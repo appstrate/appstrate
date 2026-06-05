@@ -23,7 +23,7 @@ export const realtimePaths = {
       tags: ["Realtime"],
       summary: "SSE: all run status changes",
       description:
-        'Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEvent format: `event: run.status\\ndata: {"id":"run_...","status":"running","packageId":"@scope/name",...}\\n\\n`\n\nEvent types: `run.status` (status change), `run.log` (log entry, single-run stream only). Heartbeat `:ping` every 30s.\n\n' +
+        'Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEvent format: `event: run_update\\ndata: {"id":"run_...","status":"running","packageId":"@scope/name",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller\'s own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\n' +
         SSE_ID_FIELD_DESCRIPTION,
       parameters: [
         { $ref: "#/components/parameters/SseOrgId" },
@@ -46,7 +46,7 @@ export const realtimePaths = {
       tags: ["Realtime"],
       summary: "SSE: single run events",
       description:
-        "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\n" +
+        "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\n" +
         SSE_ID_FIELD_DESCRIPTION,
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -70,7 +70,7 @@ export const realtimePaths = {
       tags: ["Realtime"],
       summary: "SSE: agent run changes",
       description:
-        "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\n" +
+        "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\n" +
         SSE_ID_FIELD_DESCRIPTION,
       parameters: [
         {

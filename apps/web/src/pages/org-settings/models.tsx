@@ -287,7 +287,7 @@ function CredentialsSection({
                         {t("credentials.oauth.badgeOauth")}
                       </Badge>
                     )}
-                    {pk.needsReconnection && (
+                    {pk.needs_reconnection && (
                       <Badge variant="destructive" className="text-[0.65rem]">
                         {t("credentials.oauth.needsReconnection")}
                       </Badge>
@@ -301,10 +301,10 @@ function CredentialsSection({
                         <span>{formatDateField(pk.createdAt)}</span>
                       </>
                     )}
-                    {isOauth && pk.oauthEmail && (
+                    {isOauth && pk.oauth_email && (
                       <>
                         <span>&middot;</span>
-                        <span>{t("credentials.oauth.connectedAs", { email: pk.oauthEmail })}</span>
+                        <span>{t("credentials.oauth.connectedAs", { email: pk.oauth_email })}</span>
                       </>
                     )}
                   </div>
@@ -339,7 +339,7 @@ function CredentialsSection({
                   )}
                   {isOauth && (
                     <>
-                      {pk.needsReconnection && pk.providerId && (
+                      {pk.needs_reconnection && pk.providerId && (
                         <Button
                           variant="outline"
                           size="sm"

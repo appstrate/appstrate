@@ -401,11 +401,11 @@ async function buildOrgLevelClaims(
   }
 
   // Dashboard SSO gate: org must have opted in via
-  // orgSettings.dashboardSsoEnabled. Mirrors the interactive-flow gate in
+  // orgSettings.dashboard_sso_enabled. Mirrors the interactive-flow gate in
   // routes.ts/loadPageContext — this is the authoritative token-mint check
   // that also catches non-interactive flows (refresh, client_credentials).
   const orgSettings = await getOrgSettings(orgId);
-  if (orgSettings.dashboardSsoEnabled !== true) {
+  if (orgSettings.dashboard_sso_enabled !== true) {
     logger.warn("oidc: dashboard SSO disabled for org — rejecting token", {
       module: "oidc",
       userId: user.id,

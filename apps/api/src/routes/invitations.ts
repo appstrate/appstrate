@@ -59,11 +59,11 @@ router.get("/:token/info", async (c) => {
 
   return c.json({
     email: invitation.email,
-    orgName,
+    org_name: orgName,
     role: invitation.role,
-    inviterName,
+    inviter_name: inviterName,
     expiresAt: invitation.expiresAt.toISOString(),
-    isNewUser: !existingUser,
+    is_new_user: !existingUser,
   });
 });
 
@@ -132,7 +132,7 @@ router.post("/:token/accept", async (c) => {
       return new Response(
         JSON.stringify({
           success: true,
-          isNewUser: true,
+          is_new_user: true,
           orgId: invitation.orgId,
         }),
         { status: 200, headers },
@@ -167,9 +167,9 @@ router.post("/:token/accept", async (c) => {
 
     return c.json({
       success: true,
-      isNewUser: false,
+      is_new_user: false,
       orgId: invitation.orgId,
-      requiresLogin: !session?.user,
+      requires_login: !session?.user,
     });
   }
 });

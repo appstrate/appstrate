@@ -118,7 +118,7 @@ describe("Organizations API", () => {
       const body = (await res.json()) as any;
 
       const settings = await getOrgSettings(body.id);
-      expect(settings.apiVersion).toBe(CURRENT_API_VERSION);
+      expect(settings.api_version).toBe(CURRENT_API_VERSION);
     });
 
     it("rejects missing name", async () => {

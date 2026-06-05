@@ -88,7 +88,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       isDefault: !orgHasDefault && def.isDefault === true,
       source: "built-in",
       credentialId: def.credentialId,
-      createdBy: null,
+      created_by: null,
       createdAt: now,
       updatedAt: now,
     }),
@@ -108,7 +108,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         isDefault: row.isDefault,
         source: row.source as "custom" | "built-in",
         credentialId: row.credentialId,
-        createdBy: row.createdBy,
+        created_by: row.createdBy,
         createdAt: toISORequired(row.createdAt),
         updatedAt: toISORequired(row.updatedAt),
       };

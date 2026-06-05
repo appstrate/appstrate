@@ -199,6 +199,38 @@ const expectedEndpoints = [
   "DELETE /api/packages/agents/{scope}/{name}/versions/{version}",
   "GET /api/packages/agents/{scope}/{name}/versions/{version}",
 
+  // Packages — Integrations
+  "GET /api/packages/integrations",
+  "POST /api/packages/integrations",
+  "GET /api/packages/integrations/{scope}/{name}",
+  "PUT /api/packages/integrations/{scope}/{name}",
+  "DELETE /api/packages/integrations/{scope}/{name}",
+  "GET /api/packages/integrations/{id}",
+  "PUT /api/packages/integrations/{id}",
+  "DELETE /api/packages/integrations/{id}",
+  "GET /api/packages/integrations/{scope}/{name}/versions",
+  "GET /api/packages/integrations/{scope}/{name}/versions/info",
+  "POST /api/packages/integrations/{scope}/{name}/versions",
+  "POST /api/packages/integrations/{scope}/{name}/versions/{version}/restore",
+  "DELETE /api/packages/integrations/{scope}/{name}/versions/{version}",
+  "GET /api/packages/integrations/{scope}/{name}/versions/{version}",
+
+  // Packages — MCP Servers
+  "GET /api/packages/mcp-servers",
+  "POST /api/packages/mcp-servers",
+  "GET /api/packages/mcp-servers/{scope}/{name}",
+  "PUT /api/packages/mcp-servers/{scope}/{name}",
+  "DELETE /api/packages/mcp-servers/{scope}/{name}",
+  "GET /api/packages/mcp-servers/{id}",
+  "PUT /api/packages/mcp-servers/{id}",
+  "DELETE /api/packages/mcp-servers/{id}",
+  "GET /api/packages/mcp-servers/{scope}/{name}/versions",
+  "GET /api/packages/mcp-servers/{scope}/{name}/versions/info",
+  "POST /api/packages/mcp-servers/{scope}/{name}/versions",
+  "POST /api/packages/mcp-servers/{scope}/{name}/versions/{version}/restore",
+  "DELETE /api/packages/mcp-servers/{scope}/{name}/versions/{version}",
+  "GET /api/packages/mcp-servers/{scope}/{name}/versions/{version}",
+
   // Organizations
   "GET /api/orgs",
   "POST /api/orgs",

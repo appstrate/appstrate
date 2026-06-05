@@ -645,9 +645,9 @@ function ModelFormBody({
                     <KeyRound className="text-muted-foreground size-3.5 shrink-0" />
                   )}
                   <span className="truncate">{selectedKey.label}</span>
-                  {isOauthProvider && selectedKey.oauthEmail && (
+                  {isOauthProvider && selectedKey.oauth_email && (
                     <span className="text-muted-foreground truncate text-xs">
-                      ({selectedKey.oauthEmail})
+                      ({selectedKey.oauth_email})
                     </span>
                   )}
                 </div>
@@ -687,9 +687,9 @@ function ModelFormBody({
                         <SelectItem key={k.id} value={k.id}>
                           <span className="flex items-center gap-2">
                             <span className="truncate">{k.label}</span>
-                            {k.oauthEmail && (
+                            {k.oauth_email && (
                               <span className="text-muted-foreground truncate text-xs">
-                                {k.oauthEmail}
+                                {k.oauth_email}
                               </span>
                             )}
                           </span>

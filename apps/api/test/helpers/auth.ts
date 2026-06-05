@@ -170,7 +170,12 @@ export function authHeaders(
   ctx: TestContext,
   extra?: Record<string, string>,
 ): Record<string, string> {
-  return { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId, "X-Application-Id": ctx.defaultAppId, ...extra };
+  return {
+    Cookie: ctx.cookie,
+    "X-Org-Id": ctx.orgId,
+    "X-Application-Id": ctx.defaultAppId,
+    ...extra,
+  };
 }
 
 /**
@@ -192,7 +197,7 @@ export async function enableDashboardSso(orgId: string): Promise<void> {
   await db
     .update(organizations)
     .set({
-      orgSettings: sql`COALESCE(${organizations.orgSettings}, '{}'::jsonb) || '{"dashboardSsoEnabled":true}'::jsonb`,
+      orgSettings: sql`COALESCE(${organizations.orgSettings}, '{}'::jsonb) || '{"dashboard_sso_enabled":true}'::jsonb`,
     })
     .where(eq(organizations.id, orgId));
 }

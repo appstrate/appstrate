@@ -20,7 +20,7 @@ export const profilePaths = {
                 type: "object",
                 properties: {
                   id: { type: "string" },
-                  displayName: { type: "string" },
+                  displayName: { type: ["string", "null"] },
                   language: { type: "string", enum: ["fr", "en"] },
                   email: { type: "string", format: "email" },
                   name: { type: "string" },
@@ -37,6 +37,8 @@ export const profilePaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
     patch: {
@@ -71,8 +73,8 @@ export const profilePaths = {
                 type: "object",
                 properties: {
                   ok: { type: "boolean" },
-                  language: { type: "string", enum: ["fr", "en"] },
-                  displayName: { type: "string" },
+                  language: { type: ["string", "null"], enum: ["fr", "en", null] },
+                  displayName: { type: ["string", "null"] },
                 },
               },
               example: { ok: true, language: "en", displayName: "Alice Martin" },
@@ -80,6 +82,8 @@ export const profilePaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },
   },
@@ -97,7 +101,7 @@ export const profilePaths = {
               type: "object",
               required: ["ids"],
               properties: {
-                ids: { type: "array", items: { type: "string" } },
+                ids: { type: "array", items: { type: "string" }, maxItems: 100 },
               },
             },
           },

@@ -204,6 +204,9 @@
                       "type": "string",
                       "enum": ["unhealthy"]
                     },
+                    "uptime_ms": {
+                      "type": "number"
+                    },
                     "checks": {
                       "type": "object"
                     }
@@ -211,10 +214,11 @@
                 },
                 "example": {
                   "status": "unhealthy",
+                  "uptime_ms": 3600000,
                   "checks": {
                     "database": {
                       "status": "unhealthy",
-                      "latency_ms": null
+                      "latency_ms": 5000
                     },
                     "agents": {
                       "status": "healthy"
@@ -269,8 +273,8 @@
                     "user": {
                       "$ref": "#/components/schemas/User"
                     },
-                    "session": {
-                      "type": "object"
+                    "token": {
+                      "type": ["string", "null"]
                     }
                   }
                 },
@@ -280,9 +284,7 @@
                     "email": "alice@example.com",
                     "name": "Alice Martin"
                   },
-                  "session": {
-                    "token": "sess_..."
-                  }
+                  "token": "sess_..."
                 }
               }
             }
@@ -331,8 +333,8 @@
                     "user": {
                       "$ref": "#/components/schemas/User"
                     },
-                    "session": {
-                      "type": "object"
+                    "token": {
+                      "type": ["string", "null"]
                     }
                   }
                 },
@@ -342,9 +344,7 @@
                     "email": "alice@example.com",
                     "name": "Alice Martin"
                   },
-                  "session": {
-                    "token": "sess_..."
-                  }
+                  "token": "sess_..."
                 }
               }
             }
@@ -433,8 +433,9 @@
                     "user": {
                       "$ref": "#/components/schemas/User"
                     },
-                    "session": {
-                      "type": "object"
+                    "token": {
+                      "type": ["string", "null"],
+                      "description": "Session token (auto sign-in); session cookie also set via Set-Cookie"
                     },
                     "bootstrap": {
                       "type": "object",
@@ -479,6 +480,9 @@
           },
           "429": {
             "description": "Rate-limited (5 redeem attempts per minute per source IP) — defense against brute-force on misconfigured short tokens."
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -498,18 +502,22 @@
                   "type": "object",
                   "properties": {
                     "user": {
-                      "$ref": "#/components/schemas/User"
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/User"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "session": {
-                      "type": "object"
+                      "type": ["object", "null"]
                     }
                   }
                 }
               }
             }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
           }
         }
       }
@@ -688,6 +696,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -948,6 +959,9 @@
                           "createdAt": {
                             "type": ["string", "null"],
                             "format": "date-time"
+                          },
+                          "pinned": {
+                            "type": "boolean"
                           }
                         }
                       }
@@ -1388,6 +1402,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Agent in use (one or more runs are running)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -1468,6 +1492,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1614,7 +1641,7 @@
             }
           },
           "400": {
-            "description": "Agent readiness validation failed (empty prompt, missing skill, integration not connected, or incomplete config)",
+            "description": "Agent readiness validation failed (empty prompt, missing skill, or incomplete config)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1636,8 +1663,21 @@
               }
             }
           },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
           "409": {
             "$ref": "#/components/responses/IdempotencyInProgress"
+          },
+          "412": {
+            "description": "Missing integration connection (`missing_integration_connection`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "422": {
             "$ref": "#/components/responses/IdempotencyConflict"
@@ -1931,8 +1971,28 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "402": {
+            "description": "Quota exceeded (Cloud only)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
           "409": {
             "$ref": "#/components/responses/IdempotencyInProgress"
+          },
+          "412": {
+            "description": "Missing integration connection (`missing_integration_connection`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "422": {
             "$ref": "#/components/responses/IdempotencyConflict"
@@ -2512,7 +2572,7 @@
                   "sink": {
                     "type": "object",
                     "properties": {
-                      "ttlSeconds": {
+                      "ttl_seconds": {
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 86400,
@@ -2549,7 +2609,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["runId", "url", "finalizeUrl", "secret", "expiresAt"],
+                  "required": ["runId", "url", "finalize_url", "secret", "expiresAt"],
                   "properties": {
                     "runId": {
                       "type": "string"
@@ -2559,7 +2619,7 @@
                       "format": "uri",
                       "description": "Absolute URL for `HttpSink.url`."
                     },
-                    "finalizeUrl": {
+                    "finalize_url": {
                       "type": "string",
                       "format": "uri",
                       "description": "Absolute URL for `HttpSink.finalizeUrl`."
@@ -2584,11 +2644,31 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "402": {
+            "description": "Quota exceeded (Cloud only)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
             "$ref": "#/components/responses/IdempotencyInProgress"
+          },
+          "412": {
+            "description": "Missing integration connection (`missing_integration_connection`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "422": {
             "$ref": "#/components/responses/IdempotencyConflict"
@@ -2719,6 +2799,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
           "401": {
             "description": "missing_signature_headers | invalid_signature | invalid_timestamp | timestamp_out_of_tolerance"
           },
@@ -2780,7 +2863,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs`.",
+                "description": "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs` and the authoritative terminal cost-tracking fields `usage` (token usage) and `cost`.",
                 "properties": {
                   "memories": {
                     "type": "array"
@@ -2810,6 +2893,33 @@
                   "durationMs": {
                     "type": "integer",
                     "minimum": 0
+                  },
+                  "usage": {
+                    "type": "object",
+                    "description": "Authoritative terminal token usage written to the `runs` row.",
+                    "properties": {
+                      "input_tokens": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "output_tokens": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "cache_creation_input_tokens": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "cache_read_input_tokens": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "cost": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Authoritative terminal run cost written to the `runs` row."
                   }
                 }
               }
@@ -2833,6 +2943,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "description": "Signature verification failed"
@@ -3167,7 +3280,7 @@
         "operationId": "extendRunSink",
         "tags": ["Runs"],
         "summary": "Extend the sink expiry for a long-running remote run",
-        "description": "Pushes `sink_expires_at` out to `now() + ttlSeconds`, clamped to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`. Only open sinks (not closed, not already expired) owned by the caller's org can be extended; mismatches return 404 to avoid cross-tenant leaks.",
+        "description": "Pushes `sink_expires_at` out to `now() + ttl_seconds`, clamped to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`. Only open sinks (not closed, not already expired) owned by the caller's org can be extended; mismatches return 404 to avoid cross-tenant leaks.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -3187,9 +3300,9 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["ttlSeconds"],
+                "required": ["ttl_seconds"],
                 "properties": {
-                  "ttlSeconds": {
+                  "ttl_seconds": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 86400
@@ -3240,7 +3353,7 @@
         "operationId": "streamAllRuns",
         "tags": ["Realtime"],
         "summary": "SSE: all run status changes",
-        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEvent format: `event: run.status\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run.status` (status change), `run.log` (log entry, single-run stream only). Heartbeat `:ping` every 30s.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
+        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEvent format: `event: run_update\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
         "parameters": [
           {
             "$ref": "#/components/parameters/SseOrgId"
@@ -3277,7 +3390,7 @@
         "operationId": "streamRun",
         "tags": ["Realtime"],
         "summary": "SSE: single run events",
-        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
+        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
         "parameters": [
           {
             "name": "id",
@@ -3322,7 +3435,7 @@
         "operationId": "streamAgentRuns",
         "tags": ["Realtime"],
         "summary": "SSE: agent run changes",
-        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
+        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
         "parameters": [
           {
             "name": "packageId",
@@ -3575,6 +3688,12 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
@@ -3737,8 +3856,21 @@
               }
             }
           },
+          "400": {
+            "description": "Validation error. Possible causes: missing/invalid cron expression or invalid input.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -3792,6 +3924,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4002,7 +4137,7 @@
         ],
         "responses": {
           "200": {
-            "description": "HTML response that closes the popup",
+            "description": "HTML page that closes the popup window. Renders either a success page or an error page (missing params, IdP error, code exchange failure, identity mismatch, or persistence failure).",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -4217,6 +4352,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Wrong package type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -4350,6 +4495,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Wrong package type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -4565,6 +4720,9 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       },
@@ -4775,6 +4933,9 @@
           "400": {
             "$ref": "#/components/responses/ValidationError"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -4873,6 +5034,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -5265,6 +5429,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -5412,38 +5579,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "required": [
-                          "packageId",
-                          "integration_package_id",
-                          "auth_key",
-                          "connection_id",
-                          "createdAt",
-                          "updatedAt"
-                        ],
-                        "properties": {
-                          "packageId": {
-                            "type": "string"
-                          },
-                          "integration_package_id": {
-                            "type": "string"
-                          },
-                          "auth_key": {
-                            "type": "string"
-                          },
-                          "connection_id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "updatedAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          }
-                        }
+                        "$ref": "#/components/schemas/IntegrationPin"
                       }
                     },
                     "hasMore": {
@@ -5592,38 +5728,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "packageId",
-                    "integration_package_id",
-                    "auth_key",
-                    "connection_id",
-                    "createdAt",
-                    "updatedAt"
-                  ],
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
-                    },
-                    "integration_package_id": {
-                      "type": "string"
-                    },
-                    "auth_key": {
-                      "type": "string"
-                    },
-                    "connection_id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "createdAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "updatedAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  }
+                  "$ref": "#/components/schemas/IntegrationPin"
                 }
               }
             }
@@ -6008,6 +6113,7 @@
                       "contextWindow": 128000,
                       "maxTokens": 16384,
                       "reasoning": false,
+                      "created_by": null,
                       "createdAt": "2026-01-10T08:00:00Z",
                       "updatedAt": "2026-01-10T08:00:00Z"
                     }
@@ -6358,6 +6464,24 @@
                           "reasoning": {
                             "type": "boolean",
                             "description": "Whether model supports reasoning"
+                          },
+                          "cost": {
+                            "type": ["object", "null"],
+                            "description": "Cost per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing",
+                            "properties": {
+                              "input": {
+                                "type": "number"
+                              },
+                              "output": {
+                                "type": "number"
+                              },
+                              "cacheRead": {
+                                "type": "number"
+                              },
+                              "cacheWrite": {
+                                "type": "number"
+                              }
+                            }
                           }
                         }
                       }
@@ -6377,7 +6501,13 @@
                       "contextWindow": 200000,
                       "maxTokens": 16384,
                       "input": ["text", "image"],
-                      "reasoning": true
+                      "reasoning": true,
+                      "cost": {
+                        "input": 3,
+                        "output": 15,
+                        "cacheRead": 0.3,
+                        "cacheWrite": 3.75
+                      }
                     }
                   ]
                 }
@@ -6401,11 +6531,11 @@
                   "$ref": "#/components/schemas/ProblemDetail"
                 },
                 "example": {
-                  "type": "about:blank",
+                  "type": "https://docs.appstrate.dev/errors/provider-error",
                   "title": "Bad Gateway",
                   "status": 502,
                   "detail": "OpenRouter API returned an unexpected error",
-                  "code": "bad_gateway",
+                  "code": "provider_error",
                   "requestId": "req_abc123"
                 }
               }
@@ -6419,11 +6549,11 @@
                   "$ref": "#/components/schemas/ProblemDetail"
                 },
                 "example": {
-                  "type": "about:blank",
+                  "type": "https://docs.appstrate.dev/errors/timeout",
                   "title": "Gateway Timeout",
                   "status": 504,
                   "detail": "OpenRouter did not respond within the allowed time",
-                  "code": "gateway_timeout",
+                  "code": "timeout",
                   "requestId": "req_def456"
                 }
               }
@@ -6501,6 +6631,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -6700,14 +6833,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "404": {
-            "description": "Model not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TestResult"
-                }
-              }
-            }
+            "$ref": "#/components/responses/NotFound"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -7024,7 +7150,17 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/ValidationError"
+            "description": "Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when `providerId` is unknown or refers to an OAuth-only provider (use the pairing flow instead).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "description": "Forbidden — caller lacks `model-provider-credentials:write`.",
@@ -7035,6 +7171,9 @@
                 }
               }
             }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -7111,6 +7250,9 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -7185,7 +7327,20 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "description": "Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `id` refers to a built-in/system credential that cannot be modified.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       },
@@ -7220,7 +7375,14 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "description": "Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `id` refers to a built-in/system credential that cannot be deleted.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "409": {
             "description": "Credential is still referenced by one or more models (credential_in_use)",
@@ -7280,17 +7442,13 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "404": {
-            "description": "Model provider credential not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TestResult"
-                }
-              }
-            }
+            "$ref": "#/components/responses/NotFound"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -7317,7 +7475,7 @@
                   "providerId": {
                     "type": "string",
                     "pattern": "^[a-z0-9-]+$",
-                    "description": "Canonical provider id. Must resolve to an OAuth provider registered by a loaded module (discoverable via `GET /api/model-provider-credentials/registry`). Unknown ids → 404. The enum is intentionally open: OAuth providers ship as modules, so the platform spec stays model-agnostic."
+                    "description": "Canonical provider id. Must resolve to an OAuth provider registered by a loaded module (discoverable via `GET /api/model-provider-credentials/registry`). Unknown/unregistered ids → 400 (validation error). The enum is intentionally open: OAuth providers ship as modules, so the platform spec stays model-agnostic."
                   }
                 }
               }
@@ -7435,6 +7593,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -7489,7 +7650,7 @@
                   "providerId": {
                     "type": "string",
                     "pattern": "^[a-z0-9-]+$",
-                    "description": "Canonical provider id. Must match the pairing's pinned providerId AND resolve to a registered OAuth provider. Unknown ids → 404; mismatched → 400."
+                    "description": "Must match the pairing's pinned providerId. Mismatched → 400; provider deregistered after mint → 404."
                   },
                   "label": {
                     "type": "string",
@@ -7528,7 +7689,7 @@
         },
         "responses": {
           "200": {
-            "description": "Connection persisted; matching provider key created.",
+            "description": "Credential persisted in model_provider_credentials; returns credentialId and available model ids.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7563,8 +7724,11 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
-          "403": {
-            "description": "Forbidden — caller lacks `model-provider-credentials:write`.",
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "410": {
+            "description": "Gone — pairing token expired or already consumed.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7572,9 +7736,6 @@
                 }
               }
             }
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -7633,6 +7794,7 @@
                       "source": "custom",
                       "enabled": true,
                       "isDefault": false,
+                      "created_by": "usr_k7x9m2p4q1",
                       "createdAt": "2026-01-10T08:00:00Z",
                       "updatedAt": "2026-01-10T08:00:00Z"
                     }
@@ -7712,8 +7874,14 @@
           "400": {
             "$ref": "#/components/responses/ValidationError"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -7775,6 +7943,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -7845,11 +8016,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       },
@@ -7885,6 +8062,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -7934,14 +8114,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "404": {
-            "description": "Proxy not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TestResult"
-                }
-              }
-            }
+            "$ref": "#/components/responses/NotFound"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -8014,7 +8187,7 @@
         "operationId": "listApiKeys",
         "tags": ["API Keys"],
         "summary": "List API keys",
-        "description": "List active (non-revoked) API keys for the organization.",
+        "description": "List active (non-revoked) API keys for the current application (scoped by X-Application-Id).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8054,8 +8227,12 @@
                       "name": "Production CI",
                       "keyPrefix": "ask_prod",
                       "scopes": ["agents:run", "runs:read"],
+                      "created_by": "user_abc",
+                      "created_by_name": "Jane Doe",
                       "createdAt": "2026-01-10T08:00:00Z",
-                      "expiresAt": null
+                      "expiresAt": null,
+                      "lastUsedAt": "2026-01-12T10:00:00Z",
+                      "revokedAt": null
                     }
                   ]
                 }
@@ -8168,6 +8345,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -8211,6 +8391,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -8351,6 +8534,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -8414,6 +8600,12 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       },
@@ -8421,7 +8613,7 @@
         "operationId": "updateOrganization",
         "tags": ["Organizations"],
         "summary": "Update organization",
-        "description": "Update organization name. Owner only.",
+        "description": "Update organization name and/or slug. Owner only.",
         "parameters": [
           {
             "name": "orgId",
@@ -8477,7 +8669,7 @@
                     "slug": {
                       "type": "string"
                     },
-                    "createdBy": {
+                    "created_by": {
                       "type": "string"
                     },
                     "createdAt": {
@@ -8492,6 +8684,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -8539,6 +8734,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -8638,11 +8836,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -8958,7 +9162,7 @@
                   "$ref": "#/components/schemas/OrgSettings"
                 },
                 "example": {
-                  "apiVersion": "2026-03-21"
+                  "api_version": "2026-03-21"
                 }
               }
             }
@@ -9052,7 +9256,7 @@
                       "type": "string"
                     },
                     "displayName": {
-                      "type": "string"
+                      "type": ["string", "null"]
                     },
                     "language": {
                       "type": "string",
@@ -9079,6 +9283,12 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       },
@@ -9128,11 +9338,11 @@
                       "type": "boolean"
                     },
                     "language": {
-                      "type": "string",
-                      "enum": ["fr", "en"]
+                      "type": ["string", "null"],
+                      "enum": ["fr", "en", null]
                     },
                     "displayName": {
-                      "type": "string"
+                      "type": ["string", "null"]
                     }
                   }
                 },
@@ -9146,6 +9356,12 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -9168,7 +9384,8 @@
                     "type": "array",
                     "items": {
                       "type": "string"
-                    }
+                    },
+                    "maxItems": 100
                   }
                 }
               }
@@ -9422,13 +9639,13 @@
                                   ]
                                 },
                                 "identity": {
-                                  "type": ["string", "null"]
+                                  "type": "string"
                                 },
                                 "reused_by_agents": {
-                                  "type": ["integer", "null"]
+                                  "type": "integer"
                                 },
                                 "auth_key": {
-                                  "type": ["string", "null"]
+                                  "type": "string"
                                 },
                                 "shared_with_org": {
                                   "type": "boolean"
@@ -9537,8 +9754,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       },
@@ -9584,38 +9810,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "packageId",
-                    "integration_package_id",
-                    "auth_key",
-                    "connection_id",
-                    "createdAt",
-                    "updatedAt"
-                  ],
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
-                    },
-                    "integration_package_id": {
-                      "type": "string"
-                    },
-                    "auth_key": {
-                      "type": "string"
-                    },
-                    "connection_id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "createdAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "updatedAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  }
+                  "$ref": "#/components/schemas/IntegrationPin"
                 }
               }
             }
@@ -9625,6 +9820,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -9669,6 +9867,12 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -9791,30 +9995,30 @@
                     "email": {
                       "type": "string"
                     },
-                    "orgName": {
+                    "org_name": {
                       "type": "string"
                     },
                     "role": {
                       "type": "string"
                     },
-                    "inviterName": {
+                    "inviter_name": {
                       "type": "string"
                     },
                     "expiresAt": {
                       "type": "string"
                     },
-                    "isNewUser": {
+                    "is_new_user": {
                       "type": "boolean"
                     }
                   }
                 },
                 "example": {
                   "email": "newuser@example.com",
-                  "orgName": "Acme Corp",
+                  "org_name": "Acme Corp",
                   "role": "member",
-                  "inviterName": "Alice Martin",
+                  "inviter_name": "Alice Martin",
                   "expiresAt": "2026-02-15T10:30:00Z",
-                  "isNewUser": true
+                  "is_new_user": true
                 }
               }
             }
@@ -9831,7 +10035,7 @@
                   "title": "Not Found",
                   "status": 404,
                   "detail": "Invitation not found",
-                  "code": "not_found",
+                  "code": "invitation_not_found",
                   "requestId": "req_mno345"
                 }
               }
@@ -9849,7 +10053,7 @@
                   "title": "Gone",
                   "status": 410,
                   "detail": "Invitation has already been accepted",
-                  "code": "gone",
+                  "code": "invitation_accepted",
                   "requestId": "req_pqr678"
                 }
               }
@@ -9883,7 +10087,8 @@
                 "properties": {
                   "password": {
                     "type": "string",
-                    "description": "Password (required for new users)"
+                    "minLength": 8,
+                    "description": "Password (required for new users, minimum 8 characters)"
                   },
                   "displayName": {
                     "type": "string"
@@ -9912,21 +10117,21 @@
                     "success": {
                       "type": "boolean"
                     },
-                    "isNewUser": {
+                    "is_new_user": {
                       "type": "boolean"
                     },
                     "orgId": {
                       "type": "string"
                     },
-                    "requiresLogin": {
+                    "requires_login": {
                       "type": "boolean",
-                      "description": "Present when isNewUser is false"
+                      "description": "Present when is_new_user is false"
                     }
                   }
                 },
                 "example": {
                   "success": true,
-                  "isNewUser": true,
+                  "is_new_user": true,
                   "orgId": "550e8400-e29b-41d4-a716-446655440000"
                 }
               }
@@ -9936,7 +10141,22 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "description": "Invitation email does not match the authenticated session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                },
+                "example": {
+                  "type": "about:blank",
+                  "title": "Email mismatch",
+                  "status": 403,
+                  "detail": "This invitation is for newuser@example.com",
+                  "code": "email_mismatch",
+                  "requestId": "req_stu901"
+                }
+              }
+            }
           },
           "404": {
             "description": "Invitation not found",
@@ -9944,6 +10164,14 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetail"
+                },
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Invitation not found",
+                  "code": "invitation_not_found",
+                  "requestId": "req_mno345"
                 }
               }
             }
@@ -9954,9 +10182,20 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetail"
+                },
+                "example": {
+                  "type": "about:blank",
+                  "title": "Gone",
+                  "status": 410,
+                  "detail": "Invitation has already been accepted",
+                  "code": "invitation_accepted",
+                  "requestId": "req_pqr678"
                 }
               }
             }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -10026,7 +10265,8 @@
                       "checkpoint": {
                         "lastProcessedId": 42
                       },
-                      "createdAt": "2026-01-14T09:00:00Z"
+                      "date": "2026-01-14T09:00:00Z",
+                      "duration": 1234
                     }
                   ]
                 }
@@ -10038,6 +10278,12 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -10129,6 +10375,12 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -10293,6 +10545,9 @@
               }
             }
           },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
           "502": {
             "description": "Transient OAuth refresh failure upstream (network error, IdP 5xx, malformed response). The cached credential may still be valid; the sidecar's listener cooldown will back off and retry on the next 401.",
             "content": {
@@ -10354,6 +10609,9 @@
                 }
               }
             }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           },
           "502": {
             "description": "Transient OAuth refresh failure upstream — same semantics as the GET endpoint.",
@@ -10467,8 +10725,14 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -10565,8 +10829,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -10620,8 +10893,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -10673,8 +10955,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -10719,8 +11010,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -10750,7 +11050,7 @@
                   "file": {
                     "type": "string",
                     "format": "binary",
-                    "description": ".afps-bundle (preferred) or .afps archive — detected automatically via the bundle.json marker."
+                    "description": "`.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker. May also be supplied under the `bundle` form field as an alias."
                   }
                 }
               }
@@ -10812,7 +11112,14 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/ValidationError"
+            "description": "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -10905,6 +11212,13 @@
                     "version": {
                       "type": "string",
                       "description": "Imported manifest version (semver). Omitted when the manifest carries no version field."
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Non-blocking install warnings (e.g. connect.login engine-subset or _meta soft-fails). Present only when warnings were emitted."
                     }
                   }
                 },
@@ -10917,7 +11231,14 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/ValidationError"
+            "description": "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `name_collision` (system package or existing identifier owned by another org), `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -10926,60 +11247,11 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "Package has unpublished draft changes that would be overwritten, or version exists with different content",
+            "description": "Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "required": ["error", "message", "details"],
-                      "properties": {
-                        "error": {
-                          "type": "string",
-                          "enum": ["DRAFT_OVERWRITE"]
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {
-                          "type": "object",
-                          "properties": {
-                            "packageId": {
-                              "type": "string"
-                            },
-                            "active_version": {
-                              "type": ["string", "null"]
-                            }
-                          }
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "required": ["error", "message", "details"],
-                      "properties": {
-                        "error": {
-                          "type": "string",
-                          "enum": ["INTEGRITY_MISMATCH"]
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {
-                          "type": "object",
-                          "properties": {
-                            "packageId": {
-                              "type": "string"
-                            },
-                            "version": {
-                              "type": "string"
-                            }
-                          }
-                        }
-                      }
-                    }
-                  ]
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -11049,6 +11321,13 @@
                     "version": {
                       "type": "string",
                       "description": "Imported manifest version (semver). Omitted when the manifest carries no version field."
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Non-blocking install warnings (e.g. connect.login engine-subset or _meta soft-fails). Present only when warnings were emitted."
                     }
                   }
                 }
@@ -11056,33 +11335,11 @@
             }
           },
           "400": {
-            "description": "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.)",
+            "description": "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`name_collision`, `type_mismatch`, `post_install_failed`).",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "type": "object",
-                  "required": ["error", "message"],
-                  "properties": {
-                    "error": {
-                      "type": "string",
-                      "enum": [
-                        "VALIDATION_ERROR",
-                        "INVALID_URL",
-                        "NOT_FOUND",
-                        "RATE_LIMITED",
-                        "GITHUB_ERROR",
-                        "REPO_TOO_LARGE",
-                        "EMPTY_PATH",
-                        "TOO_MANY_FILES",
-                        "TOO_LARGE",
-                        "FILE_TOO_LARGE",
-                        "DOWNLOAD_FAILED"
-                      ]
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -11094,60 +11351,11 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "Package has unpublished draft changes that would be overwritten, or version exists with different content",
+            "description": "Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "required": ["error", "message", "details"],
-                      "properties": {
-                        "error": {
-                          "type": "string",
-                          "enum": ["DRAFT_OVERWRITE"]
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {
-                          "type": "object",
-                          "properties": {
-                            "packageId": {
-                              "type": "string"
-                            },
-                            "active_version": {
-                              "type": ["string", "null"]
-                            }
-                          }
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "required": ["error", "message", "details"],
-                      "properties": {
-                        "error": {
-                          "type": "string",
-                          "enum": ["INTEGRITY_MISMATCH"]
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {
-                          "type": "object",
-                          "properties": {
-                            "packageId": {
-                              "type": "string"
-                            },
-                            "version": {
-                              "type": "string"
-                            }
-                          }
-                        }
-                      }
-                    }
-                  ]
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -11329,23 +11537,20 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["id", "content"],
+                "required": ["manifest"],
                 "properties": {
-                  "id": {
-                    "type": "string",
-                    "description": "Unique skill ID (kebab-case)"
-                  },
-                  "name": {
-                    "type": "string",
-                    "description": "Display name. Auto-extracted from SKILL.md YAML frontmatter if omitted."
-                  },
-                  "description": {
-                    "type": "string",
-                    "description": "Skill description. Auto-extracted from SKILL.md YAML frontmatter if omitted."
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Skill package manifest (AFPS). The package ID is derived from `manifest.name`."
                   },
                   "content": {
                     "type": "string",
-                    "description": "SKILL.md content (markdown with YAML frontmatter)"
+                    "description": "SKILL.md content (markdown with YAML frontmatter)."
+                  },
+                  "source_code": {
+                    "type": "string",
+                    "description": "Optional source code payload."
                   }
                 }
               }
@@ -11659,7 +11864,14 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Concurrent modification"
+            "description": "Concurrent modification. RFC 9457 problem+json with `code` of `conflict`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -11975,51 +12187,11 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Skill is referenced by agents or required by other packages",
+            "description": "Skill is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string",
-                      "enum": ["IN_USE", "DEPENDED_ON"],
-                      "description": "IN_USE: referenced by agents. DEPENDED_ON: required by other packages."
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "agents": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "display_name": {
-                            "type": "string"
-                          }
-                        }
-                      },
-                      "description": "Agents referencing this skill (for IN_USE)"
-                    },
-                    "dependents": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "display_name": {
-                            "type": "string"
-                          }
-                        }
-                      },
-                      "description": "Packages depending on this skill (for DEPENDED_ON)"
-                    }
-                  }
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -12285,7 +12457,14 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Concurrent modification or agent in use"
+            "description": "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       },
@@ -12324,7 +12503,14 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "Agent in use"
+            "description": "Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -12515,7 +12701,14 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "Agent in use (runs in progress)"
+            "description": "Agent in use (runs in progress) or no changes to snapshot. RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, or `conflict`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -12588,7 +12781,14 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Concurrent modification or agent in use"
+            "description": "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -12730,19 +12930,11 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Agent has runs in progress",
+            "description": "Agent has runs in progress. RFC 9457 problem+json with `code` of `agent_in_use`.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -12822,25 +13014,11 @@
             }
           },
           "400": {
-            "description": "Already owned, name collision, invalid name, or no published version",
+            "description": "Already owned, name collision, unsupported type, or no published version. RFC 9457 problem+json with `code` one of `invalid_request` (already owned / no published version / unsupported type) or `name_collision`.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string",
-                      "enum": [
-                        "ALREADY_OWNED",
-                        "NAME_COLLISION",
-                        "INVALID_NAME",
-                        "NO_PUBLISHED_VERSION"
-                      ]
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -12849,40 +13027,10 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
-            "description": "Package not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -13067,51 +13215,11 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Skill is referenced by agents or required by other packages",
+            "description": "Skill is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string",
-                      "enum": ["IN_USE", "DEPENDED_ON"],
-                      "description": "IN_USE: referenced by agents. DEPENDED_ON: required by other packages."
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "agents": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "display_name": {
-                            "type": "string"
-                          }
-                        }
-                      },
-                      "description": "Agents referencing this skill (for IN_USE)"
-                    },
-                    "dependents": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "display_name": {
-                            "type": "string"
-                          }
-                        }
-                      },
-                      "description": "Packages depending on this skill (for DEPENDED_ON)"
-                    }
-                  }
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -13254,7 +13362,14 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Concurrent modification or agent in use"
+            "description": "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       },
@@ -13296,7 +13411,1884 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "Agent in use"
+            "description": "Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/packages/integrations": {
+      "get": {
+        "operationId": "listIntegrationPackages",
+        "tags": ["Packages"],
+        "summary": "List integration packages",
+        "description": "List all integration packages (system + org) in the organization.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Integration package list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OrgPackageItem"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createIntegrationPackage",
+        "tags": ["Packages"],
+        "summary": "Create an integration package",
+        "description": "Create a new integration package in the organization packages.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["manifest"],
+                "properties": {
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Integration package manifest (AFPS). The package ID is derived from `manifest.name`."
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "Primary package file content (manifest document)."
+                  },
+                  "source_code": {
+                    "type": "string",
+                    "description": "Optional source code payload for the integration runner."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Integration package created",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "packageId": {
+                      "type": "string"
+                    },
+                    "lock_version": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/packages/integrations/{scope}/{name}/versions/info": {
+      "get": {
+        "operationId": "getIntegrationPackageVersionInfo",
+        "tags": ["Packages"],
+        "summary": "Get version info for an integration package (latest published + draft)",
+        "description": "Returns the latest published version and the current draft version from the manifest.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version info",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "latest_published_version": {
+                      "type": ["string", "null"]
+                    },
+                    "active_version": {
+                      "type": ["string", "null"]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/packages/integrations/{scope}/{name}/versions": {
+      "get": {
+        "operationId": "listIntegrationPackageVersions",
+        "tags": ["Packages"],
+        "summary": "List integration package versions",
+        "description": "List all published versions for an integration package.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "versions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgentVersion"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createIntegrationPackageVersion",
+        "tags": ["Packages"],
+        "summary": "Create a version from draft",
+        "description": "Create an immutable version snapshot from the current integration package draft. Version is determined by the manifest version field unless overridden.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "string",
+                    "description": "Optional semver version override (e.g. from bump selector)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Version created",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/packages/integrations/{scope}/{name}/versions/{version}/restore": {
+      "post": {
+        "operationId": "restoreIntegrationPackageVersion",
+        "tags": ["Packages"],
+        "summary": "Restore an integration package version into the draft",
+        "description": "Restore a previously published version into the integration package draft. Does not create a new version.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Version to restore (exact, dist-tag, or semver range)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version restored",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "restored_version": {
+                      "type": "string"
+                    },
+                    "lock_version": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Concurrent modification. RFC 9457 problem+json with `code` of `conflict`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/packages/integrations/{scope}/{name}/versions/{version}": {
+      "get": {
+        "operationId": "getIntegrationPackageVersionDetail",
+        "tags": ["Packages"],
+        "summary": "Get integration package version detail",
+        "description": "Resolve a version query and return versioned integration package data including content extracted from ZIP.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Version query — exact version, dist-tag, or semver range"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Versioned integration package detail",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "manifest": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "Full manifest object"
+                    },
+                    "content": {
+                      "type": ["string", "null"]
+                    },
+                    "yanked": {
+                      "type": "boolean"
+                    },
+                    "yanked_reason": {
+                      "type": ["string", "null"]
+                    },
+                    "integrity": {
+                      "type": "string"
+                    },
+                    "artifact_size": {
+                      "type": "integer"
+                    },
+                    "createdAt": {
+                      "type": ["string", "null"],
+                      "format": "date-time"
+                    },
+                    "dist_tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteIntegrationPackageVersion",
+        "tags": ["Packages"],
+        "summary": "Delete an integration package version",
+        "description": "Permanently delete an integration package version. Reassigns affected dist-tags to the next best stable version.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Version deleted",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/packages/integrations/{scope}/{name}": {
+      "get": {
+        "operationId": "getIntegrationPackage",
+        "tags": ["Packages"],
+        "summary": "Get integration package detail",
+        "description": "Get an integration package's full details including content.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Integration package detail",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgPackageItemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateIntegrationPackage",
+        "tags": ["Packages"],
+        "summary": "Update an integration package",
+        "description": "Update an integration package in the organization packages. Built-in integration packages cannot be modified.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["manifest", "content", "lock_version"],
+                "properties": {
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Package manifest"
+                  },
+                  "content": {
+                    "type": "string"
+                  },
+                  "lock_version": {
+                    "type": "integer",
+                    "description": "Optimistic lock version"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Integration package updated",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "packageId": {
+                      "type": "string"
+                    },
+                    "lock_version": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteIntegrationPackage",
+        "tags": ["Packages"],
+        "summary": "Delete an integration package",
+        "description": "Delete an integration package from the organization packages. Built-in integration packages cannot be deleted.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Integration package deleted",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Integration package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/packages/integrations/{id}": {
+      "get": {
+        "operationId": "getIntegrationPackageById",
+        "tags": ["Packages"],
+        "summary": "Get integration package detail by ID",
+        "description": "Get an integration package's full details by unscoped package ID.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Package ID (unscoped)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Integration package detail",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgPackageItemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateIntegrationPackageById",
+        "tags": ["Packages"],
+        "summary": "Update an integration package by ID",
+        "description": "Update an integration package by unscoped package ID. Built-in integration packages cannot be modified.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Package ID (unscoped)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["manifest", "content", "lock_version"],
+                "properties": {
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Package manifest"
+                  },
+                  "content": {
+                    "type": "string"
+                  },
+                  "lock_version": {
+                    "type": "integer",
+                    "description": "Optimistic lock version"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Integration package updated",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "packageId": {
+                      "type": "string"
+                    },
+                    "lock_version": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteIntegrationPackageById",
+        "tags": ["Packages"],
+        "summary": "Delete an integration package by ID",
+        "description": "Delete an integration package by unscoped package ID. Built-in integration packages cannot be deleted.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Package ID (unscoped)"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Integration package deleted",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Integration package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/packages/mcp-servers": {
+      "get": {
+        "operationId": "listMcpServerPackages",
+        "tags": ["Packages"],
+        "summary": "List MCP-server packages",
+        "description": "List all MCP-server packages (system + org) in the organization.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MCP-server package list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OrgPackageItem"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createMcpServerPackage",
+        "tags": ["Packages"],
+        "summary": "Create an MCP-server package",
+        "description": "Create a new MCP-server package in the organization packages.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Upload a package ZIP (`multipart/form-data` with a `.afps`/`.zip` file — the package ID is derived from the file name), or post a JSON body. Parsed by `parsePackageUpload`.",
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Package archive (`.afps` or `.zip`). File name (sans extension) is the kebab-case package id."
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["id", "content"],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Kebab-case package id."
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "Primary package file content."
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Display name. Auto-extracted from the manifest if omitted."
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Package description. Auto-extracted from the manifest if omitted."
+                  },
+                  "version": {
+                    "type": "string",
+                    "description": "Initial semver (optional)."
+                  },
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Optional manifest object (stored as-is)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "MCP-server package created",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "packageId": {
+                      "type": "string"
+                    },
+                    "lock_version": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/packages/mcp-servers/{scope}/{name}/versions/info": {
+      "get": {
+        "operationId": "getMcpServerPackageVersionInfo",
+        "tags": ["Packages"],
+        "summary": "Get version info for an MCP-server package (latest published + draft)",
+        "description": "Returns the latest published version and the current draft version from the manifest.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version info",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "latest_published_version": {
+                      "type": ["string", "null"]
+                    },
+                    "active_version": {
+                      "type": ["string", "null"]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/packages/mcp-servers/{scope}/{name}/versions": {
+      "get": {
+        "operationId": "listMcpServerPackageVersions",
+        "tags": ["Packages"],
+        "summary": "List MCP-server package versions",
+        "description": "List all published versions for an MCP-server package.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "versions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgentVersion"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createMcpServerPackageVersion",
+        "tags": ["Packages"],
+        "summary": "Create a version from draft",
+        "description": "Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "string",
+                    "description": "Optional semver version override (e.g. from bump selector)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Version created",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/packages/mcp-servers/{scope}/{name}/versions/{version}/restore": {
+      "post": {
+        "operationId": "restoreMcpServerPackageVersion",
+        "tags": ["Packages"],
+        "summary": "Restore an MCP-server package version into the draft",
+        "description": "Restore a previously published version into the MCP-server package draft. Does not create a new version.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Version to restore (exact, dist-tag, or semver range)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version restored",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "restored_version": {
+                      "type": "string"
+                    },
+                    "lock_version": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Concurrent modification. RFC 9457 problem+json with `code` of `conflict`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/packages/mcp-servers/{scope}/{name}/versions/{version}": {
+      "get": {
+        "operationId": "getMcpServerPackageVersionDetail",
+        "tags": ["Packages"],
+        "summary": "Get MCP-server package version detail",
+        "description": "Resolve a version query and return versioned MCP-server package data including content extracted from ZIP.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Version query — exact version, dist-tag, or semver range"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Versioned MCP-server package detail",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "manifest": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "Full manifest object"
+                    },
+                    "content": {
+                      "type": ["string", "null"]
+                    },
+                    "yanked": {
+                      "type": "boolean"
+                    },
+                    "yanked_reason": {
+                      "type": ["string", "null"]
+                    },
+                    "integrity": {
+                      "type": "string"
+                    },
+                    "artifact_size": {
+                      "type": "integer"
+                    },
+                    "createdAt": {
+                      "type": ["string", "null"],
+                      "format": "date-time"
+                    },
+                    "dist_tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteMcpServerPackageVersion",
+        "tags": ["Packages"],
+        "summary": "Delete an MCP-server package version",
+        "description": "Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Version deleted",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/packages/mcp-servers/{scope}/{name}": {
+      "get": {
+        "operationId": "getMcpServerPackage",
+        "tags": ["Packages"],
+        "summary": "Get MCP-server package detail",
+        "description": "Get an MCP-server package's full details including content.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MCP-server package detail",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgPackageItemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateMcpServerPackage",
+        "tags": ["Packages"],
+        "summary": "Update an MCP-server package",
+        "description": "Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["manifest", "content", "lock_version"],
+                "properties": {
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Package manifest"
+                  },
+                  "content": {
+                    "type": "string"
+                  },
+                  "lock_version": {
+                    "type": "integer",
+                    "description": "Optimistic lock version"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "MCP-server package updated",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "packageId": {
+                      "type": "string"
+                    },
+                    "lock_version": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteMcpServerPackage",
+        "tags": ["Packages"],
+        "summary": "Delete an MCP-server package",
+        "description": "Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "MCP-server package deleted",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "MCP-server package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/packages/mcp-servers/{id}": {
+      "get": {
+        "operationId": "getMcpServerPackageById",
+        "tags": ["Packages"],
+        "summary": "Get MCP-server package detail by ID",
+        "description": "Get an MCP-server package's full details by unscoped package ID.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Package ID (unscoped)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MCP-server package detail",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgPackageItemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateMcpServerPackageById",
+        "tags": ["Packages"],
+        "summary": "Update an MCP-server package by ID",
+        "description": "Update an MCP-server package by unscoped package ID. Built-in MCP-server packages cannot be modified.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Package ID (unscoped)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["manifest", "content", "lock_version"],
+                "properties": {
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Package manifest"
+                  },
+                  "content": {
+                    "type": "string"
+                  },
+                  "lock_version": {
+                    "type": "integer",
+                    "description": "Optimistic lock version"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "MCP-server package updated",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "packageId": {
+                      "type": "string"
+                    },
+                    "lock_version": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteMcpServerPackageById",
+        "tags": ["Packages"],
+        "summary": "Delete an MCP-server package by ID",
+        "description": "Delete an MCP-server package by unscoped package ID. Built-in MCP-server packages cannot be deleted.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Package ID (unscoped)"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "MCP-server package deleted",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "MCP-server package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -13370,7 +15362,7 @@
                   "settings": {
                     "allowedRedirectDomains": ["myapp.com", "staging.myapp.com"]
                   },
-                  "createdBy": "usr_k7x9m2p4q1",
+                  "created_by": "usr_k7x9m2p4q1",
                   "createdAt": "2026-01-15T10:30:00Z",
                   "updatedAt": "2026-01-15T10:30:00Z"
                 }
@@ -13438,7 +15430,7 @@
                       "settings": {
                         "allowedRedirectDomains": []
                       },
-                      "createdBy": null,
+                      "created_by": null,
                       "createdAt": "2026-01-10T08:00:00Z",
                       "updatedAt": "2026-01-10T08:00:00Z"
                     },
@@ -13451,7 +15443,7 @@
                       "settings": {
                         "allowedRedirectDomains": ["myapp.com"]
                       },
-                      "createdBy": "usr_k7x9m2p4q1",
+                      "created_by": "usr_k7x9m2p4q1",
                       "createdAt": "2026-01-15T10:30:00Z",
                       "updatedAt": "2026-01-15T10:30:00Z"
                     }
@@ -13769,6 +15761,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -13903,6 +15898,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -13938,6 +15936,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -14011,6 +16012,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -14126,8 +16130,42 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
           "409": {
-            "$ref": "#/components/responses/IdempotencyInProgress"
+            "description": "Conflict — either a request with the same Idempotency-Key is already being processed (idempotency_in_progress), or the externalId is already in use by another end-user in the application (external_id_taken)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                },
+                "examples": {
+                  "idempotencyInProgress": {
+                    "summary": "Idempotency-Key already being processed",
+                    "value": {
+                      "type": "https://docs.appstrate.dev/errors/idempotency-in-progress",
+                      "title": "Idempotency In Progress",
+                      "status": 409,
+                      "detail": "A request with the same Idempotency-Key is already being processed. Please wait and retry.",
+                      "code": "idempotency_in_progress",
+                      "requestId": "req_abc123"
+                    }
+                  },
+                  "externalIdTaken": {
+                    "summary": "externalId already in use",
+                    "value": {
+                      "type": "https://docs.appstrate.dev/errors/external-id-taken",
+                      "title": "Conflict",
+                      "status": 409,
+                      "detail": "An end-user with this externalId already exists in the application.",
+                      "code": "external_id_taken",
+                      "requestId": "req_abc123"
+                    }
+                  }
+                }
+              }
+            }
           },
           "422": {
             "$ref": "#/components/responses/IdempotencyConflict"
@@ -14356,6 +16394,7 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -14429,6 +16468,24 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The externalId is already in use by another end-user in the application",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                },
+                "example": {
+                  "type": "https://docs.appstrate.dev/errors/external-id-taken",
+                  "title": "Conflict",
+                  "status": 409,
+                  "detail": "An end-user with this externalId already exists in the application.",
+                  "code": "external_id_taken",
+                  "requestId": "req_abc123"
+                }
+              }
+            }
           }
         }
       },
@@ -14672,7 +16729,7 @@
         "operationId": "credentialProxyGet",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a GET request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
         "security": [
           {
             "bearerApiKey": []
@@ -14750,6 +16807,25 @@
             }
           },
           {
+            "name": "X-Stream-Response",
+            "in": "header",
+            "required": false,
+            "description": "When `1`, stream the upstream response body through the 100 MB streaming cap instead of buffering it. Skips the buffered `max_response_bytes` truncation, so `X-Truncated` is not emitted; an oversized stream is aborted rather than truncated.",
+            "schema": {
+              "type": "string",
+              "enum": ["0", "1"]
+            }
+          },
+          {
+            "name": "X-Max-Response-Size",
+            "in": "header",
+            "required": false,
+            "description": "Optional cap (in bytes) on the buffered upstream response before truncation. Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when `X-Stream-Response: 1` is set.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "X-Run-Id",
             "in": "header",
             "required": false,
@@ -14771,19 +16847,13 @@
         ],
         "responses": {
           "200": {
-            "description": "Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated`/`X-Truncated-Size` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry these headers.",
+            "description": "Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header.",
             "headers": {
               "X-Truncated": {
                 "description": "Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses.",
                 "schema": {
                   "type": "string",
                   "enum": ["true"]
-                }
-              },
-              "X-Truncated-Size": {
-                "description": "Original upstream `Content-Length` (in bytes) when `X-Truncated: true` is set, so the caller can decide whether to retry with `X-Stream-Request: 1` or accept the truncated body.",
-                "schema": {
-                  "type": "string"
                 }
               }
             },
@@ -14795,7 +16865,23 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "401": {
-            "$ref": "#/components/responses/Unauthorized"
+            "description": "Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself.",
+            "headers": {
+              "X-Auth-Refreshed": {
+                "description": "Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["true"]
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "403": {
             "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, or cookie session used."
@@ -14803,8 +16889,21 @@
           "404": {
             "description": "No credentials or connection for the requested integration."
           },
+          "413": {
+            "description": "Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       },
@@ -14812,7 +16911,7 @@
         "operationId": "credentialProxyPost",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a POST request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
         "security": [
           {
             "bearerApiKey": []
@@ -14890,6 +16989,25 @@
             }
           },
           {
+            "name": "X-Stream-Response",
+            "in": "header",
+            "required": false,
+            "description": "When `1`, stream the upstream response body through the 100 MB streaming cap instead of buffering it. Skips the buffered `max_response_bytes` truncation, so `X-Truncated` is not emitted; an oversized stream is aborted rather than truncated.",
+            "schema": {
+              "type": "string",
+              "enum": ["0", "1"]
+            }
+          },
+          {
+            "name": "X-Max-Response-Size",
+            "in": "header",
+            "required": false,
+            "description": "Optional cap (in bytes) on the buffered upstream response before truncation. Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when `X-Stream-Response: 1` is set.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "X-Run-Id",
             "in": "header",
             "required": false,
@@ -14911,19 +17029,13 @@
         ],
         "responses": {
           "200": {
-            "description": "Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated`/`X-Truncated-Size` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry these headers.",
+            "description": "Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header.",
             "headers": {
               "X-Truncated": {
                 "description": "Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses.",
                 "schema": {
                   "type": "string",
                   "enum": ["true"]
-                }
-              },
-              "X-Truncated-Size": {
-                "description": "Original upstream `Content-Length` (in bytes) when `X-Truncated: true` is set, so the caller can decide whether to retry with `X-Stream-Request: 1` or accept the truncated body.",
-                "schema": {
-                  "type": "string"
                 }
               }
             },
@@ -14935,7 +17047,23 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "401": {
-            "$ref": "#/components/responses/Unauthorized"
+            "description": "Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself.",
+            "headers": {
+              "X-Auth-Refreshed": {
+                "description": "Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["true"]
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "403": {
             "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, or cookie session used."
@@ -14943,8 +17071,21 @@
           "404": {
             "description": "No credentials or connection for the requested integration."
           },
+          "413": {
+            "description": "Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         },
         "requestBody": {
@@ -14959,7 +17100,7 @@
         "operationId": "credentialProxyPut",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a PUT request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
         "security": [
           {
             "bearerApiKey": []
@@ -15037,6 +17178,25 @@
             }
           },
           {
+            "name": "X-Stream-Response",
+            "in": "header",
+            "required": false,
+            "description": "When `1`, stream the upstream response body through the 100 MB streaming cap instead of buffering it. Skips the buffered `max_response_bytes` truncation, so `X-Truncated` is not emitted; an oversized stream is aborted rather than truncated.",
+            "schema": {
+              "type": "string",
+              "enum": ["0", "1"]
+            }
+          },
+          {
+            "name": "X-Max-Response-Size",
+            "in": "header",
+            "required": false,
+            "description": "Optional cap (in bytes) on the buffered upstream response before truncation. Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when `X-Stream-Response: 1` is set.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "X-Run-Id",
             "in": "header",
             "required": false,
@@ -15058,19 +17218,13 @@
         ],
         "responses": {
           "200": {
-            "description": "Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated`/`X-Truncated-Size` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry these headers.",
+            "description": "Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header.",
             "headers": {
               "X-Truncated": {
                 "description": "Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses.",
                 "schema": {
                   "type": "string",
                   "enum": ["true"]
-                }
-              },
-              "X-Truncated-Size": {
-                "description": "Original upstream `Content-Length` (in bytes) when `X-Truncated: true` is set, so the caller can decide whether to retry with `X-Stream-Request: 1` or accept the truncated body.",
-                "schema": {
-                  "type": "string"
                 }
               }
             },
@@ -15082,7 +17236,23 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "401": {
-            "$ref": "#/components/responses/Unauthorized"
+            "description": "Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself.",
+            "headers": {
+              "X-Auth-Refreshed": {
+                "description": "Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["true"]
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "403": {
             "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, or cookie session used."
@@ -15090,8 +17260,21 @@
           "404": {
             "description": "No credentials or connection for the requested integration."
           },
+          "413": {
+            "description": "Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         },
         "requestBody": {
@@ -15106,7 +17289,7 @@
         "operationId": "credentialProxyPatch",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a PATCH request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
         "security": [
           {
             "bearerApiKey": []
@@ -15184,6 +17367,25 @@
             }
           },
           {
+            "name": "X-Stream-Response",
+            "in": "header",
+            "required": false,
+            "description": "When `1`, stream the upstream response body through the 100 MB streaming cap instead of buffering it. Skips the buffered `max_response_bytes` truncation, so `X-Truncated` is not emitted; an oversized stream is aborted rather than truncated.",
+            "schema": {
+              "type": "string",
+              "enum": ["0", "1"]
+            }
+          },
+          {
+            "name": "X-Max-Response-Size",
+            "in": "header",
+            "required": false,
+            "description": "Optional cap (in bytes) on the buffered upstream response before truncation. Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when `X-Stream-Response: 1` is set.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "X-Run-Id",
             "in": "header",
             "required": false,
@@ -15205,19 +17407,13 @@
         ],
         "responses": {
           "200": {
-            "description": "Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated`/`X-Truncated-Size` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry these headers.",
+            "description": "Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header.",
             "headers": {
               "X-Truncated": {
                 "description": "Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses.",
                 "schema": {
                   "type": "string",
                   "enum": ["true"]
-                }
-              },
-              "X-Truncated-Size": {
-                "description": "Original upstream `Content-Length` (in bytes) when `X-Truncated: true` is set, so the caller can decide whether to retry with `X-Stream-Request: 1` or accept the truncated body.",
-                "schema": {
-                  "type": "string"
                 }
               }
             },
@@ -15229,7 +17425,23 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "401": {
-            "$ref": "#/components/responses/Unauthorized"
+            "description": "Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself.",
+            "headers": {
+              "X-Auth-Refreshed": {
+                "description": "Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["true"]
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "403": {
             "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, or cookie session used."
@@ -15237,8 +17449,21 @@
           "404": {
             "description": "No credentials or connection for the requested integration."
           },
+          "413": {
+            "description": "Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         },
         "requestBody": {
@@ -15253,7 +17478,7 @@
         "operationId": "credentialProxyDelete",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a DELETE request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
         "security": [
           {
             "bearerApiKey": []
@@ -15331,6 +17556,25 @@
             }
           },
           {
+            "name": "X-Stream-Response",
+            "in": "header",
+            "required": false,
+            "description": "When `1`, stream the upstream response body through the 100 MB streaming cap instead of buffering it. Skips the buffered `max_response_bytes` truncation, so `X-Truncated` is not emitted; an oversized stream is aborted rather than truncated.",
+            "schema": {
+              "type": "string",
+              "enum": ["0", "1"]
+            }
+          },
+          {
+            "name": "X-Max-Response-Size",
+            "in": "header",
+            "required": false,
+            "description": "Optional cap (in bytes) on the buffered upstream response before truncation. Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when `X-Stream-Response: 1` is set.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "X-Run-Id",
             "in": "header",
             "required": false,
@@ -15352,19 +17596,13 @@
         ],
         "responses": {
           "200": {
-            "description": "Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated`/`X-Truncated-Size` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry these headers.",
+            "description": "Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header.",
             "headers": {
               "X-Truncated": {
                 "description": "Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses.",
                 "schema": {
                   "type": "string",
                   "enum": ["true"]
-                }
-              },
-              "X-Truncated-Size": {
-                "description": "Original upstream `Content-Length` (in bytes) when `X-Truncated: true` is set, so the caller can decide whether to retry with `X-Stream-Request: 1` or accept the truncated body.",
-                "schema": {
-                  "type": "string"
                 }
               }
             },
@@ -15376,7 +17614,23 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "401": {
-            "$ref": "#/components/responses/Unauthorized"
+            "description": "Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself.",
+            "headers": {
+              "X-Auth-Refreshed": {
+                "description": "Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["true"]
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "403": {
             "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, or cookie session used."
@@ -15384,8 +17638,21 @@
           "404": {
             "description": "No credentials or connection for the requested integration."
           },
+          "413": {
+            "description": "Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -15456,28 +17723,37 @@
         "responses": {
           "200": {
             "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
+            "headers": {
+              "x-llm-proxy-cache-status": {
+                "description": "Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["HIT", "MISS"]
+                }
+              }
+            },
             "content": {
               "application/json": {},
               "text/event-stream": {}
             }
           },
           "400": {
-            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, or preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead)."
+            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Forbidden — principal lacks `llm-proxy:call`, or cookie session used (bearer only)."
+            "description": "Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only)."
           },
           "413": {
-            "description": "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes` (default 10 MiB)."
+            "description": "Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware)."
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
           },
           "502": {
-            "description": "Upstream provider returned a non-2xx response; body and status forwarded as-is. No usage recorded."
+            "description": "Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded."
           }
         }
       }
@@ -15579,28 +17855,37 @@
         "responses": {
           "200": {
             "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
+            "headers": {
+              "x-llm-proxy-cache-status": {
+                "description": "Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["HIT", "MISS"]
+                }
+              }
+            },
             "content": {
               "application/json": {},
               "text/event-stream": {}
             }
           },
           "400": {
-            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, or preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead)."
+            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Forbidden — principal lacks `llm-proxy:call`, or cookie session used (bearer only)."
+            "description": "Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only)."
           },
           "413": {
-            "description": "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes` (default 10 MiB)."
+            "description": "Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware)."
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
           },
           "502": {
-            "description": "Upstream provider returned a non-2xx response; body and status forwarded as-is. No usage recorded."
+            "description": "Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded."
           }
         }
       }
@@ -15671,28 +17956,37 @@
         "responses": {
           "200": {
             "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
+            "headers": {
+              "x-llm-proxy-cache-status": {
+                "description": "Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["HIT", "MISS"]
+                }
+              }
+            },
             "content": {
               "application/json": {},
               "text/event-stream": {}
             }
           },
           "400": {
-            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, or preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead)."
+            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Forbidden — principal lacks `llm-proxy:call`, or cookie session used (bearer only)."
+            "description": "Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only)."
           },
           "413": {
-            "description": "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes` (default 10 MiB)."
+            "description": "Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware)."
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
           },
           "502": {
-            "description": "Upstream provider returned a non-2xx response; body and status forwarded as-is. No usage recorded."
+            "description": "Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded."
           }
         }
       }
@@ -15702,7 +17996,7 @@
         "operationId": "getLibrary",
         "tags": ["Library"],
         "summary": "List all packages visible to the org with per-app install state",
-        "description": "Returns every package available to the caller's organization (org-owned + system) grouped by type (`agent`, `skill`, `integration`). Each package carries an `installed_in` array of application ids — the applications belonging to the caller's org where the package is currently installed. Ephemeral packages are excluded.\n\nThe response also includes the org's applications (id, name, isDefault) so the UI can render a single grid keyed by app without an additional `/api/applications` call.",
+        "description": "Returns every package available to the caller's organization (org-owned + system) grouped by type (`agent`, `skill`, `mcp-server`, `integration`). Each package carries an `installed_in` array of application ids — the applications belonging to the caller's org where the package is currently installed. Ephemeral packages are excluded.\n\nThe response also includes the org's applications (id, name, isDefault) so the UI can render a single grid keyed by app without an additional `/api/applications` call.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16059,7 +18353,7 @@
                 "message": {
                   "type": "string"
                 },
-                "candidateConnectionIds": {
+                "candidate_connection_ids": {
                   "type": "array",
                   "items": {
                     "type": "string"
@@ -16159,6 +18453,10 @@
           "package_source": {
             "type": "string",
             "enum": ["system", "local"]
+          },
+          "draft_manifest": {
+            "type": ["object", "null"],
+            "description": "Raw draft manifest JSONB for the installed package."
           }
         }
       },
@@ -16166,11 +18464,11 @@
         "type": "object",
         "description": "Organization settings (extensible)",
         "properties": {
-          "apiVersion": {
+          "api_version": {
             "type": "string",
             "description": "Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated."
           },
-          "dashboardSsoEnabled": {
+          "dashboard_sso_enabled": {
             "type": "boolean",
             "description": "When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need application-level SSO for their end-users."
           }
@@ -16294,7 +18592,7 @@
       },
       "AgentSkillRef": {
         "type": "object",
-        "required": ["id", "name"],
+        "required": ["id"],
         "properties": {
           "id": {
             "type": "string"
@@ -16572,7 +18870,7 @@
                 "format": "date-time"
               },
               "duration": {
-                "type": "integer"
+                "type": ["integer", "null"]
               }
             }
           },
@@ -16618,7 +18916,7 @@
             "type": "boolean",
             "description": "Whether this version has been yanked"
           },
-          "createdBy": {
+          "created_by": {
             "type": ["string", "null"]
           },
           "createdAt": {
@@ -16864,9 +19162,6 @@
           "runId": {
             "type": "string"
           },
-          "userId": {
-            "type": "string"
-          },
           "orgId": {
             "type": "string"
           },
@@ -16900,6 +19195,7 @@
           "packageId",
           "orgId",
           "applicationId",
+          "enabled",
           "cron_expression",
           "createdAt",
           "updatedAt"
@@ -16930,7 +19226,7 @@
             "type": ["string", "null"]
           },
           "enabled": {
-            "type": ["boolean", "null"]
+            "type": "boolean"
           },
           "cron_expression": {
             "type": "string"
@@ -17007,7 +19303,7 @@
             },
             "description": "Permission scopes granted to this API key."
           },
-          "createdBy": {
+          "created_by": {
             "type": ["string", "null"]
           },
           "created_by_name": {
@@ -17038,6 +19334,10 @@
           "id": {
             "type": "string"
           },
+          "orgId": {
+            "type": ["string", "null"],
+            "description": "Owning organization ID (null for system packages)"
+          },
           "name": {
             "type": ["string", "null"]
           },
@@ -17048,11 +19348,7 @@
             "type": "string",
             "enum": ["system", "local"]
           },
-          "scope": {
-            "type": ["string", "null"],
-            "description": "Scope from manifest name (e.g. @myorg from @myorg/name)"
-          },
-          "createdBy": {
+          "created_by": {
             "type": ["string", "null"]
           },
           "created_by_name": {
@@ -17089,6 +19385,10 @@
           "id": {
             "type": "string"
           },
+          "orgId": {
+            "type": ["string", "null"],
+            "description": "Owning organization ID (null for system packages)"
+          },
           "name": {
             "type": ["string", "null"]
           },
@@ -17107,18 +19407,8 @@
             "type": "string",
             "enum": ["system", "local"]
           },
-          "scope": {
-            "type": ["string", "null"],
-            "description": "Scope from manifest name (e.g. @myorg from @myorg/name)"
-          },
-          "createdBy": {
+          "created_by": {
             "type": ["string", "null"]
-          },
-          "created_by_name": {
-            "type": "string"
-          },
-          "used_by_agents": {
-            "type": "integer"
           },
           "auto_installed": {
             "type": "boolean"
@@ -17212,13 +19502,13 @@
             "type": ["string", "null"],
             "description": "Canonical providerId backing the credential. Set when `authMode === 'oauth2'`."
           },
-          "oauthEmail": {
+          "oauth_email": {
             "type": ["string", "null"]
           },
-          "needsReconnection": {
+          "needs_reconnection": {
             "type": "boolean"
           },
-          "createdBy": {
+          "created_by": {
             "type": ["string", "null"]
           },
           "createdAt": {
@@ -17309,7 +19599,7 @@
               }
             }
           },
-          "createdBy": {
+          "created_by": {
             "type": ["string", "null"]
           },
           "createdAt": {
@@ -17403,13 +19693,6 @@
                   "items": {
                     "type": "string"
                   }
-                },
-                "identity_claims": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "description": "Identity claims captured at connect time (e.g. OIDC `sub`, `email`). AFPS §7 name."
                 }
               }
             }
@@ -17443,9 +19726,52 @@
           }
         }
       },
+      "IntegrationPin": {
+        "type": "object",
+        "required": [
+          "packageId",
+          "integration_package_id",
+          "auth_key",
+          "connection_id",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "packageId": {
+            "type": "string"
+          },
+          "integration_package_id": {
+            "type": "string"
+          },
+          "auth_key": {
+            "type": "string"
+          },
+          "connection_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "OrgProxy": {
         "type": "object",
-        "required": ["id", "label", "enabled", "isDefault", "source", "createdAt", "updatedAt"],
+        "required": [
+          "id",
+          "label",
+          "enabled",
+          "isDefault",
+          "source",
+          "created_by",
+          "createdAt",
+          "updatedAt"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -17467,7 +19793,7 @@
             "type": "string",
             "enum": ["built-in", "custom"]
           },
-          "createdBy": {
+          "created_by": {
             "type": ["string", "null"]
           },
           "createdAt": {
@@ -17526,7 +19852,7 @@
               }
             }
           },
-          "createdBy": {
+          "created_by": {
             "type": ["string", "null"],
             "description": "ID of the user who created the application"
           },
@@ -17585,10 +19911,23 @@
         }
       },
       "AgentManifest": {
-        "description": "AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema; extension fields use the x- prefix per AFPS §10.",
+        "description": "AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema. Most extension fields use the x- prefix per AFPS §10, with the exception of the Appstrate-specific top-level `runtime_tools` field documented below.",
         "allOf": [
           {
             "$ref": "https://schemas.afps.dev/v0/agent.schema.json"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "runtime_tools": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["output", "log", "note", "pin", "report"]
+                },
+                "description": "Appstrate top-level extension: runtime tools the agent may use. Optional."
+              }
+            }
           }
         ]
       },
@@ -17643,7 +19982,7 @@
             },
             "source": {
               "type": "string",
-              "description": "Package origin (e.g. `org` for org-owned packages, `system` for built-in system packages)."
+              "description": "Package origin (`local` for org-owned packages, `system` for built-in system packages)."
             },
             "name": {
               "type": "string",

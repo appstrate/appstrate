@@ -158,7 +158,7 @@ export function OnboardingQuickConnect() {
         const alreadyConnected =
           credentialsQuery.data?.some(
             (k) =>
-              k.authMode === "oauth2" && k.providerId === entry.providerId && !k.needsReconnection,
+              k.authMode === "oauth2" && k.providerId === entry.providerId && !k.needs_reconnection,
           ) ?? false;
         return (
           <QuickConnectCard

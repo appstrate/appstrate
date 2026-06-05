@@ -29,7 +29,7 @@ describe("Invitations API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.email).toBe("new@test.com");
-      expect(body.isNewUser).toBe(true);
+      expect(body.is_new_user).toBe(true);
     });
 
     it("returns 404 for invalid token", async () => {
@@ -70,7 +70,7 @@ describe("Invitations API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.success).toBe(true);
-      expect(body.isNewUser).toBe(true);
+      expect(body.is_new_user).toBe(true);
       expect(body.orgId).toBe(ctx.orgId);
     });
 
@@ -120,9 +120,9 @@ describe("Invitations API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.success).toBe(true);
-      expect(body.isNewUser).toBe(false);
+      expect(body.is_new_user).toBe(false);
       expect(body.orgId).toBe(ctx.orgId);
-      expect(body.requiresLogin).toBe(false);
+      expect(body.requires_login).toBe(false);
     });
 
     it("returns requiresLogin when existing user is not authenticated", async () => {
@@ -144,8 +144,8 @@ describe("Invitations API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.success).toBe(true);
-      expect(body.isNewUser).toBe(false);
-      expect(body.requiresLogin).toBe(true);
+      expect(body.is_new_user).toBe(false);
+      expect(body.requires_login).toBe(true);
     });
 
     it("reports isNewUser=false in info when user exists", async () => {
@@ -161,7 +161,7 @@ describe("Invitations API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.isNewUser).toBe(false);
+      expect(body.is_new_user).toBe(false);
       expect(body.email).toBe("known@test.com");
     });
 

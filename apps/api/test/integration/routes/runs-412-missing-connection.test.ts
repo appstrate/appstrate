@@ -96,7 +96,7 @@ interface ValidationFieldError {
   code: string;
   title?: string;
   message: string;
-  candidateConnectionIds?: string[];
+  candidate_connection_ids?: string[];
   connection_id?: string;
   missing_scopes?: string[];
   owned_by_actor?: boolean;
@@ -251,10 +251,10 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err).toBeDefined();
     expect(err!.code).toBe("must_choose_connection");
 
-    // The candidateConnectionIds smuggle is the modal's source of truth for
+    // The candidate_connection_ids smuggle is the modal's source of truth for
     // rendering the per-actor picker dropdown.
-    expect(err!.candidateConnectionIds).toBeDefined();
-    expect(err!.candidateConnectionIds!.sort()).toEqual([conn1, conn2].sort());
+    expect(err!.candidate_connection_ids).toBeDefined();
+    expect(err!.candidate_connection_ids!.sort()).toEqual([conn1, conn2].sort());
   });
 
   it("must_choose retry: posting connection_overrides exits the 412 loop", async () => {

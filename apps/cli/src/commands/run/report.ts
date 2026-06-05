@@ -148,7 +148,7 @@ export async function startReportSession(
   };
   if (ctx.orgId) headers["X-Org-Id"] = ctx.orgId;
 
-  const sink = opts.ttlSeconds ? { sink: { ttlSeconds: opts.ttlSeconds } } : {};
+  const sink = opts.ttlSeconds ? { sink: { ttl_seconds: opts.ttlSeconds } } : {};
   const baseBody = {
     applicationId: ctx.applicationId,
     input: {},
@@ -196,14 +196,14 @@ export async function startReportSession(
   const payload = (await res.json()) as {
     runId: string;
     url: string;
-    finalizeUrl: string;
+    finalize_url: string;
     secret: string;
     expiresAt: string;
   };
 
   const httpSink = new HttpSink({
     url: payload.url,
-    finalizeUrl: payload.finalizeUrl,
+    finalizeUrl: payload.finalize_url,
     runSecret: payload.secret,
   });
 

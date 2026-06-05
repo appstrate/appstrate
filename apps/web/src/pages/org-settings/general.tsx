@@ -132,15 +132,15 @@ export function OrgSettingsGeneralPage() {
                 </span>
               </div>
               <Button
-                variant={orgSettings?.dashboardSsoEnabled ? "default" : "outline"}
+                variant={orgSettings?.dashboard_sso_enabled ? "default" : "outline"}
                 disabled={updateSettingsMutation.isPending}
                 onClick={() =>
                   updateSettingsMutation.mutate(
-                    { dashboardSsoEnabled: !orgSettings?.dashboardSsoEnabled },
+                    { dashboard_sso_enabled: !orgSettings?.dashboard_sso_enabled },
                     {
                       onSuccess: (data) => {
                         toast.success(
-                          data.dashboardSsoEnabled
+                          data.dashboard_sso_enabled
                             ? t("orgSettings.dashboardSsoEnabled")
                             : t("orgSettings.dashboardSsoDisabled"),
                         );
@@ -154,7 +154,7 @@ export function OrgSettingsGeneralPage() {
               >
                 {updateSettingsMutation.isPending ? (
                   <Spinner />
-                ) : orgSettings?.dashboardSsoEnabled ? (
+                ) : orgSettings?.dashboard_sso_enabled ? (
                   t("orgSettings.dashboardSsoDisable")
                 ) : (
                   t("orgSettings.dashboardSsoEnable")

@@ -643,10 +643,10 @@ export const oidcPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["ok", "messageId"],
                 properties: {
                   ok: { type: "boolean" },
                   messageId: { type: "string" },
-                  error: { type: "string" },
                 },
               },
             },
@@ -838,6 +838,217 @@ export const oidcPaths = {
             },
           },
         },
+      },
+    },
+  },
+  // ── CLI auth plugin endpoints (issue #165, #251) ──────────────────────────
+  // Mounted by `cliTokenPlugin()` via `betterAuthPlugins()` under
+  // `/api/auth/cli/*`. Documented here so the public surface is discoverable
+  // from `/api/docs`. Token/revoke use client_id auth; the session-management
+  // endpoints require the dashboard session cookie.
+
+  "/api/auth/cli/token": {
+    post: {
+      tags: ["Device Authorization"],
+      operationId: "cliToken",
+      security: [],
+      summary: "Exchange a device_code or refresh token for a CLI token pair",
+      description:
+        "Exchange a device_code (RFC 8628) OR a refresh token for a fresh JWT access token + rotating refresh token pair. Used by the `appstrate` CLI.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["grant_type", "client_id"],
+              properties: {
+                grant_type: { type: "string", minLength: 1 },
+                device_code: { type: "string" },
+                refresh_token: { type: "string" },
+                client_id: { type: "string", minLength: 1 },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Token pair issued.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  access_token: { type: "string" },
+                  refresh_token: { type: "string" },
+                  token_type: { type: "string", enum: ["Bearer"] },
+                  expires_in: { type: "integer" },
+                  refresh_expires_in: { type: "integer" },
+                  scope: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": {
+          description: "RFC 6749 / RFC 8628 error code.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  error: { type: "string" },
+                  error_description: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "401": { description: "Unknown or disabled client / unregistered grant type." },
+      },
+    },
+  },
+  "/api/auth/cli/revoke": {
+    post: {
+      tags: ["Device Authorization"],
+      operationId: "cliRevoke",
+      security: [],
+      summary: "Revoke a CLI refresh token family",
+      description:
+        "Revoke a CLI refresh token's family. Idempotent. Per RFC 7009 §2.2 the response is uniform (`{ revoked: true }`) even when the token is unknown or client-mismatched — the underlying hit/miss discriminator is kept in the audit log only, so a caller cannot probe token validity through the response shape.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["token", "client_id"],
+              properties: {
+                token: { type: "string", minLength: 1 },
+                client_id: { type: "string", minLength: 1 },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Revocation acknowledged.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { revoked: { type: "boolean", enum: [true] } },
+              },
+            },
+          },
+        },
+        "401": { description: "Unknown or disabled client / unregistered grant type." },
+      },
+    },
+  },
+  "/api/auth/cli/sessions": {
+    get: {
+      tags: ["Device Authorization"],
+      operationId: "cliListSessions",
+      summary: "List the caller's active CLI sessions",
+      description:
+        'List the caller\'s active CLI sessions (one entry per device). Cookie auth required — the listing is scoped to `c.get("user").id` derived from the BA session. `current` is always `false` for cookie callers because the dashboard does not present a refresh token.',
+      security: [{ cookieAuth: [] }],
+      responses: {
+        "200": {
+          description: "Session list.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        familyId: { type: "string" },
+                        deviceName: { type: ["string", "null"] },
+                        userAgent: { type: ["string", "null"] },
+                        createdIp: { type: ["string", "null"] },
+                        lastUsedIp: { type: ["string", "null"] },
+                        lastUsedAt: { type: ["string", "null"], format: "date-time" },
+                        createdAt: { type: "string", format: "date-time" },
+                        expiresAt: { type: "string", format: "date-time" },
+                        current: { type: "boolean" },
+                      },
+                    },
+                  },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "401": { description: "Authentication required." },
+      },
+    },
+  },
+  "/api/auth/cli/sessions/revoke": {
+    post: {
+      tags: ["Device Authorization"],
+      operationId: "cliRevokeSession",
+      summary: "Revoke a single CLI session owned by the caller",
+      description:
+        "Revoke a single CLI session owned by the caller. Cookie auth required. `revoked: false` is returned when the family does not exist, does not belong to the caller, or has already been revoked — the route layer does not distinguish these cases at the HTTP shape so an attacker who somehow guessed a `family_id` cannot probe ownership through the response.",
+      security: [{ cookieAuth: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["familyId"],
+              properties: { familyId: { type: "string", minLength: 1 } },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Revocation outcome.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { revoked: { type: "boolean" } },
+              },
+            },
+          },
+        },
+        "401": { description: "Authentication required." },
+      },
+    },
+  },
+  "/api/auth/cli/sessions/revoke-all": {
+    post: {
+      tags: ["Device Authorization"],
+      operationId: "cliRevokeAllSessions",
+      summary: "Revoke every active CLI session belonging to the caller",
+      description:
+        "Revoke every active CLI session belonging to the caller. Server primitive backing `appstrate logout --all`. Cookie auth required. Idempotent — calling on an account with no active sessions returns `{ revokedCount: 0 }`.",
+      security: [{ cookieAuth: [] }],
+      responses: {
+        "200": {
+          description: "Bulk revocation outcome.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { revokedCount: { type: "integer", minimum: 0 } },
+              },
+            },
+          },
+        },
+        "401": { description: "Authentication required." },
       },
     },
   },

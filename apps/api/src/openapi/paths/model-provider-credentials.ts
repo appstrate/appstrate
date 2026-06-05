@@ -230,7 +230,16 @@ export const modelProviderCredentialsPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          description:
+            "Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when `providerId` is unknown or refers to an OAuth-only provider (use the pairing flow instead).",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           description: "Forbidden — caller lacks `model-provider-credentials:write`.",
           content: {
@@ -239,6 +248,7 @@ export const modelProviderCredentialsPaths = {
             },
           },
         },
+        "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },
   },
@@ -298,6 +308,7 @@ export const modelProviderCredentialsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "429": { $ref: "#/components/responses/RateLimited" },
+        "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },
   },
@@ -341,7 +352,17 @@ export const modelProviderCredentialsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          description:
+            "Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `id` refers to a built-in/system credential that cannot be modified.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },
     delete: {
@@ -362,7 +383,15 @@ export const modelProviderCredentialsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          description:
+            "Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `id` refers to a built-in/system credential that cannot be deleted.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "409": {
           description: "Credential is still referenced by one or more models (credential_in_use)",
           content: {
@@ -398,17 +427,11 @@ export const modelProviderCredentialsPaths = {
             },
           },
         },
-        "404": {
-          description: "Model provider credential not found",
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/TestResult" },
-            },
-          },
-        },
+        "404": { $ref: "#/components/responses/NotFound" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "429": { $ref: "#/components/responses/RateLimited" },
+        "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },
   },

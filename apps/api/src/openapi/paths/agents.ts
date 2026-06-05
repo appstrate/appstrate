@@ -128,6 +128,7 @@ export const agentsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -295,6 +296,7 @@ export const agentsPaths = {
                         actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
                         actor_id: { type: ["string", "null"] },
                         createdAt: { type: ["string", "null"], format: "date-time" },
+                        pinned: { type: "boolean" },
                       },
                     },
                   },
@@ -572,6 +574,14 @@ export const agentsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Agent in use (one or more runs are running)",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -631,6 +641,7 @@ export const agentsPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

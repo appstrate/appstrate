@@ -162,6 +162,16 @@ export function createCredentialProxyRouter() {
       const streamResponse = c.req.header("x-stream-response") === "1";
       const declaredLen = parseInt(c.req.header("content-length") || "-1", 10);
 
+      // Optional caller-supplied buffered-response cap. Clamped to the
+      // platform `max_response_bytes` — a caller can only ask for a smaller
+      // truncation cap, never a larger one. Ignored when streaming the
+      // response (the streaming cap applies instead).
+      const maxResponseSizeHeader = parseInt(c.req.header("x-max-response-size") || "", 10);
+      const bufferedMaxResponseBytes =
+        Number.isFinite(maxResponseSizeHeader) && maxResponseSizeHeader > 0
+          ? Math.min(maxResponseSizeHeader, limits.max_response_bytes)
+          : limits.max_response_bytes;
+
       // Guard: declared Content-Length already exceeds the hard cap.
       if (streamRequest && declaredLen > MAX_STREAMED_BODY_SIZE) {
         throw payloadTooLarge("request body too large");
@@ -251,7 +261,7 @@ export function createCredentialProxyRouter() {
           // When the client wants a streamed response, skip the platform
           // response-size cap — the capping transform stream in this
           // route enforces MAX_STREAMED_BODY_SIZE instead.
-          maxResponseBytes: streamResponse ? 0 : limits.max_response_bytes,
+          maxResponseBytes: streamResponse ? 0 : bufferedMaxResponseBytes,
         });
 
         const durationMs = Date.now() - started;

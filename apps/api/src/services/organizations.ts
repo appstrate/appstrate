@@ -48,7 +48,7 @@ export async function createOrganization(
       name,
       slug,
       createdBy: userId,
-      orgSettings: { apiVersion: CURRENT_API_VERSION },
+      orgSettings: { api_version: CURRENT_API_VERSION },
     })
     .returning();
 
@@ -96,7 +96,7 @@ export async function getOrgById(orgId: string): Promise<OrgResult | null> {
 export async function updateOrganization(
   orgId: string,
   updates: { name?: string; slug?: string },
-): Promise<OrgResult | null> {
+): Promise<OrgResult> {
   const [row] = await db
     .update(organizations)
     .set({ ...updates, updatedAt: new Date() })

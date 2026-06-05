@@ -24,7 +24,7 @@ export function OrgSettingsOAuthPage() {
 
   if (isLoading) return <LoadingState />;
 
-  if (!orgSettings?.dashboardSsoEnabled) {
+  if (!orgSettings?.dashboard_sso_enabled) {
     return <Navigate to="/org-settings/general" replace />;
   }
 

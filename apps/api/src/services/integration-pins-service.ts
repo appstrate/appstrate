@@ -402,8 +402,8 @@ export async function deleteMemberPin(
  * renders the collapsed "Using: X" row pointing at the pinned connection.
  */
 export interface MemberPinSummary {
-  integrationId: string;
-  connectionId: string;
+  integration_package_id: string;
+  connection_id: string;
 }
 
 export async function listMemberPinsForAgent(
@@ -413,8 +413,8 @@ export async function listMemberPinsForAgent(
 ): Promise<MemberPinSummary[]> {
   const rows = await db
     .select({
-      integrationId: integrationPins.integrationId,
-      connectionId: integrationPins.connectionId,
+      integration_package_id: integrationPins.integrationId,
+      connection_id: integrationPins.connectionId,
     })
     .from(integrationPins)
     .where(
@@ -678,7 +678,7 @@ export async function resolveAgentIntegrationPick(args: {
   const adminPinnedConnectionId =
     adminPins.find((p) => p.packageId === agentPackageId)?.connection_id ?? null;
   const memberPinnedConnectionId =
-    memberPins.find((p) => p.integrationId === integrationId)?.connectionId ?? null;
+    memberPins.find((p) => p.integration_package_id === integrationId)?.connection_id ?? null;
   const orgDefaultConnectionId = orgDefault?.connection_id ?? null;
   const orgDefaultEnforced = orgDefault?.enforce ?? false;
 

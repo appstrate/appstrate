@@ -275,7 +275,8 @@ export const integrationsPaths = {
       ],
       responses: {
         "200": {
-          description: "HTML response that closes the popup",
+          description:
+            "HTML page that closes the popup window. Renders either a success page or an error page (missing params, IdP error, code exchange failure, identity mismatch, or persistence failure).",
           headers: baseResponseHeaders,
         },
       },
@@ -298,6 +299,14 @@ export const integrationsPaths = {
           content: { "application/json": { schema: integrationDetailSchema } },
         },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Wrong package type",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -373,6 +382,14 @@ export const integrationsPaths = {
           },
         },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Wrong package type",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -429,6 +446,7 @@ export const integrationsPaths = {
           content: { "application/json": { schema: oauthClientSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
     delete: {
@@ -500,6 +518,7 @@ export const integrationsPaths = {
           content: { "application/json": { schema: integrationConnectionSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -549,6 +568,7 @@ export const integrationsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -726,6 +746,7 @@ export const integrationsPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {

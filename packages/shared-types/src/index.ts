@@ -327,9 +327,9 @@ export interface MeConnectionEntry {
   needs_reconnection: boolean;
   expiresAt: string | null;
   /** Human-friendly identity (accountEmail, sub claim). */
-  identity: string | null;
+  identity: string;
   /** Which auth slot this connection satisfies. */
-  auth_key: string | null;
+  auth_key: string;
   /** Admin/owner sharing toggle (per-org). */
   shared_with_org: boolean;
   /**
@@ -338,7 +338,7 @@ export interface MeConnectionEntry {
    * surface "reused by N agents" so members understand that the connection
    * is shared across the org's agents rather than per-agent.
    */
-  reused_by_agents: number | null;
+  reused_by_agents: number;
   /** Where this connection lives (the connection is keyed per-app). */
   org: { id: string; name: string };
   application: { id: string; name: string };
@@ -431,7 +431,7 @@ export interface AgentDetail {
 export interface OrgPackageItem extends BasePackageListItem {
   /** Display name from the manifest, may be missing on legacy rows. */
   name: string | null;
-  createdBy: string | null;
+  created_by: string | null;
   created_by_name: string | null;
   createdAt: string;
   updatedAt: string;
@@ -466,9 +466,9 @@ interface PackageVersionInfo {
   createdAt: string;
 }
 
-/** Extended version info for list views (includes createdBy). */
+/** Extended version info for list views (includes created_by). */
 export interface VersionListItem extends Omit<PackageVersionInfo, "createdAt"> {
-  createdBy: string | null;
+  created_by: string | null;
   createdAt: string | null;
 }
 
@@ -531,7 +531,7 @@ export interface OrgProxyInfo {
   enabled: boolean;
   isDefault: boolean;
   source: "built-in" | "custom";
-  createdBy: string | null;
+  created_by: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -572,7 +572,7 @@ export interface OrgModelInfo extends ModelMetadata {
   isDefault: boolean;
   source: "built-in" | "custom";
   credentialId: string;
-  createdBy: string | null;
+  created_by: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -595,10 +595,10 @@ export interface ModelProviderCredentialInfo {
   /** Set when `authMode === "oauth2"`. Canonical providerId backing the connection. */
   providerId?: string | null;
   /** Surface email of the OAuth account (extracted from the access-token identity claim). UI shows it as transparency hint. */
-  oauthEmail?: string | null;
+  oauth_email?: string | null;
   /** True when the worker (or token-resolver) detected an `invalid_grant`. UI surfaces a "Reconnect" badge. */
-  needsReconnection?: boolean;
-  createdBy: string | null;
+  needs_reconnection?: boolean;
+  created_by: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -681,7 +681,7 @@ export interface ApiKeyInfo {
   name: string;
   keyPrefix: string;
   scopes: string[];
-  createdBy: string | null;
+  created_by: string | null;
   created_by_name?: string;
   expiresAt: string | null;
   lastUsedAt: string | null;
@@ -696,7 +696,7 @@ export interface ApplicationInfo {
   name: string;
   isDefault: boolean;
   settings: { allowedRedirectDomains?: string[] };
-  createdBy: string | null;
+  created_by: string | null;
   createdAt: string;
   updatedAt: string;
 }

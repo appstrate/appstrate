@@ -213,9 +213,9 @@ describe("/api/me/integration-pins", () => {
       );
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: Array<{ connectionId: string }> };
+      const body = (await res.json()) as { data: Array<{ connection_id: string }> };
       expect(body.data).toHaveLength(1);
-      expect(body.data[0]!.connectionId).toBe(connectionId);
+      expect(body.data[0]!.connection_id).toBe(connectionId);
     });
 
     it("returns an empty list when no agentPackageId query param is given", async () => {

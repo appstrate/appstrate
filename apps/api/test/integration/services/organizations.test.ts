@@ -71,7 +71,7 @@ describe("organizations service", () => {
       const org = await createOrganization("Versioned Org", "versioned-org", userId);
 
       const settings = await getOrgSettings(org.id);
-      expect(settings.apiVersion).toBe(CURRENT_API_VERSION);
+      expect(settings.api_version).toBe(CURRENT_API_VERSION);
     });
   });
 

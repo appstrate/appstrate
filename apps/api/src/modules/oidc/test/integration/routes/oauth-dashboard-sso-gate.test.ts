@@ -73,7 +73,7 @@ describe("Dashboard SSO gate (dashboardSsoEnabled)", () => {
     it("rejects org-level creation with 403 when flag is explicitly false", async () => {
       await db
         .update(organizations)
-        .set({ orgSettings: { dashboardSsoEnabled: false } })
+        .set({ orgSettings: { dashboard_sso_enabled: false } })
         .where(eq(organizations.id, ctx.orgId));
       const res = await postClient(ctx, orgBody(ctx));
       expect(res.status).toBe(403);
@@ -97,7 +97,7 @@ describe("Dashboard SSO gate (dashboardSsoEnabled)", () => {
 
       await db
         .update(organizations)
-        .set({ orgSettings: { dashboardSsoEnabled: false } })
+        .set({ orgSettings: { dashboard_sso_enabled: false } })
         .where(eq(organizations.id, ctx.orgId));
 
       const blocked = await postClient(
@@ -116,7 +116,7 @@ describe("Dashboard SSO gate (dashboardSsoEnabled)", () => {
 
       await db
         .update(organizations)
-        .set({ orgSettings: { dashboardSsoEnabled: false } })
+        .set({ orgSettings: { dashboard_sso_enabled: false } })
         .where(eq(organizations.id, ctx.orgId));
 
       const res = await app.request(`/api/oauth/clients/${clientId}`, {
@@ -148,7 +148,7 @@ describe("Dashboard SSO gate (dashboardSsoEnabled)", () => {
 
       await db
         .update(organizations)
-        .set({ orgSettings: { dashboardSsoEnabled: false } })
+        .set({ orgSettings: { dashboard_sso_enabled: false } })
         .where(eq(organizations.id, ctx.orgId));
 
       const res = await app.request(`/api/oauth/clients/${clientId}/rotate`, {
@@ -167,7 +167,7 @@ describe("Dashboard SSO gate (dashboardSsoEnabled)", () => {
 
       await db
         .update(organizations)
-        .set({ orgSettings: { dashboardSsoEnabled: false } })
+        .set({ orgSettings: { dashboard_sso_enabled: false } })
         .where(eq(organizations.id, ctx.orgId));
 
       const res = await app.request(`/api/oauth/clients/${clientId}`, {
@@ -186,7 +186,7 @@ describe("Dashboard SSO gate (dashboardSsoEnabled)", () => {
 
       await db
         .update(organizations)
-        .set({ orgSettings: { dashboardSsoEnabled: false } })
+        .set({ orgSettings: { dashboard_sso_enabled: false } })
         .where(eq(organizations.id, ctx.orgId));
 
       const res = await app.request("/api/oauth/clients", { headers: authHeaders(ctx) });
@@ -204,7 +204,7 @@ describe("Dashboard SSO gate (dashboardSsoEnabled)", () => {
 
       await db
         .update(organizations)
-        .set({ orgSettings: { dashboardSsoEnabled: false } })
+        .set({ orgSettings: { dashboard_sso_enabled: false } })
         .where(eq(organizations.id, ctx.orgId));
 
       const res = await app.request(

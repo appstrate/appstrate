@@ -91,6 +91,8 @@ export function createAgentsRouter() {
         keywords: manifest.keywords ?? [],
         dependencies: {
           skills: (manifest.dependencies?.skills ?? {}) as Record<string, string>,
+          mcp_servers: (manifest.dependencies?.mcp_servers ?? {}) as Record<string, string>,
+          integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
         },
         running_runs: runningCounts[row.id] ?? 0,
         source: row.source ?? "local",

@@ -24,7 +24,7 @@ export const packagesPaths = {
                   type: "string",
                   format: "binary",
                   description:
-                    ".afps-bundle (preferred) or .afps archive — detected automatically via the bundle.json marker.",
+                    "`.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker. May also be supplied under the `bundle` form field as an alias.",
                 },
               },
             },
@@ -79,7 +79,15 @@ export const packagesPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          description:
+            "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
@@ -155,54 +163,35 @@ export const packagesPaths = {
                     description:
                       "Imported manifest version (semver). Omitted when the manifest carries no version field.",
                   },
+                  warnings: {
+                    type: "array",
+                    items: { type: "string" },
+                    description:
+                      "Non-blocking install warnings (e.g. connect.login engine-subset or _meta soft-fails). Present only when warnings were emitted.",
+                  },
                 },
               },
               example: { packageId: "@acme/email-sorter", type: "agent", version: "1.0.0" },
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          description:
+            "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `name_collision` (system package or existing identifier owned by another org), `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`).",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "Package has unpublished draft changes that would be overwritten, or version exists with different content",
+            "Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`.",
           content: {
-            "application/json": {
-              schema: {
-                oneOf: [
-                  {
-                    type: "object",
-                    required: ["error", "message", "details"],
-                    properties: {
-                      error: { type: "string", enum: ["DRAFT_OVERWRITE"] },
-                      message: { type: "string" },
-                      details: {
-                        type: "object",
-                        properties: {
-                          packageId: { type: "string" },
-                          active_version: { type: ["string", "null"] },
-                        },
-                      },
-                    },
-                  },
-                  {
-                    type: "object",
-                    required: ["error", "message", "details"],
-                    properties: {
-                      error: { type: "string", enum: ["INTEGRITY_MISMATCH"] },
-                      message: { type: "string" },
-                      details: {
-                        type: "object",
-                        properties: {
-                          packageId: { type: "string" },
-                          version: { type: "string" },
-                        },
-                      },
-                    },
-                  },
-                ],
-              },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
@@ -262,6 +251,12 @@ export const packagesPaths = {
                     description:
                       "Imported manifest version (semver). Omitted when the manifest carries no version field.",
                   },
+                  warnings: {
+                    type: "array",
+                    items: { type: "string" },
+                    description:
+                      "Non-blocking install warnings (e.g. connect.login engine-subset or _meta soft-fails). Present only when warnings were emitted.",
+                  },
                 },
               },
             },
@@ -269,32 +264,10 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.)",
+            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`name_collision`, `type_mismatch`, `post_install_failed`).",
           content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["error", "message"],
-                properties: {
-                  error: {
-                    type: "string",
-                    enum: [
-                      "VALIDATION_ERROR",
-                      "INVALID_URL",
-                      "NOT_FOUND",
-                      "RATE_LIMITED",
-                      "GITHUB_ERROR",
-                      "REPO_TOO_LARGE",
-                      "EMPTY_PATH",
-                      "TOO_MANY_FILES",
-                      "TOO_LARGE",
-                      "FILE_TOO_LARGE",
-                      "DOWNLOAD_FAILED",
-                    ],
-                  },
-                  message: { type: "string" },
-                },
-              },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
@@ -302,43 +275,10 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "Package has unpublished draft changes that would be overwritten, or version exists with different content",
+            "Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`.",
           content: {
-            "application/json": {
-              schema: {
-                oneOf: [
-                  {
-                    type: "object",
-                    required: ["error", "message", "details"],
-                    properties: {
-                      error: { type: "string", enum: ["DRAFT_OVERWRITE"] },
-                      message: { type: "string" },
-                      details: {
-                        type: "object",
-                        properties: {
-                          packageId: { type: "string" },
-                          active_version: { type: ["string", "null"] },
-                        },
-                      },
-                    },
-                  },
-                  {
-                    type: "object",
-                    required: ["error", "message", "details"],
-                    properties: {
-                      error: { type: "string", enum: ["INTEGRITY_MISMATCH"] },
-                      message: { type: "string" },
-                      details: {
-                        type: "object",
-                        properties: {
-                          packageId: { type: "string" },
-                          version: { type: "string" },
-                        },
-                      },
-                    },
-                  },
-                ],
-              },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
@@ -470,23 +410,19 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["id", "content"],
+              required: ["manifest"],
               properties: {
-                id: { type: "string", description: "Unique skill ID (kebab-case)" },
-                name: {
-                  type: "string",
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
                   description:
-                    "Display name. Auto-extracted from SKILL.md YAML frontmatter if omitted.",
-                },
-                description: {
-                  type: "string",
-                  description:
-                    "Skill description. Auto-extracted from SKILL.md YAML frontmatter if omitted.",
+                    "Skill package manifest (AFPS). The package ID is derived from `manifest.name`.",
                 },
                 content: {
                   type: "string",
-                  description: "SKILL.md content (markdown with YAML frontmatter)",
+                  description: "SKILL.md content (markdown with YAML frontmatter).",
                 },
+                source_code: { type: "string", description: "Optional source code payload." },
               },
             },
           },
@@ -695,7 +631,14 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Concurrent modification" },
+        "409": {
+          description: "Concurrent modification. RFC 9457 problem+json with `code` of `conflict`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -881,37 +824,11 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Skill is referenced by agents or required by other packages",
+          description:
+            "Skill is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
           content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: {
-                    type: "string",
-                    enum: ["IN_USE", "DEPENDED_ON"],
-                    description:
-                      "IN_USE: referenced by agents. DEPENDED_ON: required by other packages.",
-                  },
-                  message: { type: "string" },
-                  agents: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: { id: { type: "string" }, display_name: { type: "string" } },
-                    },
-                    description: "Agents referencing this skill (for IN_USE)",
-                  },
-                  dependents: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: { id: { type: "string" }, display_name: { type: "string" } },
-                    },
-                    description: "Packages depending on this skill (for DEPENDED_ON)",
-                  },
-                },
-              },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
@@ -1085,7 +1002,15 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Concurrent modification or agent in use" },
+        "409": {
+          description:
+            "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {
@@ -1108,7 +1033,14 @@ export const packagesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "409": { description: "Agent in use" },
+        "409": {
+          description: "Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -1236,7 +1168,15 @@ export const packagesPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "409": { description: "Agent in use (runs in progress)" },
+        "409": {
+          description:
+            "Agent in use (runs in progress) or no changes to snapshot. RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, or `conflict`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -1276,7 +1216,15 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Concurrent modification or agent in use" },
+        "409": {
+          description:
+            "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -1348,16 +1296,11 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Agent has runs in progress",
+          description:
+            "Agent has runs in progress. RFC 9457 problem+json with `code` of `agent_in_use`.",
           content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
@@ -1421,55 +1364,16 @@ export const packagesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "400": {
-          description: "Already owned, name collision, invalid name, or no published version",
+          description:
+            "Already owned, name collision, unsupported type, or no published version. RFC 9457 problem+json with `code` one of `invalid_request` (already owned / no published version / unsupported type) or `name_collision`.",
           content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: {
-                    type: "string",
-                    enum: [
-                      "ALREADY_OWNED",
-                      "NAME_COLLISION",
-                      "INVALID_NAME",
-                      "NO_PUBLISHED_VERSION",
-                    ],
-                  },
-                  message: { type: "string" },
-                },
-              },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
-        "403": {
-          description: "Forbidden",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-        "404": {
-          description: "Package not found",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -1593,37 +1497,11 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Skill is referenced by agents or required by other packages",
+          description:
+            "Skill is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
           content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: {
-                    type: "string",
-                    enum: ["IN_USE", "DEPENDED_ON"],
-                    description:
-                      "IN_USE: referenced by agents. DEPENDED_ON: required by other packages.",
-                  },
-                  message: { type: "string" },
-                  agents: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: { id: { type: "string" }, display_name: { type: "string" } },
-                    },
-                    description: "Agents referencing this skill (for IN_USE)",
-                  },
-                  dependents: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: { id: { type: "string" }, display_name: { type: "string" } },
-                    },
-                    description: "Packages depending on this skill (for DEPENDED_ON)",
-                  },
-                },
-              },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
@@ -1721,7 +1599,15 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Concurrent modification or agent in use" },
+        "409": {
+          description:
+            "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {
@@ -1749,7 +1635,1273 @@ export const packagesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "409": { description: "Agent in use" },
+        "409": {
+          description: "Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  // --- Integration package CRUD routes (registry packages, distinct from the
+  //     /api/integrations connection domain) ---
+
+  "/api/packages/integrations": {
+    get: {
+      operationId: "listIntegrationPackages",
+      tags: ["Packages"],
+      summary: "List integration packages",
+      description: "List all integration packages (system + org) in the organization.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
+      responses: {
+        "200": {
+          description: "Integration package list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/OrgPackageItem" },
+                  },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+    post: {
+      operationId: "createIntegrationPackage",
+      tags: ["Packages"],
+      summary: "Create an integration package",
+      description: "Create a new integration package in the organization packages.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["manifest"],
+              properties: {
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
+                  description:
+                    "Integration package manifest (AFPS). The package ID is derived from `manifest.name`.",
+                },
+                content: {
+                  type: "string",
+                  description: "Primary package file content (manifest document).",
+                },
+                source_code: {
+                  type: "string",
+                  description: "Optional source code payload for the integration runner.",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "Integration package created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  packageId: { type: "string" },
+                  lock_version: { type: "integer" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/packages/integrations/{scope}/{name}/versions/info": {
+    get: {
+      operationId: "getIntegrationPackageVersionInfo",
+      tags: ["Packages"],
+      summary: "Get version info for an integration package (latest published + draft)",
+      description:
+        "Returns the latest published version and the current draft version from the manifest.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "Version info",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  latest_published_version: { type: ["string", "null"] },
+                  active_version: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/packages/integrations/{scope}/{name}/versions": {
+    get: {
+      operationId: "listIntegrationPackageVersions",
+      tags: ["Packages"],
+      summary: "List integration package versions",
+      description: "List all published versions for an integration package.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "Version list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  versions: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/AgentVersion" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    post: {
+      operationId: "createIntegrationPackageVersion",
+      tags: ["Packages"],
+      summary: "Create a version from draft",
+      description:
+        "Create an immutable version snapshot from the current integration package draft. Version is determined by the manifest version field unless overridden.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                version: {
+                  type: "string",
+                  description: "Optional semver version override (e.g. from bump selector)",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "Version created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "integer" },
+                  version: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/packages/integrations/{scope}/{name}/versions/{version}/restore": {
+    post: {
+      operationId: "restoreIntegrationPackageVersion",
+      tags: ["Packages"],
+      summary: "Restore an integration package version into the draft",
+      description:
+        "Restore a previously published version into the integration package draft. Does not create a new version.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "version",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Version to restore (exact, dist-tag, or semver range)",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Version restored",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  message: { type: "string" },
+                  restored_version: { type: "string" },
+                  lock_version: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Concurrent modification. RFC 9457 problem+json with `code` of `conflict`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/packages/integrations/{scope}/{name}/versions/{version}": {
+    get: {
+      operationId: "getIntegrationPackageVersionDetail",
+      tags: ["Packages"],
+      summary: "Get integration package version detail",
+      description:
+        "Resolve a version query and return versioned integration package data including content extracted from ZIP.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "version",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Version query — exact version, dist-tag, or semver range",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Versioned integration package detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "integer" },
+                  version: { type: "string" },
+                  manifest: {
+                    type: "object",
+                    additionalProperties: true,
+                    description: "Full manifest object",
+                  },
+                  content: { type: ["string", "null"] },
+                  yanked: { type: "boolean" },
+                  yanked_reason: { type: ["string", "null"] },
+                  integrity: { type: "string" },
+                  artifact_size: { type: "integer" },
+                  createdAt: { type: ["string", "null"], format: "date-time" },
+                  dist_tags: { type: "array", items: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteIntegrationPackageVersion",
+      tags: ["Packages"],
+      summary: "Delete an integration package version",
+      description:
+        "Permanently delete an integration package version. Reassigns affected dist-tags to the next best stable version.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        { name: "version", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "204": {
+          description: "Version deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/packages/integrations/{scope}/{name}": {
+    get: {
+      operationId: "getIntegrationPackage",
+      tags: ["Packages"],
+      summary: "Get integration package detail",
+      description: "Get an integration package's full details including content.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "Integration package detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    put: {
+      operationId: "updateIntegrationPackage",
+      tags: ["Packages"],
+      summary: "Update an integration package",
+      description:
+        "Update an integration package in the organization packages. Built-in integration packages cannot be modified.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["manifest", "content", "lock_version"],
+              properties: {
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
+                  description: "Package manifest",
+                },
+                content: { type: "string" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Integration package updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  packageId: { type: "string" },
+                  lock_version: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteIntegrationPackage",
+      tags: ["Packages"],
+      summary: "Delete an integration package",
+      description:
+        "Delete an integration package from the organization packages. Built-in integration packages cannot be deleted.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "204": {
+          description: "Integration package deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "Integration package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/packages/integrations/{id}": {
+    get: {
+      operationId: "getIntegrationPackageById",
+      tags: ["Packages"],
+      summary: "Get integration package detail by ID",
+      description: "Get an integration package's full details by unscoped package ID.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Integration package detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    put: {
+      operationId: "updateIntegrationPackageById",
+      tags: ["Packages"],
+      summary: "Update an integration package by ID",
+      description:
+        "Update an integration package by unscoped package ID. Built-in integration packages cannot be modified.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["manifest", "content", "lock_version"],
+              properties: {
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
+                  description: "Package manifest",
+                },
+                content: { type: "string" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Integration package updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  packageId: { type: "string" },
+                  lock_version: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteIntegrationPackageById",
+      tags: ["Packages"],
+      summary: "Delete an integration package by ID",
+      description:
+        "Delete an integration package by unscoped package ID. Built-in integration packages cannot be deleted.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      responses: {
+        "204": {
+          description: "Integration package deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "Integration package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  // --- MCP-server package CRUD routes ---
+
+  "/api/packages/mcp-servers": {
+    get: {
+      operationId: "listMcpServerPackages",
+      tags: ["Packages"],
+      summary: "List MCP-server packages",
+      description: "List all MCP-server packages (system + org) in the organization.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
+      responses: {
+        "200": {
+          description: "MCP-server package list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/OrgPackageItem" },
+                  },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+    post: {
+      operationId: "createMcpServerPackage",
+      tags: ["Packages"],
+      summary: "Create an MCP-server package",
+      description: "Create a new MCP-server package in the organization packages.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
+      requestBody: {
+        required: true,
+        description:
+          "Upload a package ZIP (`multipart/form-data` with a `.afps`/`.zip` file — the package ID is derived from the file name), or post a JSON body. Parsed by `parsePackageUpload`.",
+        content: {
+          "multipart/form-data": {
+            schema: {
+              type: "object",
+              required: ["file"],
+              properties: {
+                file: {
+                  type: "string",
+                  format: "binary",
+                  description:
+                    "Package archive (`.afps` or `.zip`). File name (sans extension) is the kebab-case package id.",
+                },
+              },
+            },
+          },
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["id", "content"],
+              properties: {
+                id: { type: "string", description: "Kebab-case package id." },
+                content: { type: "string", description: "Primary package file content." },
+                name: {
+                  type: "string",
+                  description: "Display name. Auto-extracted from the manifest if omitted.",
+                },
+                description: {
+                  type: "string",
+                  description: "Package description. Auto-extracted from the manifest if omitted.",
+                },
+                version: { type: "string", description: "Initial semver (optional)." },
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
+                  description: "Optional manifest object (stored as-is).",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "MCP-server package created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  packageId: { type: "string" },
+                  lock_version: { type: "integer" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/packages/mcp-servers/{scope}/{name}/versions/info": {
+    get: {
+      operationId: "getMcpServerPackageVersionInfo",
+      tags: ["Packages"],
+      summary: "Get version info for an MCP-server package (latest published + draft)",
+      description:
+        "Returns the latest published version and the current draft version from the manifest.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "Version info",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  latest_published_version: { type: ["string", "null"] },
+                  active_version: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/packages/mcp-servers/{scope}/{name}/versions": {
+    get: {
+      operationId: "listMcpServerPackageVersions",
+      tags: ["Packages"],
+      summary: "List MCP-server package versions",
+      description: "List all published versions for an MCP-server package.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "Version list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  versions: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/AgentVersion" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    post: {
+      operationId: "createMcpServerPackageVersion",
+      tags: ["Packages"],
+      summary: "Create a version from draft",
+      description:
+        "Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                version: {
+                  type: "string",
+                  description: "Optional semver version override (e.g. from bump selector)",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "Version created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "integer" },
+                  version: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/packages/mcp-servers/{scope}/{name}/versions/{version}/restore": {
+    post: {
+      operationId: "restoreMcpServerPackageVersion",
+      tags: ["Packages"],
+      summary: "Restore an MCP-server package version into the draft",
+      description:
+        "Restore a previously published version into the MCP-server package draft. Does not create a new version.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "version",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Version to restore (exact, dist-tag, or semver range)",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Version restored",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  message: { type: "string" },
+                  restored_version: { type: "string" },
+                  lock_version: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Concurrent modification. RFC 9457 problem+json with `code` of `conflict`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/packages/mcp-servers/{scope}/{name}/versions/{version}": {
+    get: {
+      operationId: "getMcpServerPackageVersionDetail",
+      tags: ["Packages"],
+      summary: "Get MCP-server package version detail",
+      description:
+        "Resolve a version query and return versioned MCP-server package data including content extracted from ZIP.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "version",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Version query — exact version, dist-tag, or semver range",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Versioned MCP-server package detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "integer" },
+                  version: { type: "string" },
+                  manifest: {
+                    type: "object",
+                    additionalProperties: true,
+                    description: "Full manifest object",
+                  },
+                  content: { type: ["string", "null"] },
+                  yanked: { type: "boolean" },
+                  yanked_reason: { type: ["string", "null"] },
+                  integrity: { type: "string" },
+                  artifact_size: { type: "integer" },
+                  createdAt: { type: ["string", "null"], format: "date-time" },
+                  dist_tags: { type: "array", items: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteMcpServerPackageVersion",
+      tags: ["Packages"],
+      summary: "Delete an MCP-server package version",
+      description:
+        "Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        { name: "version", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "204": {
+          description: "Version deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/packages/mcp-servers/{scope}/{name}": {
+    get: {
+      operationId: "getMcpServerPackage",
+      tags: ["Packages"],
+      summary: "Get MCP-server package detail",
+      description: "Get an MCP-server package's full details including content.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "MCP-server package detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    put: {
+      operationId: "updateMcpServerPackage",
+      tags: ["Packages"],
+      summary: "Update an MCP-server package",
+      description:
+        "Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["manifest", "content", "lock_version"],
+              properties: {
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
+                  description: "Package manifest",
+                },
+                content: { type: "string" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "MCP-server package updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  packageId: { type: "string" },
+                  lock_version: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteMcpServerPackage",
+      tags: ["Packages"],
+      summary: "Delete an MCP-server package",
+      description:
+        "Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "204": {
+          description: "MCP-server package deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "MCP-server package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/packages/mcp-servers/{id}": {
+    get: {
+      operationId: "getMcpServerPackageById",
+      tags: ["Packages"],
+      summary: "Get MCP-server package detail by ID",
+      description: "Get an MCP-server package's full details by unscoped package ID.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "MCP-server package detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    put: {
+      operationId: "updateMcpServerPackageById",
+      tags: ["Packages"],
+      summary: "Update an MCP-server package by ID",
+      description:
+        "Update an MCP-server package by unscoped package ID. Built-in MCP-server packages cannot be modified.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["manifest", "content", "lock_version"],
+              properties: {
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
+                  description: "Package manifest",
+                },
+                content: { type: "string" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "MCP-server package updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  packageId: { type: "string" },
+                  lock_version: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteMcpServerPackageById",
+      tags: ["Packages"],
+      summary: "Delete an MCP-server package by ID",
+      description:
+        "Delete an MCP-server package by unscoped package ID. Built-in MCP-server packages cannot be deleted.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      responses: {
+        "204": {
+          description: "MCP-server package deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "MCP-server package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
