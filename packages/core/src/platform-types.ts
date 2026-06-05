@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Platform runtime capability types — the structural contract for services
- * injected into modules via `ModuleInitContext.services`.
+ * Platform runtime capability types — structural contracts shared between
+ * apps/api and the published @appstrate/core package (container orchestrator,
+ * run/run-log DTOs, realtime event shape, inline-run body, pub/sub).
  *
  * This file is type-only (no runtime code). The concrete implementations live
- * in apps/api; external modules consume these shapes through the published
- * @appstrate/core package without reaching into apps/api internals.
+ * in apps/api; consumers reference these shapes without reaching into apps/api
+ * internals.
  */
 
 import type { SidecarLaunchSpec } from "./sidecar-types.ts";
@@ -31,42 +32,10 @@ export type Actor = { type: "user"; id: string } | { type: "end_user"; id: strin
 //
 // These types expose the minimum fields external modules can rely on at the
 // package boundary. Concrete apps/api rows carry more fields; width
-// subtyping makes them assignable to these narrower shapes. `manifest` and
+// subtyping makes them assignable to these narrower shapes. `result` and
 // nested payloads are typed as `unknown` — modules cast at the call site
 // when they need the richer shape.
 // ---------------------------------------------------------------------------
-
-/**
- * A skill or integration referenced by a package's manifest, hydrated against the
- * org/system catalog. Optional fields mirror what was resolvable at load
- * time — modules use them to render dependency lists without re-querying.
- */
-export interface PlatformPackageDependency {
-  readonly id: string;
-  readonly name?: string;
-  readonly description?: string;
-  readonly version?: string;
-}
-
-/**
- * Stable public fields of a loaded package (agent, skill, integration).
- *
- * `prompt`, `skills` are populated by the platform when it resolves
- * a package row — modules that render or reason about a package can read
- * them without re-implementing manifest traversal. They remain optional so
- * package shapes that lack them (e.g. integrations have no prompt) stay
- * assignable, and so adding more hydrated fields is non-breaking.
- */
-export interface PlatformPackage {
-  readonly id: string;
-  readonly source: "system" | "local";
-  /** Opaque manifest — cast to `AgentManifest` or similar at the call site. */
-  readonly manifest: unknown;
-  /** Agent prompt body (markdown). Empty string when the package has no prompt. */
-  readonly prompt?: string;
-  /** Resolved skill dependencies declared in the manifest. */
-  readonly skills?: ReadonlyArray<PlatformPackageDependency>;
-}
 
 /**
  * Stable public fields of a run row. Narrower than the internal row —
@@ -107,44 +76,6 @@ export interface RunLog {
   readonly message: string | null;
   readonly data: unknown;
   readonly createdAt: Date;
-}
-
-/**
- * Stable public fields of a resolved model.
- *
- * The three core fields (`api`, `modelId`, `baseUrl`) are always present.
- * `apiKey` is populated by `models.load()` (single-model resolution
- * including credential decryption) so modules routing LLM traffic have
- * everything they need without a second round-trip; `models.listForOrg()`
- * intentionally omits it. The catalog fields (`id`, `label`, `isDefault`,
- * `enabled`, `source`) are populated by `models.listForOrg()` so modules
- * rendering a picker UI can drive it directly. All optional → width
- * subtyping keeps both call sites assignable to the same DTO.
- */
-export interface PlatformModel {
-  readonly apiShape: string;
-  readonly modelId: string;
-  readonly baseUrl: string;
-  /** Decrypted provider key — populated by `models.load()`, omitted by `listForOrg()`. */
-  readonly apiKey?: string;
-  /** Model row id (system or org-owned). */
-  readonly id?: string;
-  /** Human-readable label for catalog/picker UIs. */
-  readonly label?: string;
-  /** Whether this model is the org's default. */
-  readonly isDefault?: boolean;
-  /** Whether the model is enabled for use. */
-  readonly enabled?: boolean;
-  /** Provenance — `built-in` from `SYSTEM_PROVIDER_KEYS`, `custom` from the org catalog. */
-  readonly source?: "built-in" | "custom";
-}
-
-/** Stable public fields of an application row. */
-export interface PlatformApplication {
-  readonly id: string;
-  readonly orgId: string;
-  readonly name: string;
-  readonly isDefault: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -299,7 +230,7 @@ export interface ContainerOrchestrator {
 }
 
 // ---------------------------------------------------------------------------
-// Realtime SSE — subscriber contract
+// Realtime SSE — event shape
 // ---------------------------------------------------------------------------
 
 /** Event delivered to realtime subscribers (matches the SSE wire format). */
@@ -308,32 +239,11 @@ export interface RealtimeEvent {
   data: Record<string, unknown>;
 }
 
-/**
- * Filter narrowing the events a subscriber receives. `orgId` and
- * `applicationId` are required (multi-tenant isolation); `runId` /
- * `packageId` further narrow to a single resource; `isAdmin` opts the
- * subscriber into `debug`-level run logs.
- */
-export interface RealtimeSubscriberFilter {
-  orgId: string;
-  applicationId: string;
-  runId?: string;
-  packageId?: string;
-  isAdmin?: boolean;
-}
-
-/** A registered realtime subscriber. `send` is invoked for every matching event. */
-export interface RealtimeSubscriber {
-  id: string;
-  filter: RealtimeSubscriberFilter;
-  send(event: RealtimeEvent): void;
-}
-
 // ---------------------------------------------------------------------------
-// Inline run preflight — request / result shapes
+// Inline run — request body
 // ---------------------------------------------------------------------------
 
-/** Body accepted by `inline.preflight`. All fields optional and validated by the preflight. */
+/** Body accepted by the inline-run preflight/pipeline. All fields optional and validated downstream. */
 export interface InlineRunBody {
   manifest?: unknown;
   prompt?: unknown;
@@ -341,38 +251,6 @@ export interface InlineRunBody {
   config?: Record<string, unknown>;
   modelId?: string | null;
   proxyId?: string | null;
-}
-
-/**
- * `fail-fast` (default) throws on the first failing stage.
- * `accumulate` runs every independent stage and folds problems into one
- * `validation_failed` error.
- */
-export type InlinePreflightMode = "fail-fast" | "accumulate";
-
-export interface InlinePreflightInput {
-  orgId: string;
-  applicationId: string;
-  /** Who triggered the preflight; `null` is allowed for anonymous internal callers. */
-  actor: Actor | null;
-  body: InlineRunBody;
-  mode?: InlinePreflightMode;
-}
-
-/**
- * Public DTO returned by `inline.preflight`. The manifest payload is
- * `unknown` — modules cast at the call site if they need the richer apps/api
- * shape. Adding optional fields here is non-breaking; adding required fields
- * would break consumers and requires a major bump.
- */
-export interface InlinePreflightResult {
-  manifest: unknown;
-  prompt: string;
-  effectiveConfig: Record<string, unknown>;
-  effectiveInput: Record<string, unknown> | null;
-  modelIdOverride: string | null;
-  proxyIdOverride: string | null;
-  resolvedDeps: { skills: unknown };
 }
 
 // ---------------------------------------------------------------------------
