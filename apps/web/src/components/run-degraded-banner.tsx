@@ -8,7 +8,8 @@ import { useIntegrationDetail } from "../hooks/use-integrations";
 
 /**
  * Safe-narrow `runs.metadata.degraded_integrations` (a `string[]` of
- * integration package ids written by the sidecar's terminal-401 report path)
+ * integration package ids stamped platform-side by `recordRunDegradedIntegration`
+ * when the `/internal/.../refresh` call flags a connection on a terminal 401)
  * out of the untyped `run.metadata` blob.
  */
 function parseDegradedIntegrations(metadata: unknown): string[] {

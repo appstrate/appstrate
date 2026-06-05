@@ -35,6 +35,7 @@ import {
   normalizeAuthScheme,
   substituteVars,
   findUnresolvedPlaceholders,
+  isIdempotentMethod,
   OUTBOUND_TIMEOUT_MS,
   INTEGRATION_ID_RE,
   type CredentialsResponse,
@@ -397,7 +398,9 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     // replay cannot clear: any 401 that PERSISTS across the replay is treated
     // as terminal and flags `needsReconnection`. OAuth skips the replay — a
     // mid-run 401 means the token is expired and must be rotated, not replayed.
-    if (refreshableAuth === false && body.kind !== "streaming") {
+    // Idempotent methods only (RFC 9110) — never re-issue a POST/PATCH; those
+    // go straight to /refresh.
+    if (refreshableAuth === false && body.kind !== "streaming" && isIdempotentMethod(method)) {
       try {
         const r = await doUpstreamRequest(creds);
         upstream = r.response;

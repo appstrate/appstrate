@@ -21,6 +21,7 @@
 
 import {
   resolveAfpsHttpDelivery,
+  RefreshError,
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type HttpDeliveryPlan,
   type ResolvedAuthCredentials,
@@ -174,12 +175,31 @@ export async function resolveLiveIntegrationCredentials(
     (options.forceRefresh === true || isWithinLeadWindow(connection.expiresAt));
 
   if (needsRefresh) {
-    const refreshContext = await buildIntegrationOAuthRefreshContext(
-      integrationId,
-      authKey,
-      authDef,
-      context.applicationId,
-    );
+    let refreshContext;
+    try {
+      refreshContext = await buildIntegrationOAuthRefreshContext(
+        integrationId,
+        authKey,
+        authDef,
+        context.applicationId,
+      );
+    } catch (err) {
+      // Transient token-endpoint discovery failure on an issuer-only manifest:
+      // surface 502 and leave the connection row untouched (NOT terminal). The
+      // cached credential may still be valid; the next run re-discovers.
+      if (err instanceof RefreshError && err.kind === "transient") {
+        logger.warn("Integration token endpoint discovery transient failure", {
+          runId: context.runId,
+          integrationId,
+          authKey,
+          error: err.message,
+        });
+        throw badGateway(
+          `Integration '${integrationId}' auth '${authKey}' token endpoint discovery failed (transient)`,
+        );
+      }
+      throw err;
+    }
     if (refreshContext) {
       // Re-acquisition = fast-path refresh_token POST. `needsRefresh`
       // already gated type=oauth2, so this is the only refreshable auth.

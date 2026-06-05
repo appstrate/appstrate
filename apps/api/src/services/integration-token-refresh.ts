@@ -331,13 +331,24 @@ export async function buildIntegrationOAuthRefreshContext(
     tokenEndpoint: afpsAuth.token_endpoint,
   });
   if (!tokenEndpoint) {
-    logger.info(
-      "Integration auth refresh skipped — no token_endpoint (issuer discovery yielded none)",
-      {
-        packageId,
-        authKey,
-      },
-    );
+    // An `issuer`-only manifest (Drive/OneDrive …) whose discovery yielded no
+    // `token_endpoint` is NOT terminal — discovery is best-effort and a routine
+    // IdP/network blip would otherwise brick refresh and falsely flag the
+    // connection `needsReconnection`. Surface it as TRANSIENT so the caller
+    // keeps the cached credential and retries later (resolveOAuthEndpoints no
+    // longer negatively-caches, so the next attempt re-discovers). Only a
+    // manifest with neither `issuer` NOR `token_endpoint` is genuinely
+    // unrefreshable (terminal → null).
+    if (afpsAuth.issuer) {
+      throw new RefreshError(
+        `Integration '${packageId}' auth '${authKey}' token_endpoint discovery yielded none (transient)`,
+        "transient",
+      );
+    }
+    logger.info("Integration auth refresh skipped — no token_endpoint and no issuer", {
+      packageId,
+      authKey,
+    });
     return null;
   }
   const [client] = await db

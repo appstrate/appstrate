@@ -592,6 +592,65 @@ describe("MITM listener — 401 refresh + retry", () => {
   );
 
   runIfOpenssl(
+    "api_key POST 401: NOT replayed (non-idempotent) but /refresh still flags",
+    async () => {
+      // RFC 9110: never re-issue a POST with the same credential. The same-cred
+      // transient replay is skipped, but a persistent-credential POST 401 still
+      // routes to /refresh (modelled by the source returning false) to flag.
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+      let upstreamCallNo = 0;
+      let refreshCalls = 0;
+      const dp: Record<string, HttpDeliveryPlan> = {
+        vendor: {
+          headerName: "X-Api-Key",
+          headerPrefix: "",
+          value: "secret",
+          allowServerOverride: false,
+        },
+      };
+      const pl = payload("vendor", "api_key", { api_key: "secret" }, ["https://api.test.local/**"]);
+      const creds: MitmCredentialSource = {
+        current: () => pl,
+        deliveryPlans: () => dp,
+        async refreshOnUnauthorized() {
+          refreshCalls += 1;
+          return false;
+        },
+      };
+      const recorded = makeRecordingFetch(async () => {
+        upstreamCallNo += 1;
+        return new Response(`{"err":"unauthorized"}`, { status: 401 });
+      });
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        fetch: recorded.fetch,
+      });
+      await listener.ready;
+      try {
+        const out = await drivenFetch({
+          listenerPort: listener.address().port,
+          sni: "api.test.local",
+          caCertPem: bundle.pems.caCertPem,
+          method: "POST",
+          path: "/v1/items",
+          headers: {},
+        });
+        expect(out.status).toBe(401);
+        expect(upstreamCallNo).toBe(1); // no same-credential replay for POST
+        expect(refreshCalls).toBe(1); // /refresh still reached (to flag)
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+
+  runIfOpenssl(
     "403 does NOT trigger a refresh (authorization decision, not a dead credential)",
     async () => {
       // A 403 is an authorization decision on a specific resource, not a dead
@@ -645,7 +704,7 @@ describe("MITM listener — 401 refresh + retry", () => {
 
 describe("MITM listener — connect.tool re-login (P3)", () => {
   runIfOpenssl(
-    "re-logins + retries once when an upstream status matches reauthOn (custom auth, no retry401)",
+    "re-logins + retries once when an upstream status matches reauthOn (custom auth)",
     async () => {
       const bundle = await makeCaBundle();
       const minter = createCertMinter({
@@ -657,8 +716,7 @@ describe("MITM listener — connect.tool re-login (P3)", () => {
       let reauthCalls = 0;
       let activeToken = "stale";
 
-      // `custom` auth → planMitmAction sets retry401 = false. The reauth path
-      // is driven purely by `shouldReauth`.
+      // `custom` auth → the reauth path is driven purely by `shouldReauth`.
       const dp: Record<string, HttpDeliveryPlan> = {
         vendor: plan("X-Session", activeToken, ""),
       };

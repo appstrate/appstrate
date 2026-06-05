@@ -93,12 +93,6 @@ export interface MitmAction {
   strippedHeaderNames: readonly string[];
   /** Header to add to the outbound request. `null` when no auth matched. */
   injectedHeader: { name: string; value: string } | null;
-  /**
-   * Whether to attempt a 401-retry path. Always `true` for `oauth2`
-   * matches (refresh-capable). `false` for `api_key` / `basic` /
-   * `custom` — no refresh path exists, so retrying would loop.
-   */
-  retry401: boolean;
 }
 
 // ─────────────────────────────────────────────
@@ -154,7 +148,6 @@ export function planMitmAction(
       matchedAuth: null,
       strippedHeaderNames: dedupeCaseInsensitive(universalStrip),
       injectedHeader: null,
-      retry401: false,
     };
   }
 
@@ -199,7 +192,6 @@ export function planMitmAction(
     matchedAuth: matched,
     strippedHeaderNames: dedupeCaseInsensitive(stripped),
     injectedHeader,
-    retry401: matched.authType === "oauth2",
   };
 }
 

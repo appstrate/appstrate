@@ -282,6 +282,38 @@ describe("executeApiCall — 401 retry path", () => {
     expect(deps.reportedAuthFailures.has("gmail")).toBe(true);
   });
 
+  it("refreshableAuth=false: a non-idempotent (POST) 401 is NOT replayed — straight to /refresh", async () => {
+    // RFC 9110 idempotency: never re-issue a POST with the same credential (a
+    // double side-effect risk). A non-OAuth POST 401 skips the same-cred replay
+    // and goes straight to /refresh (which flags). Single upstream call.
+    let calls = 0;
+    const fetchFn = mock(async () => {
+      calls += 1;
+      return new Response("expired", { status: 401 });
+    });
+    const refreshCredentials = mock(async () => null);
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      refreshCredentials,
+      refreshableAuth: false,
+    });
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        targetUrl: "https://api.example.com/x",
+        method: "POST",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.response.status).toBe(401);
+    expect(calls).toBe(1); // no same-credential replay for POST
+    expect(refreshCredentials).toHaveBeenCalledTimes(1);
+    expect(deps.reportedAuthFailures.has("gmail")).toBe(true);
+  });
+
   it("does NOT replay a streaming-request body on 401", async () => {
     let upstreamCalls = 0;
     const fetchFn = mock(async (url: string | URL) => {

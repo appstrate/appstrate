@@ -52,7 +52,6 @@ describe("planMitmAction — no auth matches", () => {
     const action = planMitmAction(ctx, p);
     expect(action.matchedAuth).toBeNull();
     expect(action.injectedHeader).toBeNull();
-    expect(action.retry401).toBe(false);
     expect(action.strippedHeaderNames.map((s) => s.toLowerCase())).toEqual([
       "authorization",
       "proxy-authorization",
@@ -90,7 +89,6 @@ describe("planMitmAction — auth matches, default deny override", () => {
       name: "Authorization",
       value: "Bearer github-tok",
     });
-    expect(action.retry401).toBe(true);
     // Universal strip still includes Authorization since allowServerOverride is false.
     expect(action.strippedHeaderNames.map((s) => s.toLowerCase())).toContain("authorization");
     expect(action.strippedHeaderNames.map((s) => s.toLowerCase())).toContain("proxy-authorization");
@@ -115,8 +113,6 @@ describe("planMitmAction — auth matches, default deny override", () => {
     const action = planMitmAction(ctx, payload(a));
     expect(action.strippedHeaderNames.map((s) => s.toLowerCase())).toContain("x-api-key");
     expect(action.injectedHeader).toEqual({ name: "X-Api-Key", value: "acme-secret" });
-    // api_key does not get a 401-retry; nothing to refresh.
-    expect(action.retry401).toBe(false);
   });
 });
 
@@ -240,41 +236,7 @@ describe("planMitmAction — no delivery plan for matched auth", () => {
     const action = planMitmAction(ctx, payload(a));
     expect(action.matchedAuth?.authKey).toBe("vendor");
     expect(action.injectedHeader).toBeNull();
-    expect(action.retry401).toBe(false);
   });
-});
-
-describe("planMitmAction — retry401 per auth type", () => {
-  it("oauth2 → retry401: true", () => {
-    const a = auth("github", { authType: "oauth2" });
-    const ctx: MitmRequestContext = {
-      url: "https://api.github.com/x",
-      headerNames: [],
-      deliveryPlans: { github: PLAIN_BEARER },
-    };
-    expect(planMitmAction(ctx, payload(a)).retry401).toBe(true);
-  });
-
-  for (const t of ["api_key", "basic", "custom"]) {
-    it(`${t} → retry401: false`, () => {
-      const a: ResolvedAuthCredentials = {
-        ...auth("vendor"),
-        authType: t,
-      };
-      const plan: HttpDeliveryPlan = {
-        headerName: "X-Api-Key",
-        headerPrefix: "",
-        value: "tok",
-        allowServerOverride: false,
-      };
-      const ctx: MitmRequestContext = {
-        url: "https://api.vendor.com/x",
-        headerNames: [],
-        deliveryPlans: { vendor: plan },
-      };
-      expect(planMitmAction(ctx, payload(a)).retry401).toBe(false);
-    });
-  }
 });
 
 describe("planMitmAction — dedup", () => {

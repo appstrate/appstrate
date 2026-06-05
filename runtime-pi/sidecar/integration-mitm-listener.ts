@@ -53,7 +53,7 @@
  */
 
 import { createServer as netCreateServer, connect as netConnect, type Socket } from "node:net";
-import { isBlockedHost, isBlockedUrl, OUTBOUND_TIMEOUT_MS } from "./helpers.ts";
+import { isBlockedHost, isBlockedUrl, isIdempotentMethod, OUTBOUND_TIMEOUT_MS } from "./helpers.ts";
 import type {
   HttpDeliveryPlan,
   IntegrationCredentialsPayload,
@@ -798,7 +798,15 @@ async function handleInnerRequest(
   // replay does NOT clear a sustained throttle window, so that case still
   // flags. OAuth and connect.tool re-login skip the replay — they re-acquire
   // the credential (rotated token / fresh session) rather than replay it.
-  if (got401 && !connectReauth && !reauthExcluded && matchedAuthKey !== null) {
+  // Idempotent methods only (RFC 9110) — never re-issue a POST/PATCH with the
+  // same credential; a non-idempotent 401 routes straight to /refresh.
+  if (
+    got401 &&
+    !connectReauth &&
+    !reauthExcluded &&
+    matchedAuthKey !== null &&
+    isIdempotentMethod(req.method)
+  ) {
     const matched = credentials.current().auths.find((a) => a.authKey === matchedAuthKey);
     if (matched && matched.authType !== "oauth2") {
       const replay = await refetch();

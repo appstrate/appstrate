@@ -50,12 +50,15 @@ interface TokenServer {
   /** Issuer origin — set as a manifest `issuer` to exercise OIDC discovery. */
   origin: string;
   setResponse: (body: Record<string, unknown> | string, status?: number) => void;
+  /** Toggle the well-known discovery doc — `false` simulates a discovery outage. */
+  setDiscovery: (enabled: boolean) => void;
   stop: () => void;
 }
 
 function startTokenServer(): TokenServer {
   let nextBody: Record<string, unknown> | string = {};
   let nextStatus = 200;
+  let discoveryEnabled = true;
   const server = (
     globalThis as unknown as {
       Bun: {
@@ -75,6 +78,7 @@ function startTokenServer(): TokenServer {
       // issuer-only manifest can resolve its token_endpoint (the issuer member
       // MUST equal the configured issuer for the §7.3 equality check to pass).
       if (u.pathname.includes("/.well-known/")) {
+        if (!discoveryEnabled) return new Response("not found", { status: 404 });
         const origin = `${u.protocol}//${u.host}`;
         return Response.json({
           issuer: origin,
@@ -94,6 +98,9 @@ function startTokenServer(): TokenServer {
     setResponse: (body, status = 200) => {
       nextBody = body;
       nextStatus = status;
+    },
+    setDiscovery: (enabled) => {
+      discoveryEnabled = enabled;
     },
     stop: () => server.stop(),
   };
@@ -425,6 +432,49 @@ describe("resolveLiveIntegrationCredentials", () => {
       }
     });
   }
+
+  it("does NOT flag on a TRANSIENT token-endpoint discovery failure (issuer-only) — 502", async () => {
+    // Major-regression guard: an issuer-only manifest (Drive/OneDrive shape)
+    // whose discovery transiently fails must NOT be flagged needsReconnection —
+    // a routine IdP blip would otherwise brick refresh for hourly-expiring
+    // tokens. A fresh server (never-discovered issuer) with the well-known
+    // probes 404'd models the outage; expect 502 + the connection row clean.
+    const failing = startTokenServer();
+    failing.setDiscovery(false);
+    try {
+      await db
+        .update(packages)
+        .set({
+          draftManifest: localIntegrationManifest({
+            name: INTEGRATION_ID,
+            serverName: "@official/gmail-server",
+            auths: {
+              primary: {
+                type: "oauth2",
+                issuer: failing.origin,
+                tokenEndpointAuthMethod: "client_secret_post",
+                delivery: OAUTH_DELIVERY,
+              },
+            },
+          }) as unknown as Record<string, unknown>,
+        })
+        .where(eq(packages.id, INTEGRATION_ID));
+      const connId = await seedConnection({ userId: ctx.user.id });
+
+      let status: number | undefined;
+      try {
+        await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+          forceRefresh: true,
+        });
+      } catch (err) {
+        status = (err as { status?: number }).status;
+      }
+      expect(status).toBe(502); // transient — NOT 410
+      expect(await needsReconnection(connId)).toBe(false); // row untouched
+    } finally {
+      failing.stop();
+    }
+  });
 
   it("flips needsReconnection when a scope shrink drops below the installed-agent floor", async () => {
     // Agent requires `delete`; the refresh narrows the grant to read+send only.
