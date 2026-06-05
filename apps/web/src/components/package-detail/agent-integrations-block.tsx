@@ -12,15 +12,9 @@ import {
   type IntegrationCandidate,
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
-import { InlineConnectButton } from "../integration-connect/inline-connect-button";
 import { connectionDisplayLabel } from "../integration-connect/connection-label";
-import { connectableAuthKeys } from "../integration-connect/connectable-auth-keys";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
-import {
-  isIntegrationEntryActive,
-  resolveAction,
-} from "../integration-connect/integration-run-readiness";
-import { requiredScopesForAgent } from "@appstrate/core/integration";
+import { resolutionBlocksRun } from "../integration-connect/integration-run-readiness";
 
 interface AgentIntegrationsBlockProps {
   entries: AgentIntegrationEntry[];
@@ -35,19 +29,18 @@ interface AgentIntegrationsBlockProps {
 
 /**
  * Connection-status block for every integration declared in the agent
- * manifest. One card per dependency, with a connect / reconnect / upgrade
- * affordance so the actor can connect or re-consent inline.
+ * manifest. One card per dependency. A card with a per-agent context
+ * (`agentPackageId`) renders the per-integration connection picker — list,
+ * pick, disambiguate, connect, reconnect, upgrade, add-another — driven by the
+ * server-authoritative `IntegrationAgentResolution`
+ * (`GET /integrations/:id/agent-resolution/:agentId`), the same verdict the
+ * launch-button readiness badge and the run-kickoff 412 consume, so the three
+ * can never disagree.
  *
- * Status comes from the server-authoritative `IntegrationAgentResolution`
- * (`GET /integrations/:id/agent-resolution/:agentId`) — the same verdict the
- * connection picker and the launch-button readiness badge consume. The card
- * never re-derives "is this connected?" client-side, so the badge, the picker,
- * and the run-kickoff 412 can never disagree.
- *
- * AFPS §4.4 wildcard — when the agent declares `tools: "*"`, per-tool scope
- * inference is bypassed and scope requirements fall back to the selected auth's
- * `default_scopes` (§7.4). The activity check + connection picker still treat
- * the wildcard as an active selection.
+ * The picker renders for EVERY declared integration, independent of whether the
+ * agent selected tools/scopes: the runtime activity gate
+ * (`isIntegrationEntryActive`) belongs to the launch badge, not to connection
+ * management — an inert integration still has connections to manage.
  */
 export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegrationsBlockProps) {
   // The list carries `active` (installed + enabled in this app). An agent can
@@ -110,8 +103,8 @@ function IntegrationConnectionCard({
   }
 
   // Not active in this application → no connection is possible. Show a
-  // disabled, explanatory control rather than a picker/connect button that
-  // the run-time gate would reject with `integration_not_active`.
+  // disabled, explanatory control rather than a picker the run-time gate would
+  // reject with `integration_not_active`.
   if (!appActive) {
     return (
       <CardShell title={displayName} subtitle={packageId}>
@@ -125,183 +118,74 @@ function IntegrationConnectionCard({
     );
   }
 
-  // Member pre-run picker — surfaces ambiguity (>1 candidates) BEFORE Run.
-  // Admin pin management has moved to the integration detail page (R2);
-  // this block now carries only member-facing widgets. The picker is
-  // integration-level (flat model — one connection per integration,
-  // regardless of auth shape).
-  //
-  // "Active" = the agent declared a usage for this integration. For MCP
-  // integrations that's a tool selection; for apiCall integrations there
-  // are no discrete tools — the usage is the selected oauth scopes. Gating
-  // on tools alone made apiCall integrations structurally unconnectable
-  // from the agent page.
-  const isActive = isIntegrationEntryActive({ tools: agentTools, scopes: agentScopes });
-  const showMemberPicker = !!agentPackageId && isActive;
-
-  // The dropdown is the unified per-integration control — it lists every
-  // accessible connection AND carries "add a connection" entries, so it
-  // stands in for the connect/reconnect button. It owns its own data
-  // (accessible connections + pins), so the fallback's status/reuse
-  // computation and its extra fetches are skipped entirely here.
-  if (showMemberPicker) {
-    return (
-      <CardShell title={displayName} subtitle={packageId}>
-        <IntegrationConnectionPicker
-          integrationId={packageId}
-          agentPackageId={agentPackageId!}
-          manifest={detail.manifest}
-          authStatuses={detail.auths}
-          displayName={displayName}
-          agentTools={agentTools}
-          agentScopes={agentScopes}
-        />
-      </CardShell>
-    );
+  // Read-only preview (no per-agent context) — just the shell, no picker/CTA.
+  // Matches the prior behaviour for library/marketplace previews.
+  if (!agentPackageId) {
+    return <CardShell title={displayName} subtitle={packageId} />;
   }
 
   return (
-    <FallbackConnectCard
+    <ManagedIntegrationCard
       packageId={packageId}
+      agentPackageId={agentPackageId}
       manifest={detail.manifest}
       authStatuses={detail.auths}
       displayName={displayName}
       agentTools={agentTools}
       agentScopes={agentScopes}
-      {...(agentPackageId ? { agentPackageId } : {})}
     />
   );
 }
 
 /**
- * Connect CTA for surfaces WITHOUT the member picker — read-only previews
- * and agents that haven't selected any tool. Reads the server-authoritative
- * `IntegrationAgentResolution` (the same verdict the picker and the launch
- * readiness badge consume) and surfaces a connect / reconnect / upgrade /
- * add-another button plus the R5 reuse hint. Split from the picker path so
- * its extra fetches (resolution + consuming-agents) only run when actually
- * rendered.
- *
- * Without an `agentPackageId` (read-only preview) the resolution query is
- * disabled and there's no per-agent verdict to surface, so the card renders
- * the shell alone — no actionable CTA, matching the prior behaviour for that
- * read-only surface.
+ * Connection-management surface for an active integration on a specific agent.
+ * Split from the parent so its data fetches (resolution + consuming-agents) run
+ * only once the parent's loading / not-active / read-only guards have passed —
+ * i.e. only when the picker actually renders.
  */
-function FallbackConnectCard({
+function ManagedIntegrationCard({
   packageId,
+  agentPackageId,
   manifest,
   authStatuses,
   displayName,
   agentTools,
   agentScopes,
-  agentPackageId,
 }: {
   packageId: string;
+  agentPackageId: string;
   manifest: IntegrationManifestView;
   authStatuses: IntegrationAuthStatus[];
   displayName: string;
   agentTools: string[] | "*" | undefined;
   agentScopes: string[] | undefined;
-  agentPackageId?: string;
 }) {
-  const { t } = useTranslation(["agents", "settings"]);
-  const { data: resolution, isPending: resolutionPending } = useIntegrationAgentResolution(
-    packageId,
-    agentPackageId,
-  );
+  const { t } = useTranslation(["agents"]);
+  const { data: resolution } = useIntegrationAgentResolution(packageId, agentPackageId);
   const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
 
-  // No agentPackageId → resolution is disabled (no per-agent verdict). Render
-  // the shell alone; this is the read-only preview surface, which never
-  // offered an actionable CTA.
-  if (!agentPackageId) {
-    return <CardShell title={displayName} subtitle={packageId} />;
-  }
-
-  if (resolutionPending || !resolution) {
-    return (
-      <CardShell
-        icon={<Loader2 className="text-muted-foreground size-4 animate-spin" />}
-        title={displayName}
-        subtitle={packageId}
-      />
-    );
-  }
-
-  const action = resolveAction(resolution, manifest, agentTools, agentScopes);
-
-  // The resolved connection drives the reuse hint below. We used to also
-  // render an unlink button here, but it called the global delete endpoint
-  // (DELETE /api/integrations/.../connections/:id) which yanked the connection
-  // from every other agent in the app — the bug that drove this refactor.
-  // The two safe paths are now: (a) change which connection THIS agent uses
-  // via the picker (writes a member pin), or (b) delete the connection
-  // globally from /connections (destructive, with confirm + impact list).
+  // R5 — reuse hint: the resolved connection is shared across every agent in
+  // the app that consumes this integration, killing the "do I need one
+  // connection per agent?" confusion. Only when resolved AND not blocking — a
+  // blocking state is the picker's warning foreground, not a reassuring line.
   const resolvedConnection =
-    resolution.candidates.find((c) => c.id === resolution.resolved_connection_id) ?? null;
-
-  // R5 — reuse hint: surface that this single connection is shared across
-  // every agent in the app that consumes this integration, killing the
-  // "do I need one connection per agent?" confusion. Only when the resolved
-  // connection isn't itself blocking (no missing scopes / reconnection) — a
-  // blocking action takes the foreground instead.
+    resolution?.candidates.find((c) => c.id === resolution.resolved_connection_id) ?? null;
   const reuseInfo =
-    resolvedConnection && !action
+    resolution && resolvedConnection && !resolutionBlocksRun(resolution)
       ? buildReuseInfo(resolvedConnection, consumingAgents?.length ?? 0, t)
       : null;
 
-  // When already connected (no blocking action), still expose a path to add
-  // ANOTHER account on the same auth — a user can hold multiple connections
-  // per integration and use different ones across agents.
-  const addAnotherAuthKey = !action && resolvedConnection ? resolvedConnection.auth_key : null;
-
-  // An oauth2 connect/reconnect needs an admin-registered OAuth client; the
-  // server returns 403 otherwise. Surface the pointer instead of a button
-  // doomed to fail — mirrors the integration detail page's gate.
-  const connectable = connectableAuthKeys(manifest, authStatuses);
-  const actionBlockedNoClient = !!action && !connectable.has(action.authKey);
-
   return (
     <CardShell title={displayName} subtitle={packageId} extraSubtitle={reuseInfo}>
-      {actionBlockedNoClient ? (
-        <span className="text-muted-foreground max-w-[18rem] text-right text-xs">
-          {t("settings:integration.auth.noClientHint")}
-        </span>
-      ) : action ? (
-        <InlineConnectButton
-          packageId={packageId}
-          authKey={action.authKey}
-          scopes={action.scopes}
-          intent={action.intent}
-          // reconnect / upgrade target the existing row — without a
-          // connectionId the callback would INSERT a duplicate.
-          {...(action.intent !== "connect" && action.connectionId
-            ? { connectionId: action.connectionId }
-            : {})}
-        />
-      ) : (
-        addAnotherAuthKey &&
-        (() => {
-          // Another account for the same auth still has to satisfy THIS
-          // agent's tool scopes, so request them rather than manifest defaults.
-          const scopes = requiredScopesForAgent({
-            manifest,
-            authKey: addAnotherAuthKey,
-            agentTools,
-            agentScopes,
-          });
-          return (
-            <InlineConnectButton
-              packageId={packageId}
-              authKey={addAnotherAuthKey}
-              intent="connect"
-              label={t("detail.integrationAddAnother")}
-              forceAccountSelect
-              {...(scopes.length ? { scopes } : {})}
-            />
-          );
-        })()
-      )}
+      <IntegrationConnectionPicker
+        integrationId={packageId}
+        agentPackageId={agentPackageId}
+        manifest={manifest}
+        authStatuses={authStatuses}
+        displayName={displayName}
+        agentTools={agentTools}
+        agentScopes={agentScopes}
+      />
     </CardShell>
   );
 }

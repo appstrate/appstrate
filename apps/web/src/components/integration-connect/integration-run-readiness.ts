@@ -68,10 +68,9 @@ export interface IntegrationConnectAction {
 
 /**
  * Map the server resolution → connect action. Single source of truth for the
- * connect/reconnect/upgrade CTA, shared by the Connexions tab
- * (`FallbackConnectCard`) and the run-kickoff 412 recovery surface
- * (`MissingConnectionsModal`) so the two never derive a different affordance
- * from the same verdict. Mirrors {@link resolutionBlocksRun}'s blocking states,
+ * connect/reconnect/upgrade CTA, used by the run-kickoff 412 recovery surface
+ * (`MissingConnectionsModal`) to derive an affordance from the same verdict the
+ * picker renders. Mirrors {@link resolutionBlocksRun}'s blocking states,
  * choosing the right intent + target:
  *
  *   - `resolved_missing_scopes` non-empty → `upgrade` the resolved connection
