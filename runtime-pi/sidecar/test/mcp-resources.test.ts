@@ -61,7 +61,7 @@ async function makeResourcesApp(overrides: Partial<AppDeps> = {}) {
         namespace: "test",
         integrationId: "@test/integ",
         fetchCredentials: integResCreds,
-        refreshCredentials: async () => ({ response: await integResCreds(), outcome: "refreshed" }),
+        refreshCredentials: integResCreds,
       },
     ],
     runtimeDeps,

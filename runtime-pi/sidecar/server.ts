@@ -3,7 +3,6 @@
 import { createApp, buildSidecarRuntimeDeps, SIDECAR_IDLE_TIMEOUT_SECONDS } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
 import type { CredentialsResponse, LlmProxyConfig } from "./helpers.ts";
-import type { CredentialRefreshOutcome } from "./credential-proxy.ts";
 import { logger } from "./logger.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
 import {
@@ -130,9 +129,7 @@ async function fetchCredentials(integrationId: string): Promise<CredentialsRespo
   return res.json() as Promise<CredentialsResponse>;
 }
 
-async function refreshCredentials(
-  integrationId: string,
-): Promise<{ response: CredentialsResponse; outcome: CredentialRefreshOutcome }> {
+async function refreshCredentials(integrationId: string): Promise<CredentialsResponse | null> {
   const res = await fetch(
     `${config.platformApiUrl}/internal/credentials/${integrationId}/refresh`,
     {
@@ -140,17 +137,10 @@ async function refreshCredentials(
       headers: { Authorization: `Bearer ${config.runToken}` },
     },
   );
-  if (!res.ok) {
-    // Legacy BYOI path has no AFPS connection row to flag — surface the
-    // failure as a thrown error, which the proxy treats as transient (no
-    // retry, no report). 410 is the platform's terminal signal.
-    if (res.status === 410) {
-      return { response: { credentials: {} } as CredentialsResponse, outcome: "terminal" };
-    }
-    throw new Error(`Failed to refresh credentials for ${integrationId}: ${res.status}`);
-  }
-  const response = (await res.json()) as CredentialsResponse;
-  return { response, outcome: "refreshed" };
+  // Legacy BYOI path. Any non-OK (incl. 410) → not rotated → the proxy skips
+  // the retry. This path has no AFPS connection row, so flagging is a no-op here.
+  if (!res.ok) return null;
+  return res.json() as Promise<CredentialsResponse>;
 }
 
 const port = parseInt(process.env.PORT || "8080", 10);

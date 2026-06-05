@@ -514,10 +514,7 @@ describe("POST /mcp — api_call", () => {
           namespace: "gmail",
           integrationId: "@official/gmail",
           fetchCredentials: async () => integrationCreds(),
-          refreshCredentials: async () => ({
-            response: integrationCreds("integ-tok-2"),
-            outcome: "refreshed",
-          }),
+          refreshCredentials: async () => integrationCreds("integ-tok-2"),
         },
       ],
       runtimeDeps,

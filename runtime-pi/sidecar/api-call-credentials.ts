@@ -26,24 +26,18 @@
 
 import type { ProxyCredentialsPayload } from "@appstrate/connect/proxy-primitives";
 import { buildProxyCredentialsPayload } from "@appstrate/connect/integration-credentials";
-import type {
-  IntegrationCredentialsSource,
-  RefreshOutcome,
-} from "./integration-credentials-source.ts";
-
-/** Result of an api_call credential refresh: the re-snapshotted payload plus
- * the tri-state outcome so `executeApiCall` retries only on a real rotation
- * and reports a terminal failure (but never a transient one). */
-export interface ApiCallRefreshResult {
-  response: ProxyCredentialsPayload;
-  outcome: RefreshOutcome;
-}
+import type { IntegrationCredentialsSource } from "./integration-credentials-source.ts";
 
 export interface ApiCallCredentialAdapter {
   fetchCredentials: (integrationId: string) => Promise<ProxyCredentialsPayload>;
-  refreshCredentials: (integrationId: string) => Promise<ApiCallRefreshResult>;
-  /** Flag the run's connection as needing re-connect after a terminal 401. */
-  reportAuthFailure: (integrationId: string) => Promise<void>;
+  /**
+   * Force a refresh on a mid-run 401. Returns the re-snapshotted payload when
+   * the credential was actually rotated (caller retries the request once), or
+   * `null` when it was not — the platform `/refresh` already flagged the
+   * connection on a terminal failure, so the caller must NOT retry with a
+   * stale token.
+   */
+  refreshCredentials: (integrationId: string) => Promise<ProxyCredentialsPayload | null>;
 }
 
 /**
@@ -75,17 +69,12 @@ export function createApiCallCredentialAdapter(opts: {
   return {
     fetchCredentials: async () => toPayload(),
     refreshCredentials: async () => {
-      // Force a refresh and report the tri-state outcome so the proxy retries
-      // ONLY on a genuine token rotation (`"refreshed"`) — never re-issuing the
-      // request with an unchanged stale token, which used to mask a dead
-      // credential as a successful refresh.
-      const outcome = await source
-        .refreshOnUnauthorizedDetailed(authKey)
-        .catch((): RefreshOutcome => "transient");
-      return { response: toPayload(), outcome };
-    },
-    reportAuthFailure: async () => {
-      await source.reportAuthFailure(authKey).catch(() => undefined);
+      // Retry ONLY when the credential was actually rotated. A false result
+      // (terminal 410 → connection flagged, or transient/cooldown) means
+      // re-issuing the request would just 401 again — return null so the proxy
+      // skips the retry instead of masking a dead credential as a success.
+      const rotated = await source.refreshOnUnauthorized(authKey).catch(() => false);
+      return rotated ? toPayload() : null;
     },
   };
 }

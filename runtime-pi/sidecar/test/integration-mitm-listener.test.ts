@@ -458,7 +458,11 @@ describe("MITM listener — 401 refresh + retry", () => {
     }
   });
 
-  runIfOpenssl("does NOT retry api_key auths", async () => {
+  runIfOpenssl("api_key 401: calls /refresh (to flag) but does NOT retry", async () => {
+    // A 401 on an injected api_key credential now reaches the platform
+    // `/refresh` (which flags the connection needsReconnection — modelled here
+    // by the source returning false), but since there is no token to rotate the
+    // request is NOT replayed.
     const bundle = await makeCaBundle();
     const minter = createCertMinter({
       caCertPem: bundle.pems.caCertPem,
@@ -483,7 +487,7 @@ describe("MITM listener — 401 refresh + retry", () => {
       deliveryPlans: () => dp,
       async refreshOnUnauthorized() {
         refreshCalls += 1;
-        return true;
+        return false; // /refresh flagged the connection; nothing to rotate
       },
     };
 
@@ -510,73 +514,25 @@ describe("MITM listener — 401 refresh + retry", () => {
         headers: {},
       });
       expect(out.status).toBe(401);
-      expect(upstreamCallNo).toBe(1);
-      expect(refreshCalls).toBe(0); // api_key never triggers refresh
+      expect(upstreamCallNo).toBe(1); // no retry — false result
+      expect(refreshCalls).toBe(1); // but /refresh WAS reached (to flag)
     } finally {
       await listener.close();
     }
   });
 
   runIfOpenssl(
-    "reports a terminal auth failure when a 401 persists (refresh terminal)",
+    "403 does NOT trigger a refresh (authorization decision, not a dead credential)",
     async () => {
+      // A 403 is an authorization decision on a specific resource, not a dead
+      // credential — the listener must NOT force a /refresh (which would flag the
+      // connection). Only 401 on an injected credential triggers it.
       const bundle = await makeCaBundle();
       const minter = createCertMinter({
         caCertPem: bundle.pems.caCertPem,
         caKeyPem: bundle.pems.caKeyPem,
       });
-      let reportCalls = 0;
-      const dp: Record<string, HttpDeliveryPlan> = { vendor: plan("Authorization", "stale") };
-      const pl = payload("vendor", "oauth2", { access_token: "stale" }, [
-        "https://api.test.local/**",
-      ]);
-      const creds: MitmCredentialSource = {
-        current: () => pl,
-        deliveryPlans: () => dp,
-        async refreshOnUnauthorizedDetailed() {
-          return "terminal";
-        },
-        async reportAuthFailure(authKey) {
-          expect(authKey).toBe("vendor");
-          reportCalls += 1;
-        },
-      };
-      const recorded = makeRecordingFetch(
-        async () => new Response(`{"err":"bad"}`, { status: 401 }),
-      );
-      const listener = createIntegrationMitmListener({
-        caBundle: bundle,
-        minter,
-        credentials: creds,
-        fetch: recorded.fetch,
-      });
-      await listener.ready;
-      try {
-        const out = await drivenFetch({
-          listenerPort: listener.address().port,
-          sni: "api.test.local",
-          caCertPem: bundle.pems.caCertPem,
-          method: "GET",
-          path: "/v1/items",
-          headers: {},
-        });
-        expect(out.status).toBe(401);
-        expect(reportCalls).toBe(1);
-      } finally {
-        await listener.close();
-      }
-    },
-  );
-
-  runIfOpenssl(
-    "does NOT report on a 403 (authorization decision, not a dead credential)",
-    async () => {
-      const bundle = await makeCaBundle();
-      const minter = createCertMinter({
-        caCertPem: bundle.pems.caCertPem,
-        caKeyPem: bundle.pems.caKeyPem,
-      });
-      let reportCalls = 0;
+      let refreshCalls = 0;
       const dp: Record<string, HttpDeliveryPlan> = { vendor: plan("Authorization", "tok") };
       const pl = payload("vendor", "oauth2", { access_token: "tok" }, [
         "https://api.test.local/**",
@@ -584,11 +540,9 @@ describe("MITM listener — 401 refresh + retry", () => {
       const creds: MitmCredentialSource = {
         current: () => pl,
         deliveryPlans: () => dp,
-        async refreshOnUnauthorizedDetailed() {
-          return "terminal";
-        },
-        async reportAuthFailure() {
-          reportCalls += 1;
+        async refreshOnUnauthorized() {
+          refreshCalls += 1;
+          return false;
         },
       };
       const recorded = makeRecordingFetch(
@@ -611,7 +565,7 @@ describe("MITM listener — 401 refresh + retry", () => {
           headers: {},
         });
         expect(out.status).toBe(403);
-        expect(reportCalls).toBe(0);
+        expect(refreshCalls).toBe(0);
       } finally {
         await listener.close();
       }

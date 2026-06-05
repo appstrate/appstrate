@@ -297,26 +297,6 @@ export const internalPaths = {
       },
     },
   },
-  "/internal/integration-credentials/{scope}/{name}/report-auth-failure": {
-    post: {
-      operationId: "reportIntegrationAuthFailure",
-      tags: ["Internal"],
-      summary: "Report a terminal auth failure for an installed integration",
-      description:
-        "Sidecar-only. Called when an upstream 401/403 persists after the proxy's single refresh+retry — the credential is terminally dead. Flags the run's connection `needs_reconnection` (any auth type, not just refreshable OAuth2) so the next-launch readiness gate fires and the dashboard badge updates, and records the integration on `runs.metadata.degraded_integrations[]`. Idempotent.",
-      security: [{ bearerExecToken: [] }],
-      parameters: [
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "204": { description: "Auth failure recorded (connection flagged if one resolved)." },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
   "/internal/mcp-server-bundle/{scope}/{name}": {
     get: {
       operationId: "getMcpServerBundle",

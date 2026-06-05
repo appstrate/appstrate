@@ -327,12 +327,14 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     expect(res.status).toBe(404);
   });
 
-  // ─── Happy path on a non-OAuth auth (no refresh side-effect) ──
+  // ─── Terminal on a non-OAuth auth (the unified flagging path) ──
 
-  it("ALLOW: returns the live payload for an api_key auth (no refresh required)", async () => {
-    // api_key auths don't trigger refresh — the response shape must still
-    // be identical to the GET happy path. This pins the route as a working
-    // alias of the read surface for non-OAuth auths.
+  it("flags needsReconnection + records run metadata + 410 for a non-OAuth auth on a forced refresh", async () => {
+    // A forced /refresh only happens after an upstream 401. A non-OAuth
+    // (api_key) credential cannot be refreshed → it is dead → the route flags
+    // the connection, stamps the run's degraded_integrations, and returns 410
+    // (the sidecar maps that to "don't retry"). This is the single place a
+    // terminal auth failure is recorded — no separate report endpoint.
     await seedIntegration(INTEGRATION, true);
     await seedConnection(INTEGRATION);
 
@@ -340,95 +342,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
     });
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      auths: Array<{ auth_key: string; fields: Record<string, string> }>;
-    };
-    expect(body.auths).toHaveLength(1);
-    expect(body.auths[0]!.fields.api_key).toBe("live-secret-value");
-  });
-});
-
-describe("POST /internal/integration-credentials/:scope/:name/report-auth-failure", () => {
-  let ctx: TestContext;
-  let runId: string;
-  let token: string;
-
-  async function seedIntegration(id: string, installed: boolean) {
-    await seedPackage({
-      id,
-      orgId: ctx.orgId,
-      type: "integration",
-      source: "local",
-      draftManifest: buildIntegrationManifest(id),
-    });
-    if (installed) {
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
-    }
-  }
-
-  async function seedConnection(integrationId: string) {
-    await db.insert(integrationConnections).values({
-      integrationId: integrationId,
-      authKey: "primary",
-      accountId: "acct-test",
-      applicationId: ctx.defaultAppId,
-      userId: ctx.user.id,
-      endUserId: null,
-      credentialsEncrypted: encryptCredentials({ api_key: "live-secret-value" }),
-      scopesGranted: [],
-    });
-  }
-
-  beforeEach(async () => {
-    await truncateAll();
-    ctx = await createTestContext({ orgSlug: "report" });
-    await seedAgent({
-      id: AGENT,
-      orgId: ctx.orgId,
-      createdBy: ctx.user.id,
-      draftManifest: buildAgentManifest([INTEGRATION]),
-    });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
-    const run = await seedRun({
-      packageId: AGENT,
-      orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
-      userId: ctx.user.id,
-      status: "running",
-    });
-    runId = run.id;
-    token = signRunToken(runId);
-  });
-
-  it("returns 401 without a run token", async () => {
-    const res = await app.request(
-      `/internal/integration-credentials/${INTEGRATION}/report-auth-failure`,
-      { method: "POST" },
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it("DENY: 404 when the integration is NOT declared by the running agent", async () => {
-    await seedIntegration(OTHER_INTEGRATION, true);
-    await seedConnection(OTHER_INTEGRATION);
-    const res = await app.request(
-      `/internal/integration-credentials/${OTHER_INTEGRATION}/report-auth-failure`,
-      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
-    );
-    expect(res.status).toBe(404);
-  });
-
-  it("ALLOW: flags the connection needsReconnection + records run metadata (204)", async () => {
-    await seedIntegration(INTEGRATION, true);
-    await seedConnection(INTEGRATION);
-
-    const res = await app.request(
-      `/internal/integration-credentials/${INTEGRATION}/report-auth-failure`,
-      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
-    );
-    expect(res.status).toBe(204);
+    expect(res.status).toBe(410);
 
     const [row] = await db
       .select()
@@ -439,21 +353,5 @@ describe("POST /internal/integration-credentials/:scope/:name/report-auth-failur
     const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
     const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
     expect(meta?.degraded_integrations).toContain(INTEGRATION);
-  });
-
-  it("is idempotent — a second report stays 204 with a single metadata entry", async () => {
-    await seedIntegration(INTEGRATION, true);
-    await seedConnection(INTEGRATION);
-    const url = `/internal/integration-credentials/${INTEGRATION}/report-auth-failure`;
-    await app.request(url, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
-    const res2 = await app.request(url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    expect(res2.status).toBe(204);
-
-    const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
-    const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
-    expect(meta?.degraded_integrations).toEqual([INTEGRATION]);
   });
 });

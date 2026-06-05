@@ -65,25 +65,6 @@ import { logger } from "./logger.ts";
  */
 const CREDENTIAL_FAILURE_RECONNECT_REQUIRED = "reconnect_required" as const;
 
-/**
- * Outcome of a forced credential refresh, so callers can distinguish the
- * three cases SOTA OAuth clients act on differently:
- *
- *   - `"refreshed"` — a new token was obtained; the caller SHOULD retry the
- *     original request once with the rotated credential.
- *   - `"terminal"`  — the credential is definitively dead (refresh token
- *     revoked, no refresh token / client, or a re-login that failed). The
- *     caller must NOT retry; the connection needs a user re-connect.
- *   - `"transient"` — a retryable failure (network, upstream 5xx, parse error)
- *     OR a cooldown-suppressed call. The cached credential may still be valid;
- *     the caller must NOT retry now and must NOT flag the connection — backoff
- *     and let a future request try again.
- *
- * The bare-boolean `refreshOnUnauthorized` (base `MitmCredentialSource`
- * contract) maps `"refreshed"` → true and everything else → false.
- */
-export type RefreshOutcome = "refreshed" | "terminal" | "transient";
-
 // Wire-level payload returned by both `/internal/integration-credentials`
 // endpoints — canonical definition lives in `@appstrate/connect` (single
 // source of truth shared with the platform-side resolver). Re-exported here
@@ -230,23 +211,6 @@ export interface IntegrationCredentialsSource extends MitmCredentialSource {
    * invoke it without a presence check.
    */
   refreshOnUnauthorized(authKey: string): Promise<boolean>;
-  /**
-   * Tri-state variant of {@link refreshOnUnauthorized} — exposes whether the
-   * refresh actually rotated the token (`"refreshed"`), is terminally dead
-   * (`"terminal"`), or hit a retryable/cooldown condition (`"transient"`).
-   * Callers use it to decide BOTH whether to retry the request AND whether to
-   * {@link reportAuthFailure} (never report on `"transient"`). The boolean
-   * `refreshOnUnauthorized` is a thin wrapper (`=== "refreshed"`).
-   */
-  refreshOnUnauthorizedDetailed(authKey: string): Promise<RefreshOutcome>;
-  /**
-   * Report a terminal upstream auth failure (a 401 that survived the single
-   * refresh+retry) to the platform, which flags the run's connection
-   * `needsReconnection` so the next-launch readiness gate fires and the
-   * dashboard badge updates. At-most-once per run (per source) — repeated
-   * calls are no-ops. Fire-and-forget: never throws into the caller.
-   */
-  reportAuthFailure(authKey: string): Promise<void>;
 }
 
 /**
@@ -310,9 +274,7 @@ export function createIntegrationCredentialsSource(
   // Last successful refresh per authKey (or "*" for full-payload refreshes).
   const lastRefreshAt = new Map<string, number>();
   // Coalesce concurrent refreshes for the same authKey.
-  const inflight = new Map<string, Promise<RefreshOutcome>>();
-  // At-most-once-per-run guard for the terminal auth-failure report.
-  let authFailureReported = false;
+  const inflight = new Map<string, Promise<boolean>>();
   // connect.tool re-login handlers (P3) — keyed by authKey. When registered,
   // `refreshOnUnauthorized` runs the handler instead of the platform POST.
   const reloginHandlers = new Map<
@@ -335,7 +297,7 @@ export function createIntegrationCredentialsSource(
     return payload.deliveryPlans;
   };
 
-  const refreshOnUnauthorizedDetailed = async (authKey: string): Promise<RefreshOutcome> => {
+  const refreshOnUnauthorized = async (authKey: string): Promise<boolean> => {
     // Cheap dedup against retry storms. We don't track per-authKey
     // separately on the network side — the platform refreshes ALL auths
     // on this integration in one call — but we DO want to suppress
@@ -351,10 +313,9 @@ export function createIntegrationCredentialsSource(
         cooldownMs: minRefreshIntervalMs,
         elapsedMs: now - last,
       });
-      // Cooldown is NOT a verdict on the credential — a recent attempt is still
-      // in its backoff window. Treat as transient so the caller neither retries
-      // now nor flags the connection.
-      return "transient";
+      // Cooldown — a recent attempt is still in its backoff window. Don't
+      // retry now (the platform already saw this 401 and flagged if terminal).
+      return false;
     }
     const existing = inflight.get(authKey);
     if (existing) return existing;
@@ -372,15 +333,7 @@ export function createIntegrationCredentialsSource(
     }
   };
 
-  // Boolean wrapper preserving the base `MitmCredentialSource` contract:
-  // "should I retry the request?" — true only on a genuine token rotation.
-  const refreshOnUnauthorized = async (authKey: string): Promise<boolean> =>
-    (await refreshOnUnauthorizedDetailed(authKey)) === "refreshed";
-
-  async function runRelogin(
-    authKey: string,
-    handler: () => Promise<boolean>,
-  ): Promise<RefreshOutcome> {
+  async function runRelogin(authKey: string, handler: () => Promise<boolean>): Promise<boolean> {
     let ok = false;
     try {
       ok = await handler();
@@ -400,14 +353,11 @@ export function createIntegrationCredentialsSource(
         integrationId: options.integrationId,
         authKey,
       });
-      return "refreshed";
     }
-    // A failed re-login means the cookie session is dead and could not be
-    // re-minted — terminal, so the caller flags the connection for re-connect.
-    return "terminal";
+    return ok;
   }
 
-  async function doRefresh(authKey: string): Promise<RefreshOutcome> {
+  async function doRefresh(authKey: string): Promise<boolean> {
     const url = `${options.platformApiUrl}/internal/integration-credentials/${options.integrationId}/refresh`;
     let res: Response;
     try {
@@ -421,8 +371,8 @@ export function createIntegrationCredentialsSource(
         authKey,
         error: err instanceof Error ? err.message : String(err),
       });
-      // Network failure reaching the platform — retryable, do not flag.
-      return "transient";
+      // Network failure reaching the platform — retryable; don't retry now.
+      return false;
     }
     if (res.status === 410) {
       // Refresh token revoked — connection now flagged needsReconnection
@@ -436,9 +386,10 @@ export function createIntegrationCredentialsSource(
       });
       // Mark cooldown so we don't retry for at least the full interval.
       lastRefreshAt.set(authKey, Date.now());
-      // 410 = the platform already flagged the connection (revoked refresh
-      // token, or unrefreshable on a forced refresh). Terminal.
-      return "terminal";
+      // 410 = the platform flagged the connection needsReconnection (revoked
+      // token, unrefreshable oauth2, or a non-oauth2 auth that 401'd). The
+      // credential is dead — do not retry.
+      return false;
     }
     if (!res.ok) {
       logger.warn("integration credential refresh non-OK status", {
@@ -447,8 +398,8 @@ export function createIntegrationCredentialsSource(
         status: res.status,
       });
       // 502 (transient upstream refresh failure) and any other non-2xx: the
-      // cached credential may still be valid. Retryable — do not flag.
-      return "transient";
+      // cached credential may still be valid. Don't retry now.
+      return false;
     }
     let next: IntegrationCredentialsWire;
     try {
@@ -459,7 +410,7 @@ export function createIntegrationCredentialsSource(
         authKey,
         error: err instanceof Error ? err.message : String(err),
       });
-      return "transient";
+      return false;
     }
     // Replace the payload in place — the listener reads `current()` /
     // `deliveryPlans()` on every request, so the next inbound request
@@ -471,41 +422,8 @@ export function createIntegrationCredentialsSource(
       authKey,
       authCount: payload.auths.length,
     });
-    return "refreshed";
+    return true;
   }
-
-  const reportAuthFailure = async (authKey: string): Promise<void> => {
-    // At-most-once per run — a flapping integration must not hammer the
-    // platform. The flag is never reset; one terminal report per source.
-    if (authFailureReported) return;
-    authFailureReported = true;
-    const url = `${options.platformApiUrl}/internal/integration-credentials/${options.integrationId}/report-auth-failure`;
-    try {
-      const res = await fetchFn(url, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${options.runToken}` },
-      });
-      if (!res.ok) {
-        logger.warn("integration auth-failure report non-OK status", {
-          integrationId: options.integrationId,
-          authKey,
-          status: res.status,
-        });
-        return;
-      }
-      logger.warn("integration auth-failure reported — connection flagged for re-connect", {
-        integrationId: options.integrationId,
-        authKey,
-        category: CREDENTIAL_FAILURE_RECONNECT_REQUIRED,
-      });
-    } catch (err) {
-      logger.warn("integration auth-failure report fetch failed", {
-        integrationId: options.integrationId,
-        authKey,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  };
 
   const setSessionOutputs = (auth: ResolvedAuthCredentials, plan: HttpDeliveryPlan): void => {
     // Re-build the immutable wire payload around the freshly-captured
@@ -534,8 +452,6 @@ export function createIntegrationCredentialsSource(
     current,
     deliveryPlans,
     refreshOnUnauthorized,
-    refreshOnUnauthorizedDetailed,
-    reportAuthFailure,
     snapshot: () => payload,
     setSessionOutputs,
     setActiveInputs: (bag: Record<string, string>, acquiring?: string) => {

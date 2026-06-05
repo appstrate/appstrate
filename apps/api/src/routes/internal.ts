@@ -34,7 +34,14 @@ import {
 } from "../services/state/package-persistence.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getPackage } from "../services/package-catalog.ts";
-import { unauthorized, forbidden, notFound, invalidRequest, internalError } from "../lib/errors.ts";
+import {
+  ApiError,
+  unauthorized,
+  forbidden,
+  notFound,
+  invalidRequest,
+  internalError,
+} from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
 import {
   forceRefreshOAuthModelProviderToken,
@@ -42,7 +49,6 @@ import {
 } from "../services/model-providers/token-resolver.ts";
 import {
   resolveLiveIntegrationCredentials,
-  reportIntegrationAuthFailureForRun,
   serializeIntegrationCredentialsWire,
 } from "../services/integration-credentials-resolver.ts";
 import { fetchIntegrationManifest } from "../services/integration-service.ts";
@@ -345,55 +351,51 @@ export function createInternalRouter() {
   });
 
   // POST /internal/integration-credentials/:scope/:name/refresh
-  // Sidecar-only. Force-refresh every OAuth2 auth on this integration,
-  // then return the freshly-resolved payload. Called by the MITM
-  // listener's `refreshOnUnauthorized` hook when upstream returns 401.
+  // Sidecar-only. Called by the sidecar (api_call adapter + MITM listener) when
+  // an upstream 401 is seen. Force-refreshes the integration's credential and
+  // returns the fresh payload (200). When the credential cannot be recovered —
+  // a revoked OAuth refresh token, an unrefreshable OAuth auth, OR any
+  // non-OAuth auth (api_key/basic), since there is nothing to refresh after a
+  // 401 — `resolveLiveIntegrationCredentials` flags the connection
+  // `needsReconnection` and throws 410. This is the SINGLE place a terminal
+  // auth failure is recorded: we also stamp the run's
+  // `metadata.degraded_integrations[]` so the finished run surfaces a reconnect
+  // banner. The sidecar maps the 410 to "don't retry"; the next-launch
+  // readiness gate + live badge do the user-facing surfacing.
   router.post("/integration-credentials/:scope{@[^/]+}/:name/refresh", async (c) => {
     const { runId, run } = await verifyRunToken(c);
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
     await assertAgentDeclaresIntegration(packageId, run, runId);
     const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
-    const result = await resolveLiveIntegrationCredentials(
-      packageId,
-      {
-        runId,
-        orgId: run.orgId,
-        applicationId: run.applicationId,
-        agentPackageId: run.packageId,
-        actor,
-        resolvedConnections: run.resolvedConnections,
-      },
-      { forceRefresh: true },
-    );
+    let result;
+    try {
+      result = await resolveLiveIntegrationCredentials(
+        packageId,
+        {
+          runId,
+          orgId: run.orgId,
+          applicationId: run.applicationId,
+          agentPackageId: run.packageId,
+          actor,
+          resolvedConnections: run.resolvedConnections,
+        },
+        { forceRefresh: true },
+      );
+    } catch (err) {
+      // 410 = the connection was flagged needsReconnection (terminal). Record
+      // it on the run so the run-detail banner can surface it, then re-throw so
+      // the sidecar sees the 410 and stops retrying.
+      if (err instanceof ApiError && err.status === 410) {
+        await recordRunDegradedIntegration(runId, packageId);
+      }
+      throw err;
+    }
     logger.info("Integration credentials refreshed", {
       runId,
       packageId,
       authCount: result.auths.length,
     });
     return c.json(serializeIntegrationCredentialsWire(result));
-  });
-
-  // POST /internal/integration-credentials/:scope/:name/report-auth-failure
-  // Sidecar-only. Called when an upstream 401/403 PERSISTS after the proxy's
-  // single refresh+retry — the credential is terminally dead. Flags the run's
-  // connection `needsReconnection` (any auth type, not just refreshable OAuth2)
-  // so the next-launch readiness gate fires + the dashboard badge updates, and
-  // records the integration on `runs.metadata.degraded_integrations[]` so the
-  // finished run surfaces a reconnect banner. Idempotent; returns 204.
-  router.post("/integration-credentials/:scope{@[^/]+}/:name/report-auth-failure", async (c) => {
-    const { runId, run } = await verifyRunToken(c);
-    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
-    await assertAgentDeclaresIntegration(packageId, run, runId);
-    const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
-    const connectionId = await reportIntegrationAuthFailureForRun(packageId, {
-      runId,
-      applicationId: run.applicationId,
-      actor,
-      resolvedConnections: run.resolvedConnections,
-    });
-    await recordRunDegradedIntegration(runId, packageId);
-    logger.info("Integration auth-failure reported", { runId, packageId, connectionId });
-    return c.body(null, 204);
   });
 
   // GET /internal/mcp-server-bundle/:scope/:name
