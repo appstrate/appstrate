@@ -23,7 +23,8 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
-import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 import { encryptCredentials } from "@appstrate/connect";
 import {
   resolveIntegrationProxyCredentials,
@@ -221,6 +222,38 @@ describe("credential-proxy integration-resolver", () => {
     await expect(forceRefreshIntegrationProxyCredentials(input())).rejects.toBeInstanceOf(
       IntegrationCredentialRevokedError,
     );
+  });
+
+  it("returns null (keeps the original 401) on a transient token-endpoint discovery failure", async () => {
+    // Issuer-only manifest (Drive/OneDrive shape) whose discovery fails (the
+    // server returns a non-matching doc on every well-known probe). The forced
+    // path must NOT throw — it returns null so the route keeps the original 401
+    // and the connection row is untouched (mirrors the main resolver's 502, but
+    // this surface degrades to not-refreshed rather than erroring).
+    const origin = token.url.replace(/\/token$/, "");
+    const issuerOnly = gmailManifest(token.url);
+    (issuerOnly.auths as Record<string, Record<string, unknown>>).primary = {
+      type: "oauth2",
+      issuer: origin,
+      token_endpoint_auth_method: "client_secret_post",
+      authorized_uris: ["https://api.example.com/*"],
+      delivery: {
+        http: {
+          in: "header",
+          name: "Authorization",
+          prefix: "Bearer ",
+          value: "{$credential.access_token}",
+        },
+      },
+    };
+    await db
+      .update(packages)
+      .set({ draftManifest: issuerOnly })
+      .where(eq(packages.id, INTEGRATION_ID));
+    await seedConnection({ userId: ctx.user.id });
+    token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
+
+    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
   });
 
   it("does not resolve another actor's connection (actor isolation, never leaks B's credentials)", async () => {

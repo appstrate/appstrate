@@ -192,6 +192,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     endUserId?: string;
     scopes?: string[];
     accountId?: string;
+    expiresAt?: Date;
   }): Promise<string> {
     const ciphertext = encryptCredentials({
       access_token: "old-access",
@@ -210,6 +211,7 @@ describe("resolveLiveIntegrationCredentials", () => {
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
         scopesGranted: opts.scopes ?? ["read", "send"],
+        ...(opts.expiresAt ? { expiresAt: opts.expiresAt } : {}),
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -471,6 +473,46 @@ describe("resolveLiveIntegrationCredentials", () => {
       }
       expect(status).toBe(502); // transient — NOT 410
       expect(await needsReconnection(connId)).toBe(false); // row untouched
+    } finally {
+      failing.stop();
+    }
+  });
+
+  it("PROACTIVE refresh: a discovery blip serves the cached token (no 502, no flag)", async () => {
+    // Regression guard: on the lead-window (non-forced) path the cached token is
+    // still valid — a discovery outage must NOT fail the run. The credential is
+    // served unchanged and a later real 401 drives forced re-discovery.
+    const failing = startTokenServer();
+    failing.setDiscovery(false);
+    try {
+      await db
+        .update(packages)
+        .set({
+          draftManifest: localIntegrationManifest({
+            name: INTEGRATION_ID,
+            serverName: "@official/gmail-server",
+            auths: {
+              primary: {
+                type: "oauth2",
+                issuer: failing.origin,
+                tokenEndpointAuthMethod: "client_secret_post",
+                delivery: OAUTH_DELIVERY,
+              },
+            },
+          }) as unknown as Record<string, unknown>,
+        })
+        .where(eq(packages.id, INTEGRATION_ID));
+      // Expiry 1 min out → inside OAUTH_REFRESH_LEAD_MS → proactive refresh fires.
+      const connId = await seedConnection({
+        userId: ctx.user.id,
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+
+      // No forceRefresh → proactive path.
+      const result = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {});
+      const primary = result.auths.find((a) => a.authKey === "primary");
+      expect(primary?.fields.access_token).toBe("old-access"); // cached, un-rotated
+      expect(await needsReconnection(connId)).toBe(false);
     } finally {
       failing.stop();
     }

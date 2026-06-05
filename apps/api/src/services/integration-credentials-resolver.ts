@@ -184,21 +184,35 @@ export async function resolveLiveIntegrationCredentials(
         context.applicationId,
       );
     } catch (err) {
-      // Transient token-endpoint discovery failure on an issuer-only manifest:
-      // surface 502 and leave the connection row untouched (NOT terminal). The
-      // cached credential may still be valid; the next run re-discovers.
+      // Transient token-endpoint discovery failure on an issuer-only manifest —
+      // NEVER terminal (the row stays untouched; the next run re-discovers).
       if (err instanceof RefreshError && err.kind === "transient") {
-        logger.warn("Integration token endpoint discovery transient failure", {
-          runId: context.runId,
-          integrationId,
-          authKey,
-          error: err.message,
-        });
-        throw badGateway(
-          `Integration '${integrationId}' auth '${authKey}' token endpoint discovery failed (transient)`,
+        if (options.forceRefresh === true) {
+          // Forced = the sidecar already saw an upstream 401, so the cached
+          // token is known-bad. We can't refresh right now → 502 so the sidecar
+          // keeps the original 401 and backs off.
+          logger.warn("Integration token endpoint discovery transient failure (forced refresh)", {
+            runId: context.runId,
+            integrationId,
+            authKey,
+            error: err.message,
+          });
+          throw badGateway(
+            `Integration '${integrationId}' auth '${authKey}' token endpoint discovery failed (transient)`,
+          );
+        }
+        // Proactive (lead-window) path: the cached token is still valid (we're
+        // merely ahead of expiry). A discovery blip must NOT fail the run —
+        // serve the cached credential unchanged and let a later real 401 drive
+        // forced re-discovery. `refreshContext` left null → refresh skipped.
+        logger.info(
+          "Integration token endpoint discovery transient failure on proactive refresh — serving cached credential",
+          { runId: context.runId, integrationId, authKey, error: err.message },
         );
+        refreshContext = null;
+      } else {
+        throw err;
       }
-      throw err;
     }
     if (refreshContext) {
       // Re-acquisition = fast-path refresh_token POST. `needsRefresh`

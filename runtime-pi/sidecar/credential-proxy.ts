@@ -140,12 +140,12 @@ export interface ApiCallDeps {
    */
   refreshCredentials?: (integrationId: string) => Promise<CredentialsResponse | null>;
   /**
-   * Whether the bound auth can ROTATE on a 401 (oauth2). When `false`
-   * (api_key / basic) a forced refresh only flags the connection, so the proxy
-   * retries the SAME request once before refreshing — a 401 on a static
-   * credential may be a transient upstream blip (rate-limit-as-401, WAF
-   * challenge), not a dead key. `undefined` (legacy callers) is treated as
-   * refreshable, preserving the immediate-refresh path.
+   * Whether a 401 can RE-ACQUIRE the bound auth's credential — oauth2 (token
+   * rotation) or a connect.tool re-login. When `false` (api_key / basic) a
+   * forced refresh only flags the connection, so the proxy retries the SAME
+   * request once before refreshing — a 401 on a static credential may be a
+   * transient upstream blip, not a dead key. `undefined` (legacy callers) is
+   * treated as refreshable, preserving the immediate-refresh path.
    */
   refreshableAuth?: boolean;
   /**

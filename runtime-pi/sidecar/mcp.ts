@@ -1550,8 +1550,9 @@ export interface ApiCallIntegrationConfig {
   fetchCredentials: ApiCallDeps["fetchCredentials"];
   /** Force-refresh on a mid-run 401 and re-resolve (null when not rotated). */
   refreshCredentials: NonNullable<ApiCallDeps["refreshCredentials"]>;
-  /** Whether the bound auth can rotate on a 401 (oauth2). Drives the proxy's
-   *  same-request retry-before-flag for non-refreshable (api_key/basic) auths. */
+  /** Whether a 401 can re-acquire the bound auth's credential (oauth2 rotation
+   *  OR a connect.tool re-login). Drives the proxy's same-request
+   *  retry-before-flag for non-refreshable (api_key/basic) auths only. */
   refreshable: boolean;
   /**
    * Resumable-upload protocols this integration's `apiCall` declared
