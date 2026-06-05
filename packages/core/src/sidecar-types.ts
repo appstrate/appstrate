@@ -250,9 +250,9 @@ export interface IntegrationSpawnSpec {
        * own bundle. Set for local sources; omitted for remote and serverless
        * integrations.
        */
-      serverPackageId?: string;
+      packageId?: string;
       /**
-       * AFPS — the CONCRETE published version of {@link serverPackageId} that
+       * AFPS — the CONCRETE published version of {@link packageId} that
        * this run resolved at kickoff (from `source.server.version`, via
        * exact → dist-tag → semver-range resolution). The sidecar forwards it
        * to `GET /internal/mcp-server-bundle/:scope/:name?version=…` so the
@@ -263,7 +263,7 @@ export interface IntegrationSpawnSpec {
        * remote/serverless integrations. When absent, the byte route falls back
        * to the latest non-yanked published version (back-compat).
        */
-      serverVersion?: string;
+      version?: string;
       /**
        * AFPS §7.1 — build-provenance flag. `true` means the referenced
        * mcp-server's source is vendored into the integration's own bundle

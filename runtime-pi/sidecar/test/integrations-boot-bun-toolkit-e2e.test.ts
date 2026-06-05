@@ -52,7 +52,7 @@ function spec(): IntegrationSpawnSpec {
       // The process adapter runs `.ts` under bun (`HOST_INTERPRETER_BY_TYPE["bun"]`).
       // The MCPB manifest declares `node` (a valid MCPB type), but this synthetic
       // spec pins `bun` so the host subprocess runs the TypeScript entry directly.
-      server: { type: "bun", entry_point: "./server.ts", serverPackageId: SERVER_ID },
+      server: { type: "bun", entry_point: "./server.ts", packageId: SERVER_ID },
     },
     spawnEnv: {},
     // Native-tool subset under test (api_call / fetch_echo need creds + MITM).

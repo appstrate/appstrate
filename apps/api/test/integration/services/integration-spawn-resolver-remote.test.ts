@@ -243,8 +243,8 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
     expect(specs[0]!.manifest.server).toEqual({
       type: "bun",
       entry_point: "./server.ts",
-      serverPackageId: SERVER,
-      serverVersion: "0.1.0",
+      packageId: SERVER,
+      version: "0.1.0",
     });
   });
 });

@@ -13,7 +13,7 @@
  * The resolver now resolves the mcp-server to ONE concrete published version
  * (honoring the pin: exact → dist-tag → semver range), reads THAT version's
  * manifest, and stamps the resolved version onto
- * `spec.manifest.server.serverVersion` so the byte route serves the same
+ * `spec.manifest.server.version` so the byte route serves the same
  * version. This suite locks that contract:
  *
  *   - pin honored: a `^1.0.0` pin resolves to the highest matching version and
@@ -154,8 +154,8 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
     const server = specs[0]!.manifest.server!;
     // Highest version satisfying `^1.0.0` is 1.5.0 — NOT 2.0.0 (latest) and NOT
     // the stale draft.
-    expect(server.serverVersion).toBe("1.5.0");
-    expect(server.serverPackageId).toBe(SERVER);
+    expect(server.version).toBe("1.5.0");
+    expect(server.packageId).toBe(SERVER);
     // Manifest fields come from the RESOLVED version, never the draft.
     expect(server.entry_point).toBe("./v1_5.js");
   });
@@ -239,7 +239,7 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
     const specs = await resolve(ctx);
     expect(specs.length).toBe(1);
     const server = specs[0]!.manifest.server!;
-    expect(server.serverVersion).toBe("1.0.3");
+    expect(server.version).toBe("1.0.3");
     expect(server.entry_point).toBe("./v1_0_3.js");
   });
 });

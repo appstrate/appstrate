@@ -739,12 +739,12 @@ async function spawnAndConnectLocalIntegration(params: {
 
   // AFPS — fetch the referenced mcp-server package's bundle (the runnable
   // server code), NOT the integration's own bundle. Local-source integrations
-  // always carry `server.serverPackageId`; fall back to the integration id only
+  // always carry `server.packageId`; fall back to the integration id only
   // if a spec somehow omits it (defensive).
-  const serverPackageId = spec.manifest.server?.serverPackageId ?? spec.integrationId;
+  const serverPackageId = spec.manifest.server?.packageId ?? spec.integrationId;
   const bytes = await fetchBundleBytes(
     serverPackageId,
-    spec.manifest.server?.serverVersion,
+    spec.manifest.server?.version,
     bundleFetchOpts,
   );
   const root = await extractBundle(bytes, spec.namespace);

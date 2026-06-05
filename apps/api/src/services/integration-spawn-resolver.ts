@@ -219,8 +219,8 @@ async function resolveOne(
         entry_point?: string;
         url?: string;
         transport?: "streamable-http" | "sse";
-        serverPackageId?: string;
-        serverVersion?: string;
+        packageId?: string;
+        version?: string;
         vendored?: boolean;
       }
     | undefined;
@@ -253,7 +253,7 @@ async function resolveOne(
     // Resolve the referenced mcp-server to ONE concrete version, honoring the
     // `source.server.version` pin, and read THAT version's manifest. The
     // resolved `version` is forwarded to the byte route (below, via
-    // `serverVersion`) so the runnable bytes come from the same version — no
+    // `server.version`) so the runnable bytes come from the same version — no
     // manifest/bytes skew, and a `publish` is reflected on the run without a
     // draft overwrite (issue #588). An unsatisfiable pin / missing published
     // version skips the integration LOUDLY rather than silently falling back to
@@ -292,10 +292,10 @@ async function resolveOne(
     serverSpec = {
       type: effectiveType,
       entry_point: run.entry_point,
-      serverPackageId: ref.name,
+      packageId: ref.name,
       // The version the byte route must serve. `null` for system mcp-servers
       // (the boot registry holds a single version, fetched by id alone).
-      ...(resolution.version ? { serverVersion: resolution.version } : {}),
+      ...(resolution.version ? { version: resolution.version } : {}),
       ...(typeof ref.vendored === "boolean" ? { vendored: ref.vendored } : {}),
     };
   }
@@ -379,7 +379,7 @@ async function resolveOne(
       // spec — the sidecar's serverless path (no spec.manifest.server) skips
       // spawn and only wires the generic api_call tool. Local runners
       // (node|python|binary|uv, resolved from the referenced mcp-server) emit
-      // `{ type, entry_point, serverPackageId }`. Remote MCP
+      // `{ type, entry_point, packageId, version }`. Remote MCP
       // (`sourceKind: "remote"`) emits `{ url, transport }` only — `server.type`
       // is intentionally absent because the spawn-mode discriminant lives on
       // `spec.sourceKind`, not in the AFPS `mcpServerTypeEnum` slot.
@@ -391,12 +391,10 @@ async function resolveOne(
               // AFPS — the referenced mcp-server package id, so the sidecar
               // fetches the runnable server bundle from
               // `GET /internal/mcp-server-bundle/...` (local sources only).
-              ...(serverSpec.serverPackageId
-                ? { serverPackageId: serverSpec.serverPackageId }
-                : {}),
+              ...(serverSpec.packageId ? { packageId: serverSpec.packageId } : {}),
               // #588 — the concrete resolved version, so the sidecar fetches
               // `?version=…` and the bytes match the manifest read above.
-              ...(serverSpec.serverVersion ? { serverVersion: serverSpec.serverVersion } : {}),
+              ...(serverSpec.version ? { version: serverSpec.version } : {}),
               // Phase 7 — propagate the remote MCP URL so the sidecar can open
               // a Streamable HTTP client against it. Mutually exclusive with
               // `entry_point` (enforced by `integrationManifestSchema`).
