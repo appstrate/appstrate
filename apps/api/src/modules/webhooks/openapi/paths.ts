@@ -176,6 +176,7 @@ export const webhooksPaths = {
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: { type: "array", items: { $ref: "#/components/schemas/WebhookObject" } },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
@@ -486,7 +487,7 @@ export const webhooksPaths = {
                         id: { type: "string" },
                         eventId: { type: "string" },
                         eventType: { type: "string" },
-                        status: { type: "string", enum: ["pending", "success", "failed"] },
+                        status: { type: "string", enum: ["success", "failed"] },
                         statusCode: { type: ["integer", "null"] },
                         latency: {
                           type: ["integer", "null"],
@@ -498,6 +499,7 @@ export const webhooksPaths = {
                       },
                     },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {

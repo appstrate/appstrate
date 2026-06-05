@@ -608,7 +608,7 @@ export function translateResolutionError(e: ConnectionResolutionError): Validati
     // Smuggle the candidate ids on must_choose_connection so the modal
     // can render a picker.
     ...(e.candidateConnectionIds && e.candidateConnectionIds.length > 0
-      ? { candidateConnectionIds: e.candidateConnectionIds }
+      ? { candidate_connection_ids: e.candidateConnectionIds }
       : {}),
     // Smuggle scope-diff detail on insufficient_scopes so the UI can offer
     // an upgrade (own connection) or a read-only error (foreign owner).

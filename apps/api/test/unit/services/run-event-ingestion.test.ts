@@ -211,7 +211,7 @@ describe("mintSinkCredentials", () => {
       ttlSeconds: 3600,
     });
     expect(creds.url).toBe("https://app.example.com/api/runs/run_abc/events");
-    expect(creds.finalizeUrl).toBe("https://app.example.com/api/runs/run_abc/events/finalize");
+    expect(creds.finalize_url).toBe("https://app.example.com/api/runs/run_abc/events/finalize");
   });
 
   test("strips a trailing slash from appUrl (idempotent join)", () => {

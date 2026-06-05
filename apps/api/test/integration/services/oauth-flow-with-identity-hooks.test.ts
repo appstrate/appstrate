@@ -135,8 +135,8 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
     expect(oauth!.source).toBe("custom");
     expect(oauth!.authMode).toBe("oauth2");
     expect(oauth!.providerId).toBe(TEST_OAUTH_HOOKS_PROVIDER_ID);
-    expect(oauth!.oauthEmail).toBe("user@example.com");
-    expect(oauth!.needsReconnection).toBe(false);
+    expect(oauth!.oauth_email).toBe("user@example.com");
+    expect(oauth!.needs_reconnection).toBe(false);
   });
 
   it("loadInferenceCredentials returns access token + providerId + accountId + apiShape", async () => {

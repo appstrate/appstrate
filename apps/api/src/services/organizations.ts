@@ -48,7 +48,7 @@ export async function createOrganization(
       name,
       slug,
       createdBy: userId,
-      orgSettings: { apiVersion: CURRENT_API_VERSION },
+      orgSettings: { api_version: CURRENT_API_VERSION },
     })
     .returning();
 

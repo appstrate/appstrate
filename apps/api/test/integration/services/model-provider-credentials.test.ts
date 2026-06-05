@@ -362,7 +362,7 @@ describe("model-provider-credentials service — oauth path", () => {
     const list = (await listOrgModelProviderCredentials(ctx.orgId)).filter(
       (k) => k.source === "custom",
     );
-    expect(list[0]!.oauthEmail).toBe("x@example.test");
+    expect(list[0]!.oauth_email).toBe("x@example.test");
   });
 
   it("markCredentialNeedsReconnection flips the flag", async () => {
@@ -384,7 +384,7 @@ describe("model-provider-credentials service — oauth path", () => {
     const list = (await listOrgModelProviderCredentials(ctx.orgId)).filter(
       (k) => k.source === "custom",
     );
-    expect(list[0]!.needsReconnection).toBe(true);
+    expect(list[0]!.needs_reconnection).toBe(true);
   });
 });
 
@@ -455,8 +455,8 @@ describe("model-provider-credentials service — aggregator + inference loader",
       expect(oauth!.authMode).toBe("oauth2");
       expect(oauth!.providerId).toBe(TEST_OAUTH);
       expect(oauth!.id).toBe(imported.credentialId);
-      expect(oauth!.oauthEmail).toBe("user@example.com");
-      expect(oauth!.needsReconnection).toBe(false);
+      expect(oauth!.oauth_email).toBe("user@example.com");
+      expect(oauth!.needs_reconnection).toBe(false);
     });
   });
 

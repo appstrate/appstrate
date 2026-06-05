@@ -267,7 +267,7 @@ async function loadPageContext(
   // defense in depth also exists at token mint in auth/plugins.ts.
   if (record.level === "org" && record.referencedOrgId) {
     const settings = await getOrgSettings(record.referencedOrgId);
-    if (settings.dashboardSsoEnabled !== true) {
+    if (settings.dashboard_sso_enabled !== true) {
       return c.html(
         renderErrorPage({
           title: "SSO désactivé",
@@ -458,7 +458,7 @@ export function createOidcRouter() {
           throw forbidden("referencedOrgId must match the current organization");
         }
         const settings = await getOrgSettings(orgId);
-        if (settings.dashboardSsoEnabled !== true) {
+        if (settings.dashboard_sso_enabled !== true) {
           throw forbidden("Dashboard SSO is disabled for this organization");
         }
       } else {
@@ -544,7 +544,7 @@ export function createOidcRouter() {
       const existing = await getClient(clientId);
       if (existing?.level === "org") {
         const settings = await getOrgSettings(orgId);
-        if (settings.dashboardSsoEnabled !== true) {
+        if (settings.dashboard_sso_enabled !== true) {
           throw forbidden("Dashboard SSO is disabled for this organization");
         }
       }
@@ -592,7 +592,7 @@ export function createOidcRouter() {
       const existing = await getClient(clientId);
       if (existing?.level === "org") {
         const settings = await getOrgSettings(orgId);
-        if (settings.dashboardSsoEnabled !== true) {
+        if (settings.dashboard_sso_enabled !== true) {
           throw forbidden("Dashboard SSO is disabled for this organization");
         }
       }

@@ -247,7 +247,9 @@ router.put("/:orgId", async (c) => {
     orgIdOverride: orgId,
   });
 
-  return c.json(updated);
+  if (!updated) return c.json(updated);
+  const { createdBy, ...updatedRest } = updated;
+  return c.json({ ...updatedRest, created_by: createdBy });
 });
 
 // DELETE /api/orgs/:orgId — delete organization and all related data (owner only)
@@ -453,6 +455,11 @@ router.put("/:orgId/members/:userId", async (c) => {
   // Cannot change own role
   if (targetUserId === user.id) {
     throw forbidden("Cannot change your own role");
+  }
+
+  const target = await getOrgMember(orgId, targetUserId);
+  if (!target) {
+    throw notFound("Member not found");
   }
 
   await updateMemberRole(orgId, targetUserId, data.role);

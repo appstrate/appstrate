@@ -25,7 +25,7 @@ const proxySharedDescription =
   "sessions are rejected. Session binding pins the `X-Session-Id` to the first " +
   "principal (API key or JWT user) that used it.\n\n" +
   "Optional `Appstrate-User` header scopes the call to an end-user's connection " +
-  "profile (API-key auth only).\n\n" +
+  "(API-key auth only).\n\n" +
   "URL and headers can contain `{{credential_field}}` placeholders substituted " +
   "against the integration's credential schema. Set `X-Substitute-Body: true` to run " +
   "the same substitution on the request body (verbs that carry one).";
@@ -91,6 +91,26 @@ const proxyParameters = [
     schema: { type: "string", enum: ["0", "1"] },
   },
   {
+    name: "X-Stream-Response",
+    in: "header",
+    required: false,
+    description:
+      "When `1`, stream the upstream response body through the 100 MB streaming cap " +
+      "instead of buffering it. Skips the buffered `max_response_bytes` truncation, so " +
+      "`X-Truncated` is not emitted; an oversized stream is aborted rather than truncated.",
+    schema: { type: "string", enum: ["0", "1"] },
+  },
+  {
+    name: "X-Max-Response-Size",
+    in: "header",
+    required: false,
+    description:
+      "Optional cap (in bytes) on the buffered upstream response before truncation. " +
+      "Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when " +
+      "`X-Stream-Response: 1` is set.",
+    schema: { type: "string" },
+  },
+  {
     name: "X-Run-Id",
     in: "header",
     required: false,
@@ -118,10 +138,9 @@ const proxyResponses = {
   "200": {
     description:
       "Upstream response (status code, headers, body forwarded verbatim). Buffered " +
-      "responses include `X-Truncated`/`X-Truncated-Size` when the body exceeded the " +
-      "platform truncation cap; streamed responses (when the upstream sends " +
-      "`Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) " +
-      "do not carry these headers.",
+      "responses include `X-Truncated` when the body exceeded the platform truncation " +
+      "cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or " +
+      "a `Content-Length` over `max_streamed_body_size`) do not carry this header.",
     headers: {
       "X-Truncated": {
         description:
@@ -129,18 +148,27 @@ const proxyResponses = {
           "`CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses.",
         schema: { type: "string", enum: ["true"] },
       },
-      "X-Truncated-Size": {
-        description:
-          "Original upstream `Content-Length` (in bytes) when `X-Truncated: true` is set, " +
-          "so the caller can decide whether to retry with `X-Stream-Request: 1` or accept " +
-          "the truncated body.",
-        schema: { type: "string" },
-      },
     },
     content: { "*/*": {} },
   },
   "400": { $ref: "#/components/responses/ValidationError" },
-  "401": { $ref: "#/components/responses/Unauthorized" },
+  "401": {
+    description:
+      "Unauthorized. On a streaming-upload 401, the response carries " +
+      "`X-Auth-Refreshed: true` when credentials were refreshed server-side but the " +
+      "body could not be replayed — the caller must refresh and replay the call itself.",
+    headers: {
+      "X-Auth-Refreshed": {
+        description:
+          "Present and set to `true` on a streaming-upload 401 where credentials were " +
+          "refreshed but the body could not be replayed. Signals the caller to retry.",
+        schema: { type: "string", enum: ["true"] },
+      },
+    },
+    content: {
+      "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+    },
+  },
   "403": {
     description:
       "Forbidden — principal lacks `credential-proxy:call`, target not in " +
@@ -149,7 +177,14 @@ const proxyResponses = {
   "404": {
     description: "No credentials or connection for the requested integration.",
   },
+  "413": {
+    description: "Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB).",
+    content: {
+      "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+    },
+  },
   "429": { $ref: "#/components/responses/RateLimited" },
+  "500": { $ref: "#/components/responses/InternalServerError" },
 } as const;
 
 const proxyRequestBody = {

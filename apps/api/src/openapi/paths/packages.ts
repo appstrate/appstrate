@@ -24,7 +24,7 @@ export const packagesPaths = {
                   type: "string",
                   format: "binary",
                   description:
-                    ".afps-bundle (preferred) or .afps archive — detected automatically via the bundle.json marker.",
+                    "`.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker. May also be supplied under the `bundle` form field as an alias.",
                 },
               },
             },
@@ -79,7 +79,15 @@ export const packagesPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          description:
+            "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
@@ -155,54 +163,35 @@ export const packagesPaths = {
                     description:
                       "Imported manifest version (semver). Omitted when the manifest carries no version field.",
                   },
+                  warnings: {
+                    type: "array",
+                    items: { type: "string" },
+                    description:
+                      "Non-blocking install warnings (e.g. connect.login engine-subset or _meta soft-fails). Present only when warnings were emitted.",
+                  },
                 },
               },
               example: { packageId: "@acme/email-sorter", type: "agent", version: "1.0.0" },
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          description:
+            "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `name_collision` (system package or existing identifier owned by another org), `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`).",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "Package has unpublished draft changes that would be overwritten, or version exists with different content",
+            "Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`.",
           content: {
-            "application/json": {
-              schema: {
-                oneOf: [
-                  {
-                    type: "object",
-                    required: ["error", "message", "details"],
-                    properties: {
-                      error: { type: "string", enum: ["DRAFT_OVERWRITE"] },
-                      message: { type: "string" },
-                      details: {
-                        type: "object",
-                        properties: {
-                          packageId: { type: "string" },
-                          active_version: { type: ["string", "null"] },
-                        },
-                      },
-                    },
-                  },
-                  {
-                    type: "object",
-                    required: ["error", "message", "details"],
-                    properties: {
-                      error: { type: "string", enum: ["INTEGRITY_MISMATCH"] },
-                      message: { type: "string" },
-                      details: {
-                        type: "object",
-                        properties: {
-                          packageId: { type: "string" },
-                          version: { type: "string" },
-                        },
-                      },
-                    },
-                  },
-                ],
-              },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
@@ -262,6 +251,12 @@ export const packagesPaths = {
                     description:
                       "Imported manifest version (semver). Omitted when the manifest carries no version field.",
                   },
+                  warnings: {
+                    type: "array",
+                    items: { type: "string" },
+                    description:
+                      "Non-blocking install warnings (e.g. connect.login engine-subset or _meta soft-fails). Present only when warnings were emitted.",
+                  },
                 },
               },
             },
@@ -269,32 +264,10 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.)",
+            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`name_collision`, `type_mismatch`, `post_install_failed`).",
           content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["error", "message"],
-                properties: {
-                  error: {
-                    type: "string",
-                    enum: [
-                      "VALIDATION_ERROR",
-                      "INVALID_URL",
-                      "NOT_FOUND",
-                      "RATE_LIMITED",
-                      "GITHUB_ERROR",
-                      "REPO_TOO_LARGE",
-                      "EMPTY_PATH",
-                      "TOO_MANY_FILES",
-                      "TOO_LARGE",
-                      "FILE_TOO_LARGE",
-                      "DOWNLOAD_FAILED",
-                    ],
-                  },
-                  message: { type: "string" },
-                },
-              },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
@@ -302,43 +275,10 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "Package has unpublished draft changes that would be overwritten, or version exists with different content",
+            "Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`.",
           content: {
-            "application/json": {
-              schema: {
-                oneOf: [
-                  {
-                    type: "object",
-                    required: ["error", "message", "details"],
-                    properties: {
-                      error: { type: "string", enum: ["DRAFT_OVERWRITE"] },
-                      message: { type: "string" },
-                      details: {
-                        type: "object",
-                        properties: {
-                          packageId: { type: "string" },
-                          active_version: { type: ["string", "null"] },
-                        },
-                      },
-                    },
-                  },
-                  {
-                    type: "object",
-                    required: ["error", "message", "details"],
-                    properties: {
-                      error: { type: "string", enum: ["INTEGRITY_MISMATCH"] },
-                      message: { type: "string" },
-                      details: {
-                        type: "object",
-                        properties: {
-                          packageId: { type: "string" },
-                          version: { type: "string" },
-                        },
-                      },
-                    },
-                  },
-                ],
-              },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
@@ -695,7 +635,14 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Concurrent modification" },
+        "409": {
+          description: "Concurrent modification. RFC 9457 problem+json with `code` of `conflict`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -881,37 +828,11 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Skill is referenced by agents or required by other packages",
+          description:
+            "Skill is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
           content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: {
-                    type: "string",
-                    enum: ["IN_USE", "DEPENDED_ON"],
-                    description:
-                      "IN_USE: referenced by agents. DEPENDED_ON: required by other packages.",
-                  },
-                  message: { type: "string" },
-                  agents: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: { id: { type: "string" }, display_name: { type: "string" } },
-                    },
-                    description: "Agents referencing this skill (for IN_USE)",
-                  },
-                  dependents: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: { id: { type: "string" }, display_name: { type: "string" } },
-                    },
-                    description: "Packages depending on this skill (for DEPENDED_ON)",
-                  },
-                },
-              },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
@@ -1085,7 +1006,15 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Concurrent modification or agent in use" },
+        "409": {
+          description:
+            "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {
@@ -1108,7 +1037,14 @@ export const packagesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "409": { description: "Agent in use" },
+        "409": {
+          description: "Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -1236,7 +1172,15 @@ export const packagesPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "409": { description: "Agent in use (runs in progress)" },
+        "409": {
+          description:
+            "Agent in use (runs in progress) or no changes to snapshot. RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, or `conflict`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -1276,7 +1220,15 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Concurrent modification or agent in use" },
+        "409": {
+          description:
+            "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -1348,16 +1300,11 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Agent has runs in progress",
+          description:
+            "Agent has runs in progress. RFC 9457 problem+json with `code` of `agent_in_use`.",
           content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
@@ -1421,55 +1368,16 @@ export const packagesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "400": {
-          description: "Already owned, name collision, invalid name, or no published version",
+          description:
+            "Already owned, name collision, unsupported type, or no published version. RFC 9457 problem+json with `code` one of `invalid_request` (already owned / no published version / unsupported type) or `name_collision`.",
           content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: {
-                    type: "string",
-                    enum: [
-                      "ALREADY_OWNED",
-                      "NAME_COLLISION",
-                      "INVALID_NAME",
-                      "NO_PUBLISHED_VERSION",
-                    ],
-                  },
-                  message: { type: "string" },
-                },
-              },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
-        "403": {
-          description: "Forbidden",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-        "404": {
-          description: "Package not found",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -1593,37 +1501,11 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Skill is referenced by agents or required by other packages",
+          description:
+            "Skill is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
           content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: {
-                    type: "string",
-                    enum: ["IN_USE", "DEPENDED_ON"],
-                    description:
-                      "IN_USE: referenced by agents. DEPENDED_ON: required by other packages.",
-                  },
-                  message: { type: "string" },
-                  agents: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: { id: { type: "string" }, display_name: { type: "string" } },
-                    },
-                    description: "Agents referencing this skill (for IN_USE)",
-                  },
-                  dependents: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: { id: { type: "string" }, display_name: { type: "string" } },
-                    },
-                    description: "Packages depending on this skill (for DEPENDED_ON)",
-                  },
-                },
-              },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
@@ -1721,7 +1603,15 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Concurrent modification or agent in use" },
+        "409": {
+          description:
+            "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {
@@ -1749,7 +1639,14 @@ export const packagesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "409": { description: "Agent in use" },
+        "409": {
+          description: "Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

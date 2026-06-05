@@ -48,7 +48,7 @@ export interface MissingIntegrationFieldError {
   /** Missing scopes — populated on insufficient_scopes for the OAuth re-consent upgrade. */
   missing_scopes?: string[];
   /** Candidate connection ids — populated on must_choose_connection. */
-  candidateConnectionIds?: string[];
+  candidate_connection_ids?: string[];
   /**
    * The dead/under-scoped connection id — populated on `needs_reconnection`
    * and `insufficient_scopes`. Forwarded to `InlineConnectButton.connectionId`
@@ -239,7 +239,7 @@ function MissingRow({
   // must_choose candidates come from the live verdict (own + shared accessible
   // connections), not the 412 snapshot — the picker stays accurate as the set
   // changes. Falls back to the 412-supplied ids until the verdict lands.
-  const candidateIds = err.candidateConnectionIds ?? [];
+  const candidateIds = err.candidate_connection_ids ?? [];
   const candidates = (resolution?.candidates ?? []).filter(
     (c) => candidateIds.length === 0 || candidateIds.includes(c.id),
   );

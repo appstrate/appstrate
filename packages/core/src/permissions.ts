@@ -187,8 +187,8 @@ export type OrgRole = (typeof ORG_ROLES)[number];
 
 /** Zod validator for the per-org `settings` JSONB shape. */
 export const orgSettingsSchema = z.object({
-  apiVersion: z.string().optional(),
-  dashboardSsoEnabled: z.boolean().optional(),
+  api_version: z.string().optional(),
+  dashboard_sso_enabled: z.boolean().optional(),
 });
 
 // ---------------------------------------------------------------------------

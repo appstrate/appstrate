@@ -140,7 +140,7 @@ export async function listPackageVersions(packageId: string) {
       integrity: packageVersions.integrity,
       artifact_size: packageVersions.artifactSize,
       yanked: packageVersions.yanked,
-      createdBy: packageVersions.createdBy,
+      created_by: packageVersions.createdBy,
       createdAt: packageVersions.createdAt,
     })
     .from(packageVersions)

@@ -97,7 +97,7 @@ export const runsPaths = {
         },
         "400": {
           description:
-            "Agent readiness validation failed (empty prompt, missing skill, integration not connected, or incomplete config)",
+            "Agent readiness validation failed (empty prompt, missing skill, or incomplete config)",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -113,7 +113,16 @@ export const runsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
         "409": { $ref: "#/components/responses/IdempotencyInProgress" },
+        "412": {
+          description: "Missing integration connection (`missing_integration_connection`)",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "422": { $ref: "#/components/responses/IdempotencyConflict" },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": { $ref: "#/components/responses/InternalServerError" },
@@ -315,8 +324,24 @@ export const runsPaths = {
             },
           },
         },
+        "402": {
+          description: "Quota exceeded (Cloud only)",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "409": { $ref: "#/components/responses/IdempotencyInProgress" },
+        "412": {
+          description: "Missing integration connection (`missing_integration_connection`)",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "422": { $ref: "#/components/responses/IdempotencyConflict" },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": { $ref: "#/components/responses/InternalServerError" },
@@ -686,7 +711,7 @@ export const runsPaths = {
                 sink: {
                   type: "object",
                   properties: {
-                    ttlSeconds: {
+                    ttl_seconds: {
                       type: "integer",
                       minimum: 1,
                       maximum: 86400,
@@ -714,7 +739,7 @@ export const runsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["runId", "url", "finalizeUrl", "secret", "expiresAt"],
+                required: ["runId", "url", "finalize_url", "secret", "expiresAt"],
                 properties: {
                   runId: { type: "string" },
                   url: {
@@ -722,7 +747,7 @@ export const runsPaths = {
                     format: "uri",
                     description: "Absolute URL for `HttpSink.url`.",
                   },
-                  finalizeUrl: {
+                  finalize_url: {
                     type: "string",
                     format: "uri",
                     description: "Absolute URL for `HttpSink.finalizeUrl`.",
@@ -744,8 +769,24 @@ export const runsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "402": {
+          description: "Quota exceeded (Cloud only)",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": { $ref: "#/components/responses/IdempotencyInProgress" },
+        "412": {
+          description: "Missing integration connection (registry readiness gate)",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "422": { $ref: "#/components/responses/IdempotencyConflict" },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": { $ref: "#/components/responses/InternalServerError" },
@@ -836,6 +877,7 @@ export const runsPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": {
           description:
             "missing_signature_headers | invalid_signature | invalid_timestamp | timestamp_out_of_tolerance",
@@ -866,7 +908,7 @@ export const runsPaths = {
             schema: {
               type: "object",
               description:
-                "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs`.",
+                "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs` and the authoritative terminal cost-tracking fields `usage` (token usage) and `cost`.",
               properties: {
                 memories: { type: "array" },
                 pinned: { type: "object" },
@@ -884,6 +926,21 @@ export const runsPaths = {
                   enum: ["success", "failed", "timeout", "cancelled"],
                 },
                 durationMs: { type: "integer", minimum: 0 },
+                usage: {
+                  type: "object",
+                  description: "Authoritative terminal token usage written to the `runs` row.",
+                  properties: {
+                    input_tokens: { type: "integer", minimum: 0 },
+                    output_tokens: { type: "integer", minimum: 0 },
+                    cache_creation_input_tokens: { type: "integer", minimum: 0 },
+                    cache_read_input_tokens: { type: "integer", minimum: 0 },
+                  },
+                },
+                cost: {
+                  type: "number",
+                  minimum: 0,
+                  description: "Authoritative terminal run cost written to the `runs` row.",
+                },
               },
             },
           },
@@ -903,6 +960,7 @@ export const runsPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { description: "Signature verification failed" },
         "404": { description: "run_not_found" },
         "410": { description: "run_sink_closed | run_sink_expired" },
@@ -1068,7 +1126,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Extend the sink expiry for a long-running remote run",
       description:
-        "Pushes `sink_expires_at` out to `now() + ttlSeconds`, clamped to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`. Only open sinks (not closed, not already expired) owned by the caller's org can be extended; mismatches return 404 to avoid cross-tenant leaks.",
+        "Pushes `sink_expires_at` out to `now() + ttl_seconds`, clamped to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`. Only open sinks (not closed, not already expired) owned by the caller's org can be extended; mismatches return 404 to avoid cross-tenant leaks.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
@@ -1079,9 +1137,9 @@ export const runsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["ttlSeconds"],
+              required: ["ttl_seconds"],
               properties: {
-                ttlSeconds: { type: "integer", minimum: 1, maximum: 86400 },
+                ttl_seconds: { type: "integer", minimum: 1, maximum: 86400 },
               },
             },
           },

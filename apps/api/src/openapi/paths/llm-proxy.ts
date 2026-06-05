@@ -39,6 +39,15 @@ const baseResponses = {
       "Upstream response forwarded verbatim. For streaming requests " +
       "(`stream: true`), the response is `text/event-stream`; otherwise " +
       "`application/json`.",
+    headers: {
+      "x-llm-proxy-cache-status": {
+        description:
+          "Present only when the response cache is enabled (non-streaming " +
+          "2xx responses). `MISS` when the upstream was hit and the result " +
+          "stored; `HIT` when served from cache.",
+        schema: { type: "string", enum: ["HIT", "MISS"] },
+      },
+    },
     content: {
       "application/json": {},
       "text/event-stream": {},
@@ -47,23 +56,29 @@ const baseResponses = {
   "400": {
     description:
       "Validation error — malformed body, missing/empty `model`, model " +
-      "preset not enabled for this org, or preset's protocol does not " +
+      "preset not enabled for this org, preset's protocol does not " +
       "match this endpoint (use the corresponding " +
-      "`/api/llm-proxy/<api>/…` route instead).",
+      "`/api/llm-proxy/<api>/…` route instead), or request body exceeds " +
+      "the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB).",
   },
   "401": { $ref: "#/components/responses/Unauthorized" },
   "403": {
     description:
-      "Forbidden — principal lacks `llm-proxy:call`, or cookie session " + "used (bearer only).",
+      "Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth " +
+      "method was used (cookie sessions and any unknown/unrecognized auth " +
+      "strategy are rejected; bearer only).",
   },
   "413": {
-    description: "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes` (default 10 MiB).",
+    description:
+      "Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced " +
+      "by the body-limit middleware).",
   },
   "429": { $ref: "#/components/responses/RateLimited" },
   "502": {
     description:
-      "Upstream provider returned a non-2xx response; body and status " +
-      "forwarded as-is. No usage recorded.",
+      "Upstream provider error — the upstream's status and body are " +
+      "forwarded verbatim (the documented status may be any non-2xx the " +
+      "upstream returns, e.g. 400/401/404/429/500/503). No usage recorded.",
   },
 } as const;
 

@@ -81,7 +81,41 @@ export const endUsersPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "409": { $ref: "#/components/responses/IdempotencyInProgress" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "Conflict — either a request with the same Idempotency-Key is already being processed (idempotency_in_progress), or the externalId is already in use by another end-user in the application (external_id_taken)",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              examples: {
+                idempotencyInProgress: {
+                  summary: "Idempotency-Key already being processed",
+                  value: {
+                    type: "https://docs.appstrate.dev/errors/idempotency-in-progress",
+                    title: "Idempotency In Progress",
+                    status: 409,
+                    detail:
+                      "A request with the same Idempotency-Key is already being processed. Please wait and retry.",
+                    code: "idempotency_in_progress",
+                    requestId: "req_abc123",
+                  },
+                },
+                externalIdTaken: {
+                  summary: "externalId already in use",
+                  value: {
+                    type: "https://docs.appstrate.dev/errors/external-id-taken",
+                    title: "Conflict",
+                    status: 409,
+                    detail: "An end-user with this externalId already exists in the application.",
+                    code: "external_id_taken",
+                    requestId: "req_abc123",
+                  },
+                },
+              },
+            },
+          },
+        },
         "422": { $ref: "#/components/responses/IdempotencyConflict" },
       },
     },
@@ -236,6 +270,7 @@ export const endUsersPaths = {
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
+        required: true,
         content: {
           "application/json": {
             schema: {
@@ -294,6 +329,22 @@ export const endUsersPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "The externalId is already in use by another end-user in the application",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "https://docs.appstrate.dev/errors/external-id-taken",
+                title: "Conflict",
+                status: 409,
+                detail: "An end-user with this externalId already exists in the application.",
+                code: "external_id_taken",
+                requestId: "req_abc123",
+              },
+            },
+          },
+        },
       },
     },
     delete: {

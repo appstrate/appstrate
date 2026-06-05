@@ -10,9 +10,11 @@ export const webhooksSchemas = {
       "applicationId",
       "url",
       "events",
+      "packageId",
       "payloadMode",
       "enabled",
       "createdAt",
+      "updatedAt",
     ],
     properties: {
       id: { type: "string", description: "Webhook ID (wh_ prefix)" },

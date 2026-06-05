@@ -33,7 +33,7 @@ export function OrgSettingsLayout() {
 
   const oidcEnabled = !!features.oidc;
   const { data: orgSettings } = useOrgSettings();
-  const dashboardSsoEnabled = !!orgSettings?.dashboardSsoEnabled;
+  const dashboardSsoEnabled = !!orgSettings?.dashboard_sso_enabled;
 
   const sections: SettingsSection[] = [
     {

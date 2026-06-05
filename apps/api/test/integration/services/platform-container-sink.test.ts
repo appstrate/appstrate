@@ -348,7 +348,7 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
     const realCredentials = {
       ...credentials,
       url: `http://platform:3000/api/runs/${runId}/events`,
-      finalizeUrl: `http://platform:3000/api/runs/${runId}/events/finalize`,
+      finalize_url: `http://platform:3000/api/runs/${runId}/events/finalize`,
     };
 
     const plan = buildRunPlan();

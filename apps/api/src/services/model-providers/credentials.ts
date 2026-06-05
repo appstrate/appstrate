@@ -485,7 +485,7 @@ export async function listOrgModelProviderCredentials(
         baseUrl: def.baseUrl,
         source: "built-in",
         authMode: "api_key",
-        createdBy: null,
+        created_by: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -502,9 +502,9 @@ export async function listOrgModelProviderCredentials(
         source: "custom",
         authMode: cfg?.authMode ?? "api_key",
         providerId: r.providerId,
-        oauthEmail: isOauth ? (blob.email ?? null) : null,
-        needsReconnection: isOauth ? !!blob.needsReconnection : false,
-        createdBy: r.createdBy,
+        oauth_email: isOauth ? (blob.email ?? null) : null,
+        needs_reconnection: isOauth ? !!blob.needsReconnection : false,
+        created_by: r.createdBy,
         createdAt: toISORequired(r.createdAt),
         updatedAt: toISORequired(r.updatedAt),
       };

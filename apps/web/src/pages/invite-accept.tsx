@@ -16,11 +16,11 @@ import type { OrgRole } from "@appstrate/shared-types";
 
 interface InviteInfo {
   email: string;
-  orgName: string;
+  org_name: string;
   role: OrgRole;
-  inviterName: string;
+  inviter_name: string;
   expiresAt: string;
-  isNewUser: boolean;
+  is_new_user: boolean;
 }
 
 export function InviteAcceptPage() {
@@ -48,7 +48,7 @@ export function InviteAcceptPage() {
       })
       .then((data: InviteInfo) => {
         setInfo(data);
-        setMode(data.isNewUser ? "register" : "login");
+        setMode(data.is_new_user ? "register" : "login");
         setLoading(false);
       })
       .catch((err) => {
@@ -139,8 +139,8 @@ export function InviteAcceptPage() {
         </h1>
         <p className="text-muted-foreground text-center text-sm">
           {t("invite.description", {
-            inviter: info.inviterName,
-            org: info.orgName,
+            inviter: info.inviter_name,
+            org: info.org_name,
           })}
         </p>
       </div>
@@ -193,7 +193,7 @@ export function InviteAcceptPage() {
           {inviteBanner}
           {serverError && <p className="text-destructive text-sm">{serverError}</p>}
           <Button className="w-full" onClick={handleAcceptAuthenticated} disabled={accepting}>
-            {accepting ? <Spinner /> : t("invite.joinOrg", { org: info.orgName })}
+            {accepting ? <Spinner /> : t("invite.joinOrg", { org: info.org_name })}
           </Button>
         </div>
       </AuthLayout>

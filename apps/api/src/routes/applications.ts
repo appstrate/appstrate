@@ -29,6 +29,18 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import { recordAuditFromContext } from "../services/audit.ts";
 
+/**
+ * Project a Drizzle application row onto the wire shape. The DB column is
+ * `created_by` (snake_case) but the Drizzle TS field is `createdBy`; the wire
+ * contract (ApplicationObject) is snake_case `created_by`, so rename here.
+ */
+function toApplicationWire<T extends { createdBy: string | null }>(
+  app: T,
+): Omit<T, "createdBy"> & { created_by: string | null } {
+  const { createdBy, ...rest } = app;
+  return { ...rest, created_by: createdBy };
+}
+
 export const createApplicationSchema = z.object({
   name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
   settings: appSettingsSchema.optional(),
@@ -69,7 +81,9 @@ export function createApplicationsRouter() {
     const authMethod = c.get("authMethod");
     const keyAppId = c.get("applicationId");
     const scoped = authMethod === "api_key" ? apps.filter((a) => a.id === keyAppId) : apps;
-    return c.json(listResponse(scoped.map((app) => ({ object: "application", ...app }))));
+    return c.json(
+      listResponse(scoped.map((app) => ({ object: "application", ...toApplicationWire(app) }))),
+    );
   });
 
   // POST /api/applications — create a new application
@@ -95,7 +109,7 @@ export function createApplicationsRouter() {
         resourceId: app.id,
         after: { name: app.name },
       });
-      return c.json({ object: "application", ...app }, 201);
+      return c.json({ object: "application", ...toApplicationWire(app) }, 201);
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Application creation failed", {
@@ -112,7 +126,7 @@ export function createApplicationsRouter() {
 
     try {
       const app = await getApplication(orgId, applicationId);
-      return c.json({ object: "application", ...app });
+      return c.json({ object: "application", ...toApplicationWire(app) });
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Failed to get application", {
@@ -143,7 +157,7 @@ export function createApplicationsRouter() {
         resourceId: app.id,
         after: data as unknown as Record<string, unknown>,
       });
-      return c.json({ object: "application", ...app });
+      return c.json({ object: "application", ...toApplicationWire(app) });
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Application update failed", {

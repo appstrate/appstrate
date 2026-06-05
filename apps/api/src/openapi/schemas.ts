@@ -40,7 +40,7 @@ export const schemas = {
             message: { type: "string" },
             // Channel-specific smuggles surfaced by services/integration-connection-resolver.ts:translateResolutionError.
             // Documented here so SDK consumers can rely on them without reading the resolver source.
-            candidateConnectionIds: {
+            candidate_connection_ids: {
               type: "array",
               items: { type: "string" },
               description:
@@ -103,18 +103,22 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
       package_type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
       package_source: { type: "string", enum: ["system", "local"] },
+      draft_manifest: {
+        type: ["object", "null"],
+        description: "Raw draft manifest JSONB for the installed package.",
+      },
     },
   },
   OrgSettings: {
     type: "object",
     description: "Organization settings (extensible)",
     properties: {
-      apiVersion: {
+      api_version: {
         type: "string",
         description:
           "Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated.",
       },
-      dashboardSsoEnabled: {
+      dashboard_sso_enabled: {
         type: "boolean",
         description:
           "When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need application-level SSO for their end-users.",
@@ -182,7 +186,7 @@ export const schemas = {
   },
   AgentSkillRef: {
     type: "object",
-    required: ["id", "name"],
+    required: ["id"],
     properties: {
       id: { type: "string" },
       version: { type: "string" },
@@ -336,7 +340,7 @@ export const schemas = {
           id: { type: "string" },
           status: { type: "string" },
           started_at: { type: "string", format: "date-time" },
-          duration: { type: "integer" },
+          duration: { type: ["integer", "null"] },
         },
       },
       running_runs: { type: "integer" },
@@ -360,7 +364,7 @@ export const schemas = {
       integrity: { type: "string", description: "SRI integrity hash (sha256-...)" },
       artifact_size: { type: "integer", description: "Artifact ZIP size in bytes" },
       yanked: { type: "boolean", description: "Whether this version has been yanked" },
-      createdBy: { type: ["string", "null"] },
+      created_by: { type: ["string", "null"] },
       createdAt: { type: ["string", "null"], format: "date-time" },
     },
   },
@@ -560,7 +564,6 @@ export const schemas = {
     properties: {
       id: { type: "integer" },
       runId: { type: "string" },
-      userId: { type: "string" },
       orgId: { type: "string" },
       type: { type: "string" },
       level: {
@@ -581,6 +584,7 @@ export const schemas = {
       "packageId",
       "orgId",
       "applicationId",
+      "enabled",
       "cron_expression",
       "createdAt",
       "updatedAt",
@@ -596,7 +600,7 @@ export const schemas = {
         description: "Application ID (app_ prefix) that owns this schedule",
       },
       name: { type: ["string", "null"] },
-      enabled: { type: ["boolean", "null"] },
+      enabled: { type: "boolean" },
       cron_expression: { type: "string" },
       timezone: { type: ["string", "null"] },
       input: { type: "object" },
@@ -630,7 +634,7 @@ export const schemas = {
         items: { type: "string" },
         description: "Permission scopes granted to this API key.",
       },
-      createdBy: { type: ["string", "null"] },
+      created_by: { type: ["string", "null"] },
       created_by_name: { type: "string" },
       expiresAt: { type: ["string", "null"], format: "date-time" },
       lastUsedAt: { type: ["string", "null"], format: "date-time" },
@@ -643,14 +647,14 @@ export const schemas = {
     required: ["id", "source", "createdAt", "updatedAt"],
     properties: {
       id: { type: "string" },
+      orgId: {
+        type: ["string", "null"],
+        description: "Owning organization ID (null for system packages)",
+      },
       name: { type: ["string", "null"] },
       description: { type: ["string", "null"] },
       source: { type: "string", enum: ["system", "local"] },
-      scope: {
-        type: ["string", "null"],
-        description: "Scope from manifest name (e.g. @myorg from @myorg/name)",
-      },
-      createdBy: { type: ["string", "null"] },
+      created_by: { type: ["string", "null"] },
       created_by_name: { type: "string" },
       used_by_agents: { type: "integer" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
@@ -677,9 +681,7 @@ export const schemas = {
         type: ["string", "null"],
         description: "Scope from manifest name (e.g. @myorg from @myorg/name)",
       },
-      createdBy: { type: ["string", "null"] },
-      created_by_name: { type: "string" },
-      used_by_agents: { type: "integer" },
+      created_by: { type: ["string", "null"] },
       auto_installed: { type: "boolean" },
       lock_version: { type: "integer", description: "Optimistic lock version" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
@@ -735,9 +737,9 @@ export const schemas = {
         description:
           "Canonical providerId backing the credential. Set when `authMode === 'oauth2'`.",
       },
-      oauthEmail: { type: ["string", "null"] },
-      needsReconnection: { type: "boolean" },
-      createdBy: { type: ["string", "null"] },
+      oauth_email: { type: ["string", "null"] },
+      needs_reconnection: { type: "boolean" },
+      created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -784,7 +786,7 @@ export const schemas = {
           cacheWrite: { type: "number" },
         },
       },
-      createdBy: { type: ["string", "null"] },
+      created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -840,12 +842,6 @@ export const schemas = {
             },
             expires_at: { type: "string", format: "date-time" },
             scopes_granted: { type: "array", items: { type: "string" } },
-            identity_claims: {
-              type: "object",
-              additionalProperties: { type: "string" },
-              description:
-                "Identity claims captured at connect time (e.g. OIDC `sub`, `email`). AFPS §7 name.",
-            },
           },
         },
       },
@@ -889,7 +885,16 @@ export const schemas = {
   },
   OrgProxy: {
     type: "object",
-    required: ["id", "label", "enabled", "isDefault", "source", "createdAt", "updatedAt"],
+    required: [
+      "id",
+      "label",
+      "enabled",
+      "isDefault",
+      "source",
+      "created_by",
+      "createdAt",
+      "updatedAt",
+    ],
     properties: {
       id: { type: "string" },
       label: { type: "string" },
@@ -897,7 +902,7 @@ export const schemas = {
       enabled: { type: "boolean" },
       isDefault: { type: "boolean" },
       source: { type: "string", enum: ["built-in", "custom"] },
-      createdBy: { type: ["string", "null"] },
+      created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -921,7 +926,7 @@ export const schemas = {
           },
         },
       },
-      createdBy: {
+      created_by: {
         type: ["string", "null"],
         description: "ID of the user who created the application",
       },
@@ -947,8 +952,22 @@ export const schemas = {
   AgentManifest: {
     description:
       "AFPS Agent manifest extended with Appstrate platform fields. " +
-      "Standard fields are defined by the AFPS Agent schema; extension fields use the x- prefix per AFPS §10.",
-    allOf: [{ $ref: "https://schemas.afps.dev/v0/agent.schema.json" }],
+      "Standard fields are defined by the AFPS Agent schema. Most extension fields use the x- prefix per AFPS §10, " +
+      "with the exception of the Appstrate-specific top-level `runtime_tools` field documented below.",
+    allOf: [
+      { $ref: "https://schemas.afps.dev/v0/agent.schema.json" },
+      {
+        type: "object",
+        properties: {
+          runtime_tools: {
+            type: "array",
+            items: { type: "string", enum: ["output", "log", "note", "pin", "report"] },
+            description:
+              "Appstrate top-level extension: runtime tools the agent may use. Optional.",
+          },
+        },
+      },
+    ],
   },
   SkillManifest: {
     description: "AFPS Skill manifest. See https://schemas.afps.dev for field reference.",
@@ -1003,7 +1022,7 @@ export const schemas = {
         source: {
           type: "string",
           description:
-            "Package origin (e.g. `org` for org-owned packages, `system` for built-in system packages).",
+            "Package origin (`local` for org-owned packages, `system` for built-in system packages).",
         },
         name: {
           type: "string",

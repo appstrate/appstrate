@@ -307,7 +307,7 @@ describe("api-keys service", () => {
       const keys = await listApiKeys({ orgId: ctx.orgId });
 
       expect(keys).toHaveLength(1);
-      expect(keys[0]!.createdBy).toBe(ctx.user.id);
+      expect(keys[0]!.created_by).toBe(ctx.user.id);
       // created_by_name comes from profiles.displayName or user.name
       expect(keys[0]!.created_by_name).toBeDefined();
     });

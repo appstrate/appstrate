@@ -46,6 +46,7 @@ export const modelsPaths = {
                     contextWindow: 128000,
                     maxTokens: 16384,
                     reasoning: false,
+                    created_by: null,
                     createdAt: "2026-01-10T08:00:00Z",
                     updatedAt: "2026-01-10T08:00:00Z",
                   },
@@ -291,6 +292,17 @@ export const modelsPaths = {
                           type: "boolean",
                           description: "Whether model supports reasoning",
                         },
+                        cost: {
+                          type: ["object", "null"],
+                          description:
+                            "Cost per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing",
+                          properties: {
+                            input: { type: "number" },
+                            output: { type: "number" },
+                            cacheRead: { type: "number" },
+                            cacheWrite: { type: "number" },
+                          },
+                        },
                       },
                     },
                   },
@@ -308,6 +320,7 @@ export const modelsPaths = {
                     maxTokens: 16384,
                     input: ["text", "image"],
                     reasoning: true,
+                    cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
                   },
                 ],
               },
@@ -323,11 +336,11 @@ export const modelsPaths = {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
               example: {
-                type: "about:blank",
+                type: "https://docs.appstrate.dev/errors/provider-error",
                 title: "Bad Gateway",
                 status: 502,
                 detail: "OpenRouter API returned an unexpected error",
-                code: "bad_gateway",
+                code: "provider_error",
                 requestId: "req_abc123",
               },
             },
@@ -339,11 +352,11 @@ export const modelsPaths = {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
               example: {
-                type: "about:blank",
+                type: "https://docs.appstrate.dev/errors/timeout",
                 title: "Gateway Timeout",
                 status: 504,
                 detail: "OpenRouter did not respond within the allowed time",
-                code: "gateway_timeout",
+                code: "timeout",
                 requestId: "req_def456",
               },
             },
@@ -405,6 +418,7 @@ export const modelsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -514,14 +528,7 @@ export const modelsPaths = {
             },
           },
         },
-        "404": {
-          description: "Model not found",
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/TestResult" },
-            },
-          },
-        },
+        "404": { $ref: "#/components/responses/NotFound" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "429": { $ref: "#/components/responses/RateLimited" },

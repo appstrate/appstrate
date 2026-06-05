@@ -117,10 +117,10 @@ export const forkSchema = z
   .catch({});
 
 /** Enrich items with creator display names (batch lookup). */
-async function enrichWithCreatorNames<T extends { createdBy?: string | null }>(
+async function enrichWithCreatorNames<T extends { created_by?: string | null }>(
   items: T[],
 ): Promise<(T & { created_by_name?: string })[]> {
-  const userIds = [...new Set(items.map((i) => i.createdBy).filter(Boolean))] as string[];
+  const userIds = [...new Set(items.map((i) => i.created_by).filter(Boolean))] as string[];
   if (userIds.length === 0) return items;
 
   const rows = await db
@@ -132,7 +132,7 @@ async function enrichWithCreatorNames<T extends { createdBy?: string | null }>(
 
   return items.map((item) => ({
     ...item,
-    created_by_name: item.createdBy ? (nameMap.get(item.createdBy) ?? undefined) : undefined,
+    created_by_name: item.created_by ? (nameMap.get(item.created_by) ?? undefined) : undefined,
   }));
 }
 
@@ -342,8 +342,8 @@ interface PackageRouteConfig {
 
 // Every AFPS package type exposes user-facing routes. `Partial` is kept so
 // the `ROUTE_CONFIGS[type]?.` lookups stay null-tolerant, but all four types are
-// wired. `agent`/`skill` have JSON-body editors; `integration`/`mcp-server` are
-// import-only (no editor — both are authored externally and land via ZIP).
+// wired. `agent`/`skill`/`integration` have JSON-body editors; only `mcp-server`
+// is import-only (no editor — authored externally and lands via ZIP).
 const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   skill: {
     cfg: CONFIG_BY_TYPE.skill,

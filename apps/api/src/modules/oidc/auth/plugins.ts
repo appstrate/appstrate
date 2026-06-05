@@ -405,7 +405,7 @@ async function buildOrgLevelClaims(
   // routes.ts/loadPageContext — this is the authoritative token-mint check
   // that also catches non-interactive flows (refresh, client_credentials).
   const orgSettings = await getOrgSettings(orgId);
-  if (orgSettings.dashboardSsoEnabled !== true) {
+  if (orgSettings.dashboard_sso_enabled !== true) {
     logger.warn("oidc: dashboard SSO disabled for org — rejecting token", {
       module: "oidc",
       userId: user.id,

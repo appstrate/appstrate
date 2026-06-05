@@ -106,7 +106,7 @@ const CreateRemoteRunBodySchema = z
       ),
     sink: z
       .object({
-        ttlSeconds: z.number().int().positive().max(86400).optional(),
+        ttl_seconds: z.number().int().positive().max(86400).optional(),
       })
       .optional(),
   })
@@ -114,7 +114,7 @@ const CreateRemoteRunBodySchema = z
 
 const ExtendSinkBodySchema = z
   .object({
-    ttlSeconds: z.number().int().positive().max(86400),
+    ttl_seconds: z.number().int().positive().max(86400),
   })
   .strict();
 
@@ -279,7 +279,7 @@ export function createRunsRemoteRouter() {
         modelId: modelIdOverride,
         proxyId: proxyIdOverride,
         apiKeyId: c.get("apiKeyId") ?? undefined,
-        sink: body.sink,
+        sink: body.sink ? { ttlSeconds: body.sink.ttl_seconds } : undefined,
         contextSnapshot: body.contextSnapshot,
         runnerName: runner.name,
         runnerKind: runner.kind,
@@ -340,7 +340,7 @@ export function createRunsRemoteRouter() {
       }
 
       const env = getEnv();
-      const ttl = Math.min(parsed.data.ttlSeconds, env.REMOTE_RUN_SINK_MAX_TTL_SECONDS);
+      const ttl = Math.min(parsed.data.ttl_seconds, env.REMOTE_RUN_SINK_MAX_TTL_SECONDS);
       const newExpiresAt = new Date(Date.now() + ttl * 1000);
 
       // Update only open sinks (not closed, not already expired) owned by

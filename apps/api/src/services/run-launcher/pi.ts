@@ -230,7 +230,7 @@ export async function runPlatformContainer(
       forwardProxyUrl: skipSidecar ? undefined : "http://sidecar:8081",
       sink: {
         url: sinkCredentials.url,
-        finalizeUrl: sinkCredentials.finalizeUrl,
+        finalizeUrl: sinkCredentials.finalize_url,
         secret: sinkCredentials.secret,
       },
       // Forward the W3C trace from the spawning request — when set, the

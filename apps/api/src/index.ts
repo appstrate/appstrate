@@ -203,7 +203,7 @@ app.use("*", async (c, next) => {
 // API versioning: resolve Appstrate-Version header > org setting > default
 const apiVersionMiddleware = apiVersion(async (orgId) => {
   const settings = await getOrgSettings(orgId);
-  return settings.apiVersion ?? null;
+  return settings.api_version ?? null;
 });
 app.use("*", async (c, next) => {
   if (skipAuth(c.req.path, getModulePublicPaths(), c.req.raw.headers)) return next();

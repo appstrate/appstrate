@@ -57,13 +57,15 @@ export const healthPaths = {
                 type: "object",
                 properties: {
                   status: { type: "string", enum: ["unhealthy"] },
+                  uptime_ms: { type: "number" },
                   checks: { type: "object" },
                 },
               },
               example: {
                 status: "unhealthy",
+                uptime_ms: 3600000,
                 checks: {
-                  database: { status: "unhealthy", latency_ms: null },
+                  database: { status: "unhealthy", latency_ms: 5000 },
                   agents: { status: "healthy" },
                 },
               },

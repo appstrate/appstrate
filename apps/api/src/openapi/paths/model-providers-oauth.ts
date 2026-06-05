@@ -21,7 +21,7 @@ export const modelProvidersOAuthPaths = {
                   type: "string",
                   pattern: "^[a-z0-9-]+$",
                   description:
-                    "Canonical provider id. Must resolve to an OAuth provider registered by a loaded module (discoverable via `GET /api/model-provider-credentials/registry`). Unknown ids → 404. The enum is intentionally open: OAuth providers ship as modules, so the platform spec stays model-agnostic.",
+                    "Canonical provider id. Must resolve to an OAuth provider registered by a loaded module (discoverable via `GET /api/model-provider-credentials/registry`). Unknown/unregistered ids → 400 (validation error). The enum is intentionally open: OAuth providers ship as modules, so the platform spec stays model-agnostic.",
                 },
               },
             },
@@ -122,6 +122,7 @@ export const modelProvidersOAuthPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -166,7 +167,7 @@ export const modelProvidersOAuthPaths = {
                   type: "string",
                   pattern: "^[a-z0-9-]+$",
                   description:
-                    "Canonical provider id. Must match the pairing's pinned providerId AND resolve to a registered OAuth provider. Unknown ids → 404; mismatched → 400.",
+                    "Canonical provider id. Must match the pairing's pinned providerId AND resolve to a registered OAuth provider. Unknown/non-OAuth ids → 400; mismatched → 400.",
                 },
                 label: {
                   type: "string",
@@ -202,7 +203,8 @@ export const modelProvidersOAuthPaths = {
       },
       responses: {
         "200": {
-          description: "Connection persisted; matching provider key created.",
+          description:
+            "Credential persisted in model_provider_credentials; returns credentialId and available model ids.",
           content: {
             "application/json": {
               schema: {
@@ -220,15 +222,14 @@ export const modelProvidersOAuthPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": {
-          description: "Forbidden — caller lacks `model-provider-credentials:write`.",
+        "410": {
+          description: "Gone — pairing token expired or already consumed.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
-        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },

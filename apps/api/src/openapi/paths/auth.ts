@@ -33,7 +33,7 @@ export const authPaths = {
                 type: "object",
                 properties: {
                   user: { $ref: "#/components/schemas/User" },
-                  session: { type: "object" },
+                  token: { type: ["string", "null"] },
                 },
               },
               example: {
@@ -42,7 +42,7 @@ export const authPaths = {
                   email: "alice@example.com",
                   name: "Alice Martin",
                 },
-                session: { token: "sess_..." },
+                token: "sess_...",
               },
             },
           },
@@ -82,7 +82,7 @@ export const authPaths = {
                 type: "object",
                 properties: {
                   user: { $ref: "#/components/schemas/User" },
-                  session: { type: "object" },
+                  token: { type: ["string", "null"] },
                 },
               },
               example: {
@@ -91,7 +91,7 @@ export const authPaths = {
                   email: "alice@example.com",
                   name: "Alice Martin",
                 },
-                session: { token: "sess_..." },
+                token: "sess_...",
               },
             },
           },
@@ -163,7 +163,11 @@ export const authPaths = {
                 type: "object",
                 properties: {
                   user: { $ref: "#/components/schemas/User" },
-                  session: { type: "object" },
+                  token: {
+                    type: ["string", "null"],
+                    description:
+                      "Session token (auto sign-in); session cookie also set via Set-Cookie",
+                  },
                   bootstrap: {
                     type: "object",
                     properties: {
@@ -201,6 +205,7 @@ export const authPaths = {
           description:
             "Rate-limited (5 redeem attempts per minute per source IP) — defense against brute-force on misconfigured short tokens.",
         },
+        "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },
   },
@@ -218,14 +223,13 @@ export const authPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  user: { $ref: "#/components/schemas/User" },
-                  session: { type: "object" },
+                  user: { anyOf: [{ $ref: "#/components/schemas/User" }, { type: "null" }] },
+                  session: { type: ["object", "null"] },
                 },
               },
             },
           },
         },
-        "401": { $ref: "#/components/responses/Unauthorized" },
       },
     },
   },

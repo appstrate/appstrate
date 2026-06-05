@@ -192,7 +192,7 @@ export async function listApiKeys(
     name: r.name,
     keyPrefix: r.keyPrefix,
     scopes: r.scopes,
-    createdBy: r.createdBy,
+    created_by: r.createdBy,
     created_by_name: r.displayName || r.userName || undefined,
     expiresAt: toISO(r.expiresAt),
     lastUsedAt: toISO(r.lastUsedAt),
