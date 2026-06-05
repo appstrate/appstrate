@@ -24,7 +24,13 @@ import { getPackage, searchPackages } from "../../services/package-catalog.ts";
 import { isInlineShadowPackageId, triggerInlineRun } from "../../services/inline-run.ts";
 import { runInlinePreflight } from "../../services/inline-run-preflight.ts";
 import { getDefaultApplication } from "../../services/applications.ts";
-import { appendRunLog, getRunByOrg, listRunLogs, updateRun } from "../../services/state/runs.ts";
+import {
+  appendRunLog,
+  getRunByOrg,
+  listLlmUsageForRun,
+  listRunLogs,
+  updateRun,
+} from "../../services/state/runs.ts";
 import { abortRun } from "../../services/run-tracker.ts";
 import { addSubscriber, removeSubscriber } from "../../services/realtime.ts";
 import { getOrchestrator } from "../../services/orchestrator/index.ts";
@@ -144,6 +150,7 @@ function buildPlatformServices(): PlatformServices {
         }
       },
       abort: abortRun,
+      listLlmUsage: listLlmUsageForRun,
     },
     inline: { preflight: runInlinePreflight, run: triggerInlineRun },
     realtime: { addSubscriber, removeSubscriber },

@@ -1153,6 +1153,19 @@ export interface PlatformServices {
       updates: RunUpdate;
     }): Promise<void>;
     abort(runId: string): void;
+    /**
+     * Per-call `llm_usage` ledger rows for a run, org-scoped and filtered by
+     * `source` (e.g. `["runner", "proxy"]`). A read into the canonical platform
+     * usage ledger WITHOUT a cross-module SQL join — a consumer that aggregates
+     * per-call usage (analytics, an external usage store) reads here rather than
+     * joining `llm_usage` directly. Returns `{ id, costUsd, source }[]`; the
+     * caller reconciles on `id` against its own store.
+     */
+    listLlmUsage(args: {
+      runId: string;
+      orgId: string;
+      sources: readonly string[];
+    }): Promise<Array<{ id: number; costUsd: number; source: string }>>;
   };
   /**
    * Inline run lifecycle — preflight (validate without side effects) and
