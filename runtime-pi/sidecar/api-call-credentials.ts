@@ -81,19 +81,32 @@ export function createApiCallCredentialAdapter(opts: {
   return {
     fetchCredentials: async () => toPayload(),
     refreshCredentials: async () => {
-      // Retry ONLY when the credential was actually rotated. A false result
-      // (terminal 410 → connection flagged, or transient/cooldown) means
-      // re-issuing the request would just 401 again — return null so the proxy
-      // skips the retry instead of masking a dead credential as a success.
+      // A connect.tool session whose `reauth_on` EXCLUDES 401 (handler
+      // registered, but `shouldReauth(401)` false): the manifest declared a 401
+      // is not a re-login trigger. Don't re-acquire — return null so the proxy
+      // passes the 401 through untouched (no re-login, no flag). Mirrors the
+      // MITM listener's `reauthExcluded` gate.
+      if (
+        source.hasReloginHandler?.(authKey) === true &&
+        source.shouldReauth?.(authKey, 401) !== true
+      ) {
+        return null;
+      }
+      // Retry ONLY when the credential was actually rotated / re-acquired. A
+      // false result (terminal 410 → connection flagged, or transient/cooldown)
+      // means re-issuing would just 401 again — return null so the proxy skips
+      // the retry instead of masking a dead credential as a success.
       const rotated = await source.refreshOnUnauthorized(authKey).catch(() => false);
       return rotated ? toPayload() : null;
     },
-    // oauth2 rotates; a connect.tool auth re-logs in on a 401 (`shouldReauth`).
-    // Both re-acquire the credential, so skip the stale-credential replay and
-    // refresh immediately. Optional-chained: real sources always implement
-    // `shouldReauth`, test fakes may not.
+    // oauth2 rotates; a connect.tool auth re-acquires via re-login. Both skip
+    // the stale-credential replay (refresh immediately) — as does a connect.tool
+    // auth whose `reauth_on` excludes 401, where `refreshCredentials` above
+    // no-ops to a pass-through. Only a PLAIN static credential (api_key/basic,
+    // no re-login handler) takes the same-request replay. Optional-chained:
+    // real sources always implement `hasReloginHandler`, test fakes may not.
     refreshable:
       source.current().auths.find((a) => a.authKey === authKey)?.authType === "oauth2" ||
-      source.shouldReauth?.(authKey, 401) === true,
+      source.hasReloginHandler?.(authKey) === true,
   };
 }

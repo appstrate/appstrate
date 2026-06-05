@@ -776,6 +776,68 @@ describe("MITM listener — connect.tool re-login (P3)", () => {
     }
   });
 
+  runIfOpenssl(
+    "connect.tool auth whose reauth_on EXCLUDES 401: pass-through (no stale replay, no re-login)",
+    async () => {
+      // A 401 on a connect.tool session whose `reauth_on` deliberately excludes
+      // 401: the manifest says 401 is not a session-death signal. The listener
+      // must leave it untouched — NOT mistake it for a dead static credential
+      // (replay + flag) NOR re-login (which refreshOnUnauthorized would do
+      // regardless of status). `hasReloginHandler` distinguishes it from a plain
+      // api_key.
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+
+      let upstreamCallNo = 0;
+      let reauthCalls = 0;
+
+      const dp: Record<string, HttpDeliveryPlan> = { vendor: plan("X-Session", "stale", "") };
+      const pl = payload("vendor", "custom", { session: "stale" }, ["https://api.test.local/**"]);
+
+      const creds: MitmCredentialSource = {
+        current: () => pl,
+        deliveryPlans: () => dp,
+        hasReloginHandler: (authKey) => authKey === "vendor",
+        shouldReauth: (authKey, status) => authKey === "vendor" && status === 403, // excludes 401
+        async refreshOnUnauthorized() {
+          reauthCalls += 1;
+          return true;
+        },
+      };
+
+      const recorded = makeRecordingFetch(async () => {
+        upstreamCallNo += 1;
+        return new Response(`{"err":"unauthorized"}`, { status: 401 });
+      });
+
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        fetch: recorded.fetch,
+      });
+      await listener.ready;
+      try {
+        const out = await drivenFetch({
+          listenerPort: listener.address().port,
+          sni: "api.test.local",
+          caCertPem: bundle.pems.caCertPem,
+          method: "GET",
+          path: "/v1/items",
+          headers: {},
+        });
+        expect(out.status).toBe(401);
+        expect(upstreamCallNo).toBe(1); // pass-through — no replay
+        expect(reauthCalls).toBe(0); // no re-login
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+
   runIfOpenssl("leaves the original failed response when re-login fails (no loop)", async () => {
     const bundle = await makeCaBundle();
     const minter = createCertMinter({

@@ -264,26 +264,45 @@ describe("createApiCallCredentialAdapter — refresh re-snapshot", () => {
     expect(adapter.refreshable).toBe(false);
   });
 
-  it("refreshable is true for a connect.tool auth whose shouldReauth covers 401 (no stale replay)", async () => {
-    // A connect.tool session is `custom`/cookie (not oauth2) but a 401 re-logs
-    // in — re-acquiring the credential. It must be treated as refreshable so the
-    // proxy refreshes immediately instead of replaying the stale session, exactly
-    // like the MITM listener's `!connectReauth` gate.
-    const source = {
+  function connectToolSource(reauthStatuses: number[]): IntegrationCredentialsSource {
+    return {
       current: () => ({
         auths: [{ authKey: "session", authType: "custom", fields: { cookie: "C" } }],
       }),
       deliveryPlans: () => ({}),
       refreshOnUnauthorized: async () => true,
-      shouldReauth: (_authKey: string, status: number) => status === 401,
+      hasReloginHandler: (authKey: string) => authKey === "session",
+      shouldReauth: (authKey: string, status: number) =>
+        authKey === "session" && reauthStatuses.includes(status),
       snapshot: () => ({ auths: [], deliveryPlans: {}, expiresAtEpochMs: {} }),
     } as unknown as IntegrationCredentialsSource;
+  }
+
+  it("refreshable is true for a connect.tool auth (re-login re-acquires — no stale replay)", async () => {
+    // A connect.tool session is `custom`/cookie (not oauth2) but a 401 re-logs
+    // in — re-acquiring the credential. It must be treated as refreshable so the
+    // proxy refreshes immediately instead of replaying the stale session, exactly
+    // like the MITM listener's `!connectReauth` gate. True regardless of which
+    // statuses trigger re-login (gated by `hasReloginHandler`, not `shouldReauth`).
     const adapter = createApiCallCredentialAdapter({
-      source,
+      source: connectToolSource([401]),
       authKey: "session",
       authorizedUris: ["https://api.example.com/**"],
     });
     expect(adapter.refreshable).toBe(true);
+  });
+
+  it("connect.tool auth whose reauth_on EXCLUDES 401: refreshCredentials no-ops (pass-through)", async () => {
+    // The manifest declared 401 is not a re-login trigger → the proxy must NOT
+    // re-acquire and must NOT flag — the 401 passes through. (refreshable stays
+    // true so no stale replay happens either.)
+    const adapter = createApiCallCredentialAdapter({
+      source: connectToolSource([403]),
+      authKey: "session",
+      authorizedUris: ["https://api.example.com/**"],
+    });
+    expect(adapter.refreshable).toBe(true);
+    expect(await adapter.refreshCredentials("@scope/integ")).toBeNull();
   });
 
   it("refreshCredentials returns null when the credential was NOT rotated", async () => {

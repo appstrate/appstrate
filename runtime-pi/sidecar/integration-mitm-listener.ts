@@ -94,6 +94,14 @@ export interface MitmCredentialSource {
    */
   shouldReauth?(authKey: string, status: number): boolean;
   /**
+   * True when a connect.tool re-login handler is registered for `authKey` (any
+   * trigger status). Lets the listener leave a 401 that the manifest's
+   * `reauth_on` deliberately EXCLUDES untouched, rather than mistaking the
+   * session auth for a dead static credential and replaying / flagging it.
+   * Optional — sources without it behave as a plain static credential.
+   */
+  hasReloginHandler?(authKey: string): boolean;
+  /**
    * Connect-login primitive (P1) — when this returns a non-null bag, the
    * listener substitutes `{{key}}` placeholders into the outbound URL,
    * body, and inbound header values BEFORE building the credential action
@@ -742,6 +750,18 @@ async function handleInnerRequest(
     !!action.matchedAuth &&
     matchedAuthKey !== null &&
     credentials.shouldReauth?.(matchedAuthKey, response.status) === true;
+  // A connect.tool session auth whose `reauth_on` deliberately EXCLUDES this
+  // status (`shouldReauth` false but a re-login handler IS registered): the
+  // manifest declared this 401 is NOT a session-death signal. Leave the
+  // response untouched — no stale replay, no re-login, no flag (the pre-P3
+  // pass-through). Without this gate the auth would be mistaken for a dead
+  // static credential (replayed + flagged) AND re-logged-in regardless, since
+  // `refreshOnUnauthorized` runs the handler without re-checking the status.
+  const reauthExcluded =
+    got401 &&
+    !connectReauth &&
+    matchedAuthKey !== null &&
+    credentials.hasReloginHandler?.(matchedAuthKey) === true;
   let retried = false;
   let lastAction = action;
 
@@ -778,7 +798,7 @@ async function handleInnerRequest(
   // replay does NOT clear a sustained throttle window, so that case still
   // flags. OAuth and connect.tool re-login skip the replay — they re-acquire
   // the credential (rotated token / fresh session) rather than replay it.
-  if (got401 && !connectReauth && matchedAuthKey !== null) {
+  if (got401 && !connectReauth && !reauthExcluded && matchedAuthKey !== null) {
     const matched = credentials.current().auths.find((a) => a.authKey === matchedAuthKey);
     if (matched && matched.authType !== "oauth2") {
       const replay = await refetch();
@@ -797,6 +817,7 @@ async function handleInnerRequest(
     response.status === 401 && !!lastAction.matchedAuth && lastAction.injectedHeader !== null;
   if (
     (stillUnauthorized || connectReauth) &&
+    !reauthExcluded &&
     matchedAuthKey !== null &&
     credentials.refreshOnUnauthorized
   ) {
