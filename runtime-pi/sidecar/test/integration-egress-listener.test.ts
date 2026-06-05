@@ -155,6 +155,53 @@ describe("integration-egress-listener (#543)", () => {
     expect(statusCode).toBe(405);
   });
 
+  it("relays when the CONNECT request line is split across TCP segments", async () => {
+    const echo = await startTcpEcho();
+    const { handle, events } = await makeListener();
+    const port = handle.address().port;
+    const target = `127.0.0.1:${echo.port}`;
+
+    const res = await new Promise<{ statusCode: number; echoed: string }>((resolve, reject) => {
+      const socket = netConnect(port, "127.0.0.1", () => {
+        // Fragment the request line itself across two writes — the verb lands
+        // in one segment, the rest (incl. the CRLF) in the next.
+        socket.write("CONN");
+        setTimeout(() => socket.write(`ECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`), 20);
+      });
+      let phase: "header" | "tunnel" = "header";
+      let buf = "";
+      let echoed = "";
+      let statusCode = 0;
+      socket.on("data", (chunk) => {
+        if (phase === "header") {
+          buf += chunk.toString("latin1");
+          const end = buf.indexOf("\r\n\r\n");
+          if (end === -1) return;
+          statusCode = parseInt(buf.split(" ")[1] ?? "0");
+          if (statusCode !== 200) {
+            socket.destroy();
+            resolve({ statusCode, echoed });
+            return;
+          }
+          phase = "tunnel";
+          socket.write("ping");
+        } else {
+          echoed += chunk.toString();
+          if (echoed.length >= 4) {
+            socket.destroy();
+            resolve({ statusCode, echoed });
+          }
+        }
+      });
+      socket.on("error", reject);
+      setTimeout(() => reject(new Error("CONNECT timeout")), 5000);
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.echoed).toBe("ping");
+    expect(events.some((e) => e.kind === "tunnel-opened")).toBe(true);
+  });
+
   it("enforces the optional hard allowlist when supplied", async () => {
     const echo = await startTcpEcho();
     const { handle, events } = await makeListener({

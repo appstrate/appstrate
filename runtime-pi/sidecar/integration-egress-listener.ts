@@ -78,10 +78,27 @@ export function createIntegrationEgressListener(
 
   server.on("connection", (clientSocket: Socket) => {
     // The kernel hands us a raw TCP socket; we must read the CONNECT preamble
-    // ourselves (net.Server has no `connect` event — that's http.Server).
-    clientSocket.once("data", (chunk: Buffer) => {
-      const preamble = chunk.toString("latin1");
-      const firstLine = preamble.slice(0, preamble.indexOf("\r\n"));
+    // ourselves (net.Server has no `connect` event — that's http.Server). The
+    // request line can be split across TCP segments, so accumulate until the
+    // first CRLF instead of assuming it arrives in one chunk; cap the buffer so
+    // a peer that never sends a CRLF can't grow it unbounded. Headers after the
+    // request line are ignored (we tunnel, not inspect); a well-behaved CONNECT
+    // client waits for the 200 before sending tunnel bytes, so none are lost.
+    const MAX_PREAMBLE_BYTES = 8_192;
+    let preamble = "";
+    const onData = (chunk: Buffer) => {
+      preamble += chunk.toString("latin1");
+      const lineEnd = preamble.indexOf("\r\n");
+      if (lineEnd === -1) {
+        if (preamble.length > MAX_PREAMBLE_BYTES) {
+          clientSocket.off("data", onData);
+          clientSocket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+          clientSocket.destroy();
+        }
+        return; // request line not complete yet — await more segments
+      }
+      clientSocket.off("data", onData);
+      const firstLine = preamble.slice(0, lineEnd);
       const match = /^CONNECT\s+(\S+)\s+HTTP\/1\.[01]$/i.exec(firstLine);
       if (!match) {
         clientSocket.write("HTTP/1.1 405 Method Not Allowed\r\n\r\n");
@@ -124,7 +141,8 @@ export function createIntegrationEgressListener(
         clientSocket.destroy();
       });
       clientSocket.on("error", () => upstream.destroy());
-    });
+    };
+    clientSocket.on("data", onData);
     clientSocket.on("error", () => clientSocket.destroy());
   });
 
