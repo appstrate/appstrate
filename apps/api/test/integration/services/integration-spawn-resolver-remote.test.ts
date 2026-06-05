@@ -16,7 +16,7 @@ import { encryptCredentials } from "@appstrate/connect";
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedInstalledPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   remoteIntegrationManifest,
   localIntegrationManifest,
@@ -216,19 +216,21 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
     });
     // The mcp-server keeps an MCPB-vocabulary server.type "node" and declares
     // the real runtime under _meta — the resolver must surface `bun`, not `node`.
+    const serverManifest = mcpServerManifest({
+      name: SERVER,
+      version: "0.1.0",
+      serverType: "node",
+      entryPoint: "./server.ts",
+      appstrateRuntime: "bun",
+    });
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,
       type: "mcp-server",
       source: "local",
-      draftManifest: mcpServerManifest({
-        name: SERVER,
-        version: "0.1.0",
-        serverType: "node",
-        entryPoint: "./server.ts",
-        appstrateRuntime: "bun",
-      }),
+      draftManifest: serverManifest,
     });
+    await seedPackageVersion({ packageId: SERVER, version: "0.1.0", manifest: serverManifest });
     await seedInstalledPackage(ctx.defaultAppId, LOCAL);
     await seedConnection();
 
@@ -242,6 +244,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
       type: "bun",
       entry_point: "./server.ts",
       serverPackageId: SERVER,
+      serverVersion: "0.1.0",
     });
   });
 });

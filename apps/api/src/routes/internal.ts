@@ -424,21 +424,47 @@ export function createInternalRouter() {
         headers: { "Content-Type": "application/zip" },
       });
     }
-    const [latest] = await db
-      .select({ version: packageVersions.version, integrity: packageVersions.integrity })
-      .from(packageVersions)
-      .where(
-        and(eq(packageVersions.packageId, mcpServerId), sql`${packageVersions.yanked} = false`),
-      )
-      .orderBy(sql`${packageVersions.createdAt} DESC`)
-      .limit(1);
-    if (!latest) throw notFound(`No published version for '${mcpServerId}'`);
-    const bytes = await downloadVersionZip(mcpServerId, latest.version, latest.integrity);
+    // #588 — the spawn resolver pins the CONCRETE version (from
+    // `source.server.version`) and the sidecar forwards it here as `?version=`,
+    // so the runnable bytes match the version's manifest the resolver read. The
+    // version is server-resolved at run kickoff (not caller-chosen); we serve it
+    // by exact match (yank-visibility already applied upstream). Falling back to
+    // "latest non-yanked" only when the query is absent keeps older sidecars
+    // (and the pre-#588 path) working.
+    const requestedVersion = c.req.query("version")?.trim();
+    let resolved: { version: string; integrity: string } | undefined;
+    if (requestedVersion) {
+      [resolved] = await db
+        .select({ version: packageVersions.version, integrity: packageVersions.integrity })
+        .from(packageVersions)
+        .where(
+          and(
+            eq(packageVersions.packageId, mcpServerId),
+            eq(packageVersions.version, requestedVersion),
+          ),
+        )
+        .limit(1);
+      if (!resolved) {
+        throw notFound(`Version '${requestedVersion}' not found for '${mcpServerId}'`);
+      }
+    } else {
+      [resolved] = await db
+        .select({ version: packageVersions.version, integrity: packageVersions.integrity })
+        .from(packageVersions)
+        .where(
+          and(eq(packageVersions.packageId, mcpServerId), sql`${packageVersions.yanked} = false`),
+        )
+        .orderBy(sql`${packageVersions.createdAt} DESC`)
+        .limit(1);
+      if (!resolved) throw notFound(`No published version for '${mcpServerId}'`);
+    }
+    const bytes = await downloadVersionZip(mcpServerId, resolved.version, resolved.integrity);
     if (!bytes) throw notFound(`Bundle bytes unavailable for '${mcpServerId}'`);
     logger.info("mcp-server bundle delivered (storage)", {
       runId,
       mcpServerId,
-      version: latest.version,
+      version: resolved.version,
+      pinned: Boolean(requestedVersion),
       bytes: bytes.length,
     });
     return new Response(bytes, { status: 200, headers: { "Content-Type": "application/zip" } });

@@ -252,6 +252,19 @@ export interface IntegrationSpawnSpec {
        */
       serverPackageId?: string;
       /**
+       * AFPS — the CONCRETE published version of {@link serverPackageId} that
+       * this run resolved at kickoff (from `source.server.version`, via
+       * exact → dist-tag → semver-range resolution). The sidecar forwards it
+       * to `GET /internal/mcp-server-bundle/:scope/:name?version=…` so the
+       * runnable BYTES come from the SAME version as the manifest the
+       * spawn-resolver read — eliminating the manifest/bytes version skew and
+       * the "publish ≠ deploy" footgun (issue #588). Omitted for system
+       * mcp-servers (single version served from the boot registry) and for
+       * remote/serverless integrations. When absent, the byte route falls back
+       * to the latest non-yanked published version (back-compat).
+       */
+      serverVersion?: string;
+      /**
        * AFPS §7.1 — build-provenance flag. `true` means the referenced
        * mcp-server's source is vendored into the integration's own bundle
        * rather than fetched as an independent package (reproducibility +
