@@ -23,8 +23,10 @@
  *    `/api/oauth/{login,consent}` pages, and the RFC-compliant
  *    `/.well-known/openid-configuration` + `/.well-known/oauth-authorization-server`
  *    discovery endpoints.
- *  - `init()` runs module-owned Drizzle migrations for the Better Auth
- *    oauth-provider tables plus the `oidc_end_user_profiles` shadow table.
+ *  - `init()` installs the realm resolver and syncs instance clients. The
+ *    Better Auth oauth-provider tables and the `oidc_end_user_profiles`
+ *    shadow table live in the core schema and are created by the system
+ *    migration pipeline — the module no longer owns migrations.
  */
 
 import { z } from "zod";

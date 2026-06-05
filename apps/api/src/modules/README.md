@@ -96,9 +96,9 @@ or `ctx.applyMigrations` — those were removed in core 2.23.0.
    module reads another module's data via the platform API/events, never a
    cross-module SQL join.
 4. **Need a separate tenant?** A module that must own a physically isolated
-   database (e.g. the proprietary `@appstrate/cloud` billing module) runs its
-   own DB + migrations and reads platform data through `ctx.services` (e.g.
-   `services.runs.listLlmUsage`), never a cross-DB join.
+   database (e.g. the proprietary `@appstrate/cloud` module) runs its own
+   database and migrations, and reads platform data through `ctx.services`
+   (e.g. `services.runs.listLlmUsage`), never a cross-DB join.
 
 ## Permissions
 

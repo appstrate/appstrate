@@ -492,7 +492,7 @@ function buildBasePlugins(
 // needed. All consumers must call `getAuth()` at request time / post-boot
 // — never at module-evaluation time.
 //
-// Test harness: `test/setup/preload.ts` calls `createAuth([], {})` during
+// Test harness: `test/setup/preload.ts` calls `createAuth([])` during
 // preload so module test runs boot cleanly.
 
 function buildAuth(extraPlugins: BetterAuthPluginList = []) {

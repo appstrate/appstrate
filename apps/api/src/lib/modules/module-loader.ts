@@ -502,14 +502,14 @@ export function getModuleAuthStrategies(): AuthStrategy[] {
 
 /**
  * Shape of the aggregated auth contributions that need to reach Better Auth
- * at `createAuth()` time: plugins (merged with `basePlugins`) and Drizzle
- * table definitions (merged into the adapter's model map so plugins like
- * `@better-auth/oauth-provider` can resolve their own tables).
+ * at `createAuth()` time: plugins merged with `basePlugins`. Module tables
+ * live in the core schema, so the Drizzle adapter resolves them from the
+ * barrel directly — no per-module table map is passed.
  *
- * Both fields are erased to `unknown` at this layer — the boot integration
- * site in `packages/db/src/auth.ts` narrows to `BetterAuthPluginList` before
- * calling `createAuth(plugins, schemas)`. Keeps Better Auth types out of
- * core.
+ * `betterAuthPlugins` is erased to `unknown` at this layer — the boot
+ * integration site in `packages/db/src/auth.ts` narrows to
+ * `BetterAuthPluginList` before calling `createAuth(plugins)`. Keeps Better
+ * Auth types out of core.
  */
 export interface ModuleContributions {
   betterAuthPlugins: unknown[];
