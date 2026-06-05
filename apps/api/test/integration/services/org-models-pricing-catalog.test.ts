@@ -119,4 +119,13 @@ describe("loadModel — vendored pricing catalog fallback (#437 phase 2)", () =>
     expect(resolved!.input).toContain("text");
     expect(resolved!.reasoning === false || resolved!.reasoning === null).toBe(true);
   });
+
+  // Regression for #544: `org_models.id` is a uuid column. A non-UUID id (e.g.
+  // a human-readable model name) used to make Postgres throw
+  // `invalid input syntax for type uuid`, surfacing as a 500. loadModel now
+  // swallows the cast failure and resolves null ("not found").
+  it("returns null (no throw) for a non-UUID modelDbId", async () => {
+    const resolved = await loadModel(ctx.orgId, "gpt-5.5");
+    expect(resolved).toBeNull();
+  });
 });

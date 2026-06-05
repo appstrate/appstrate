@@ -37,6 +37,7 @@ import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
 import { validateConfig, validateInput } from "../services/schema.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
+import { assertExplicitModelExists } from "../services/org-models.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import type { LoadedPackage } from "../types/index.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -264,6 +265,11 @@ export function createRunsRemoteRouter() {
           preflight.resolvedDeps,
         );
       }
+
+      // Reject an explicit `modelId` override that references no real model
+      // (system key or org-model UUID) with a clean 404 — both the registry
+      // and inline branches forward the caller's value verbatim.
+      await assertExplicitModelExists(orgId, modelIdOverride);
 
       const runId = `run_${crypto.randomUUID()}`;
       const runner = await resolveRunnerContext(c);
