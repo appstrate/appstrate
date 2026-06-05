@@ -37,7 +37,7 @@ import { deviceAuthorization } from "better-auth/plugins/device-authorization";
 import { APIError } from "better-auth/api";
 import { getEnv } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
-import { oauthClient } from "../schema.ts";
+import { oauthClient } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import { getOrgSettings } from "../../../services/organizations.ts";
 import {

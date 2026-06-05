@@ -36,7 +36,7 @@ import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import oidcModule from "../../../index.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { ensureCliClient } from "../../../services/ensure-cli-client.ts";
-import { deviceCode } from "../../../schema.ts";
+import { deviceCode } from "@appstrate/db/schema";
 import { overrideJwksResolver } from "../../../services/enduser-token.ts";
 
 const app = getTestApp({ modules: [oidcModule] });

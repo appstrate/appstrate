@@ -15,7 +15,7 @@ import { eq } from "drizzle-orm";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
-import { oauthClient } from "../../../schema.ts";
+import { oauthClient } from "@appstrate/db/schema";
 import {
   syncInstanceClientsFromEnv,
   InstanceClientSyncError,

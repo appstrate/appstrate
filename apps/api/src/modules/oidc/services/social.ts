@@ -25,7 +25,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { decryptCredentials, encryptCredentials } from "@appstrate/connect";
 import type { SocialProviderId, SocialProviderView } from "@appstrate/shared-types";
-import { applicationSocialProviders } from "../schema.ts";
+import { applicationSocialProviders } from "@appstrate/db/schema";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { logger } from "../../../lib/logger.ts";

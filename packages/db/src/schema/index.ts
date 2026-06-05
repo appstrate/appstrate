@@ -13,4 +13,5 @@ export * from "./integration-org-defaults.ts";
 export * from "./uploads.ts";
 export * from "./audit.ts";
 export * from "./webhooks.ts";
+export * from "./oidc.ts";
 export * from "./types.ts";

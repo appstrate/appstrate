@@ -34,7 +34,7 @@ import { logger } from "../../../lib/logger.ts";
 import { prefixedId } from "../../../lib/ids.ts";
 import type { AppContextRow } from "../../../middleware/app-context.ts";
 import type { AuthIdentity } from "../auth/types.ts";
-import { oidcEndUserProfiles } from "../schema.ts";
+import { oidcEndUserProfiles } from "@appstrate/db/schema";
 
 export type { AuthIdentity };
 

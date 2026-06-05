@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
-import { oauthClient } from "../../../schema.ts";
+import { oauthClient } from "@appstrate/db/schema";
 import { ensureCliClient, APPSTRATE_CLI_CLIENT_ID } from "../../../services/ensure-cli-client.ts";
 
 describe("ensureCliClient()", () => {

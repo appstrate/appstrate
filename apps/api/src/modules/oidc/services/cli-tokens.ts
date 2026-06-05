@@ -71,7 +71,7 @@ import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
 import { user as userTable, organizationMembers } from "@appstrate/db/schema";
-import { cliRefreshToken, deviceCode, oauthClient } from "../schema.ts";
+import { cliRefreshToken, deviceCode, oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getOidcAuthApi } from "../auth/api.ts";

@@ -38,7 +38,7 @@ import type { RateLimiterAbstract } from "rate-limiter-flexible";
 import { db } from "@appstrate/db/client";
 import { getRateLimiterFactory } from "../../../infra/index.ts";
 import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
-import { deviceCode, oauthClient } from "../schema.ts";
+import { deviceCode, oauthClient } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import { loadClientSignupPolicy } from "../services/orgmember-mapping.ts";
 import { readPendingClientCookieFromHeaders } from "../services/pending-client-cookie.ts";

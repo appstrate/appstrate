@@ -35,7 +35,7 @@
 
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { oauthClient } from "../schema.ts";
+import { oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
 
 /**

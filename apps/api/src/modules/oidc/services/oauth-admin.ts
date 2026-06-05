@@ -41,7 +41,7 @@
 import { eq, or, inArray, asc } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
-import { oauthClient } from "../schema.ts";
+import { oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getAppstrateScopeSet } from "../auth/scopes.ts";

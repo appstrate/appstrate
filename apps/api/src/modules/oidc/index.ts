@@ -27,9 +27,8 @@
  *    oauth-provider tables plus the `oidc_end_user_profiles` shadow table.
  */
 
-import { resolve } from "node:path";
 import { z } from "zod";
-import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
+import type { AppstrateModule } from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
 
 // Register module-owned RBAC resources. OAuth client registration /
@@ -66,7 +65,7 @@ import {
   oauthAccessToken,
   oauthRefreshToken,
   oauthConsent,
-} from "./schema.ts";
+} from "@appstrate/db/schema";
 import {
   ensureInstanceClient,
   getInstanceClientId,
@@ -106,10 +105,11 @@ const oidcModule: AppstrateModule = {
     verifyEndUserAccessToken,
   } satisfies OidcModuleApi,
 
-  async init(ctx: ModuleInitContext) {
-    await ctx.applyMigrations("oidc", resolve(import.meta.dir, "drizzle/migrations"), {
-      requireCoreTables: ["end_users", "user", "session", "organizations", "applications"],
-    });
+  async init() {
+    // Tables are centralized in the core schema and created by the system
+    // migration pipeline — no module migration. Better Auth tables are
+    // auto-registered via the core schema barrel in `packages/db/src/auth.ts`.
+    //
     // Install the realm resolver so the BA user-create hook tags new
     // end-user rows with `realm="end_user:<applicationId>"`. Platform-side
     // signups (dashboard, org invitation, instance/org-level OIDC clients)

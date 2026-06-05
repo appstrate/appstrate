@@ -22,6 +22,13 @@
       "when": 1780666802597,
       "tag": "0002_fold_webhooks_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780667328185,
+      "tag": "0003_fold_oidc_tables",
+      "breakpoints": true
     }
   ]
 }
