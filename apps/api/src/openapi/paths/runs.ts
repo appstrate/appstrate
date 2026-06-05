@@ -780,7 +780,7 @@ export const runsPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": { $ref: "#/components/responses/IdempotencyInProgress" },
         "412": {
-          description: "Missing integration connection (registry readiness gate)",
+          description: "Missing integration connection (`missing_integration_connection`)",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

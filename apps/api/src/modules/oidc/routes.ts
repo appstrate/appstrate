@@ -262,7 +262,7 @@ async function loadPageContext(
     );
   }
   // Dashboard SSO gate: org-level clients only work when the owning org has
-  // explicitly opted in via orgSettings.dashboardSsoEnabled. This blocks the
+  // explicitly opted in via orgSettings.dashboard_sso_enabled. This blocks the
   // interactive login/consent flow before any credential is collected —
   // defense in depth also exists at token mint in auth/plugins.ts.
   if (record.level === "org" && record.referencedOrgId) {

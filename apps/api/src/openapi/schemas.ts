@@ -669,6 +669,10 @@ export const schemas = {
     required: ["id", "source", "createdAt", "updatedAt"],
     properties: {
       id: { type: "string" },
+      orgId: {
+        type: ["string", "null"],
+        description: "Owning organization ID (null for system packages)",
+      },
       name: { type: ["string", "null"] },
       description: { type: ["string", "null"] },
       content: { type: "string", description: "Package item content" },
@@ -677,10 +681,6 @@ export const schemas = {
         description: "Secondary source file content (e.g. .ts for tools)",
       },
       source: { type: "string", enum: ["system", "local"] },
-      scope: {
-        type: ["string", "null"],
-        description: "Scope from manifest name (e.g. @myorg from @myorg/name)",
-      },
       created_by: { type: ["string", "null"] },
       auto_installed: { type: "boolean" },
       lock_version: { type: "integer", description: "Optimistic lock version" },

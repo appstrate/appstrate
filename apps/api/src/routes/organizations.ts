@@ -247,7 +247,6 @@ router.put("/:orgId", async (c) => {
     orgIdOverride: orgId,
   });
 
-  if (!updated) return c.json(updated);
   const { createdBy, ...updatedRest } = updated;
   return c.json({ ...updatedRest, created_by: createdBy });
 });

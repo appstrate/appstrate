@@ -96,7 +96,7 @@ export async function getOrgById(orgId: string): Promise<OrgResult | null> {
 export async function updateOrganization(
   orgId: string,
   updates: { name?: string; slug?: string },
-): Promise<OrgResult | null> {
+): Promise<OrgResult> {
   const [row] = await db
     .update(organizations)
     .set({ ...updates, updatedAt: new Date() })

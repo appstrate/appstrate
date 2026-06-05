@@ -851,6 +851,7 @@ export const oidcPaths = {
     post: {
       tags: ["Device Authorization"],
       operationId: "cliToken",
+      security: [],
       summary: "Exchange a device_code or refresh token for a CLI token pair",
       description:
         "Exchange a device_code (RFC 8628) OR a refresh token for a fresh JWT access token + rotating refresh token pair. Used by the `appstrate` CLI.",
@@ -912,6 +913,7 @@ export const oidcPaths = {
     post: {
       tags: ["Device Authorization"],
       operationId: "cliRevoke",
+      security: [],
       summary: "Revoke a CLI refresh token family",
       description:
         "Revoke a CLI refresh token's family. Idempotent. Per RFC 7009 §2.2 the response is uniform (`{ revoked: true }`) even when the token is unknown or client-mismatched — the underlying hit/miss discriminator is kept in the audit log only, so a caller cannot probe token validity through the response shape.",

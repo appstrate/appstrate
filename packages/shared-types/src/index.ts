@@ -327,9 +327,9 @@ export interface MeConnectionEntry {
   needs_reconnection: boolean;
   expiresAt: string | null;
   /** Human-friendly identity (accountEmail, sub claim). */
-  identity: string | null;
+  identity: string;
   /** Which auth slot this connection satisfies. */
-  auth_key: string | null;
+  auth_key: string;
   /** Admin/owner sharing toggle (per-org). */
   shared_with_org: boolean;
   /**
@@ -338,7 +338,7 @@ export interface MeConnectionEntry {
    * surface "reused by N agents" so members understand that the connection
    * is shared across the org's agents rather than per-agent.
    */
-  reused_by_agents: number | null;
+  reused_by_agents: number;
   /** Where this connection lives (the connection is keyed per-app). */
   org: { id: string; name: string };
   application: { id: string; name: string };

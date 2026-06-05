@@ -410,23 +410,19 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["id", "content"],
+              required: ["manifest"],
               properties: {
-                id: { type: "string", description: "Unique skill ID (kebab-case)" },
-                name: {
-                  type: "string",
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
                   description:
-                    "Display name. Auto-extracted from SKILL.md YAML frontmatter if omitted.",
-                },
-                description: {
-                  type: "string",
-                  description:
-                    "Skill description. Auto-extracted from SKILL.md YAML frontmatter if omitted.",
+                    "Skill package manifest (AFPS). The package ID is derived from `manifest.name`.",
                 },
                 content: {
                   type: "string",
-                  description: "SKILL.md content (markdown with YAML frontmatter)",
+                  description: "SKILL.md content (markdown with YAML frontmatter).",
                 },
+                source_code: { type: "string", description: "Optional source code payload." },
               },
             },
           },
@@ -1969,7 +1965,11 @@ export const packagesPaths = {
                 properties: {
                   id: { type: "integer" },
                   version: { type: "string" },
-                  manifest: { $ref: "#/components/schemas/SkillManifest" },
+                  manifest: {
+                    type: "object",
+                    additionalProperties: true,
+                    description: "Full manifest object",
+                  },
                   content: { type: ["string", "null"] },
                   yanked: { type: "boolean" },
                   yanked_reason: { type: ["string", "null"] },
@@ -2059,11 +2059,15 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
+              required: ["manifest", "content", "lock_version"],
               properties: {
-                name: { type: "string", description: "Display name" },
-                description: { type: "string" },
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
+                  description: "Package manifest",
+                },
                 content: { type: "string" },
-                version: { type: "string", description: "Semver version (X.Y.Z)" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
             },
           },
@@ -2185,11 +2189,15 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
+              required: ["manifest", "content", "lock_version"],
               properties: {
-                name: { type: "string", description: "Display name" },
-                description: { type: "string" },
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
+                  description: "Package manifest",
+                },
                 content: { type: "string" },
-                version: { type: "string", description: "Semver version (X.Y.Z)" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
             },
           },
@@ -2367,11 +2375,6 @@ export const packagesPaths = {
                   packageId: { type: "string" },
                   lock_version: { type: "integer" },
                   message: { type: "string" },
-                  warnings: {
-                    type: "array",
-                    items: { type: "string" },
-                    description: "Non-fatal content-validation warnings.",
-                  },
                 },
               },
             },
@@ -2600,7 +2603,11 @@ export const packagesPaths = {
                 properties: {
                   id: { type: "integer" },
                   version: { type: "string" },
-                  manifest: { $ref: "#/components/schemas/SkillManifest" },
+                  manifest: {
+                    type: "object",
+                    additionalProperties: true,
+                    description: "Full manifest object",
+                  },
                   content: { type: ["string", "null"] },
                   yanked: { type: "boolean" },
                   yanked_reason: { type: ["string", "null"] },
@@ -2690,11 +2697,15 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
+              required: ["manifest", "content", "lock_version"],
               properties: {
-                name: { type: "string", description: "Display name" },
-                description: { type: "string" },
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
+                  description: "Package manifest",
+                },
                 content: { type: "string" },
-                version: { type: "string", description: "Semver version (X.Y.Z)" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
             },
           },
@@ -2816,11 +2827,15 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
+              required: ["manifest", "content", "lock_version"],
               properties: {
-                name: { type: "string", description: "Display name" },
-                description: { type: "string" },
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
+                  description: "Package manifest",
+                },
                 content: { type: "string" },
-                version: { type: "string", description: "Semver version (X.Y.Z)" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
             },
           },

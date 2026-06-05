@@ -382,6 +382,14 @@ export const integrationsPaths = {
           },
         },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Wrong package type",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

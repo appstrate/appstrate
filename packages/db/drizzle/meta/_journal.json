@@ -15,6 +15,13 @@
       "when": 1780062003189,
       "tag": "0001_drop_credential_proxy_usage_cost_usd",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790000000000,
+      "tag": "0002_rename_org_settings_keys",
+      "breakpoints": true
     }
   ]
 }

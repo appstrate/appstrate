@@ -167,7 +167,7 @@ export const modelProvidersOAuthPaths = {
                   type: "string",
                   pattern: "^[a-z0-9-]+$",
                   description:
-                    "Canonical provider id. Must match the pairing's pinned providerId AND resolve to a registered OAuth provider. Unknown/non-OAuth ids → 400; mismatched → 400.",
+                    "Must match the pairing's pinned providerId. Mismatched → 400; provider deregistered after mint → 404.",
                 },
                 label: {
                   type: "string",
@@ -222,6 +222,7 @@ export const modelProvidersOAuthPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
         "410": {
           description: "Gone — pairing token expired or already consumed.",
           content: {

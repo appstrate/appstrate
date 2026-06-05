@@ -2661,7 +2661,7 @@
             "$ref": "#/components/responses/IdempotencyInProgress"
           },
           "412": {
-            "description": "Missing integration connection (registry readiness gate)",
+            "description": "Missing integration connection (`missing_integration_connection`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4495,6 +4495,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Wrong package type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -7640,7 +7650,7 @@
                   "providerId": {
                     "type": "string",
                     "pattern": "^[a-z0-9-]+$",
-                    "description": "Canonical provider id. Must match the pairing's pinned providerId AND resolve to a registered OAuth provider. Unknown/non-OAuth ids → 400; mismatched → 400."
+                    "description": "Must match the pairing's pinned providerId. Mismatched → 400; provider deregistered after mint → 404."
                   },
                   "label": {
                     "type": "string",
@@ -7713,6 +7723,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "410": {
             "description": "Gone — pairing token expired or already consumed.",
@@ -11524,23 +11537,20 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["id", "content"],
+                "required": ["manifest"],
                 "properties": {
-                  "id": {
-                    "type": "string",
-                    "description": "Unique skill ID (kebab-case)"
-                  },
-                  "name": {
-                    "type": "string",
-                    "description": "Display name. Auto-extracted from SKILL.md YAML frontmatter if omitted."
-                  },
-                  "description": {
-                    "type": "string",
-                    "description": "Skill description. Auto-extracted from SKILL.md YAML frontmatter if omitted."
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Skill package manifest (AFPS). The package ID is derived from `manifest.name`."
                   },
                   "content": {
                     "type": "string",
-                    "description": "SKILL.md content (markdown with YAML frontmatter)"
+                    "description": "SKILL.md content (markdown with YAML frontmatter)."
+                  },
+                  "source_code": {
+                    "type": "string",
+                    "description": "Optional source code payload."
                   }
                 }
               }
@@ -13872,7 +13882,9 @@
                       "type": "string"
                     },
                     "manifest": {
-                      "$ref": "#/components/schemas/SkillManifest"
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "Full manifest object"
                     },
                     "content": {
                       "type": ["string", "null"]
@@ -14032,20 +14044,19 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "required": ["manifest", "content", "lock_version"],
                 "properties": {
-                  "name": {
-                    "type": "string",
-                    "description": "Display name"
-                  },
-                  "description": {
-                    "type": "string"
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Package manifest"
                   },
                   "content": {
                     "type": "string"
                   },
-                  "version": {
-                    "type": "string",
-                    "description": "Semver version (X.Y.Z)"
+                  "lock_version": {
+                    "type": "integer",
+                    "description": "Optimistic lock version"
                   }
                 }
               }
@@ -14221,20 +14232,19 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "required": ["manifest", "content", "lock_version"],
                 "properties": {
-                  "name": {
-                    "type": "string",
-                    "description": "Display name"
-                  },
-                  "description": {
-                    "type": "string"
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Package manifest"
                   },
                   "content": {
                     "type": "string"
                   },
-                  "version": {
-                    "type": "string",
-                    "description": "Semver version (X.Y.Z)"
+                  "lock_version": {
+                    "type": "integer",
+                    "description": "Optimistic lock version"
                   }
                 }
               }
@@ -14478,13 +14488,6 @@
                     },
                     "message": {
                       "type": "string"
-                    },
-                    "warnings": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Non-fatal content-validation warnings."
                     }
                   }
                 }
@@ -14827,7 +14830,9 @@
                       "type": "string"
                     },
                     "manifest": {
-                      "$ref": "#/components/schemas/SkillManifest"
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "Full manifest object"
                     },
                     "content": {
                       "type": ["string", "null"]
@@ -14987,20 +14992,19 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "required": ["manifest", "content", "lock_version"],
                 "properties": {
-                  "name": {
-                    "type": "string",
-                    "description": "Display name"
-                  },
-                  "description": {
-                    "type": "string"
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Package manifest"
                   },
                   "content": {
                     "type": "string"
                   },
-                  "version": {
-                    "type": "string",
-                    "description": "Semver version (X.Y.Z)"
+                  "lock_version": {
+                    "type": "integer",
+                    "description": "Optimistic lock version"
                   }
                 }
               }
@@ -15176,20 +15180,19 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "required": ["manifest", "content", "lock_version"],
                 "properties": {
-                  "name": {
-                    "type": "string",
-                    "description": "Display name"
-                  },
-                  "description": {
-                    "type": "string"
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Package manifest"
                   },
                   "content": {
                     "type": "string"
                   },
-                  "version": {
-                    "type": "string",
-                    "description": "Semver version (X.Y.Z)"
+                  "lock_version": {
+                    "type": "integer",
+                    "description": "Optimistic lock version"
                   }
                 }
               }
@@ -19382,6 +19385,10 @@
           "id": {
             "type": "string"
           },
+          "orgId": {
+            "type": ["string", "null"],
+            "description": "Owning organization ID (null for system packages)"
+          },
           "name": {
             "type": ["string", "null"]
           },
@@ -19399,10 +19406,6 @@
           "source": {
             "type": "string",
             "enum": ["system", "local"]
-          },
-          "scope": {
-            "type": ["string", "null"],
-            "description": "Scope from manifest name (e.g. @myorg from @myorg/name)"
           },
           "created_by": {
             "type": ["string", "null"]
