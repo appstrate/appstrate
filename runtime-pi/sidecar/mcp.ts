@@ -605,6 +605,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         ...proxyDeps,
         fetchCredentials: integ.fetchCredentials,
         refreshCredentials: integ.refreshCredentials,
+        refreshableAuth: integ.refreshable,
       },
       integrationId: integ.integrationId,
       label: toolName,
@@ -1549,6 +1550,9 @@ export interface ApiCallIntegrationConfig {
   fetchCredentials: ApiCallDeps["fetchCredentials"];
   /** Force-refresh on a mid-run 401 and re-resolve (null when not rotated). */
   refreshCredentials: NonNullable<ApiCallDeps["refreshCredentials"]>;
+  /** Whether the bound auth can rotate on a 401 (oauth2). Drives the proxy's
+   *  same-request retry-before-flag for non-refreshable (api_key/basic) auths. */
+  refreshable: boolean;
   /**
    * Resumable-upload protocols this integration's `apiCall` declared
    * (`manifest.apiCall.uploadProtocols`). When non-empty the sidecar

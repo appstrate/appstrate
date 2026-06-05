@@ -247,6 +247,21 @@ describe("createApiCallCredentialAdapter — refresh re-snapshot", () => {
     const result = await adapter.refreshCredentials("@scope/integ");
     expect(refreshed).toBe(true);
     expect(result?.credentials[PROXY_INJECTED_FIELD]).toBe("AT");
+    // oauth2 → can rotate → the proxy refreshes immediately (no same-cred retry).
+    expect(adapter.refreshable).toBe(true);
+  });
+
+  it("refreshable is false for a non-oauth2 auth (drives the proxy's same-credential retry)", async () => {
+    const source = fakeSource({
+      auths: [{ authKey: "primary", authType: "api_key", fields: { api_key: "K" } }],
+      deliveryPlans: { primary: { headerName: "X-Api-Key", headerPrefix: "", value: "K" } },
+    });
+    const adapter = createApiCallCredentialAdapter({
+      source,
+      authKey: "primary",
+      authorizedUris: ["https://api.example.com/**"],
+    });
+    expect(adapter.refreshable).toBe(false);
   });
 
   it("refreshCredentials returns null when the credential was NOT rotated", async () => {

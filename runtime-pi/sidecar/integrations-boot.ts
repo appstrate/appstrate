@@ -1112,6 +1112,7 @@ export async function bootIntegrations(
             toolName: apiCall.toolName,
             fetchCredentials: credAdapter.fetchCredentials,
             refreshCredentials: credAdapter.refreshCredentials,
+            refreshable: credAdapter.refreshable,
             // Resumable-upload protocols the manifest declared (plumbed via
             // the spawn resolver). When non-empty the factory also emits an
             // `api_upload` tool; the agent-side resolver drives it.

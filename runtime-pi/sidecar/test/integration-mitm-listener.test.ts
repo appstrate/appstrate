@@ -458,68 +458,138 @@ describe("MITM listener — 401 refresh + retry", () => {
     }
   });
 
-  runIfOpenssl("api_key 401: calls /refresh (to flag) but does NOT retry", async () => {
-    // A 401 on an injected api_key credential now reaches the platform
-    // `/refresh` (which flags the connection needsReconnection — modelled here
-    // by the source returning false), but since there is no token to rotate the
-    // request is NOT replayed.
-    const bundle = await makeCaBundle();
-    const minter = createCertMinter({
-      caCertPem: bundle.pems.caCertPem,
-      caKeyPem: bundle.pems.caKeyPem,
-    });
-
-    let upstreamCallNo = 0;
-    let refreshCalls = 0;
-
-    const dp: Record<string, HttpDeliveryPlan> = {
-      vendor: {
-        headerName: "X-Api-Key",
-        headerPrefix: "",
-        value: "secret",
-        allowServerOverride: false,
-      },
-    };
-    const pl = payload("vendor", "api_key", { api_key: "secret" }, ["https://api.test.local/**"]);
-
-    const creds: MitmCredentialSource = {
-      current: () => pl,
-      deliveryPlans: () => dp,
-      async refreshOnUnauthorized() {
-        refreshCalls += 1;
-        return false; // /refresh flagged the connection; nothing to rotate
-      },
-    };
-
-    const recorded = makeRecordingFetch(async () => {
-      upstreamCallNo += 1;
-      return new Response(`{"err":"unauthorized"}`, { status: 401 });
-    });
-
-    const listener = createIntegrationMitmListener({
-      caBundle: bundle,
-      minter,
-      credentials: creds,
-      fetch: recorded.fetch,
-    });
-    await listener.ready;
-    try {
-      const addr = listener.address();
-      const out = await drivenFetch({
-        listenerPort: addr.port,
-        sni: "api.test.local",
+  runIfOpenssl(
+    "api_key persistent 401: same-credential retry, THEN /refresh (to flag), no rotate-retry",
+    async () => {
+      // A 401 on an injected api_key credential first replays the SAME request
+      // once (a 401 may be a transient blip). The replay also 401s here → the
+      // listener reaches the platform `/refresh` (which flags the connection —
+      // modelled by the source returning false). Since there is no token to
+      // rotate, the request is not replayed a third time.
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
         caCertPem: bundle.pems.caCertPem,
-        method: "GET",
-        path: "/",
-        headers: {},
+        caKeyPem: bundle.pems.caKeyPem,
       });
-      expect(out.status).toBe(401);
-      expect(upstreamCallNo).toBe(1); // no retry — false result
-      expect(refreshCalls).toBe(1); // but /refresh WAS reached (to flag)
-    } finally {
-      await listener.close();
-    }
-  });
+
+      let upstreamCallNo = 0;
+      let refreshCalls = 0;
+
+      const dp: Record<string, HttpDeliveryPlan> = {
+        vendor: {
+          headerName: "X-Api-Key",
+          headerPrefix: "",
+          value: "secret",
+          allowServerOverride: false,
+        },
+      };
+      const pl = payload("vendor", "api_key", { api_key: "secret" }, ["https://api.test.local/**"]);
+
+      const creds: MitmCredentialSource = {
+        current: () => pl,
+        deliveryPlans: () => dp,
+        async refreshOnUnauthorized() {
+          refreshCalls += 1;
+          return false; // /refresh flagged the connection; nothing to rotate
+        },
+      };
+
+      const recorded = makeRecordingFetch(async () => {
+        upstreamCallNo += 1;
+        return new Response(`{"err":"unauthorized"}`, { status: 401 });
+      });
+
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        fetch: recorded.fetch,
+      });
+      await listener.ready;
+      try {
+        const addr = listener.address();
+        const out = await drivenFetch({
+          listenerPort: addr.port,
+          sni: "api.test.local",
+          caCertPem: bundle.pems.caCertPem,
+          method: "GET",
+          path: "/",
+          headers: {},
+        });
+        expect(out.status).toBe(401);
+        expect(upstreamCallNo).toBe(2); // original + one same-credential replay
+        expect(refreshCalls).toBe(1); // replay still 401 → /refresh reached (to flag)
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+
+  runIfOpenssl(
+    "api_key transient 401: same-credential retry succeeds → NO /refresh, not flagged",
+    async () => {
+      // The first response is a transient 401 (upstream blip); the same-request
+      // replay succeeds. The listener must NOT reach `/refresh` — a still-good
+      // key would be wrongly flagged needsReconnection.
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+
+      let upstreamCallNo = 0;
+      let refreshCalls = 0;
+
+      const dp: Record<string, HttpDeliveryPlan> = {
+        vendor: {
+          headerName: "X-Api-Key",
+          headerPrefix: "",
+          value: "secret",
+          allowServerOverride: false,
+        },
+      };
+      const pl = payload("vendor", "api_key", { api_key: "secret" }, ["https://api.test.local/**"]);
+
+      const creds: MitmCredentialSource = {
+        current: () => pl,
+        deliveryPlans: () => dp,
+        async refreshOnUnauthorized() {
+          refreshCalls += 1;
+          return false;
+        },
+      };
+
+      const recorded = makeRecordingFetch(async () => {
+        upstreamCallNo += 1;
+        return upstreamCallNo === 1
+          ? new Response(`{"err":"unauthorized"}`, { status: 401 })
+          : new Response(`{"ok":true}`, { status: 200 });
+      });
+
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        fetch: recorded.fetch,
+      });
+      await listener.ready;
+      try {
+        const out = await drivenFetch({
+          listenerPort: listener.address().port,
+          sni: "api.test.local",
+          caCertPem: bundle.pems.caCertPem,
+          method: "GET",
+          path: "/",
+          headers: {},
+        });
+        expect(out.status).toBe(200); // recovered on the same-credential replay
+        expect(upstreamCallNo).toBe(2); // original + one replay
+        expect(refreshCalls).toBe(0); // never reached /refresh → not flagged
+      } finally {
+        await listener.close();
+      }
+    },
+  );
 
   runIfOpenssl(
     "403 does NOT trigger a refresh (authorization decision, not a dead credential)",

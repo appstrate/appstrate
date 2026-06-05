@@ -745,28 +745,65 @@ async function handleInnerRequest(
   let retried = false;
   let lastAction = action;
 
-  if ((got401 || connectReauth) && matchedAuthKey !== null && credentials.refreshOnUnauthorized) {
+  // Rebuild the action from the source's CURRENT state (fresh after a refresh /
+  // re-login, identical for a same-credential replay) and re-issue the request
+  // once. Returns the new response, or null if the retry threw.
+  const refetch = async (): Promise<Response | null> => {
+    const a = buildAction();
+    lastAction = a;
+    const outbound = buildOutboundHeaders(
+      headersForOutbound,
+      sniHost,
+      a.strippedHeaderNames,
+      a.injectedHeader,
+    );
+    try {
+      return await fetchFn(targetUrl, {
+        method: req.method,
+        headers: outbound,
+        ...(body.byteLength > 0 ? { body } : {}),
+        redirect: "manual",
+        signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
+      });
+    } catch (err) {
+      emit({ kind: "upstream-error", url: targetUrl, error: `retry: ${(err as Error).message}` });
+      return null;
+    }
+  };
+
+  // Non-OAuth credential transient guard: an api_key/basic 401 may be a passing
+  // upstream blip (rate-limit-as-401, WAF challenge), not a dead key. Retry the
+  // SAME request once; only a SECOND 401 routes to the platform /refresh (which
+  // flags the connection). OAuth and connect.tool re-login skip this — they need
+  // a rotated token / fresh session, not a replay of the same credential.
+  if (got401 && !connectReauth && matchedAuthKey !== null) {
+    const matched = credentials.current().auths.find((a) => a.authKey === matchedAuthKey);
+    if (matched && matched.authType !== "oauth2") {
+      const replay = await refetch();
+      if (replay) {
+        response = replay;
+        retried = true;
+      }
+    }
+  }
+
+  // Still unauthorized on our injected credential (or a connect.tool re-login
+  // trigger): force a platform refresh — rotates the token for oauth, flags the
+  // connection for a non-oauth auth whose same-request replay above also 401'd.
+  // A successful refresh / re-login replays the request once more.
+  const stillUnauthorized =
+    response.status === 401 && !!lastAction.matchedAuth && lastAction.injectedHeader !== null;
+  if (
+    (stillUnauthorized || connectReauth) &&
+    matchedAuthKey !== null &&
+    credentials.refreshOnUnauthorized
+  ) {
     const refreshed = await credentials.refreshOnUnauthorized(matchedAuthKey).catch(() => false);
     if (refreshed) {
-      const action2 = buildAction();
-      lastAction = action2;
-      const outbound2 = buildOutboundHeaders(
-        headersForOutbound,
-        sniHost,
-        action2.strippedHeaderNames,
-        action2.injectedHeader,
-      );
-      try {
-        response = await fetchFn(targetUrl, {
-          method: req.method,
-          headers: outbound2,
-          ...(body.byteLength > 0 ? { body } : {}),
-          redirect: "manual",
-          signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
-        });
+      const replay = await refetch();
+      if (replay) {
+        response = replay;
         retried = true;
-      } catch (err) {
-        emit({ kind: "upstream-error", url: targetUrl, error: `retry: ${(err as Error).message}` });
       }
     }
   }

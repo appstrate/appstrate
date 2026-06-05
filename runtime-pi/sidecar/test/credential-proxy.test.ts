@@ -211,6 +211,75 @@ describe("executeApiCall — 401 retry path", () => {
     expect(deps.reportedAuthFailures.has("gmail")).toBe(true);
   });
 
+  it("refreshableAuth=false: a transient 401 recovers on the same-credential replay (no /refresh)", async () => {
+    // A non-refreshable (api_key/basic) 401 may be a passing upstream blip. The
+    // proxy retries the SAME request once BEFORE /refresh; when the replay
+    // succeeds the credential is NOT flagged — refreshCredentials is never hit.
+    let calls = 0;
+    const fetchFn = mock(async () => {
+      calls += 1;
+      return calls === 1
+        ? new Response("blip", { status: 401 })
+        : new Response('{"ok":true}', {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+    });
+    const refreshCredentials = mock(async () => null);
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      refreshCredentials,
+      refreshableAuth: false,
+    });
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.response.status).toBe(200);
+    expect(calls).toBe(2); // original + same-credential replay
+    expect(refreshCredentials).not.toHaveBeenCalled();
+    expect(deps.reportedAuthFailures.has("gmail")).toBe(false);
+  });
+
+  it("refreshableAuth=false: a persistent 401 replays once, THEN /refresh flags it", async () => {
+    // The same-credential replay also 401s → the credential is dead. The proxy
+    // calls /refresh (which flags the connection + returns null) and does not
+    // replay a third time.
+    let calls = 0;
+    const fetchFn = mock(async () => {
+      calls += 1;
+      return new Response("expired", { status: 401 });
+    });
+    const refreshCredentials = mock(async () => null);
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      refreshCredentials,
+      refreshableAuth: false,
+    });
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.response.status).toBe(401);
+    expect(calls).toBe(2); // original + one same-credential replay
+    expect(refreshCredentials).toHaveBeenCalledTimes(1);
+    expect(deps.reportedAuthFailures.has("gmail")).toBe(true);
+  });
+
   it("does NOT replay a streaming-request body on 401", async () => {
     let upstreamCalls = 0;
     const fetchFn = mock(async (url: string | URL) => {

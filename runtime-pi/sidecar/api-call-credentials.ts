@@ -38,6 +38,14 @@ export interface ApiCallCredentialAdapter {
    * stale token.
    */
   refreshCredentials: (integrationId: string) => Promise<ProxyCredentialsPayload | null>;
+  /**
+   * Whether this auth can ROTATE its credential on a 401 (oauth2). When
+   * `false` (api_key / basic / a custom auth) a forced refresh has nothing to
+   * rotate and the platform `/refresh` flags the connection — so the proxy
+   * first retries the SAME request once (a 401 may be a transient upstream
+   * blip, not a dead key) before letting `refreshCredentials` flag it.
+   */
+  refreshable: boolean;
 }
 
 /**
@@ -76,5 +84,7 @@ export function createApiCallCredentialAdapter(opts: {
       const rotated = await source.refreshOnUnauthorized(authKey).catch(() => false);
       return rotated ? toPayload() : null;
     },
+    // Static at run-start: an auth's type never changes mid-run.
+    refreshable: source.current().auths.find((a) => a.authKey === authKey)?.authType === "oauth2",
   };
 }

@@ -139,6 +139,15 @@ export interface ApiCallDeps {
    */
   refreshCredentials?: (integrationId: string) => Promise<CredentialsResponse | null>;
   /**
+   * Whether the bound auth can ROTATE on a 401 (oauth2). When `false`
+   * (api_key / basic) a forced refresh only flags the connection, so the proxy
+   * retries the SAME request once before refreshing — a 401 on a static
+   * credential may be a transient upstream blip (rate-limit-as-401, WAF
+   * challenge), not a dead key. `undefined` (legacy callers) is treated as
+   * refreshable, preserving the immediate-refresh path.
+   */
+  refreshableAuth?: boolean;
+  /**
    * Set tracking which integrations already had a persistent auth
    * failure logged in this run. Mutated by the function — shared
    * across calls so a flapping integration only logs once and so the
@@ -156,8 +165,15 @@ export interface ApiCallDeps {
  * before any outbound bytes were sent.
  */
 export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Promise<ApiCallResult> {
-  const { config, cookieJar, fetchFn, fetchCredentials, refreshCredentials, reportedAuthFailures } =
-    deps;
+  const {
+    config,
+    cookieJar,
+    fetchFn,
+    fetchCredentials,
+    refreshCredentials,
+    refreshableAuth,
+    reportedAuthFailures,
+  } = deps;
   const { integrationId, targetUrl, method, callerHeaders, body, substituteBody } = args;
 
   // 1. Validate integrationId format (defence in depth — callers should
@@ -374,20 +390,40 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     config.runToken &&
     !reportedAuthFailures.has(integrationId)
   ) {
-    const fresh = await refreshCredentials(integrationId).catch(() => null);
-    if (fresh) {
-      if (body.kind !== "streaming") {
-        try {
-          const r = await doUpstreamRequest(fresh);
-          upstream = r.response;
-          upstreamFinalUrl = r.finalUrl;
-        } catch (err) {
-          return wrapRequestError(err, resolvedUrl);
+    // Non-refreshable auth (api_key / basic): a 401 may be a transient upstream
+    // blip (rate-limit returned as 401, WAF challenge), not a dead key. Retry
+    // the SAME request once before `/refresh` treats the credential as dead and
+    // flags the connection. OAuth skips this — a mid-run 401 means the token is
+    // expired and must be rotated, not replayed with the same stale value.
+    if (refreshableAuth === false && body.kind !== "streaming") {
+      try {
+        const r = await doUpstreamRequest(creds);
+        upstream = r.response;
+        upstreamFinalUrl = r.finalUrl;
+      } catch (err) {
+        return wrapRequestError(err, resolvedUrl);
+      }
+    }
+
+    // Still 401 → force a refresh. Rotates the token for oauth (replay with the
+    // fresh value), or — for a non-oauth auth whose same-request replay above
+    // also 401'd — flags the connection and returns null (no replay).
+    if (upstream.status === 401) {
+      const fresh = await refreshCredentials(integrationId).catch(() => null);
+      if (fresh) {
+        if (body.kind !== "streaming") {
+          try {
+            const r = await doUpstreamRequest(fresh);
+            upstream = r.response;
+            upstreamFinalUrl = r.finalUrl;
+          } catch (err) {
+            return wrapRequestError(err, resolvedUrl);
+          }
+        } else {
+          // Body already consumed — surface the rotated-but-still-401 signal to
+          // the caller, which adds X-Auth-Refreshed.
+          authRefreshed = true;
         }
-      } else {
-        // Body already consumed — surface the rotated-but-still-401 signal to
-        // the caller, which adds X-Auth-Refreshed.
-        authRefreshed = true;
       }
     }
   }
