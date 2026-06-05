@@ -62,7 +62,6 @@ async function makeResourcesApp(overrides: Partial<AppDeps> = {}) {
         integrationId: "@test/integ",
         fetchCredentials: integResCreds,
         refreshCredentials: integResCreds,
-        refreshable: true,
       },
     ],
     runtimeDeps,

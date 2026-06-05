@@ -53,7 +53,7 @@
  */
 
 import { createServer as netCreateServer, connect as netConnect, type Socket } from "node:net";
-import { isBlockedHost, isBlockedUrl, isIdempotentMethod, OUTBOUND_TIMEOUT_MS } from "./helpers.ts";
+import { isBlockedHost, isBlockedUrl, OUTBOUND_TIMEOUT_MS } from "./helpers.ts";
 import type {
   HttpDeliveryPlan,
   IntegrationCredentialsPayload,
@@ -791,40 +791,12 @@ async function handleInnerRequest(
     }
   };
 
-  // Non-OAuth credential guard: retry the SAME request once to absorb a one-off
-  // / spurious 401 (e.g. a brief upstream auth-backend hiccup). A 401 that
-  // PERSISTS across the replay is treated as terminal and routes to the
-  // platform /refresh (which flags the connection) — an immediate identical
-  // replay does NOT clear a sustained throttle window, so that case still
-  // flags. OAuth and connect.tool re-login skip the replay — they re-acquire
-  // the credential (rotated token / fresh session) rather than replay it.
-  // Idempotent methods only (RFC 9110) — never re-issue a POST/PATCH with the
-  // same credential; a non-idempotent 401 routes straight to /refresh.
+  // A 401 on our injected credential (or a connect.tool re-login trigger):
+  // force a platform refresh — rotates the token for oauth, flags the
+  // connection needsReconnection for a non-oauth auth (nothing to refresh after
+  // a 401). A successful refresh / re-login replays the request once.
   if (
-    got401 &&
-    !connectReauth &&
-    !reauthExcluded &&
-    matchedAuthKey !== null &&
-    isIdempotentMethod(req.method)
-  ) {
-    const matched = credentials.current().auths.find((a) => a.authKey === matchedAuthKey);
-    if (matched && matched.authType !== "oauth2") {
-      const replay = await refetch();
-      if (replay) {
-        response = replay;
-        retried = true;
-      }
-    }
-  }
-
-  // Still unauthorized on our injected credential (or a connect.tool re-login
-  // trigger): force a platform refresh — rotates the token for oauth, flags the
-  // connection for a non-oauth auth whose same-request replay above also 401'd.
-  // A successful refresh / re-login replays the request once more.
-  const stillUnauthorized =
-    response.status === 401 && !!lastAction.matchedAuth && lastAction.injectedHeader !== null;
-  if (
-    (stillUnauthorized || connectReauth) &&
+    (got401 || connectReauth) &&
     !reauthExcluded &&
     matchedAuthKey !== null &&
     credentials.refreshOnUnauthorized

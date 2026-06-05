@@ -35,7 +35,6 @@ import {
   normalizeAuthScheme,
   substituteVars,
   findUnresolvedPlaceholders,
-  isIdempotentMethod,
   OUTBOUND_TIMEOUT_MS,
   INTEGRATION_ID_RE,
   type CredentialsResponse,
@@ -140,15 +139,6 @@ export interface ApiCallDeps {
    */
   refreshCredentials?: (integrationId: string) => Promise<CredentialsResponse | null>;
   /**
-   * Whether a 401 can RE-ACQUIRE the bound auth's credential — oauth2 (token
-   * rotation) or a connect.tool re-login. When `false` (api_key / basic) a
-   * forced refresh only flags the connection, so the proxy retries the SAME
-   * request once before refreshing — a 401 on a static credential may be a
-   * transient upstream blip, not a dead key. `undefined` (legacy callers) is
-   * treated as refreshable, preserving the immediate-refresh path.
-   */
-  refreshableAuth?: boolean;
-  /**
    * Set tracking which integrations already had a persistent auth
    * failure logged in this run. Mutated by the function — shared
    * across calls so a flapping integration only logs once and so the
@@ -166,15 +156,8 @@ export interface ApiCallDeps {
  * before any outbound bytes were sent.
  */
 export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Promise<ApiCallResult> {
-  const {
-    config,
-    cookieJar,
-    fetchFn,
-    fetchCredentials,
-    refreshCredentials,
-    refreshableAuth,
-    reportedAuthFailures,
-  } = deps;
+  const { config, cookieJar, fetchFn, fetchCredentials, refreshCredentials, reportedAuthFailures } =
+    deps;
   const { integrationId, targetUrl, method, callerHeaders, body, substituteBody } = args;
 
   // 1. Validate integrationId format (defence in depth — callers should
@@ -391,44 +374,20 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     config.runToken &&
     !reportedAuthFailures.has(integrationId)
   ) {
-    // Non-refreshable auth (api_key / basic): retry the SAME request once
-    // before `/refresh` treats the credential as dead and flags the connection.
-    // This absorbs a one-off / spurious 401 (e.g. a brief upstream auth-backend
-    // hiccup) — NOT a sustained throttle window, which an immediate identical
-    // replay cannot clear: any 401 that PERSISTS across the replay is treated
-    // as terminal and flags `needsReconnection`. OAuth skips the replay — a
-    // mid-run 401 means the token is expired and must be rotated, not replayed.
-    // Idempotent methods only (RFC 9110) — never re-issue a POST/PATCH; those
-    // go straight to /refresh.
-    if (refreshableAuth === false && body.kind !== "streaming" && isIdempotentMethod(method)) {
-      try {
-        const r = await doUpstreamRequest(creds);
-        upstream = r.response;
-        upstreamFinalUrl = r.finalUrl;
-      } catch (err) {
-        return wrapRequestError(err, resolvedUrl);
-      }
-    }
-
-    // Still 401 → force a refresh. Rotates the token for oauth (replay with the
-    // fresh value), or — for a non-oauth auth whose same-request replay above
-    // also 401'd — flags the connection and returns null (no replay).
-    if (upstream.status === 401) {
-      const fresh = await refreshCredentials(integrationId).catch(() => null);
-      if (fresh) {
-        if (body.kind !== "streaming") {
-          try {
-            const r = await doUpstreamRequest(fresh);
-            upstream = r.response;
-            upstreamFinalUrl = r.finalUrl;
-          } catch (err) {
-            return wrapRequestError(err, resolvedUrl);
-          }
-        } else {
-          // Body already consumed — surface the rotated-but-still-401 signal to
-          // the caller, which adds X-Auth-Refreshed.
-          authRefreshed = true;
+    const fresh = await refreshCredentials(integrationId).catch(() => null);
+    if (fresh) {
+      if (body.kind !== "streaming") {
+        try {
+          const r = await doUpstreamRequest(fresh);
+          upstream = r.response;
+          upstreamFinalUrl = r.finalUrl;
+        } catch (err) {
+          return wrapRequestError(err, resolvedUrl);
         }
+      } else {
+        // Body already consumed — surface the rotated-but-still-401 signal to
+        // the caller, which adds X-Auth-Refreshed.
+        authRefreshed = true;
       }
     }
   }

@@ -26,17 +26,6 @@ export const OUTBOUND_TIMEOUT_MS = 30_000;
 export const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_000 — was killing legitimate long-running agentic runs at exactly 5 min)
 
 /**
- * RFC 9110 §9.2.2 idempotent methods — a request that can be re-issued without
- * additional effect on the server. The credential proxy + MITM listener replay
- * a same-credential request once on a 401 (transient-blip guard) ONLY for these
- * methods, so a `POST`/`PATCH` is never double-applied. Case-insensitive.
- */
-const IDEMPOTENT_HTTP_METHODS = new Set(["GET", "HEAD", "PUT", "DELETE", "OPTIONS", "TRACE"]);
-export function isIdempotentMethod(method: string): boolean {
-  return IDEMPOTENT_HTTP_METHODS.has(method.toUpperCase());
-}
-
-/**
  * Default cap on simultaneous `api_call` MCP invocations per run.
  * Three matches the typical browsing concurrency a single LLM turn can
  * usefully exploit while leaving headroom under most providers' per-IP

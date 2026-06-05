@@ -38,18 +38,6 @@ export interface ApiCallCredentialAdapter {
    * stale token.
    */
   refreshCredentials: (integrationId: string) => Promise<ProxyCredentialsPayload | null>;
-  /**
-   * Whether a 401 can RE-ACQUIRE this auth's credential — oauth2 (token
-   * rotation) OR a connect.tool auth whose `reauth_on` covers 401 (mid-run
-   * re-login). When `true` the proxy refreshes immediately. When `false`
-   * (api_key / basic / a custom auth with no 401 re-login) a forced refresh
-   * has nothing to re-acquire and the platform `/refresh` flags the
-   * connection — so the proxy first retries the SAME request once (a one-off
-   * 401 may be spurious, not a dead key) before letting `refreshCredentials`
-   * flag it. Mirrors the MITM listener's `!connectReauth` gate so a
-   * connect.tool session is never replayed stale on the api_call path.
-   */
-  refreshable: boolean;
 }
 
 /**
@@ -99,14 +87,5 @@ export function createApiCallCredentialAdapter(opts: {
       const rotated = await source.refreshOnUnauthorized(authKey).catch(() => false);
       return rotated ? toPayload() : null;
     },
-    // oauth2 rotates; a connect.tool auth re-acquires via re-login. Both skip
-    // the stale-credential replay (refresh immediately) — as does a connect.tool
-    // auth whose `reauth_on` excludes 401, where `refreshCredentials` above
-    // no-ops to a pass-through. Only a PLAIN static credential (api_key/basic,
-    // no re-login handler) takes the same-request replay. Optional-chained:
-    // real sources always implement `hasReloginHandler`, test fakes may not.
-    refreshable:
-      source.current().auths.find((a) => a.authKey === authKey)?.authType === "oauth2" ||
-      source.hasReloginHandler?.(authKey) === true,
   };
 }
