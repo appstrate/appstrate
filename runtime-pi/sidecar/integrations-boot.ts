@@ -231,9 +231,15 @@ export function readIntegrationSpecsFromEnv(env = process.env): IntegrationSpawn
  */
 async function fetchBundleBytes(
   mcpServerId: string,
+  serverVersion: string | undefined,
   opts: BundleFetchOptions,
 ): Promise<Uint8Array> {
-  const url = `${opts.platformApiUrl}/internal/mcp-server-bundle/${mcpServerId}`;
+  // #588 — when the platform pinned a concrete version at run kickoff, forward
+  // it so the bytes match the manifest the spawn-resolver read. Absent → the
+  // route serves the latest non-yanked version (back-compat).
+  const url = serverVersion
+    ? `${opts.platformApiUrl}/internal/mcp-server-bundle/${mcpServerId}?version=${encodeURIComponent(serverVersion)}`
+    : `${opts.platformApiUrl}/internal/mcp-server-bundle/${mcpServerId}`;
   const f = opts.fetchFn ?? fetch;
   const res = await f(url, { headers: { Authorization: `Bearer ${opts.runToken}` } });
   if (!res.ok) {
@@ -765,10 +771,14 @@ async function spawnAndConnectLocalIntegration(params: {
 
   // AFPS — fetch the referenced mcp-server package's bundle (the runnable
   // server code), NOT the integration's own bundle. Local-source integrations
-  // always carry `server.serverPackageId`; fall back to the integration id only
+  // always carry `server.packageId`; fall back to the integration id only
   // if a spec somehow omits it (defensive).
-  const serverPackageId = spec.manifest.server?.serverPackageId ?? spec.integrationId;
-  const bytes = await fetchBundleBytes(serverPackageId, bundleFetchOpts);
+  const serverPackageId = spec.manifest.server?.packageId ?? spec.integrationId;
+  const bytes = await fetchBundleBytes(
+    serverPackageId,
+    spec.manifest.server?.version,
+    bundleFetchOpts,
+  );
   const root = await extractBundle(bytes, spec.namespace);
 
   const spawnStart = performance.now();

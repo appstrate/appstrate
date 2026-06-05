@@ -17,7 +17,7 @@ import type { ConnectContext } from "../../../src/services/connect/strategy.ts";
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedInstalledPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   localIntegrationManifest,
@@ -88,12 +88,22 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     });
     // The integration's `source.kind: "local"` references a separate mcp-server
     // package; the spawn resolver looks it up for the runnable server config.
+    const serverManifest = mcpServerManifest({
+      name: MCP_SERVER,
+      version: "0.1.0",
+      serverType: "node",
+    });
     await seedPackage({
       id: MCP_SERVER,
       orgId: ctx.orgId,
       type: "mcp-server",
       source: "local",
-      draftManifest: mcpServerManifest({ name: MCP_SERVER, version: "0.1.0", serverType: "node" }),
+      draftManifest: serverManifest,
+    });
+    await seedPackageVersion({
+      packageId: MCP_SERVER,
+      version: "0.1.0",
+      manifest: serverManifest,
     });
     await seedInstalledPackage(ctx.defaultAppId, INTEG);
   });
@@ -219,12 +229,22 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       source: "local",
       draftManifest: manifest,
     });
+    const serverManifest = mcpServerManifest({
+      name: MCP_SERVER,
+      version: "0.1.0",
+      serverType: "node",
+    });
     await seedPackage({
       id: MCP_SERVER,
       orgId: ctx.orgId,
       type: "mcp-server",
       source: "local",
-      draftManifest: mcpServerManifest({ name: MCP_SERVER, version: "0.1.0", serverType: "node" }),
+      draftManifest: serverManifest,
+    });
+    await seedPackageVersion({
+      packageId: MCP_SERVER,
+      version: "0.1.0",
+      manifest: serverManifest,
     });
     await seedInstalledPackage(ctx.defaultAppId, INTEG);
     await new LoginSecretStrategy().complete(connectCtx(), {
@@ -284,12 +304,22 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       source: "local",
       draftManifest: manifest,
     });
+    const serverManifest = mcpServerManifest({
+      name: MCP_SERVER,
+      version: "0.1.0",
+      serverType: "node",
+    });
     await seedPackage({
       id: MCP_SERVER,
       orgId: ctx.orgId,
       type: "mcp-server",
       source: "local",
-      draftManifest: mcpServerManifest({ name: MCP_SERVER, version: "0.1.0", serverType: "node" }),
+      draftManifest: serverManifest,
+    });
+    await seedPackageVersion({
+      packageId: MCP_SERVER,
+      version: "0.1.0",
+      manifest: serverManifest,
     });
     await seedInstalledPackage(ctx.defaultAppId, INTEG);
 

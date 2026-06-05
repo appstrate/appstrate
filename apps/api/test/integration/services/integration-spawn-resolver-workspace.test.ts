@@ -24,7 +24,7 @@ import { encryptCredentials } from "@appstrate/connect";
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedInstalledPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   mcpServerManifest,
@@ -85,19 +85,21 @@ async function seedMcpServer(
   ctx: TestContext,
   workspace?: { mount?: string; access?: "ro" | "rw" },
 ) {
+  const manifest = mcpServerManifest({
+    name: SERVER,
+    version: "1.0.0",
+    serverType: "node",
+    entryPoint: "./server.js",
+    ...(workspace ? { workspace } : {}),
+  });
   await seedPackage({
     id: SERVER,
     orgId: ctx.orgId,
     type: "mcp-server",
     source: "local",
-    draftManifest: mcpServerManifest({
-      name: SERVER,
-      version: "1.0.0",
-      serverType: "node",
-      entryPoint: "./server.js",
-      ...(workspace ? { workspace } : {}),
-    }),
+    draftManifest: manifest,
   });
+  await seedPackageVersion({ packageId: SERVER, version: "1.0.0", manifest });
 }
 
 describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {

@@ -8,14 +8,16 @@
  * and the runtime credential/spawn path live in their own services.
  */
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages } from "@appstrate/db/schema";
+import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { mcpServerManifestSchema, type McpServerManifest } from "@appstrate/core/mcp-server";
+import { getSystemPackages } from "./system-packages.ts";
 import type { IntegrationSummary } from "@appstrate/shared-types";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
+import { pickVersion } from "./run-launcher/db-package-catalog.ts";
 import { logger } from "../lib/logger.ts";
 
 export type { IntegrationSummary };
@@ -100,6 +102,146 @@ export async function fetchMcpServerManifest(packageId: string): Promise<McpServ
     return null;
   }
   return parsed.data;
+}
+
+/**
+ * Discriminated failure modes for {@link resolveMcpServerForSpawn} — distinct
+ * from "package missing" so the spawn resolver can log WHY an integration was
+ * skipped (a leaked diagnosis cycle in prod traced to the silent
+ * stale-draft/latest-bytes split; see issue #588).
+ */
+export type McpServerResolveFailure =
+  | "not_found"
+  | "not_mcp_server"
+  | "invalid_manifest"
+  /** A published version exists, but none satisfied `source.server.version`. */
+  | "unsatisfiable_pin"
+  /** The package exists but has no published version to run. */
+  | "no_published_version";
+
+export type McpServerResolution =
+  | {
+      ok: true;
+      manifest: McpServerManifest;
+      /**
+       * The CONCRETE version the spawn will run. `null` for system
+       * mcp-servers (single version served from the boot registry — no
+       * `package_versions` row, no `?version=` needed on the byte route).
+       */
+      version: string | null;
+      /** `"system"` → boot registry bytes; `"version"` → published `.afps`. */
+      source: "system" | "version";
+    }
+  | { ok: false; reason: McpServerResolveFailure };
+
+/**
+ * Resolve a referenced `mcp-server` package to a CONCRETE version, honoring the
+ * `source.server.version` pin, and return that version's manifest.
+ *
+ * This is the single resolution contract for the local-source spawn path. It
+ * replaces the previous split where the manifest was read from
+ * `packages.draft_manifest` (version-blind) while the runnable bytes came from
+ * the latest non-yanked `package_versions` row (pin-blind, and independent of
+ * the manifest version) — so a `publish` that didn't also overwrite the draft
+ * left the run executing one version's bytes under another version's manifest
+ * (issue #588). Here the manifest comes from `package_versions.manifest` for the
+ * SAME `version` the byte route is told to serve, so they can never skew.
+ *
+ * Resolution order mirrors every other platform catalog: exact → dist-tag →
+ * semver range (yanked versions visible only to an exact pin). A missing /
+ * empty pin resolves to the `"latest"` dist-tag. System packages short-circuit
+ * to the in-memory boot registry (single version, served by id alone).
+ *
+ * Unscoped (no orgId filter) — callers already hold an auth context (run token
+ * / service-internal call), matching {@link fetchMcpServerManifest}.
+ */
+export async function resolveMcpServerForSpawn(
+  packageId: string,
+  pin?: string | null,
+): Promise<McpServerResolution> {
+  // System mcp-servers are loaded once at boot and served from the in-memory
+  // registry by id — there is no `package_versions` row to pin against, and the
+  // byte route resolves them the same way (issue #588 only concerns
+  // separately-versioned local packages).
+  const sys = getSystemPackages().get(packageId);
+  if (sys) {
+    const parsed = mcpServerManifestSchema.safeParse(sys.manifest);
+    if (!parsed.success) {
+      logger.warn("system mcp-server manifest failed validation", { packageId });
+      return { ok: false, reason: "invalid_manifest" };
+    }
+    return { ok: true, manifest: parsed.data, version: null, source: "system" };
+  }
+
+  const [pkgRow] = await db
+    .select({ type: packages.type })
+    .from(packages)
+    .where(eq(packages.id, packageId))
+    .limit(1);
+  if (!pkgRow) {
+    logger.info("referenced mcp-server package not found", { packageId });
+    return { ok: false, reason: "not_found" };
+  }
+  if (pkgRow.type !== "mcp-server") {
+    logger.warn("referenced package is not an mcp-server", {
+      packageId,
+      actualType: pkgRow.type,
+    });
+    return { ok: false, reason: "not_mcp_server" };
+  }
+
+  const [versionRows, tagRows] = await Promise.all([
+    db
+      .select({
+        version: packageVersions.version,
+        integrity: packageVersions.integrity,
+        yanked: packageVersions.yanked,
+        manifest: packageVersions.manifest,
+      })
+      .from(packageVersions)
+      .where(eq(packageVersions.packageId, packageId))
+      .orderBy(desc(packageVersions.createdAt)),
+    db
+      .select({ tag: packageDistTags.tag, version: packageVersions.version })
+      .from(packageDistTags)
+      .innerJoin(packageVersions, eq(packageDistTags.versionId, packageVersions.id))
+      .where(eq(packageDistTags.packageId, packageId)),
+  ]);
+
+  if (versionRows.length === 0) {
+    logger.warn("referenced mcp-server has no published version", { packageId, pin });
+    return { ok: false, reason: "no_published_version" };
+  }
+
+  // Missing/empty pin → "latest" (the working-copy default; the org run path
+  // treats `source.server.version` as advisory). `pickVersion` applies the
+  // canonical exact → dist-tag → range resolution and the yanked-visibility
+  // rule shared with `DbPackageCatalog`.
+  const spec = pin && pin.trim().length > 0 ? pin.trim() : "latest";
+  const picked = pickVersion(
+    spec,
+    versionRows.map((v) => ({ version: v.version, integrity: v.integrity, yanked: v.yanked })),
+    tagRows,
+  );
+  if (!picked) {
+    logger.warn("source.server.version pin could not be satisfied for mcp-server", {
+      packageId,
+      pin: spec,
+      available: versionRows.map((v) => v.version),
+    });
+    return { ok: false, reason: "unsatisfiable_pin" };
+  }
+
+  const row = versionRows.find((v) => v.version === picked.version);
+  const parsed = mcpServerManifestSchema.safeParse(row?.manifest);
+  if (!parsed.success) {
+    logger.warn("mcp-server version manifest failed validation", {
+      packageId,
+      version: picked.version,
+    });
+    return { ok: false, reason: "invalid_manifest" };
+  }
+  return { ok: true, manifest: parsed.data, version: picked.version, source: "version" };
 }
 
 // ---------------------------------------------------------------------------

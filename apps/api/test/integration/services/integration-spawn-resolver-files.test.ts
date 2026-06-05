@@ -20,7 +20,7 @@ import { encryptCredentials } from "@appstrate/connect";
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedInstalledPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   mcpServerManifest,
@@ -95,18 +95,20 @@ async function seedConnection(ctx: TestContext, fields: Record<string, string>) 
 }
 
 async function seedServer(ctx: TestContext) {
+  const manifest = mcpServerManifest({
+    name: SERVER,
+    version: "0.1.0",
+    serverType: "node",
+    entryPoint: "./server.js",
+  });
   await seedPackage({
     id: SERVER,
     orgId: ctx.orgId,
     type: "mcp-server",
     source: "local",
-    draftManifest: mcpServerManifest({
-      name: SERVER,
-      version: "0.1.0",
-      serverType: "node",
-      entryPoint: "./server.js",
-    }),
+    draftManifest: manifest,
   });
+  await seedPackageVersion({ packageId: SERVER, version: "0.1.0", manifest });
 }
 
 describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {

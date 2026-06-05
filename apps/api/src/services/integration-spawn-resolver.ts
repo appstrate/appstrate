@@ -45,13 +45,14 @@ import {
   getMcpServerMcpConfigEnv,
   getMcpServerWorkspaceMount,
   renderMcpConfigEnv,
+  type McpServerManifest,
 } from "@appstrate/core/mcp-server";
 import type { IntegrationSpawnSpec, ApiCallSpec } from "@appstrate/core/sidecar-types";
 
 import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
 import { isIntegrationActive, selectAccessibleConnection } from "./integration-connections.ts";
-import { fetchIntegrationManifest, fetchMcpServerManifest } from "./integration-service.ts";
+import { fetchIntegrationManifest, resolveMcpServerForSpawn } from "./integration-service.ts";
 import {
   getIntegrationSourceKind,
   getLocalServerRef,
@@ -218,10 +219,12 @@ async function resolveOne(
         entry_point?: string;
         url?: string;
         transport?: "streamable-http" | "sse";
-        serverPackageId?: string;
+        packageId?: string;
+        version?: string;
+        vendored?: boolean;
       }
     | undefined;
-  let referencedMcpServer: Awaited<ReturnType<typeof fetchMcpServerManifest>> | null = null;
+  let referencedMcpServer: McpServerManifest | null = null;
   if (isRemoteHttp) {
     const remote = getRemoteSource(manifest);
     if (!remote) {
@@ -247,14 +250,25 @@ async function resolveOne(
       logger.warn("local-source integration missing source.server; skipping", { integrationId });
       return null;
     }
-    const mcpServer = await fetchMcpServerManifest(ref.name);
-    if (!mcpServer) {
+    // Resolve the referenced mcp-server to ONE concrete version, honoring the
+    // `source.server.version` pin, and read THAT version's manifest. The
+    // resolved `version` is forwarded to the byte route (below, via
+    // `server.version`) so the runnable bytes come from the same version — no
+    // manifest/bytes skew, and a `publish` is reflected on the run without a
+    // draft overwrite (issue #588). An unsatisfiable pin / missing published
+    // version skips the integration LOUDLY rather than silently falling back to
+    // whatever bytes happen to be latest.
+    const resolution = await resolveMcpServerForSpawn(ref.name, ref.version);
+    if (!resolution.ok) {
       logger.warn("referenced mcp-server could not be resolved; skipping integration", {
         integrationId,
         mcpServerId: ref.name,
+        pin: ref.version,
+        reason: resolution.reason,
       });
       return null;
     }
+    const mcpServer = resolution.manifest;
     referencedMcpServer = mcpServer;
     const run = (mcpServer as { server?: { type?: string; entry_point?: string } }).server;
     // Defensive: mcpServerManifestSchema makes `server.{type,entry_point}`
@@ -278,7 +292,10 @@ async function resolveOne(
     serverSpec = {
       type: effectiveType,
       entry_point: run.entry_point,
-      serverPackageId: ref.name,
+      packageId: ref.name,
+      // The version the byte route must serve. `null` for system mcp-servers
+      // (the boot registry holds a single version, fetched by id alone).
+      ...(resolution.version ? { version: resolution.version } : {}),
       ...(typeof ref.vendored === "boolean" ? { vendored: ref.vendored } : {}),
     };
   }
@@ -362,7 +379,7 @@ async function resolveOne(
       // spec — the sidecar's serverless path (no spec.manifest.server) skips
       // spawn and only wires the generic api_call tool. Local runners
       // (node|python|binary|uv, resolved from the referenced mcp-server) emit
-      // `{ type, entry_point, serverPackageId }`. Remote MCP
+      // `{ type, entry_point, packageId, version }`. Remote MCP
       // (`sourceKind: "remote"`) emits `{ url, transport }` only — `server.type`
       // is intentionally absent because the spawn-mode discriminant lives on
       // `spec.sourceKind`, not in the AFPS `mcpServerTypeEnum` slot.
@@ -374,9 +391,10 @@ async function resolveOne(
               // AFPS — the referenced mcp-server package id, so the sidecar
               // fetches the runnable server bundle from
               // `GET /internal/mcp-server-bundle/...` (local sources only).
-              ...(serverSpec.serverPackageId
-                ? { serverPackageId: serverSpec.serverPackageId }
-                : {}),
+              ...(serverSpec.packageId ? { packageId: serverSpec.packageId } : {}),
+              // #588 — the concrete resolved version, so the sidecar fetches
+              // `?version=…` and the bytes match the manifest read above.
+              ...(serverSpec.version ? { version: serverSpec.version } : {}),
               // Phase 7 — propagate the remote MCP URL so the sidecar can open
               // a Streamable HTTP client against it. Mutually exclusive with
               // `entry_point` (enforced by `integrationManifestSchema`).
@@ -445,7 +463,7 @@ async function resolveOne(
  */
 function resolveWorkspaceMount(
   integrationId: string,
-  mcpServer: NonNullable<Awaited<ReturnType<typeof fetchMcpServerManifest>>>,
+  mcpServer: McpServerManifest,
 ): { workspaceMount?: NonNullable<IntegrationSpawnSpec["workspaceMount"]> } {
   let mount: ReturnType<typeof getMcpServerWorkspaceMount>;
   try {
@@ -515,7 +533,7 @@ async function resolveDeliveries(
   manifest: IntegrationManifest,
   resolvedConnection: ResolvedConnection | null,
   hasApiCall: boolean,
-  referencedMcpServer: Awaited<ReturnType<typeof fetchMcpServerManifest>> | null,
+  referencedMcpServer: McpServerManifest | null,
   requiredAuthKey: string | undefined,
 ): Promise<ResolvedDeliveries | null> {
   const auths = (manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;

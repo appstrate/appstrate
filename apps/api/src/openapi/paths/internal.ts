@@ -310,11 +310,19 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Fetch the AFPS bundle bytes for a referenced mcp-server package",
       description:
-        "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`).",
+        "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read; absent, the latest non-yanked version is served (back-compat).",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "version",
+          in: "query",
+          required: false,
+          description:
+            "Concrete published version to serve (the version the spawn resolver pinned from `source.server.version`). When omitted, the latest non-yanked version is served.",
+          schema: { type: "string" },
+        },
       ],
       responses: {
         "200": {

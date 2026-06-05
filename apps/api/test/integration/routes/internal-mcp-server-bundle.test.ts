@@ -170,6 +170,64 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
     expect(res.status).toBe(404);
   });
 
+  it("serves the EXACT version requested via ?version= (not the latest)", async () => {
+    // #588 — the spawn resolver pins a concrete version and the sidecar
+    // forwards it as ?version=. The route must serve THAT version's bytes even
+    // when a newer version exists, so manifest and bytes never skew.
+    await seedLocalIntegration(true);
+    const v100 = new TextEncoder().encode("bytes-of-1.0.0");
+    const v101 = new TextEncoder().encode("bytes-of-1.0.1-LATEST");
+    const manifest = mcpServerManifest({ name: MCP_SERVER, version: "1.0.0" });
+    await seedPackage({
+      id: MCP_SERVER,
+      orgId: ctx.orgId,
+      type: "mcp-server",
+      source: "local",
+      draftManifest: manifest,
+    });
+    // Two published versions; 1.0.1 is the newest (latest by createdAt).
+    await storage.uploadFile(BUCKET, `${MCP_SERVER}/1.0.0.afps`, Buffer.from(v100));
+    await seedPackageVersion({
+      packageId: MCP_SERVER,
+      version: "1.0.0",
+      integrity: computeIntegrity(v100),
+      artifactSize: v100.length,
+      manifest,
+    });
+    await storage.uploadFile(BUCKET, `${MCP_SERVER}/1.0.1.afps`, Buffer.from(v101));
+    await seedPackageVersion({
+      packageId: MCP_SERVER,
+      version: "1.0.1",
+      integrity: computeIntegrity(v101),
+      artifactSize: v101.length,
+      manifest: mcpServerManifest({ name: MCP_SERVER, version: "1.0.1" }),
+    });
+
+    // Explicit pin → 1.0.0 bytes, even though 1.0.1 is newer.
+    const pinned = await app.request(`/internal/mcp-server-bundle/${MCP_SERVER}?version=1.0.0`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(pinned.status).toBe(200);
+    expect(Array.from(new Uint8Array(await pinned.arrayBuffer()))).toEqual(Array.from(v100));
+
+    // No pin → latest (1.0.1), preserving the back-compat fallback.
+    const latest = await app.request(`/internal/mcp-server-bundle/${MCP_SERVER}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(latest.status).toBe(200);
+    expect(Array.from(new Uint8Array(await latest.arrayBuffer()))).toEqual(Array.from(v101));
+  });
+
+  it("returns 404 for a ?version= that does not exist", async () => {
+    await seedLocalIntegration(true);
+    await seedMcpServerWithBundle(MCP_SERVER, SERVER_BUNDLE_BYTES); // only 1.0.0
+
+    const res = await app.request(`/internal/mcp-server-bundle/${MCP_SERVER}?version=9.9.9`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(404);
+  });
+
   it("DENY: returns 404 when the referencing integration is declared but NOT installed in the app", async () => {
     // The integration that references MCP_SERVER exists and is declared by the
     // agent, but is not in `application_packages` — the guard requires an

@@ -27,7 +27,7 @@ import { encryptCredentials } from "@appstrate/connect";
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedInstalledPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   mcpServerManifest,
@@ -64,19 +64,21 @@ async function seedAll(ctx: TestContext, opts: SeedOpts, credBag: Record<string,
     }),
   });
   await seedInstalledPackage(ctx.defaultAppId, INTEG);
+  const serverManifest = mcpServerManifest({
+    name: SERVER,
+    version: "0.1.0",
+    serverType: "node",
+    entryPoint: "./server.js",
+    mcpConfigEnv: opts.mcpConfigEnv,
+  });
   await seedPackage({
     id: SERVER,
     orgId: ctx.orgId,
     type: "mcp-server",
     source: "local",
-    draftManifest: mcpServerManifest({
-      name: SERVER,
-      version: "0.1.0",
-      serverType: "node",
-      entryPoint: "./server.js",
-      mcpConfigEnv: opts.mcpConfigEnv,
-    }),
+    draftManifest: serverManifest,
   });
+  await seedPackageVersion({ packageId: SERVER, version: "0.1.0", manifest: serverManifest });
   await db.insert(integrationConnections).values({
     integrationId: INTEG,
     authKey: "primary",
