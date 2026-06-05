@@ -48,6 +48,21 @@ const KEY = (orgId: string | null | undefined, applicationId: string | null | un
   ["integrations", orgId ?? undefined, applicationId ?? undefined] as const;
 
 /**
+ * React Query key for a (integration, agent) resolution verdict. Exported so
+ * every consumer — the picker hook ({@link useIntegrationAgentResolution}) and
+ * the launch-badge readiness hook (`useAgentIntegrationsReadiness`) — builds it
+ * from ONE place and shares the cache. Hand-copying the key risked a silent
+ * cache split where the badge and the Connexions tab fetch the same verdict
+ * twice and disagree.
+ */
+export const agentResolutionQueryKey = (
+  orgId: string | null | undefined,
+  applicationId: string | null | undefined,
+  integrationId: string | undefined,
+  agentPackageId: string | undefined,
+) => [...KEY(orgId, applicationId), "agent-resolution", integrationId, agentPackageId] as const;
+
+/**
  * Shared request builder for `PATCH /integrations/{packageId}/connections/{id}`.
  *
  * Both the agent-context update (`useUpdateIntegrationConnection`) and the
@@ -130,12 +145,7 @@ export function useIntegrationAgentResolution(
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: [
-      ...KEY(orgId, applicationId),
-      "agent-resolution",
-      integrationId,
-      agentPackageId,
-    ] as const,
+    queryKey: agentResolutionQueryKey(orgId, applicationId, integrationId, agentPackageId),
     enabled: Boolean(orgId && applicationId && integrationId && agentPackageId),
     queryFn: () =>
       api<IntegrationAgentResolution>(

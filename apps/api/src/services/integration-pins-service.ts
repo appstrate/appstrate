@@ -41,7 +41,11 @@ import type {
   IntegrationPickStatus,
   IntegrationPin,
 } from "@appstrate/shared-types";
-import { missingScopesForConnection } from "@appstrate/core/integration";
+import {
+  missingScopesForConnection,
+  manifestAuthKeySet,
+  type ConnectionResolutionSource,
+} from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { conflict, notFound, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
@@ -599,6 +603,19 @@ async function attachOwnerNames(rows: ConnectionRow[]): Promise<SharedConnection
 // ─────────────────────────── Agent-page picker resolution ─────────────────────
 
 /**
+ * Map a resolver `source` to the picker's status badge. A force layer (admin
+ * pin / enforced org default) reads as `admin_locked`; the actor's own member
+ * pin as `pinned`; every remaining source (override / soft default / fallback)
+ * is an unforced `auto`. Single definition so the `resolved` and the
+ * `insufficient_scopes` branches can't drift on this mapping.
+ */
+function pickStatusForSource(source: ConnectionResolutionSource): IntegrationPickStatus {
+  if (source === "admin_pin" || source === "org_default_enforced") return "admin_locked";
+  if (source === "member_pin") return "pinned";
+  return "auto";
+}
+
+/**
  * The single-source verdict for the agent-page connection picker: which
  * connection the next run would use for this (agent, integration, actor),
  * plus the candidate list and pin/blocked state the dropdown renders.
@@ -649,6 +666,11 @@ export async function resolveAgentIntegrationPick(args: {
         packageId: agentPackageId,
         actor,
         scope: { orgId: scope.orgId, applicationId: scope.applicationId },
+        // The picker manages connections for EVERY declared integration, incl.
+        // inert ones (auth_key but no tools/scopes). Opting in here makes the
+        // cascade honour their pins too — so we reuse its verdict + `source`
+        // rather than re-deriving the precedence in this service.
+        includeInert: true,
       }),
     ],
   );
@@ -661,16 +683,14 @@ export async function resolveAgentIntegrationPick(args: {
   const orgDefaultEnforced = orgDefault?.enforce ?? false;
 
   // Drop orphaned-auth connections: a row whose `auth_key` no longer exists in
-  // the integration's current manifest (e.g. a version bump renamed the auth,
-  // `primary` → `session`) can never be delivered — the spawn resolver matches
-  // a connection to its auth by `authKey`, so an orphaned one yields no
-  // delivery plan. Offering it in the picker desynced the agent dropdown (which
-  // listed it) from the integration page (which iterates manifest auths and so
-  // hid it), and let a member pick a connection that silently fails at runtime.
-  // When the manifest can't be fetched, fall back to no filtering.
-  const manifestAuthKeys = manifest ? new Set(Object.keys(manifest.auths ?? {})) : null;
+  // the integration's current manifest can never be delivered (the spawn
+  // resolver matches connection → auth by `authKey`). Shared `manifestAuthKeySet`
+  // keeps this guard — and its `null` = "no constraint" semantics — identical to
+  // the runtime resolver's, so the picker and the run path can't disagree about
+  // which connections are live.
+  const liveAuthKeys = manifestAuthKeySet(manifest);
   const candidates: IntegrationCandidate[] = candidatesRaw
-    .filter((c) => manifestAuthKeys === null || manifestAuthKeys.has(c.auth_key))
+    .filter((c) => liveAuthKeys === null || liveAuthKeys.has(c.auth_key))
     .map((c) => ({
       ...c,
       missing_scopes: manifest
@@ -696,12 +716,7 @@ export async function resolveAgentIntegrationPick(args: {
 
   if (resolved) {
     resolvedConnectionId = resolved.connectionId;
-    status =
-      resolved.source === "admin_pin" || resolved.source === "org_default_enforced"
-        ? "admin_locked"
-        : resolved.source === "member_pin"
-          ? "pinned"
-          : "auto";
+    status = pickStatusForSource(resolved.source);
     resolvedOwnedByActor = candidates.find((c) => c.id === resolved.connectionId)?.is_own ?? false;
   } else if (err) {
     switch (err.code) {
@@ -709,12 +724,7 @@ export async function resolveAgentIntegrationPick(args: {
         resolvedConnectionId = err.connectionId ?? null;
         resolvedMissingScopes = err.missingScopes ?? [];
         resolvedOwnedByActor = err.ownedByActor ?? false;
-        status =
-          err.source === "admin_pin" || err.source === "org_default_enforced"
-            ? "admin_locked"
-            : err.source === "member_pin"
-              ? "pinned"
-              : "auto";
+        status = err.source ? pickStatusForSource(err.source) : "auto";
         break;
       case "must_choose_connection":
         status = "must_choose";
@@ -730,8 +740,10 @@ export async function resolveAgentIntegrationPick(args: {
         status = "none";
     }
   } else {
-    // Integration is inert (agent picked no tools) — the picker still lists
-    // candidates; mirror the fallback branch so the trigger label is sane.
+    // No verdict at all — only reachable when the integration manifest couldn't
+    // be fetched (buildRequirement returned null, so the resolver never saw it,
+    // `includeInert` notwithstanding). The pin cascade can't run without the
+    // manifest; fall back to a sane label from the candidate count.
     status = candidates.length === 1 ? "auto" : candidates.length === 0 ? "none" : "must_choose";
     if (candidates.length === 1) resolvedConnectionId = candidates[0]!.id;
   }

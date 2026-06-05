@@ -40,6 +40,7 @@ import { FieldsConnectModal } from "./fields-connect-modal";
 import { useIntegrationOAuthPopup } from "./use-integration-oauth-popup";
 import { connectionDisplayLabel } from "./connection-label";
 import { connectableAuthKeys } from "./connectable-auth-keys";
+import { isIntegrationEntryActive, resolutionBlocksRun } from "./integration-run-readiness";
 import { requiredScopesForAgent } from "@appstrate/core/integration";
 import { api } from "../../api";
 
@@ -274,9 +275,21 @@ export function IntegrationConnectionPicker({
   // Warning visuals when there's no usable connection OR the displayed one is
   // under-scoped (run would be blocked). In override mode "no pick" is a valid
   // inherit state, so only the under-scoped case warns.
-  const triggerWarn = overrideMode
-    ? underScoped
-    : status === "must_choose" || status === "stale" || underScoped;
+  //
+  // The trigger paints amber on exactly the states that gate a run — the SAME
+  // predicate (`resolutionBlocksRun`) the launch badge and the 412 modal use,
+  // so the picker can never disagree with the badge for a given integration.
+  //
+  // Gated on `entryActive`: an inert integration (agent selected no tool/scope)
+  // is never spawned at runtime, so it never gates Run — the launch badge skips
+  // it entirely (use-agent-integrations-readiness). A `must_choose` / `stale` /
+  // `none` on an inert entry is a manageable ambiguity, NOT a run-blocking
+  // error, so it stays neutral here too.
+  //
+  // Override mode (schedule editor) keeps its own rule: "no pick" = inherit is
+  // valid, so only the SELECTED override connection being under-scoped warns.
+  const entryActive = isIntegrationEntryActive({ tools: agentTools, scopes: agentScopes });
+  const triggerWarn = overrideMode ? underScoped : entryActive && resolutionBlocksRun(resolution);
   const TriggerIcon = triggerWarn ? AlertTriangle : displayConn ? Users : Plus;
 
   // Blocked for this member AND nothing to pick → dead end. Show a

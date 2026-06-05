@@ -405,6 +405,26 @@ export function getDeclaredToolNames(manifest: IntegrationManifest): string[] {
 }
 
 /**
+ * The set of auth keys a manifest currently declares — the single source for
+ * the "orphaned-auth" guard. A connection whose `authKey` is not in this set
+ * can never produce a delivery plan (the spawn resolver matches connection →
+ * auth by key), so it must not be offered in the picker nor auto-picked at run
+ * time. Returns `null` when there is NO constraint to apply — either the
+ * manifest is absent/unfetchable, or it declares zero auths — so every caller
+ * treats `null` as "don't filter" and the empty-auths edge can't silently drop
+ * every candidate. Callers keep their own row shape; this owns the key set +
+ * null semantics so the two filter sites (runtime resolver + picker verdict)
+ * can't drift apart.
+ */
+export function manifestAuthKeySet(
+  manifest: IntegrationManifest | null | undefined,
+): Set<string> | null {
+  if (!manifest) return null;
+  const keys = Object.keys(manifest.auths ?? {});
+  return keys.length === 0 ? null : new Set(keys);
+}
+
+/**
  * Tool names referenced as a run-start `connect.tool` across all auths.
  * Auto-hidden from the agent surface — these are credential-acquisition
  * primitives the platform invokes at boot, not agent capabilities.
