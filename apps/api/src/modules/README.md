@@ -15,20 +15,18 @@ The default value is `oidc,webhooks` — these are built-in OSS modules that shi
 ```
 apps/api/src/modules/<id>/
 ├── index.ts           # Default-exports an `AppstrateModule`
-├── README.md          # Purpose, owned tables, hooks/events, disable behavior
-├── schema.ts          # Drizzle tables owned by this module
+├── README.md          # Purpose, hooks/events, disable behavior
 ├── routes.ts          # (or routes/)  Hono router mounted under /api
 ├── service.ts         # Business logic, workers, lifecycle
 ├── lib/               # Module-private utilities (cron parser, helpers…)
 ├── test/              # Pure unit tests for module-internal logic (no DB/HTTP)
-├── drizzle/
-│   ├── migrations/
-│   │   ├── 0000_initial.sql
-│   │   └── meta/_journal.json
 └── openapi/
     ├── paths.ts       # OpenAPI path items (merged into the platform spec)
     └── schemas.ts     # Component schemas (merged into components.schemas)
 ```
+
+> A module owns **no** `schema.ts` / `drizzle/` — its tables live in the core
+> schema (`packages/db/src/schema/`). See "Database ownership rules" below.
 
 ## Test placement
 
@@ -48,8 +46,8 @@ const myModule: AppstrateModule = {
   manifest: { id: "my-feature", name: "My Feature", version: "1.0.0" },
 
   async init(ctx: ModuleInitContext) {
-    await ctx.applyMigrations("my-feature", resolve(import.meta.dir, "drizzle/migrations"));
-    // start workers, warm caches, etc.
+    // Modules own no tables — `ctx` provides redis/appUrl + platform services,
+    // not a migrator. Start workers, warm caches, capture `ctx.services`, etc.
   },
 
   createRouter() {
@@ -81,10 +79,26 @@ Everything else (`hooks`, `events`, `openApiComponentSchemas`, `openApiSchemas`,
 
 ## Database ownership rules
 
-1. Module tables live in `apps/api/src/modules/<id>/schema.ts`. They have their own Drizzle migration tree and a dedicated tracking table `__drizzle_migrations_<id>` (hyphens replaced with underscores).
-2. **Backward FKs (module → core)** use Drizzle `.references()` inline in the module schema — for example `orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" })`. Core tables always exist before any module migration runs at boot, so this is safe.
-3. **Forward FKs (core → module)** cannot be expressed via Drizzle without leaking the module schema into core. When you need one, add it via raw SQL inside the module's own migration. Core stays agnostic of module tables.
-4. Core never imports from `apps/api/src/modules/`. If core code needs data from a module, use a hook (`beforeRun`, `afterRun`) — never a direct import.
+**Modules own no tables.** All OSS tables — including those a module reads/writes
+(e.g. OIDC's `oauth_clients`/`jwks`, webhooks' `webhooks`) — live in the **core
+schema** (`packages/db/src/schema/`) and are created by the system migration
+pipeline at boot. A module is pure behavior: routes, hooks, events, RBAC, Better
+Auth plugins, model providers, OpenAPI. There is no module `schema.ts`, no
+per-module migration tree, no `__drizzle_migrations_<id>`, and no `drizzleSchemas()`
+or `ctx.applyMigrations` — those were removed in core 2.23.0.
+
+1. A module's tables are defined in `packages/db/src/schema/<domain>.ts` and
+   exported from the core barrel. The module imports them from `@appstrate/db/schema`.
+2. Better Auth tables (jwks, oauth_clients, …) are resolved by the adapter
+   directly from the core barrel — no module-side registration.
+3. Core never imports from `apps/api/src/modules/`. If core needs data from a
+   module, use a hook (`beforeRun`, `afterRun`) — never a direct import. A
+   module reads another module's data via the platform API/events, never a
+   cross-module SQL join.
+4. **Need a separate tenant?** A module that must own a physically isolated
+   database (e.g. the proprietary `@appstrate/cloud` billing module) runs its
+   own DB + migrations and reads platform data through `ctx.services` (e.g.
+   `services.runs.listLlmUsage`), never a cross-DB join.
 
 ## Permissions
 
