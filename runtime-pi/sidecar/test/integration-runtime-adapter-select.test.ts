@@ -17,7 +17,8 @@ import { describe, it, expect } from "bun:test";
 import {
   registerIntegrationRuntimeAdapter,
   selectIntegrationRuntimeAdapter,
-  buildMitmEnvBlock,
+  buildProxyEnvBlock,
+  buildCaEnvBlock,
   type IntegrationRuntimeAdapter,
 } from "../integration-runtime-adapter.ts";
 
@@ -86,11 +87,10 @@ describe("selectIntegrationRuntimeAdapter", () => {
   });
 });
 
-describe("buildMitmEnvBlock", () => {
-  it("returns the standard proxy + CA trust-store env shape", () => {
+describe("buildProxyEnvBlock", () => {
+  it("returns ONLY the proxy-routing env vars (no CA — #543 split)", () => {
     const proxyUrl = "http://sidecar:39472";
-    const caPath = "/tmp/appstrate-ca.pem";
-    const env = buildMitmEnvBlock(proxyUrl, caPath);
+    const env = buildProxyEnvBlock(proxyUrl);
 
     expect(env).toEqual({
       HTTPS_PROXY: proxyUrl,
@@ -99,17 +99,30 @@ describe("buildMitmEnvBlock", () => {
       http_proxy: proxyUrl,
       NO_PROXY: "127.0.0.1,localhost",
       no_proxy: "127.0.0.1,localhost",
+    });
+    // The CA trust vars must NOT leak into the proxy half — a plain CONNECT
+    // egress listener uses this block alone, with no cert mint.
+    expect(env.NODE_EXTRA_CA_CERTS).toBeUndefined();
+  });
+});
+
+describe("buildCaEnvBlock", () => {
+  it("returns ONLY the CA trust-store env vars (MITM half)", () => {
+    const caPath = "/tmp/appstrate-ca.pem";
+    const env = buildCaEnvBlock(caPath);
+
+    expect(env).toEqual({
       NODE_EXTRA_CA_CERTS: caPath,
       SSL_CERT_FILE: caPath,
       REQUESTS_CA_BUNDLE: caPath,
       CURL_CA_BUNDLE: caPath,
       GIT_SSL_CAINFO: caPath,
     });
+    expect(env.HTTPS_PROXY).toBeUndefined();
   });
 
-  it("threads distinct proxy + CA paths through unchanged", () => {
-    const env = buildMitmEnvBlock("http://127.0.0.1:8080", "/host/path/ca.pem");
-    expect(env.HTTPS_PROXY).toBe("http://127.0.0.1:8080");
+  it("threads the CA path through unchanged", () => {
+    const env = buildCaEnvBlock("/host/path/ca.pem");
     expect(env.NODE_EXTRA_CA_CERTS).toBe("/host/path/ca.pem");
     expect(env.REQUESTS_CA_BUNDLE).toBe("/host/path/ca.pem");
   });

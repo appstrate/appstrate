@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Spawn resolver — env-delivery egress gate.
+ * Spawn resolver — env-delivery egress signal (#543).
  *
  * A `delivery.env` local-source integration (the server holds its own
  * credentials and authenticates itself — e.g. a form/session login) sits on
- * the per-run network with no direct egress in docker mode. Its only route out
- * is the per-integration MITM listener, which a `delivery.env` auth wouldn't
- * otherwise mount (it resolves no injection plan). The resolver must emit a
- * forward-only `httpDeliveryAuths` entry (empty injection plan, carrying
- * `authorizedUris`) purely to mount that listener — the runner's egress route.
- * It injects NOTHING (the env credentials are delivered separately via
- * `spawnEnv`); the MITM's SSRF floor is the hard egress boundary, not
- * `authorized_uris` (which only scopes credential injection in the delivery path).
+ * the per-run network with no direct egress in docker mode. It resolves NO
+ * injection plan, so the resolver raises an explicit `needsEgress` flag and
+ * the sidecar mounts a plain CONNECT egress listener for it (tunnel + SSRF
+ * floor, no TLS termination, no cert mint). It must NOT emit a fake
+ * `httpDeliveryAuths` entry (the pre-#543 presence-token workaround). The env
+ * credentials are delivered separately via `spawnEnv`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -106,7 +104,7 @@ async function seedAll(ctx: TestContext, manifest: Record<string, unknown>) {
   });
 }
 
-describe("resolveIntegrationSpawns — env-delivery egress gate", () => {
+describe("resolveIntegrationSpawns — env-delivery egress signal (#543)", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -114,7 +112,7 @@ describe("resolveIntegrationSpawns — env-delivery egress gate", () => {
     ctx = await createTestContext({ orgSlug: "orga" });
   });
 
-  it("mounts a forward-only egress listener (empty plan + authorizedUris) and delivers env creds", async () => {
+  it("raises needsEgress (no fake httpDeliveryAuths) and delivers env creds", async () => {
     await seedAll(ctx, integManifest());
 
     const specs = await resolveIntegrationSpawns({
@@ -132,16 +130,13 @@ describe("resolveIntegrationSpawns — env-delivery egress gate", () => {
       CRM_PASSWORD: "secret",
     });
 
-    // Forward-only egress entry mounts the MITM listener without injecting.
-    expect(spec.httpDeliveryAuths).toBeDefined();
-    const plan = spec.httpDeliveryAuths!.session;
-    expect(plan).toBeDefined();
-    expect(plan!.headerName).toBe(""); // empty plan → planner injects nothing
-    expect(plan!.value).toBe("");
-    expect(plan!.authorizedUris).toEqual(["https://crm.example.com/**"]);
+    // The runner gets an explicit egress signal — and NO fake injection plan.
+    // The sidecar mounts a plain CONNECT egress listener off `needsEgress`.
+    expect(spec.needsEgress).toBe(true);
+    expect(spec.httpDeliveryAuths).toBeUndefined();
   });
 
-  it("also gates an allow_all_uris env integration", async () => {
+  it("also signals egress for an allow_all_uris env integration", async () => {
     await seedAll(ctx, integManifest({ allowAllUris: true }));
 
     const specs = await resolveIntegrationSpawns({
@@ -150,7 +145,7 @@ describe("resolveIntegrationSpawns — env-delivery egress gate", () => {
       agentManifest: agentManifest(),
     });
     const spec = specs[0]!;
-    expect(spec.httpDeliveryAuths?.session).toBeDefined();
-    expect(spec.httpDeliveryAuths!.session!.headerName).toBe("");
+    expect(spec.needsEgress).toBe(true);
+    expect(spec.httpDeliveryAuths).toBeUndefined();
   });
 });

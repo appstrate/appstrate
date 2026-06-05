@@ -58,6 +58,7 @@ import {
   createIntegrationMitmListener,
   type MitmListenerHandle,
 } from "./integration-mitm-listener.ts";
+import { createIntegrationEgressListener } from "./integration-egress-listener.ts";
 import {
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
@@ -74,7 +75,7 @@ import {
   selectIntegrationRuntimeAdapter,
   type IntegrationRuntimeAdapter,
   type RuntimeAdapterRunContext,
-  type RuntimeMitmContext,
+  type RuntimeEgressContext,
 } from "./integration-runtime-adapter.ts";
 // Side-effect imports — each adapter module registers itself on load.
 // New adapters (firecracker, podman, …) plug in with one more import here.
@@ -658,6 +659,13 @@ async function spawnAndConnectLocalIntegration(params: {
   workspaceHandle: WorkspaceHandle | null;
   /** Front this integration with a MITM listener (also needs `ca` + `source`). */
   wantsMitm: boolean;
+  /**
+   * Issue #543 — the runner needs a controlled egress route but no header
+   * injection (a `delivery.env` auth declaring an outbound surface). When set
+   * and `wantsMitm` is false, mount a plain CONNECT egress listener. MITM
+   * wins when both are set (it already provides egress).
+   */
+  wantsEgress: boolean;
   /** Allowlist for `host.register`. `[]` exposes nothing (connect-run). */
   allowedTools: readonly string[] | undefined;
   /**
@@ -676,12 +684,17 @@ async function spawnAndConnectLocalIntegration(params: {
 }): Promise<SpawnAndConnectResult> {
   const { spec, runId, adapter, adapterCtx, host, bundleFetchOpts, ca, logLabel } = params;
 
-  let mitmCtx: RuntimeMitmContext | null = null;
-  // The listener is mounted only when this integration wants MITM, a CA came
-  // up, AND the caller hoisted a source. When mounted, the shared `source` is
-  // what the connect-login hook drives — surfaced back to the caller as
-  // `mitmSource` (kept null when no listener exists, so the hook's "MITM
-  // required" guard still fires on a CA-bring-up failure).
+  // One listener per integration, picked MITM-first (#543). `egressCtx` is
+  // handed to the adapter as the runner's HTTPS_PROXY:
+  //   - MITM listener   → caCertHostPath set (TLS terminate + inject).
+  //   - plain CONNECT    → caCertHostPath null (tunnel + SSRF floor only).
+  //   - neither          → null (mtls / delivery.files reach upstream directly).
+  let egressCtx: RuntimeEgressContext | null = null;
+  // The MITM listener is mounted only when this integration wants MITM, a CA
+  // came up, AND the caller hoisted a source. When mounted, the shared
+  // `source` is what the connect-login hook drives — surfaced back to the
+  // caller as `mitmSource` (kept null when no listener exists, so the hook's
+  // "MITM required" guard still fires on a CA-bring-up failure).
   let mitmMounted = false;
   if (params.wantsMitm && ca !== null && params.source !== null) {
     const source = params.source;
@@ -723,11 +736,30 @@ async function spawnAndConnectLocalIntegration(params: {
     params.mitmListeners.push(listener);
     mitmMounted = true;
     const port = listener.address().port;
-    mitmCtx = { proxyUrl: adapterCtx.proxyUrlFor(port), caCertHostPath: ca.certHostPath };
+    egressCtx = { proxyUrl: adapterCtx.proxyUrlFor(port), caCertHostPath: ca.certHostPath };
     logger.info(`${logLabel} MITM listener ready`, {
       integrationId: spec.integrationId,
       localUrl: listener.proxyUrl(),
-      runnerProxyUrl: mitmCtx.proxyUrl,
+      runnerProxyUrl: egressCtx.proxyUrl,
+    });
+  } else if (params.wantsEgress) {
+    // No injection plan, but the runner declares an outbound surface — give it
+    // a plain CONNECT egress route (tunnel + SSRF floor, NO TLS termination,
+    // NO cert mint). `caCertHostPath: null` tells the adapter to skip the CA
+    // env block + cert delivery.
+    const listener = createIntegrationEgressListener({
+      host: adapterCtx.listenerBindHost,
+      onEvent: (event) =>
+        logger.info(`${logLabel} egress event`, { integrationId: spec.integrationId, ...event }),
+    });
+    await listener.ready;
+    params.mitmListeners.push(listener);
+    const port = listener.address().port;
+    egressCtx = { proxyUrl: adapterCtx.proxyUrlFor(port), caCertHostPath: null };
+    logger.info(`${logLabel} egress listener ready`, {
+      integrationId: spec.integrationId,
+      localUrl: listener.proxyUrl(),
+      runnerProxyUrl: egressCtx.proxyUrl,
     });
   }
 
@@ -744,7 +776,7 @@ async function spawnAndConnectLocalIntegration(params: {
     runId,
     spec,
     bundleRoot: root,
-    mitm: mitmCtx,
+    egress: egressCtx,
     workspaceHandle: params.workspaceHandle,
     onStderrLine: (line) => {
       logger.info(`${logLabel} integration stderr`, { integrationId: spec.integrationId, line });
@@ -1241,9 +1273,12 @@ export async function bootIntegrations(
       // MITM is created only when the CA came up AND this integration declared
       // `delivery.http`. `mitmSource` is returned so the connect-login hook
       // (run-start acquisition, below) drives `setSessionOutputs` on the same
-      // source the MITM listener reads from.
+      // source the MITM listener reads from. `wantsEgress` (#543) is the
+      // fallback: a no-injection runner that still needs an outbound route gets
+      // a plain CONNECT egress listener instead.
       const wantsMitm =
         spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
+      const wantsEgress = spec.needsEgress === true;
       const {
         allocatedNs,
         mitmSource,
@@ -1262,6 +1297,7 @@ export async function bootIntegrations(
         ca: runCa,
         workspaceHandle,
         wantsMitm,
+        wantsEgress,
         allowedTools: spec.toolAllowlist,
         // R8a — propagate `hidden_tools` so the host filters them out at
         // runtime, regardless of whether install-time validation removed them.
@@ -1508,6 +1544,9 @@ export async function runConnectOnce(
       // regardless of the launching orchestrator's env.
       workspaceHandle: null,
       wantsMitm: true,
+      // connect-run always mounts the MITM listener (it provides egress too),
+      // so the plain-egress fallback never applies here.
+      wantsEgress: false,
       allowedTools: [],
       logLabel: "connect-run",
       clients,

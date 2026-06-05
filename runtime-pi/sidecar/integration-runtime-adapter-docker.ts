@@ -20,7 +20,8 @@ import { SubprocessTransport } from "@appstrate/mcp-transport";
 import { logger } from "./logger.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import {
-  buildMitmEnvBlock,
+  buildProxyEnvBlock,
+  buildCaEnvBlock,
   isPathSafeForMount,
   registerIntegrationRuntimeAdapter,
   resolveBundleEntry,
@@ -367,7 +368,7 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
     },
 
     async spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration> {
-      const { runId, spec, bundleRoot, mitm, workspaceHandle, onStderrLine } = options;
+      const { runId, spec, bundleRoot, egress, workspaceHandle, onStderrLine } = options;
       const plan = planContainer(spec, bundleRoot);
       const safeNs = spec.namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
       const containerName = `appstrate-integ-${safeNs}-${runId.slice(0, 8)}-${Date.now()}`;
@@ -376,9 +377,17 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
       for (const [k, v] of Object.entries(spec.spawnEnv)) {
         envFlags.push("-e", `${k}=${v}`);
       }
-      if (mitm) {
-        for (const [k, v] of Object.entries(buildMitmEnvBlock(mitm.proxyUrl, CA_CONTAINER_PATH))) {
+      if (egress) {
+        // Proxy routing for BOTH listener kinds (MITM + plain CONNECT).
+        for (const [k, v] of Object.entries(buildProxyEnvBlock(egress.proxyUrl))) {
           envFlags.push("-e", `${k}=${v}`);
+        }
+        // CA trust ONLY for a TLS-terminating MITM listener; a plain CONNECT
+        // egress listener has a null caCertHostPath → no CA env, no cert mint.
+        if (egress.caCertHostPath !== null) {
+          for (const [k, v] of Object.entries(buildCaEnvBlock(CA_CONTAINER_PATH))) {
+            envFlags.push("-e", `${k}=${v}`);
+          }
         }
       }
 
@@ -458,8 +467,11 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
       // the runner image as the WORKDIR), so the runner's entrypoint
       // sees `/bundle/server/index.js` at the path the manifest declared.
       await dockerExec(["cp", `${bundleRoot}/.`, `${containerId}:/bundle/`]);
-      if (mitm) {
-        await dockerExec(["cp", mitm.caCertHostPath, `${containerId}:${CA_CONTAINER_PATH}`]);
+      // Deliver the run CA only for a TLS-terminating MITM listener. A plain
+      // CONNECT egress listener does not terminate TLS, so the runner needs no
+      // extra CA (null caCertHostPath).
+      if (egress && egress.caCertHostPath !== null) {
+        await dockerExec(["cp", egress.caCertHostPath, `${containerId}:${CA_CONTAINER_PATH}`]);
       }
 
       // AFPS §7.6 (CC-5) — materialise `delivery.files` entries into
