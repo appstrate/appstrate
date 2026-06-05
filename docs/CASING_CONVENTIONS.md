@@ -194,6 +194,14 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 | `runs.metadata.creditsUsed`                                                                                                                                                                                 | camelCase                                                                                              | Cloud's `afterRun` hook contract; opaque storage of TS object |
 | `runs.checkpoint`, `runs.config`, `runs.config_override`, `runs.input`, `runs.result`, `runs.connection_overrides`, `runs.inline_manifest`, `runs.context_snapshot`, `pinned`, `memory`, `webhooks.payload` | Opaque (varies by producer)                                                                            | Each producer documents its own shape                         |
 
+**⚠️ Boundary — this carve-out covers JSONB that NEVER crosses the wire verbatim.** A JSONB column that is serialized back to a client as-is (no per-key projection) is a **wire payload**, not an internal contract, and its interior keys follow Zone 1 (**snake_case**, with the universal DB carve-out). The interior is the API contract.
+
+| Wire-exposed JSONB column    | Interior casing                                         | Why                                                                                                                                                                                                                                                         |
+| ---------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `organizations.org_settings` | **snake_case** (`api_version`, `dashboard_sso_enabled`) | Returned verbatim by `GET /api/orgs/:orgId/settings` and written verbatim by `PUT`; the blob IS the wire shape. Renaming a key here is a breaking wire change AND needs a JSONB data migration for existing rows (see `0002_rename_org_settings_keys.sql`). |
+
+When adding a JSONB column, decide up front: **internal contract** (never returned raw → camelCase/producer-defined, this carve-out) or **wire-exposed** (returned/accepted raw → snake_case, Zone 1). If a route ever starts returning an internal blob verbatim, its keys must be migrated to snake_case.
+
 #### Carve-out 4h — SSE event payloads (historical)
 
 **File**: `apps/api/src/services/realtime.ts:27` (`snakeToCamel()` transform).
@@ -369,6 +377,13 @@ Treat any new management-CRUD route on a BA plugin table the same way (mirror th
 **Cloud billing wire**: `usage_percent`, `credits_used`, `credit_quota`, `period_end`, `cancel_at_period_end`, `plan_id`, `return_url`
 
 **Universal DB convention** (camelCase carve-out on wire): `id`, `createdAt`, `updatedAt`, `expiresAt`, `revokedAt`, `lastUsedAt`, `notifiedAt`, `readAt`, `runNumber`, `userId`, `orgId`, `applicationId`, `packageId`, `endUserId`, `apiKeyId`, `scheduleId`, `runOrigin`, `contextSnapshot`, `modelCredentialId`
+
+**⚠️ The carve-out is this EXACT list — not a pattern.** Only the timestamp fields (`*At`) and id fields (`id`, `*Id`) above stay camelCase. Look-alikes that are NOT on the list are domain fields and go **snake_case on the wire**, even though they resemble a carve-out:
+
+- `createdBy` → **`created_by`** (it is `*By`, an actor reference, not a timestamp/id; resembles `createdAt` but is NOT carved out).
+- `createdByName` → **`created_by_name`** (already snake_case in the domain list above).
+
+Rule of thumb: a field qualifies for the camelCase carve-out only if its literal name appears in the list above (universal DB convention) — never by suffix similarity.
 
 ---
 

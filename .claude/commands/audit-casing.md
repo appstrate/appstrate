@@ -27,7 +27,7 @@ The audit references `docs/CASING_CONVENTIONS.md` as authoritative. It verifies:
    - Module hook contracts (4d)
    - ModelProviderDefinition (4e)
    - Connect-helper internal types (4f)
-   - JSONB internal contracts (4g)
+   - JSONB internal contracts (4g) — split: internal-only (producer casing) vs wire-exposed (snake_case, e.g. `org_settings`)
    - SSE camelCase (4h)
    - CloudEvents (4i)
    - Webhook deliveries (4j)
@@ -51,6 +51,7 @@ When invoked, this skill:
    - **Agent F — Cross-repo + tests**: cloud, docs, website, module-claude-code, connect-helper, afps-spec + test fixtures + e2e helpers. Confirms no drift introduced by parallel work.
 
 Each sub-agent produces a structured report classified by severity:
+
 - 🔴 **BUG**: real deviation from convention (e.g. camelCase wire field, snake_case Drizzle TS field, BA carve-out violated)
 - 🟡 **DRIFT**: documentation/comment stale but runtime correct
 - ✅ **VERIFIED CLEAN**: surface confirmed conforming
@@ -82,6 +83,7 @@ When you (Claude) execute this skill:
 ### Sub-agent prompt template (per agent)
 
 Each sub-agent should:
+
 - Use `Read` to load `docs/CASING_CONVENTIONS.md` first
 - Be told its specific zone responsibility
 - Use `Grep` aggressively for exhaustive coverage
@@ -102,6 +104,7 @@ Each sub-agent should:
 ### Coordination between agents
 
 The sub-agents are **read-only**. They never modify files. After consolidation, the orchestrator (the executing Claude) decides whether to:
+
 - Report findings and stop (default)
 - Dispatch separate **fix agents** if the user opts in
 
@@ -201,23 +204,23 @@ Output: per-file verdict, bug list, verified clean count.
 ### Agent B — Wire DTO layer
 
 ```
-Mission: verify every wire DTO field matches convention. Read `docs/CASING_CONVENTIONS.md` Zone 1 + Carve-out 4b first.
+Mission: DISCOVER every camelCase wire field that should be snake_case — do NOT just check known fields against a catalog. Read `docs/CASING_CONVENTIONS.md` Zone 1 + Carve-out 4b first.
+
+⚠️ DISCOVERY MODE (not conformance): the catalog in the convention doc is necessarily incomplete and WILL miss long-standing leaks (this is exactly how oauthEmail/needsReconnection/candidateConnectionIds/ttlSeconds/finalizeUrl/createdBy escaped a prior audit). Do NOT treat "not in the catalog" as "fine". Enumerate the ACTUAL fields on the wire and flag any camelCase whose literal name is not on the EXACT universal carve-out list (matched by NAME, never by suffix similarity).
 
 Scope:
 - packages/shared-types/src/*.ts (every interface)
-- apps/api/src/openapi/schemas.ts (every component)
-- apps/api/src/openapi/paths/*.ts (every path response + example)
+- apps/api/src/openapi/schemas.ts (every component property)
+- apps/api/src/openapi/paths/*.ts (every request body, response schema, AND example — examples leak real field names)
 - apps/api/src/openapi/baseline.json (verify regenerated, no stale fields)
-- apps/api/src/routes/*.ts (projection sites)
-- apps/api/src/services/*.ts (DTO builders)
+- apps/api/src/routes/*.ts + apps/api/src/services/*.ts (serializer sites: every `c.json({...})`, every object spread onto a response, every `mapRow`/`toXWire` builder)
 
-For each field:
-- Check against the canonical catalog in CASING_CONVENTIONS.md
-- Snake_case domain fields → required
-- camelCase universal DB convention (id, *Id, createdAt, etc.) → required to STAY camelCase
-- Any deviation → BUG
+Method:
+1. Extract the full set of property names emitted in OpenAPI response/request schemas AND in real `c.json(...)` projections.
+2. For EACH camelCase name: is its literal name on the universal carve-out list (id, *Id, *At timestamps, runNumber, runOrigin, contextSnapshot, modelCredentialId)? Yes → OK. No → BUG (must be snake_case). Pay special attention to `*By` (createdBy → created_by), `*Name`, `*Email`, `*Url`, and boolean flags (needsReconnection, isNewUser, requiresLogin, dashboardSsoEnabled) — these are the common leaks.
+3. Cross-check spec vs serializer: a field the code emits camelCase but the spec documents snake_case (or vice-versa) is BOTH a casing bug AND spec↔code drift — report it.
 
-Output: per-interface table, total bugs, verdict.
+Output: per-interface/component table, the discovered field set (so coverage is auditable), total bugs, verdict.
 ```
 
 ### Agent C — Drizzle TS schema
@@ -243,17 +246,19 @@ Output: per-file count, any TS field starting with [a-z]+_[a-z_]+: → BUG.
 ```
 Mission: verify apps/web reads use the right casing per wire field. Read `docs/CASING_CONVENTIONS.md` full first.
 
-Grep for camelCase reads of fields that are now snake_case on the wire:
-rg "\.(displayName|schemaVersion|runningRuns|lockVersion|hasUnarchivedChanges|usedByAgents|tokenUsage|cronExpression|...)\b" apps/web/src/
+⚠️ DO NOT rely on a hardcoded list of camelCase names — a fixed allowlist only catches fields someone already knew about and is precisely how prior leaks (oauthEmail, finalizeUrl, candidateConnectionIds, dashboardSsoEnabled) went undetected. Derive the suspect set from the SPEC, then trace consumers.
 
-For each hit:
-- Reading from wire DTO type → BUG (would return undefined at runtime)
-- Reading from Drizzle row passed through internally → OK (Drizzle TS stays camelCase)
-- Reading from profile/Better Auth shape → OK (Carve-out 4a/4c)
-- Reading from ModelProviderDefinition → OK (Carve-out 4e)
-- Internal variable / function arg → OK (Zone 3)
+Method (two-way, spec-derived):
+1. From Agent B's discovered wire field set (or by parsing apps/api/src/openapi/schemas.ts + paths/*.ts yourself), build the list of snake_case wire fields. For each, search apps/web/src/ for a camelCase read of the same concept (e.g. wire `oauth_email` → grep `oauthEmail`; `needs_reconnection` → `needsReconnection`). A camelCase read of a snake_case wire field → BUG (undefined at runtime).
+2. Independently, grep apps/web/src/ for property reads off any `api()/apiList()/apiFetch()` response value and off shared-types DTO-typed variables; flag any camelCase access whose literal name is NOT on the universal carve-out list.
 
-Output: bug list with file:line and the actual variable type, classification of all hits.
+Classify each hit:
+- Reading from a wire DTO / api() response → BUG if camelCase-not-carve-out (returns undefined at runtime)
+- Reading from a Drizzle row passed through internally → OK (Drizzle TS stays camelCase)
+- profile/Better Auth shape → OK (Carve-out 4a/4c); ModelProviderDefinition → OK (4e); SSE payload → OK (4h, camelCase by transform)
+- Internal variable / function arg / React prop → OK (Zone 3)
+
+Output: bug list with file:line and the actual variable type; report which snake_case wire fields were checked for a camelCase consumer (coverage).
 ```
 
 ### Agent E — Carve-outs
@@ -268,7 +273,9 @@ For each carve-out:
 4d. Module hook contracts (module.ts): camelCase interfaces — verify
 4e. ModelProviderDefinition: camelCase — verify in core-providers, module-claude-code, module-codex
 4f. Connect-helper internal types: camelCase — verify
-4g. JSONB internals: token_usage interior snake_case, runs.metadata.creditsUsed camelCase — verify
+4g. JSONB contracts — SPLIT by exposure (this carve-out ONLY covers JSONB that never crosses the wire verbatim):
+    - Internal-only JSONB → producer-defined casing OK: token_usage interior snake_case, runs.metadata.creditsUsed camelCase — verify
+    - Wire-exposed JSONB (returned/accepted RAW by a route, no per-key projection) → interior MUST be snake_case (Zone 1), NOT this carve-out. Verify organizations.org_settings interior is snake_case (api_version, dashboard_sso_enabled) since GET/PUT /api/orgs/:orgId/settings serialize it verbatim. To find others: for each jsonb() column, check whether any route returns it via `c.json` without rebuilding keys — if so it is wire and a camelCase interior key is a BUG (and renaming it later needs a JSONB data migration).
 4h. SSE transform in realtime.ts:27 — verify snakeToCamel() still in place
 4i. CloudEvents canonical-events.ts — verify camelCase
 4j. Webhooks: verify camelCase end-to-end
