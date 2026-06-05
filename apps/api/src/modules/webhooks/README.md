@@ -23,15 +23,12 @@ features: {
 }
 ```
 
-## App-scoped route prefixes
+## App-scoping
 
-```ts
-appScopedPaths: ["/api/webhooks"];
-```
-
-Contributed via the `appScopedPaths` field on the module manifest so that
-core's app-context middleware picks up the prefix dynamically — core has
-no hardcoded knowledge of the webhooks routes.
+Webhooks routes are not registered in core's `APP_SCOPED_PREFIXES`. Each route
+validates the `applicationId` body/query field directly against the caller's
+org (`assertAppBelongsToOrg` in `routes.ts`) rather than relying on the
+`X-Application-Id` app-context middleware.
 
 ## Permissions
 

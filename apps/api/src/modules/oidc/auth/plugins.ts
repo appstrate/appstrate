@@ -214,11 +214,11 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // is served — which this plugin itself serves. The warning is purely
       // advisory for the non-root basePath; clear it via the documented flag.
       silenceWarnings: { oauthAuthServerConfig: true },
-      // Snapshot the full vocabulary at plugin construction time —
-      // `betterAuthPlugins()` runs after `loadModules()` populates the
-      // module registry, so module-contributed scopes are included in
-      // discovery `scopes_supported` and accepted by the oauth-provider
-      // plugin's own scope filter.
+      // OIDC scope vocabulary (identity scopes + OIDC_ALLOWED_SCOPES). Owned
+      // wholly by this module — there is no cross-module scope contribution
+      // point, so load ordering is irrelevant. Advertised in discovery
+      // `scopes_supported` and enforced by the oauth-provider plugin's own
+      // scope filter.
       scopes: [...getAppstrateScopes()],
       validAudiences,
       cachedTrustedClients,

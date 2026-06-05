@@ -45,7 +45,6 @@ import { swaggerUI } from "@hono/swagger-ui";
 import { buildOpenApiSpec } from "./openapi/index.ts";
 import {
   getModulePublicPaths,
-  getModuleAppScopedPaths,
   getModuleAuthStrategies,
   getModuleOpenApiPaths,
   getModuleOpenApiComponentSchemas,
@@ -170,10 +169,9 @@ applyAuthPipeline(app, {
 });
 
 // App context middleware: resolve X-Application-Id for app-scoped routes.
-// Core prefixes listed statically; module-owned prefixes (e.g. webhooks)
-// are contributed by modules via `appScopedPaths` and merged lazily after
-// boot (modules are not yet loaded at top-level eval time).
-const CORE_APP_SCOPED_PREFIXES = [
+// Modules own app-scoping for their own routes (e.g. webhooks gates via an
+// explicit `applicationId` body/query field), so the prefix list is core-only.
+const APP_SCOPED_PREFIXES = [
   "/api/agents",
   "/api/runs",
   "/api/schedules",
@@ -184,19 +182,12 @@ const CORE_APP_SCOPED_PREFIXES = [
   "/api/integrations",
   "/api/uploads",
 ];
-let _appScopedPrefixes: string[] | null = null;
-function getAppScopedPrefixes(): string[] {
-  if (_appScopedPrefixes === null) {
-    _appScopedPrefixes = [...CORE_APP_SCOPED_PREFIXES, ...getModuleAppScopedPaths()];
-  }
-  return _appScopedPrefixes;
-}
 
 const appContextMiddleware = requireAppContext();
 app.use("*", async (c, next) => {
   if (skipAuth(c.req.path, getModulePublicPaths(), c.req.raw.headers)) return next();
   if (!c.get("user")) return next();
-  if (!getAppScopedPrefixes().some((p) => c.req.path.startsWith(p))) return next();
+  if (!APP_SCOPED_PREFIXES.some((p) => c.req.path.startsWith(p))) return next();
   return appContextMiddleware(c, next);
 });
 
