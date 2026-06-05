@@ -113,6 +113,8 @@
   "runs.deletedAgentTitle": "The source agent has been deleted. The run is kept for history but cannot be re-run.",
   "runs.detailsExpired": "Details expired",
   "exec.rerun": "Re-run",
+  "exec.degradedIntegrations.title": "Connection lost during this run",
+  "exec.degradedIntegrations.message": "These integrations returned an authentication error and must be reconnected before the next launch.",
   "exec.tabLogs": "Logs",
   "exec.tabResultGroup": "Result",
   "exec.tabResult": "Data",

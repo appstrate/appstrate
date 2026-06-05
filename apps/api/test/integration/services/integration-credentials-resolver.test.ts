@@ -240,6 +240,42 @@ describe("resolveLiveIntegrationCredentials", () => {
     expect(await needsReconnection(connId)).toBe(false);
   });
 
+  it("throws 410 and flags needsReconnection when an oauth2 auth is unrefreshable on a FORCED refresh", async () => {
+    const connId = await seedConnection({ userId: ctx.user.id });
+    // Remove the per-app OAuth client → buildIntegrationOAuthRefreshContext
+    // returns null, so the oauth2 token cannot be refreshed server-side. A
+    // forced refresh only happens after an upstream 401, so the credential is
+    // dead: must flag + 410 (not the old silent stale-200).
+    await db
+      .delete(integrationOauthClients)
+      .where(eq(integrationOauthClients.integrationId, INTEGRATION_ID));
+
+    let status: number | undefined;
+    try {
+      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+        forceRefresh: true,
+      });
+      throw new Error("expected resolveLiveIntegrationCredentials to throw");
+    } catch (err) {
+      status = (err as { status?: number }).status;
+    }
+    expect(status).toBe(410);
+    expect(await needsReconnection(connId)).toBe(true);
+  });
+
+  it("does NOT flag an unrefreshable oauth2 auth on a PROACTIVE read (no forced refresh)", async () => {
+    const connId = await seedConnection({ userId: ctx.user.id });
+    await db
+      .delete(integrationOauthClients)
+      .where(eq(integrationOauthClients.integrationId, INTEGRATION_ID));
+
+    // No forceRefresh + the seeded token has no expiry → outside the lead
+    // window → no refresh attempt → a still-valid token must NOT be flagged
+    // merely because it lacks a refresh client.
+    await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {});
+    expect(await needsReconnection(connId)).toBe(false);
+  });
+
   it("flips needsReconnection when a scope shrink drops below the installed-agent floor", async () => {
     // Agent requires `delete`; the refresh narrows the grant to read+send only.
     await seedPackage({

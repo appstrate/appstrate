@@ -386,18 +386,34 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     });
   }
 
-  if (candidates.length === 1) {
-    return checkHealth(args, candidates[0]!, "fallback_auto");
+  // Prefer HEALTHY candidates (not flagged needsReconnection). A dead
+  // connection must never be auto-picked when a live sibling exists, and the
+  // picker should not offer a dead option as a valid choice. So: a single
+  // healthy connection auto-resolves even if dead siblings exist, and the
+  // must_choose picker lists only live candidates.
+  const healthy = candidates.filter((c) => !c.needsReconnection);
+
+  if (healthy.length === 1) {
+    return checkHealth(args, healthy[0]!, "fallback_auto");
   }
 
-  // >1 — caller must pick. Surface the candidate ids so the UI can render
-  // a picker (label + accountId + shared/owned badge). The picker writes
-  // a member pin, so the next run skips this branch and resolves via layer 5.
-  return errorOf(args, {
-    code: "must_choose_connection",
-    message: `Multiple connections available for ${args.integrationId} — pick one.`,
-    candidateConnectionIds: candidates.map((c) => c.id),
-  });
+  if (healthy.length > 1) {
+    // >1 healthy — caller must pick. Surface the LIVE candidate ids so the UI
+    // renders a picker (label + accountId + shared/owned badge). The picker
+    // writes a member pin, so the next run skips this branch and resolves via
+    // layer 5.
+    return errorOf(args, {
+      code: "must_choose_connection",
+      message: `Multiple connections available for ${args.integrationId} — pick one.`,
+      candidateConnectionIds: healthy.map((c) => c.id),
+    });
+  }
+
+  // No healthy candidate — every accessible connection on this integration is
+  // flagged needsReconnection. Surface needs_reconnection (with one id for the
+  // reconnect CTA to UPDATE in place) rather than must_choose, which would only
+  // offer dead options. checkHealth on the first emits the canonical shape.
+  return checkHealth(args, candidates[0]!, "fallback_auto");
 }
 
 function checkHealth(

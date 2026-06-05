@@ -79,6 +79,20 @@ export interface MitmCredentialSource {
   deliveryPlans(): Readonly<Record<string, HttpDeliveryPlan>>;
   refreshOnUnauthorized?(authKey: string): Promise<boolean>;
   /**
+   * Tri-state variant of {@link refreshOnUnauthorized} — `"refreshed"` (retry),
+   * `"terminal"` (dead credential, flag + don't retry), `"transient"`
+   * (retryable/cooldown, don't retry now, don't flag). When present the
+   * listener prefers it so it can drive the terminal-failure report; when
+   * absent it falls back to the boolean form (legacy/test sources).
+   */
+  refreshOnUnauthorizedDetailed?(authKey: string): Promise<"refreshed" | "terminal" | "transient">;
+  /**
+   * Report a terminal upstream auth failure (a 401 that survived the single
+   * refresh+retry) so the platform flags the run's connection for re-connect.
+   * Optional — sources without a platform round-trip omit it.
+   */
+  reportAuthFailure?(authKey: string): Promise<void>;
+  /**
    * connect.tool mid-run re-login (P3) — when this returns true for
    * `(authKey, status)`, the listener treats `status` as a re-acquire trigger:
    * it calls {@link refreshOnUnauthorized} (which routes to the registered
@@ -729,16 +743,37 @@ async function handleInnerRequest(
   //     `refreshOnUnauthorized` routes to the registered re-login handler;
   //     `setSessionOutputs` (inside the handler) updates the source's
   //     deliveryPlans, so the rebuilt action injects the fresh session header.
+  const matchedAuthKey = action.matchedAuth?.authKey ?? null;
   const oauthRetry = response.status === 401 && action.retry401;
   const connectReauth =
     !!action.matchedAuth &&
-    credentials.shouldReauth?.(action.matchedAuth.authKey, response.status) === true;
-  if ((oauthRetry || connectReauth) && action.matchedAuth && credentials.refreshOnUnauthorized) {
-    const refreshed = await credentials
-      .refreshOnUnauthorized(action.matchedAuth.authKey)
-      .catch(() => false);
-    if (refreshed) {
+    matchedAuthKey !== null &&
+    credentials.shouldReauth?.(matchedAuthKey, response.status) === true;
+  let retried = false;
+  // null = no refresh attempt was made for this request.
+  let refreshOutcome: "refreshed" | "terminal" | "transient" | null = null;
+  let lastAction = action;
+
+  if (
+    (oauthRetry || connectReauth) &&
+    action.matchedAuth &&
+    matchedAuthKey !== null &&
+    (credentials.refreshOnUnauthorizedDetailed || credentials.refreshOnUnauthorized)
+  ) {
+    // Prefer the tri-state variant so we can distinguish a dead credential
+    // (report) from a transient/cooldown failure (back off, don't flag). Fall
+    // back to the boolean form for legacy/test sources.
+    refreshOutcome = credentials.refreshOnUnauthorizedDetailed
+      ? await credentials
+          .refreshOnUnauthorizedDetailed(matchedAuthKey)
+          .catch((): "transient" => "transient")
+      : (await credentials.refreshOnUnauthorized!(matchedAuthKey).catch(() => false))
+        ? "refreshed"
+        : "transient";
+
+    if (refreshOutcome === "refreshed") {
       const action2 = buildAction();
+      lastAction = action2;
       const outbound2 = buildOutboundHeaders(
         headersForOutbound,
         sniHost,
@@ -753,20 +788,34 @@ async function handleInnerRequest(
           redirect: "manual",
           signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
         });
-        emit({
-          kind: "request-forwarded",
-          url: targetUrl,
-          method: req.method,
-          status: response.status,
-          authKey: action2.matchedAuth?.authKey ?? null,
-          retried: true,
-          headerInjected: action2.injectedHeader !== null,
-        });
-        return passthroughResponse(response);
+        retried = true;
       } catch (err) {
         emit({ kind: "upstream-error", url: targetUrl, error: `retry: ${(err as Error).message}` });
+        // The retry itself failed to complete (network/timeout) — the token
+        // rotated fine, so this is NOT a dead credential. Treat as transient so
+        // the terminal-failure report below is suppressed.
+        refreshOutcome = "transient";
       }
     }
+  }
+
+  // Terminal auth-failure report: a 401 we could not clear. Fires at most once
+  // per run (the source dedups). Gated on:
+  //   - status === 401 (authentication failed) — NOT 403 (an authorization
+  //     decision on a specific resource, not a dead credential);
+  //   - a matched auth whose credential we actually injected (so the 401 is
+  //     about OUR credential, not an unauthenticated endpoint);
+  //   - the refresh outcome is not "transient" (network/5xx/cooldown may still
+  //     be valid — flagging then would be a false positive).
+  if (
+    response.status === 401 &&
+    lastAction.matchedAuth &&
+    lastAction.injectedHeader !== null &&
+    matchedAuthKey !== null &&
+    refreshOutcome !== "transient" &&
+    credentials.reportAuthFailure
+  ) {
+    await credentials.reportAuthFailure(matchedAuthKey).catch(() => undefined);
   }
 
   emit({
@@ -774,9 +823,9 @@ async function handleInnerRequest(
     url: targetUrl,
     method: req.method,
     status: response.status,
-    authKey: action.matchedAuth?.authKey ?? null,
-    retried: false,
-    headerInjected: action.injectedHeader !== null,
+    authKey: lastAction.matchedAuth?.authKey ?? null,
+    retried,
+    headerInjected: lastAction.injectedHeader !== null,
   });
   return passthroughResponse(response);
 }

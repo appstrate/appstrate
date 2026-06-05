@@ -605,6 +605,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         ...proxyDeps,
         fetchCredentials: integ.fetchCredentials,
         refreshCredentials: integ.refreshCredentials,
+        reportAuthFailure: integ.reportAuthFailure,
       },
       integrationId: integ.integrationId,
       label: toolName,
@@ -1547,8 +1548,11 @@ export interface ApiCallIntegrationConfig {
   integrationId: string;
   /** Resolve the integration's credentials into the proxy payload. */
   fetchCredentials: ApiCallDeps["fetchCredentials"];
-  /** Force-refresh on a mid-run 401 and re-resolve. */
+  /** Force-refresh on a mid-run 401 and re-resolve (returns the tri-state outcome). */
   refreshCredentials: NonNullable<ApiCallDeps["refreshCredentials"]>;
+  /** Flag the run's connection for re-connect after a terminal 401. Optional —
+   * the legacy/test paths without an AFPS connection omit it. */
+  reportAuthFailure?: NonNullable<ApiCallDeps["reportAuthFailure"]>;
   /**
    * Resumable-upload protocols this integration's `apiCall` declared
    * (`manifest.apiCall.uploadProtocols`). When non-empty the sidecar

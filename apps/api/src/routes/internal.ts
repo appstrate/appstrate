@@ -19,7 +19,12 @@ import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
-import { getRecentRuns, RUN_HISTORY_FIELDS, type RunHistoryField } from "../services/state/runs.ts";
+import {
+  getRecentRuns,
+  recordRunDegradedIntegration,
+  RUN_HISTORY_FIELDS,
+  type RunHistoryField,
+} from "../services/state/runs.ts";
 import {
   recallMemories,
   RECALL_LIMIT_DEFAULT,
@@ -37,6 +42,7 @@ import {
 } from "../services/model-providers/token-resolver.ts";
 import {
   resolveLiveIntegrationCredentials,
+  reportIntegrationAuthFailureForRun,
   serializeIntegrationCredentialsWire,
 } from "../services/integration-credentials-resolver.ts";
 import { fetchIntegrationManifest } from "../services/integration-service.ts";
@@ -365,6 +371,29 @@ export function createInternalRouter() {
       authCount: result.auths.length,
     });
     return c.json(serializeIntegrationCredentialsWire(result));
+  });
+
+  // POST /internal/integration-credentials/:scope/:name/report-auth-failure
+  // Sidecar-only. Called when an upstream 401/403 PERSISTS after the proxy's
+  // single refresh+retry — the credential is terminally dead. Flags the run's
+  // connection `needsReconnection` (any auth type, not just refreshable OAuth2)
+  // so the next-launch readiness gate fires + the dashboard badge updates, and
+  // records the integration on `runs.metadata.degraded_integrations[]` so the
+  // finished run surfaces a reconnect banner. Idempotent; returns 204.
+  router.post("/integration-credentials/:scope{@[^/]+}/:name/report-auth-failure", async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    await assertAgentDeclaresIntegration(packageId, run, runId);
+    const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
+    const connectionId = await reportIntegrationAuthFailureForRun(packageId, {
+      runId,
+      applicationId: run.applicationId,
+      actor,
+      resolvedConnections: run.resolvedConnections,
+    });
+    await recordRunDegradedIntegration(runId, packageId);
+    logger.info("Integration auth-failure reported", { runId, packageId, connectionId });
+    return c.body(null, 204);
   });
 
   // GET /internal/mcp-server-bundle/:scope/:name

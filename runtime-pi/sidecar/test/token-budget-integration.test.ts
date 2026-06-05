@@ -142,7 +142,10 @@ async function buildTestApp(opts: {
         namespace: "test",
         integrationId: "@test/integ",
         fetchCredentials: opts.deps.fetchCredentials,
-        refreshCredentials: opts.deps.fetchCredentials,
+        refreshCredentials: async (id: string) => ({
+          response: await opts.deps.fetchCredentials(id),
+          outcome: "refreshed" as const,
+        }),
       },
     ],
     { proxyDeps, blobStore, ...(opts.tokenBudget ? { tokenBudget: opts.tokenBudget } : {}) },
@@ -548,7 +551,10 @@ describe("token-aware spill — env-var configuration via createApp", () => {
             namespace: "test",
             integrationId: "@test/integ",
             fetchCredentials: defaultFetchCredentials,
-            refreshCredentials: defaultFetchCredentials,
+            refreshCredentials: async () => ({
+              response: await defaultFetchCredentials(),
+              outcome: "refreshed" as const,
+            }),
           },
         ],
         runtimeDeps,

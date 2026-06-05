@@ -453,6 +453,45 @@ export async function updateRun(
 }
 
 /**
+ * Append an integration id to `runs.metadata.degraded_integrations[]` — the
+ * record that a tool/api_call on that integration hit a terminal auth failure
+ * (401/403 that survived the proxy's refresh+retry) during this run. Surfaced
+ * in the run detail UI as a "reconnect" banner so a finished run shows the
+ * degradation even when no one was watching the live `connection_update` badge.
+ *
+ * Atomic + idempotent via a single jsonb UPDATE: the `?` membership guard
+ * makes a repeated report for the same integration a no-op, and concurrent
+ * reports for DIFFERENT integrations on the same run cannot clobber each other
+ * (`||` appends to whatever the row currently holds). Best-effort — never
+ * throws into the caller; a metadata write must not break the refresh path.
+ */
+export async function recordRunDegradedIntegration(
+  runId: string,
+  integrationId: string,
+): Promise<void> {
+  try {
+    await db.execute(sql`
+      UPDATE ${runs}
+      SET metadata = jsonb_set(
+        COALESCE(${runs.metadata}, '{}'::jsonb),
+        '{degraded_integrations}',
+        COALESCE(${runs.metadata} -> 'degraded_integrations', '[]'::jsonb)
+          || to_jsonb(${integrationId}::text)
+      )
+      WHERE ${runs.id} = ${runId}
+        AND NOT (COALESCE(${runs.metadata} -> 'degraded_integrations', '[]'::jsonb)
+                 ? ${integrationId})
+    `);
+  } catch (err) {
+    logger.warn("Failed to record degraded integration on run metadata", {
+      runId,
+      integrationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
  * Compute the total attributable spend for a run from the unified
  * `llm_usage` ledger (proxy + runner rows). Called by `finalizeRun` to
  * cache the canonical `runs.cost` value at terminal time. This is the

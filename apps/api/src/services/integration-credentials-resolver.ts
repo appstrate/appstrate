@@ -243,6 +243,33 @@ export async function resolveLiveIntegrationCredentials(
           });
         }
       }
+    } else if (options.forceRefresh === true) {
+      // The auth is OAuth2 and we reached here via a FORCED refresh — the
+      // sidecar only forces a refresh after an upstream 401, so the cached
+      // access token is dead. But `buildIntegrationOAuthRefreshContext`
+      // returned null: no per-app OAuth client (DCR / system-wide / shared
+      // client) or no `token_endpoint`, so the token can never be refreshed
+      // server-side. Previously this silently returned the same stale creds
+      // with HTTP 200 — the sidecar treated it as a successful refresh,
+      // retried with the dead token, got 401 again, and the connection was
+      // NEVER flagged, so the next-launch readiness gate never fired. Flag it
+      // now and surface 410 (same contract as the revoked branch) so the
+      // dashboard prompts a re-connect. Guarded by `forceRefresh` so the
+      // PROACTIVE lead-window path does NOT invalidate a still-valid token
+      // merely because we lack a refresh client.
+      await markIntegrationConnectionNeedsReconnection(connection.id);
+      logger.warn(
+        "Integration credential unrefreshable on forced refresh — flagging needsReconnection",
+        {
+          runId: context.runId,
+          integrationId,
+          authKey,
+        },
+      );
+      throw gone(
+        "INTEGRATION_CONNECTION_NEEDS_RECONNECTION",
+        `Integration '${integrationId}' auth '${authKey}' cannot be refreshed (no OAuth client or token endpoint) — needs re-connection`,
+      );
     }
   }
 
@@ -269,6 +296,59 @@ export async function resolveLiveIntegrationCredentials(
   out.expiresAtEpochMs[authKey] = expiresAtEpochMs;
 
   return out;
+}
+
+/**
+ * Flag the connection a run is using for `integrationId` as
+ * `needsReconnection`, then return its id (or `null` when no connection
+ * resolves). Called by the sidecar via `POST /report-auth-failure` when an
+ * upstream 401/403 PERSISTS after the proxy's single refresh+retry — i.e. the
+ * credential is terminally dead and could not be refreshed. This generalises
+ * the revoked-OAuth flag to ALL auth types (api_key, basic, cookie-session),
+ * restoring the "any terminal auth failure invalidates the connection so the
+ * user reconnects at next launch" guarantee — but only AFTER a refresh attempt,
+ * so a transient blip the retry fixes never poisons the row.
+ *
+ * Resolves the same connection the credential surface used (the run's
+ * `resolvedConnections` snapshot pins it), so the flagged row is exactly the
+ * one whose token 401'd. Idempotent: a second report for an already-flagged
+ * connection is a harmless no-op UPDATE.
+ */
+export async function reportIntegrationAuthFailureForRun(
+  integrationId: string,
+  context: {
+    runId: string;
+    applicationId: string;
+    actor: Actor | null;
+    resolvedConnections?: Record<string, { connectionId: string; source: string }> | null;
+  },
+): Promise<string | null> {
+  if (!context.actor) return null;
+  const manifest = await loadIntegrationManifest(integrationId);
+  const auths = (manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
+  const snapshotEntry = context.resolvedConnections?.[integrationId] ?? null;
+  const connection = await selectAccessibleConnection(
+    integrationId,
+    Object.keys(auths),
+    snapshotEntry?.connectionId ?? null,
+    { applicationId: context.applicationId, actor: context.actor },
+  );
+  if (!connection) {
+    logger.warn("Integration auth-failure report — no connection resolved to flag", {
+      runId: context.runId,
+      integrationId,
+    });
+    return null;
+  }
+  await markIntegrationConnectionNeedsReconnection(connection.id);
+  logger.warn("Integration connection flagged needsReconnection (terminal auth failure)", {
+    runId: context.runId,
+    integrationId,
+    authKey: connection.authKey,
+    // W3 — definitive: the credential is dead, the user must reconnect.
+    category: "reconnect_required",
+  });
+  return connection.id;
 }
 
 // ─────────────────────────────────────────────

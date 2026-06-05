@@ -32,7 +32,8 @@ import {
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
 import { encryptCredentials } from "@appstrate/connect";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, runs } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 
 const app = getTestApp();
 
@@ -346,5 +347,113 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     };
     expect(body.auths).toHaveLength(1);
     expect(body.auths[0]!.fields.api_key).toBe("live-secret-value");
+  });
+});
+
+describe("POST /internal/integration-credentials/:scope/:name/report-auth-failure", () => {
+  let ctx: TestContext;
+  let runId: string;
+  let token: string;
+
+  async function seedIntegration(id: string, installed: boolean) {
+    await seedPackage({
+      id,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: buildIntegrationManifest(id),
+    });
+    if (installed) {
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+    }
+  }
+
+  async function seedConnection(integrationId: string) {
+    await db.insert(integrationConnections).values({
+      integrationId: integrationId,
+      authKey: "primary",
+      accountId: "acct-test",
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      endUserId: null,
+      credentialsEncrypted: encryptCredentials({ api_key: "live-secret-value" }),
+      scopesGranted: [],
+    });
+  }
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "report" });
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    const run = await seedRun({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      status: "running",
+    });
+    runId = run.id;
+    token = signRunToken(runId);
+  });
+
+  it("returns 401 without a run token", async () => {
+    const res = await app.request(
+      `/internal/integration-credentials/${INTEGRATION}/report-auth-failure`,
+      { method: "POST" },
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("DENY: 404 when the integration is NOT declared by the running agent", async () => {
+    await seedIntegration(OTHER_INTEGRATION, true);
+    await seedConnection(OTHER_INTEGRATION);
+    const res = await app.request(
+      `/internal/integration-credentials/${OTHER_INTEGRATION}/report-auth-failure`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("ALLOW: flags the connection needsReconnection + records run metadata (204)", async () => {
+    await seedIntegration(INTEGRATION, true);
+    await seedConnection(INTEGRATION);
+
+    const res = await app.request(
+      `/internal/integration-credentials/${INTEGRATION}/report-auth-failure`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(res.status).toBe(204);
+
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, INTEGRATION));
+    expect(row!.needsReconnection).toBe(true);
+
+    const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
+    const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
+    expect(meta?.degraded_integrations).toContain(INTEGRATION);
+  });
+
+  it("is idempotent — a second report stays 204 with a single metadata entry", async () => {
+    await seedIntegration(INTEGRATION, true);
+    await seedConnection(INTEGRATION);
+    const url = `/internal/integration-credentials/${INTEGRATION}/report-auth-failure`;
+    await app.request(url, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    const res2 = await app.request(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res2.status).toBe(204);
+
+    const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
+    const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
+    expect(meta?.degraded_integrations).toEqual([INTEGRATION]);
   });
 });

@@ -26,11 +26,24 @@
 
 import type { ProxyCredentialsPayload } from "@appstrate/connect/proxy-primitives";
 import { buildProxyCredentialsPayload } from "@appstrate/connect/integration-credentials";
-import type { IntegrationCredentialsSource } from "./integration-credentials-source.ts";
+import type {
+  IntegrationCredentialsSource,
+  RefreshOutcome,
+} from "./integration-credentials-source.ts";
+
+/** Result of an api_call credential refresh: the re-snapshotted payload plus
+ * the tri-state outcome so `executeApiCall` retries only on a real rotation
+ * and reports a terminal failure (but never a transient one). */
+export interface ApiCallRefreshResult {
+  response: ProxyCredentialsPayload;
+  outcome: RefreshOutcome;
+}
 
 export interface ApiCallCredentialAdapter {
   fetchCredentials: (integrationId: string) => Promise<ProxyCredentialsPayload>;
-  refreshCredentials: (integrationId: string) => Promise<ProxyCredentialsPayload>;
+  refreshCredentials: (integrationId: string) => Promise<ApiCallRefreshResult>;
+  /** Flag the run's connection as needing re-connect after a terminal 401. */
+  reportAuthFailure: (integrationId: string) => Promise<void>;
 }
 
 /**
@@ -62,11 +75,17 @@ export function createApiCallCredentialAdapter(opts: {
   return {
     fetchCredentials: async () => toPayload(),
     refreshCredentials: async () => {
-      // `refreshOnUnauthorized` is optional on the source (static api_key
-      // sources have no refresh hook); the optional call short-circuits the
-      // whole chain when absent, so we just re-read the current payload.
-      await source.refreshOnUnauthorized?.(authKey).catch(() => false);
-      return toPayload();
+      // Force a refresh and report the tri-state outcome so the proxy retries
+      // ONLY on a genuine token rotation (`"refreshed"`) — never re-issuing the
+      // request with an unchanged stale token, which used to mask a dead
+      // credential as a successful refresh.
+      const outcome = await source
+        .refreshOnUnauthorizedDetailed(authKey)
+        .catch((): RefreshOutcome => "transient");
+      return { response: toPayload(), outcome };
+    },
+    reportAuthFailure: async () => {
+      await source.reportAuthFailure(authKey).catch(() => undefined);
     },
   };
 }

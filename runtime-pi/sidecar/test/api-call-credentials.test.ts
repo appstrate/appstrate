@@ -34,6 +34,11 @@ function fakeSource(
       onRefresh?.();
       return true;
     },
+    refreshOnUnauthorizedDetailed: async () => {
+      onRefresh?.();
+      return "refreshed" as const;
+    },
+    reportAuthFailure: async () => {},
     snapshot: () => wire,
   } as unknown as IntegrationCredentialsSource;
 }
@@ -225,8 +230,8 @@ describe("createApiCallCredentialAdapter — connect.tool session via shared sou
   });
 });
 
-describe("createApiCallCredentialAdapter — legacy refresh re-snapshot", () => {
-  it("refreshCredentials triggers refreshOnUnauthorized and re-snapshots", async () => {
+describe("createApiCallCredentialAdapter — refresh re-snapshot + outcome", () => {
+  it("refreshCredentials triggers refresh, re-snapshots, and returns the tri-state outcome", async () => {
     let refreshed = false;
     const source = fakeSource(
       {
@@ -244,7 +249,30 @@ describe("createApiCallCredentialAdapter — legacy refresh re-snapshot", () => 
       authKey: "primary",
       authorizedUris: ["https://api.example.com/**"],
     });
-    await adapter.refreshCredentials("@scope/integ");
+    const result = await adapter.refreshCredentials("@scope/integ");
     expect(refreshed).toBe(true);
+    expect(result.outcome).toBe("refreshed");
+    expect(result.response.credentials[PROXY_INJECTED_FIELD]).toBe("AT");
+  });
+
+  it("exposes reportAuthFailure delegating to the source", async () => {
+    let reported = 0;
+    const source = {
+      current: () => ({ auths: [] }),
+      deliveryPlans: () => ({}),
+      refreshOnUnauthorized: async () => false,
+      refreshOnUnauthorizedDetailed: async () => "terminal" as const,
+      reportAuthFailure: async () => {
+        reported += 1;
+      },
+      snapshot: () => ({ auths: [], deliveryPlans: {}, expiresAtEpochMs: {} }),
+    } as unknown as IntegrationCredentialsSource;
+    const adapter = createApiCallCredentialAdapter({
+      source,
+      authKey: "primary",
+      authorizedUris: ["https://api.example.com/**"],
+    });
+    await adapter.reportAuthFailure("@scope/integ");
+    expect(reported).toBe(1);
   });
 });

@@ -148,16 +148,17 @@ describe("executeApiCall — 401 retry path", () => {
         headers: { "Content-Type": "application/json" },
       });
     });
-    const refreshCredentials = mock(
-      async (): Promise<CredentialsResponse> => ({
+    const refreshCredentials = mock(async () => ({
+      response: {
         credentials: { access_token: "tok-fresh" },
         authorizedUris: ["https://api.example.com/**"],
         allowAllUris: false,
         credentialHeaderName: "Authorization",
         credentialHeaderPrefix: "Bearer",
         credentialFieldName: "access_token",
-      }),
-    );
+      } satisfies CredentialsResponse,
+      outcome: "refreshed" as const,
+    }));
     const deps = makeDeps({
       fetchFn: fetchFn as unknown as typeof fetch,
       refreshCredentials,
@@ -179,6 +180,113 @@ describe("executeApiCall — 401 retry path", () => {
     expect(deps.reportedAuthFailures.has("gmail")).toBe(false);
   });
 
+  function refreshMock(outcome: "refreshed" | "terminal" | "transient") {
+    return mock(async () => ({
+      response: {
+        credentials: { access_token: "tok-fresh" },
+        authorizedUris: ["https://api.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer",
+        credentialFieldName: "access_token",
+      } satisfies CredentialsResponse,
+      outcome,
+    }));
+  }
+
+  it("reports a terminal auth failure and does NOT retry on a 'terminal' refresh", async () => {
+    let calls = 0;
+    const fetchFn = mock(async () => {
+      calls += 1;
+      return new Response("expired", { status: 401 });
+    });
+    const refreshCredentials = refreshMock("terminal");
+    const reportAuthFailure = mock(async () => undefined);
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      refreshCredentials,
+      reportAuthFailure,
+    });
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.response.status).toBe(401);
+    // No retry on a terminal credential — single upstream call.
+    expect(calls).toBe(1);
+    expect(refreshCredentials).toHaveBeenCalledTimes(1);
+    expect(reportAuthFailure).toHaveBeenCalledTimes(1);
+    expect(deps.reportedAuthFailures.has("gmail")).toBe(true);
+  });
+
+  it("does NOT report (or retry) on a 'transient' refresh outcome", async () => {
+    let calls = 0;
+    const fetchFn = mock(async () => {
+      calls += 1;
+      return new Response("expired", { status: 401 });
+    });
+    const refreshCredentials = refreshMock("transient");
+    const reportAuthFailure = mock(async () => undefined);
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      refreshCredentials,
+      reportAuthFailure,
+    });
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.response.status).toBe(401);
+    expect(calls).toBe(1);
+    // Transient = credential may still be valid → never flagged.
+    expect(reportAuthFailure).not.toHaveBeenCalled();
+    expect(deps.reportedAuthFailures.has("gmail")).toBe(true);
+  });
+
+  it("reports when a 'refreshed' retry STILL returns 401 (rotated token also dead)", async () => {
+    let calls = 0;
+    const fetchFn = mock(async () => {
+      calls += 1;
+      return new Response("still expired", { status: 401 });
+    });
+    const refreshCredentials = refreshMock("refreshed");
+    const reportAuthFailure = mock(async () => undefined);
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      refreshCredentials,
+      reportAuthFailure,
+    });
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.response.status).toBe(401);
+    // Refreshed → one retry → still 401 → terminal report.
+    expect(calls).toBe(2);
+    expect(reportAuthFailure).toHaveBeenCalledTimes(1);
+  });
+
   it("does NOT replay a streaming-request body on 401", async () => {
     let upstreamCalls = 0;
     const fetchFn = mock(async (url: string | URL) => {
@@ -186,16 +294,17 @@ describe("executeApiCall — 401 retry path", () => {
       if (target.startsWith("https://api.example.com")) upstreamCalls += 1;
       return new Response("expired", { status: 401 });
     });
-    const refreshCredentials = mock(
-      async (): Promise<CredentialsResponse> => ({
+    const refreshCredentials = mock(async () => ({
+      response: {
         credentials: { access_token: "tok-fresh" },
         authorizedUris: ["https://api.example.com/**"],
         allowAllUris: false,
         credentialHeaderName: "Authorization",
         credentialHeaderPrefix: "Bearer",
         credentialFieldName: "access_token",
-      }),
-    );
+      } satisfies CredentialsResponse,
+      outcome: "refreshed" as const,
+    }));
     const deps = makeDeps({
       fetchFn: fetchFn as unknown as typeof fetch,
       refreshCredentials,
@@ -1120,16 +1229,17 @@ describe("executeApiCall — finalUrl exposure (#471)", () => {
       }
       return new Response("ok", { status: 200 });
     });
-    const refreshCredentials = mock(
-      async (): Promise<CredentialsResponse> => ({
+    const refreshCredentials = mock(async () => ({
+      response: {
         credentials: { access_token: "tok-fresh" },
         authorizedUris: ["https://api.example.com/**"],
         allowAllUris: false,
         credentialHeaderName: "Authorization",
         credentialHeaderPrefix: "Bearer",
         credentialFieldName: "access_token",
-      }),
-    );
+      } satisfies CredentialsResponse,
+      outcome: "refreshed" as const,
+    }));
     const deps = makeDeps({
       fetchFn: fetchFn as unknown as typeof fetch,
       refreshCredentials,

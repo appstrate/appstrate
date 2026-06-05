@@ -21,6 +21,7 @@ import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
 import { RunRow } from "../components/run-row";
+import { RunDegradedBanner } from "../components/run-degraded-banner";
 import { useMarkRead } from "../hooks/use-notifications";
 import { ACTIVE_RUN_STATUSES, type RunLog, type EnrichedRun } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
@@ -202,6 +203,8 @@ export function RunDetailPage() {
           {run.error}
         </div>
       )}
+
+      <RunDegradedBanner metadata={run.metadata} />
 
       <div className="mb-4 flex items-center justify-between gap-4">
         <Tabs

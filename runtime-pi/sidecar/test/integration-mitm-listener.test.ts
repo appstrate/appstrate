@@ -516,6 +516,107 @@ describe("MITM listener — 401 refresh + retry", () => {
       await listener.close();
     }
   });
+
+  runIfOpenssl(
+    "reports a terminal auth failure when a 401 persists (refresh terminal)",
+    async () => {
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+      let reportCalls = 0;
+      const dp: Record<string, HttpDeliveryPlan> = { vendor: plan("Authorization", "stale") };
+      const pl = payload("vendor", "oauth2", { access_token: "stale" }, [
+        "https://api.test.local/**",
+      ]);
+      const creds: MitmCredentialSource = {
+        current: () => pl,
+        deliveryPlans: () => dp,
+        async refreshOnUnauthorizedDetailed() {
+          return "terminal";
+        },
+        async reportAuthFailure(authKey) {
+          expect(authKey).toBe("vendor");
+          reportCalls += 1;
+        },
+      };
+      const recorded = makeRecordingFetch(
+        async () => new Response(`{"err":"bad"}`, { status: 401 }),
+      );
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        fetch: recorded.fetch,
+      });
+      await listener.ready;
+      try {
+        const out = await drivenFetch({
+          listenerPort: listener.address().port,
+          sni: "api.test.local",
+          caCertPem: bundle.pems.caCertPem,
+          method: "GET",
+          path: "/v1/items",
+          headers: {},
+        });
+        expect(out.status).toBe(401);
+        expect(reportCalls).toBe(1);
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+
+  runIfOpenssl(
+    "does NOT report on a 403 (authorization decision, not a dead credential)",
+    async () => {
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+      let reportCalls = 0;
+      const dp: Record<string, HttpDeliveryPlan> = { vendor: plan("Authorization", "tok") };
+      const pl = payload("vendor", "oauth2", { access_token: "tok" }, [
+        "https://api.test.local/**",
+      ]);
+      const creds: MitmCredentialSource = {
+        current: () => pl,
+        deliveryPlans: () => dp,
+        async refreshOnUnauthorizedDetailed() {
+          return "terminal";
+        },
+        async reportAuthFailure() {
+          reportCalls += 1;
+        },
+      };
+      const recorded = makeRecordingFetch(
+        async () => new Response(`{"err":"forbidden"}`, { status: 403 }),
+      );
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        fetch: recorded.fetch,
+      });
+      await listener.ready;
+      try {
+        const out = await drivenFetch({
+          listenerPort: listener.address().port,
+          sni: "api.test.local",
+          caCertPem: bundle.pems.caCertPem,
+          method: "GET",
+          path: "/v1/items",
+          headers: {},
+        });
+        expect(out.status).toBe(403);
+        expect(reportCalls).toBe(0);
+      } finally {
+        await listener.close();
+      }
+    },
+  );
 });
 
 describe("MITM listener — connect.tool re-login (P3)", () => {
