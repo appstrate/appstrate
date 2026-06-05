@@ -8,11 +8,9 @@
  * and dispatches matching webhooks to subscribers.
  */
 
-import { resolve } from "node:path";
 import { z } from "zod";
 import type {
   AppstrateModule,
-  ModuleInitContext,
   RunConnectionMissingParams,
   RunStatusChangeParams,
 } from "@appstrate/core/module";
@@ -41,10 +39,9 @@ declare module "@appstrate/core/permissions" {
 const webhooksModule: AppstrateModule = {
   manifest: { id: "webhooks", name: "Webhooks", version: "1.0.0" },
 
-  async init(ctx: ModuleInitContext) {
-    await ctx.applyMigrations("webhooks", resolve(import.meta.dir, "drizzle/migrations"), {
-      requireCoreTables: ["organizations", "applications", "packages"],
-    });
+  async init() {
+    // Tables (`webhooks`, `webhook_deliveries`) are centralized in the core
+    // schema and created by the system migration pipeline — no module migration.
     await initWebhookWorker();
   },
 

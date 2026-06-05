@@ -7,7 +7,7 @@
 import { z } from "zod";
 import { eq, or, desc, isNull, type InferSelectModel } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { webhooks, webhookDeliveries } from "./schema.ts";
+import { webhooks, webhookDeliveries } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
 import { notFound, invalidRequest, ApiError } from "../../lib/errors.ts";
 import type {

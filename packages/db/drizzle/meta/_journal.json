@@ -15,6 +15,13 @@
       "when": 1780062003189,
       "tag": "0001_drop_credential_proxy_usage_cost_usd",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780666802597,
+      "tag": "0002_fold_webhooks_tables",
+      "breakpoints": true
     }
   ]
 }

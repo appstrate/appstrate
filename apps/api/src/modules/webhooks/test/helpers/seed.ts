@@ -8,7 +8,7 @@
  * module-owned schemas.
  */
 import { db } from "../../../../../test/helpers/db.ts";
-import { webhooks } from "../../schema.ts";
+import { webhooks } from "@appstrate/db/schema";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
 type WebhookInsert = Partial<InferInsertModel<typeof webhooks>> & {

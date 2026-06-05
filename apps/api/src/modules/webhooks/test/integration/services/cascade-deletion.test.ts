@@ -15,7 +15,7 @@ import { seedApplication } from "../../../../../../test/helpers/seed.ts";
 import { assertDbHas, assertDbMissing } from "../../../../../../test/helpers/assertions.ts";
 import { deleteApplication } from "../../../../../services/applications.ts";
 import { seedWebhook } from "../../helpers/seed.ts";
-import { webhooks } from "../../../schema.ts";
+import { webhooks } from "@appstrate/db/schema";
 
 describe("Webhooks cascade deletion", () => {
   let userId: string;
