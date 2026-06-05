@@ -248,14 +248,16 @@ describe("executeApiCall — 401 retry path", () => {
     expect(deps.reportedAuthFailures.has("gmail")).toBe(false);
   });
 
-  it("refreshableAuth=false: a persistent 401 replays once, THEN /refresh flags it", async () => {
-    // The same-credential replay also 401s → the credential is dead. The proxy
-    // calls /refresh (which flags the connection + returns null) and does not
-    // replay a third time.
+  it("refreshableAuth=false: ANY persistent 401 replays once, THEN routes to /refresh (terminal — cause-agnostic)", async () => {
+    // The same-credential replay also 401s → treated as terminal regardless of
+    // WHY (revoked key, sustained throttle-as-401, misconfig). The proxy calls
+    // /refresh — which platform-side flags `needsReconnection` (asserted in the
+    // resolver's forced-refresh matrix test) and returns null here — and does
+    // not replay a third time. This pins the "persistence, not cause" semantic.
     let calls = 0;
     const fetchFn = mock(async () => {
       calls += 1;
-      return new Response("expired", { status: 401 });
+      return new Response("still-401", { status: 401 });
     });
     const refreshCredentials = mock(async () => null);
     const deps = makeDeps({

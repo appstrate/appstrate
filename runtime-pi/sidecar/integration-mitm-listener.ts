@@ -771,11 +771,13 @@ async function handleInnerRequest(
     }
   };
 
-  // Non-OAuth credential transient guard: an api_key/basic 401 may be a passing
-  // upstream blip (rate-limit-as-401, WAF challenge), not a dead key. Retry the
-  // SAME request once; only a SECOND 401 routes to the platform /refresh (which
-  // flags the connection). OAuth and connect.tool re-login skip this — they need
-  // a rotated token / fresh session, not a replay of the same credential.
+  // Non-OAuth credential guard: retry the SAME request once to absorb a one-off
+  // / spurious 401 (e.g. a brief upstream auth-backend hiccup). A 401 that
+  // PERSISTS across the replay is treated as terminal and routes to the
+  // platform /refresh (which flags the connection) — an immediate identical
+  // replay does NOT clear a sustained throttle window, so that case still
+  // flags. OAuth and connect.tool re-login skip the replay — they re-acquire
+  // the credential (rotated token / fresh session) rather than replay it.
   if (got401 && !connectReauth && matchedAuthKey !== null) {
     const matched = credentials.current().auths.find((a) => a.authKey === matchedAuthKey);
     if (matched && matched.authType !== "oauth2") {

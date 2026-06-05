@@ -39,11 +39,15 @@ export interface ApiCallCredentialAdapter {
    */
   refreshCredentials: (integrationId: string) => Promise<ProxyCredentialsPayload | null>;
   /**
-   * Whether this auth can ROTATE its credential on a 401 (oauth2). When
-   * `false` (api_key / basic / a custom auth) a forced refresh has nothing to
-   * rotate and the platform `/refresh` flags the connection — so the proxy
-   * first retries the SAME request once (a 401 may be a transient upstream
-   * blip, not a dead key) before letting `refreshCredentials` flag it.
+   * Whether a 401 can RE-ACQUIRE this auth's credential — oauth2 (token
+   * rotation) OR a connect.tool auth whose `reauth_on` covers 401 (mid-run
+   * re-login). When `true` the proxy refreshes immediately. When `false`
+   * (api_key / basic / a custom auth with no 401 re-login) a forced refresh
+   * has nothing to re-acquire and the platform `/refresh` flags the
+   * connection — so the proxy first retries the SAME request once (a one-off
+   * 401 may be spurious, not a dead key) before letting `refreshCredentials`
+   * flag it. Mirrors the MITM listener's `!connectReauth` gate so a
+   * connect.tool session is never replayed stale on the api_call path.
    */
   refreshable: boolean;
 }
@@ -84,7 +88,12 @@ export function createApiCallCredentialAdapter(opts: {
       const rotated = await source.refreshOnUnauthorized(authKey).catch(() => false);
       return rotated ? toPayload() : null;
     },
-    // Static at run-start: an auth's type never changes mid-run.
-    refreshable: source.current().auths.find((a) => a.authKey === authKey)?.authType === "oauth2",
+    // oauth2 rotates; a connect.tool auth re-logs in on a 401 (`shouldReauth`).
+    // Both re-acquire the credential, so skip the stale-credential replay and
+    // refresh immediately. Optional-chained: real sources always implement
+    // `shouldReauth`, test fakes may not.
+    refreshable:
+      source.current().auths.find((a) => a.authKey === authKey)?.authType === "oauth2" ||
+      source.shouldReauth?.(authKey, 401) === true,
   };
 }

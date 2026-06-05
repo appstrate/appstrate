@@ -390,11 +390,13 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     config.runToken &&
     !reportedAuthFailures.has(integrationId)
   ) {
-    // Non-refreshable auth (api_key / basic): a 401 may be a transient upstream
-    // blip (rate-limit returned as 401, WAF challenge), not a dead key. Retry
-    // the SAME request once before `/refresh` treats the credential as dead and
-    // flags the connection. OAuth skips this — a mid-run 401 means the token is
-    // expired and must be rotated, not replayed with the same stale value.
+    // Non-refreshable auth (api_key / basic): retry the SAME request once
+    // before `/refresh` treats the credential as dead and flags the connection.
+    // This absorbs a one-off / spurious 401 (e.g. a brief upstream auth-backend
+    // hiccup) — NOT a sustained throttle window, which an immediate identical
+    // replay cannot clear: any 401 that PERSISTS across the replay is treated
+    // as terminal and flags `needsReconnection`. OAuth skips the replay — a
+    // mid-run 401 means the token is expired and must be rotated, not replayed.
     if (refreshableAuth === false && body.kind !== "streaming") {
       try {
         const r = await doUpstreamRequest(creds);
