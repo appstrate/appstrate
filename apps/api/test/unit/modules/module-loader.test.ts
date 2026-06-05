@@ -5,7 +5,6 @@ import {
   loadModulesFromInstances,
   getModule,
   getModules,
-  getModuleOidcScopes,
   getModulePublicPaths,
   registerModuleRoutes,
   applyModuleFeatures,
@@ -36,11 +35,8 @@ function mockModule(id: string, overrides: Partial<AppstrateModule> = {}): Appst
 
 function mockCtx(): ModuleInitContext {
   return {
-    databaseUrl: null,
     redisUrl: null,
     appUrl: "http://localhost:3000",
-    isEmbeddedDb: true,
-    applyMigrations: async () => {},
     getSendMail: async () => () => {},
     getOrgAdminEmails: async () => [],
     services: {} as ModuleInitContext["services"],
@@ -369,115 +365,6 @@ describe("module-loader", () => {
           applicationId: "app",
           status: "success",
         }),
-      ).resolves.toBeUndefined();
-    });
-  });
-
-  describe("getModuleOidcScopes", () => {
-    it("returns empty array when no module contributes scopes", async () => {
-      await loadModulesFromInstances([], mockCtx());
-      expect(getModuleOidcScopes()).toEqual([]);
-    });
-
-    it("aggregates oidcScopes from every loaded module", async () => {
-      await loadModulesFromInstances(
-        [
-          mockModule("tasks", { oidcScopes: ["tasks:read", "tasks:write"] }),
-          mockModule("billing", { oidcScopes: ["billing:read"] }),
-        ],
-        mockCtx(),
-      );
-      expect(getModuleOidcScopes().sort()).toEqual(["billing:read", "tasks:read", "tasks:write"]);
-    });
-
-    it("deduplicates repeated scopes", async () => {
-      await loadModulesFromInstances(
-        [
-          mockModule("alpha", { oidcScopes: ["x:read"] }),
-          mockModule("beta", { oidcScopes: ["x:read", "y:read"] }),
-        ],
-        mockCtx(),
-      );
-      expect(getModuleOidcScopes().sort()).toEqual(["x:read", "y:read"]);
-    });
-
-    it("excludes the OIDC module's own contributions (canonical vocabulary lives in scopes.ts)", async () => {
-      await loadModulesFromInstances(
-        [
-          // A module with id "oidc" must not pollute the aggregator —
-          // the OIDC module owns the built-in vocabulary directly.
-          mockModule("oidc", { oidcScopes: ["ignored:scope"] }),
-          mockModule("tasks", { oidcScopes: ["tasks:read"] }),
-        ],
-        mockCtx(),
-      );
-      expect(getModuleOidcScopes()).toEqual(["tasks:read"]);
-    });
-  });
-
-  describe("validateModuleOidcScopes (boot-time format guard)", () => {
-    it("rejects a scope without colon — fails fast at boot", async () => {
-      const mod = mockModule("tasks", {
-        // Casting around the template-literal compile-time guard so the
-        // runtime validation gets exercised. External modules built from JS
-        // (not TS) bypass the compile-time guard entirely — this is the
-        // last line of defense.
-        oidcScopes: ["tasksread"] as unknown as ReadonlyArray<`${string}:${string}`>,
-      });
-      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
-        /Module "tasks" declared invalid oidcScope "tasksread"/,
-      );
-    });
-
-    it("rejects an uppercase scope", async () => {
-      const mod = mockModule("tasks", {
-        oidcScopes: ["Tasks:Read"] as unknown as ReadonlyArray<`${string}:${string}`>,
-      });
-      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
-        /invalid oidcScope "Tasks:Read"/,
-      );
-    });
-
-    it("rejects a scope containing whitespace", async () => {
-      const mod = mockModule("tasks", {
-        oidcScopes: ["tasks: read"] as unknown as ReadonlyArray<`${string}:${string}`>,
-      });
-      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
-        /invalid oidcScope "tasks: read"/,
-      );
-    });
-
-    it("accepts valid namespace:action scopes", async () => {
-      await expect(
-        loadModulesFromInstances(
-          [
-            mockModule("tasks", { oidcScopes: ["tasks:read", "tasks:write"] }),
-            mockModule("billing", { oidcScopes: ["billing:read", "billing-v2:write"] }),
-          ],
-          mockCtx(),
-        ),
-      ).resolves.toBeUndefined();
-    });
-
-    it("accepts modules with no oidcScopes declaration", async () => {
-      await expect(
-        loadModulesFromInstances([mockModule("plain")], mockCtx()),
-      ).resolves.toBeUndefined();
-    });
-
-    it("exempts the OIDC module — its built-in vocabulary lives in scopes.ts", async () => {
-      // The OIDC module owns the canonical vocabulary directly, including
-      // single-word identity scopes (`openid`, `profile`, …). The
-      // validator must not block them — exemption is keyed on `manifest.id`.
-      await expect(
-        loadModulesFromInstances(
-          [
-            mockModule("oidc", {
-              oidcScopes: ["openid"] as unknown as ReadonlyArray<`${string}:${string}`>,
-            }),
-          ],
-          mockCtx(),
-        ),
       ).resolves.toBeUndefined();
     });
   });
@@ -814,32 +701,22 @@ describe("module-loader", () => {
     it("returns empty shape in OSS mode (no modules loaded)", () => {
       expect(getModuleContributions()).toEqual({
         betterAuthPlugins: [],
-        drizzleSchemas: {},
       });
     });
 
-    it("flattens plugins + schemas from multiple modules in load order", async () => {
+    it("flattens plugins from multiple modules in load order", async () => {
       const plugA = { id: "plug-a" };
       const plugB1 = { id: "plug-b1" };
       const plugB2 = { id: "plug-b2" };
-      const tableA = { __table: "a" };
-      const tableB = { __table: "b" };
       await loadModulesFromInstances(
         [
-          mockModule("a", {
-            betterAuthPlugins: () => [plugA],
-            drizzleSchemas: () => ({ tableA }),
-          }),
-          mockModule("b", {
-            betterAuthPlugins: () => [plugB1, plugB2],
-            drizzleSchemas: () => ({ tableB }),
-          }),
+          mockModule("a", { betterAuthPlugins: () => [plugA] }),
+          mockModule("b", { betterAuthPlugins: () => [plugB1, plugB2] }),
         ],
         mockCtx(),
       );
       const contributions = getModuleContributions();
       expect(contributions.betterAuthPlugins).toEqual([plugA, plugB1, plugB2]);
-      expect(contributions.drizzleSchemas).toEqual({ tableA, tableB });
     });
 
     it("returns empty shape after resetModules()", async () => {
@@ -851,7 +728,6 @@ describe("module-loader", () => {
       resetModules();
       expect(getModuleContributions()).toEqual({
         betterAuthPlugins: [],
-        drizzleSchemas: {},
       });
     });
   });

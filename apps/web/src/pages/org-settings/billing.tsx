@@ -47,7 +47,7 @@ export function OrgSettingsBillingPage() {
 
   const handleUpgrade = (planId: string) => {
     checkoutMutation.mutate(
-      { planId },
+      { planId, returnUrl: "/org-settings/billing" },
       {
         onSuccess: (url) => {
           window.location.href = url;

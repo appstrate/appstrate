@@ -50,7 +50,7 @@ export function SidebarBilling() {
               } as React.ComponentProps<typeof TooltipContent>
             }
           >
-            <Link to="/org-settings#billing">
+            <Link to="/org-settings/billing">
               <Coins size={16} />
             </Link>
           </SidebarMenuButton>
@@ -63,7 +63,7 @@ export function SidebarBilling() {
       {/* Expanded view: full credit bar */}
       <div className="group-data-[collapsible=icon]:hidden">
         <Link
-          to="/org-settings#billing"
+          to="/org-settings/billing"
           className="hover:bg-sidebar-accent block rounded-md px-2 py-2 transition-colors"
         >
           <div className="mb-1.5 flex items-center justify-between text-xs">

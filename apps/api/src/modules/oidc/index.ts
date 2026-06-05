@@ -23,13 +23,14 @@
  *    `/api/oauth/{login,consent}` pages, and the RFC-compliant
  *    `/.well-known/openid-configuration` + `/.well-known/oauth-authorization-server`
  *    discovery endpoints.
- *  - `init()` runs module-owned Drizzle migrations for the Better Auth
- *    oauth-provider tables plus the `oidc_end_user_profiles` shadow table.
+ *  - `init()` installs the realm resolver and syncs instance clients. The
+ *    Better Auth oauth-provider tables and the `oidc_end_user_profiles`
+ *    shadow table live in the core schema and are created by the system
+ *    migration pipeline — the module no longer owns migrations.
  */
 
-import { resolve } from "node:path";
 import { z } from "zod";
-import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
+import type { AppstrateModule } from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
 
 // Register module-owned RBAC resources. OAuth client registration /
@@ -59,15 +60,6 @@ import {
 import { oidcPaths } from "./openapi/paths.ts";
 import { oidcSchemas } from "./openapi/schemas.ts";
 import {
-  cliRefreshToken,
-  deviceCode,
-  jwks,
-  oauthClient,
-  oauthAccessToken,
-  oauthRefreshToken,
-  oauthConsent,
-} from "./schema.ts";
-import {
   ensureInstanceClient,
   getInstanceClientId,
   listFirstPartyClientIds,
@@ -76,22 +68,8 @@ import { ensureCliClient } from "./services/ensure-cli-client.ts";
 import { syncInstanceClientsFromEnv } from "./services/instance-client-sync.ts";
 import { oidcRealmResolver } from "./services/oidc-realm-resolver.ts";
 import { setRealmResolver } from "@appstrate/db/auth";
-import { verifyEndUserAccessToken } from "./services/enduser-token.ts";
 import { setRunnerResolver } from "../../lib/runner-resolver.ts";
 import { lookupCliDeviceName } from "./services/cli-tokens.ts";
-
-/**
- * Public API surface exposed via `services.modules.get("oidc")?.api`. Other
- * modules that accept OAuth2 Bearer JWTs call `verifyEndUserAccessToken` to
- * re-verify tokens against the local JWKS without re-implementing JWKS
- * fetch + caching + signature parsing.
- *
- * Consumers narrow the type by importing this module's published typings:
- *   const oidc = services.modules.get("oidc")?.api as OidcModuleApi | undefined;
- */
-export interface OidcModuleApi {
-  verifyEndUserAccessToken: typeof verifyEndUserAccessToken;
-}
 
 // Snapshot of first-party clientIds captured at `init()` time and forwarded
 // to `oauthProvider({ cachedTrustedClients })` when `betterAuthPlugins()` is
@@ -102,14 +80,11 @@ let cachedTrustedClientIds: readonly string[] = [];
 const oidcModule: AppstrateModule = {
   manifest: { id: "oidc", name: "OIDC Identity Provider", version: "1.0.0" },
 
-  api: {
-    verifyEndUserAccessToken,
-  } satisfies OidcModuleApi,
-
-  async init(ctx: ModuleInitContext) {
-    await ctx.applyMigrations("oidc", resolve(import.meta.dir, "drizzle/migrations"), {
-      requireCoreTables: ["end_users", "user", "session", "organizations", "applications"],
-    });
+  async init() {
+    // Tables are centralized in the core schema and created by the system
+    // migration pipeline — no module migration. Better Auth tables are
+    // auto-registered via the core schema barrel in `packages/db/src/auth.ts`.
+    //
     // Install the realm resolver so the BA user-create hook tags new
     // end-user rows with `realm="end_user:<applicationId>"`. Platform-side
     // signups (dashboard, org invitation, instance/org-level OIDC clients)
@@ -192,21 +167,8 @@ const oidcModule: AppstrateModule = {
     return oidcBetterAuthPlugins({ cachedTrustedClientIds });
   },
 
-  drizzleSchemas() {
-    // Names must match the camelCase model ids Better Auth's oauth-provider,
-    // jwt, and device-authorization plugins use internally (see
-    // `@better-auth/oauth-provider` `schema`, `better-auth/plugins/jwt/schema`,
-    // and `better-auth/plugins/device-authorization/schema`).
-    return {
-      jwks,
-      oauthClient,
-      oauthAccessToken,
-      oauthRefreshToken,
-      oauthConsent,
-      deviceCode,
-      cliRefreshToken,
-    };
-  },
+  // No `drizzleSchemas()`: the OIDC tables (jwks, oauth_clients, …) live in the
+  // core schema barrel, which the Better Auth adapter resolves directly.
 
   openApiPaths() {
     return oidcPaths;

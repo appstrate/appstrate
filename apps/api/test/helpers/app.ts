@@ -170,8 +170,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   });
 
   // App context middleware: resolve X-Application-Id for app-scoped routes.
-  // Core prefixes listed statically; any module-owned prefixes come from the
-  // modules passed via options.modules so tests mirror the production aggregation.
+  // Core-only prefix list — modules own app-scoping for their own routes.
   const APP_SCOPED_PREFIXES = [
     "/api/agents",
     "/api/runs",
@@ -181,7 +180,6 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     "/api/notifications",
     "/api/packages",
     "/api/integrations",
-    ...extraModules.flatMap((m) => m.appScopedPaths ?? []),
   ];
 
   const appContextMiddleware = requireAppContext();

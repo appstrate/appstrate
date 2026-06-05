@@ -9,28 +9,15 @@
  * a default AppstrateModule (or an `appstrateModule` named export).
  */
 
-import { isEmbeddedDb } from "@appstrate/db/client";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import type { ModuleInitContext, PlatformServices } from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
-import { applyModuleMigrations } from "./migrate.ts";
 
 // ---- Platform service imports (for buildPlatformServices) -----------------
 import { logger } from "../logger.ts";
-import { loadModel, listOrgModels } from "../../services/org-models.ts";
-import { getPackage, searchPackages } from "../../services/package-catalog.ts";
-import { isInlineShadowPackageId, triggerInlineRun } from "../../services/inline-run.ts";
-import { runInlinePreflight } from "../../services/inline-run-preflight.ts";
-import { getDefaultApplication } from "../../services/applications.ts";
-import { appendRunLog, getRunByOrg, listRunLogs, updateRun } from "../../services/state/runs.ts";
-import { abortRun } from "../../services/run-tracker.ts";
-import { addSubscriber, removeSubscriber } from "../../services/realtime.ts";
-import { getOrchestrator } from "../../services/orchestrator/index.ts";
-import { getPubSub } from "../../infra/index.ts";
-import { hasRedis, hasExternalDb } from "../../infra/mode.ts";
-import { getModule, emitEvent } from "./module-loader.ts";
+import { listLlmUsageForRun } from "../../services/state/runs.ts";
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
@@ -88,78 +75,23 @@ export function getModuleRegistry(): string[] {
 
 /**
  * Wire concrete platform services into the structural `PlatformServices`
- * contract declared in `@appstrate/core/module`. All bindings pass through:
- * the public DTO shapes in `@appstrate/core/platform-types` use open index
- * signatures so the concrete apps/api rows (LoadedPackage, ResolvedModel,
- * Application row, UserConnectionProviderGroup) are structurally assignable.
- *
- * `Actor` is re-declared in core with the same two-variant union as
- * `@appstrate/connect` — they're nominally different types but structurally
- * identical, hence the parameter-name-only mismatch goes through.
+ * contract declared in `@appstrate/core/module`. The surface is intentionally
+ * minimal — only `runs.listLlmUsage` (the cloud billing module's per-run
+ * ledger read) is exposed. See the `PlatformServices` doc in core for the
+ * razor and the history of the previous (chat-era) broad surface.
  */
 function buildPlatformServices(): PlatformServices {
   return {
     logger,
-    orchestrator: { get: getOrchestrator },
-    pubsub: { get: getPubSub },
-    env: { hasRedis, hasExternalDb },
-    models: { load: loadModel, listForOrg: listOrgModels },
-    packages: {
-      get: getPackage,
-      isInlineShadow: isInlineShadowPackageId,
-      search: searchPackages,
-    },
-    applications: { getDefault: getDefaultApplication },
-    runs: {
-      // Adapter: positional args internally, object args at the public boundary
-      // so the published contract is non-breaking when fields are added.
-      get: getRunByOrg,
-      listLogs: listRunLogs,
-      // Both writes are best-effort from a module's perspective: a
-      // transient DB failure must not crash a module handler. The
-      // strict (throw-on-error) contract on the underlying functions
-      // is reserved for the ingestion hot path, which wraps them in
-      // a transaction.
-      appendLog: async (a) => {
-        try {
-          return await appendRunLog(
-            { orgId: a.orgId },
-            a.runId,
-            a.type,
-            a.event ?? null,
-            a.message ?? null,
-            a.data ?? null,
-            a.level,
-          );
-        } catch (err) {
-          logger.error("module appendRunLog failed", { runId: a.runId, err: String(err) });
-          return 0;
-        }
-      },
-      update: async (a) => {
-        try {
-          await updateRun({ orgId: a.orgId, applicationId: a.applicationId }, a.runId, a.updates);
-        } catch (err) {
-          logger.error("module updateRun failed", { runId: a.runId, err: String(err) });
-        }
-      },
-      abort: abortRun,
-    },
-    inline: { preflight: runInlinePreflight, run: triggerInlineRun },
-    realtime: { addSubscriber, removeSubscriber },
-    modules: { get: getModule, emit: emitEvent },
+    runs: { listLlmUsage: listLlmUsageForRun },
   };
 }
 
 export function buildModuleInitContext(): ModuleInitContext {
   const env = getEnv();
   const ctx: ModuleInitContext = {
-    databaseUrl: env.DATABASE_URL ?? null,
     redisUrl: env.REDIS_URL ?? null,
     appUrl: env.APP_URL,
-    isEmbeddedDb,
-    applyMigrations: (moduleId, migrationsDir, opts) =>
-      applyModuleMigrations(moduleId, migrationsDir, opts),
     getSendMail: async () => {
       // Lazy import to break circular dep: email.ts -> app-config.ts -> modules
       const { sendMail } = await import("../../services/email.ts");

@@ -19,7 +19,12 @@ import {
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import oidcModule from "../../../index.ts";
-import { oauthClient, oauthAccessToken, oauthRefreshToken, oauthConsent } from "../../../schema.ts";
+import {
+  oauthClient,
+  oauthAccessToken,
+  oauthRefreshToken,
+  oauthConsent,
+} from "@appstrate/db/schema";
 
 const app = getTestApp({ modules: [oidcModule] });
 

@@ -16,20 +16,6 @@ import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
 import type { ModelApiShape, OAuthWireFormat } from "./sidecar-types.ts";
-import type {
-  Actor,
-  ContainerOrchestrator,
-  InlinePreflightInput,
-  InlinePreflightResult,
-  InlineRunBody,
-  PlatformApplication,
-  PlatformModel,
-  PlatformPackage,
-  PubSub,
-  RealtimeSubscriber,
-  Run,
-  RunLog,
-} from "./platform-types.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -65,17 +51,6 @@ export interface AppstrateModule {
   publicPaths?: string[];
 
   /**
-   * Route prefixes owned by this module that require the app context middleware
-   * (`X-Application-Id` header resolution). Aggregated with core prefixes at boot.
-   *
-   * Only declare prefixes for app-scoped resources. Org-scoped or global
-   * routes should be omitted.
-   *
-   * @example appScopedPaths: ["/api/webhooks"]
-   */
-  appScopedPaths?: string[];
-
-  /**
    * Create and return a Hono router to be mounted at the HTTP origin root
    * (`/`). The router declares its routes with their **full paths** — the
    * platform does NOT inject an `/api` prefix.
@@ -88,10 +63,9 @@ export interface AppstrateModule {
    * `/.well-known/oauth-authorization-server`), `robots.txt`, etc.
    *
    * Route paths declared here must match the entries the module lists in
-   * `publicPaths` and `appScopedPaths` (which also use full paths). Two
-   * modules cannot register the same path — collisions surface as Hono
-   * first-match-wins silent shadowing, so authors are responsible for
-   * keeping prefixes distinct.
+   * `publicPaths` (which also use full paths). Two modules cannot register
+   * the same path — collisions surface as Hono first-match-wins silent
+   * shadowing, so authors are responsible for keeping prefixes distinct.
    *
    * Mount order: the platform calls `app.route("/", router)` for each
    * module **before** the SPA static fallback, so module-owned paths take
@@ -169,27 +143,6 @@ export interface AppstrateModule {
   betterAuthPlugins?(): unknown[];
 
   /**
-   * Drizzle tables contributed to the Better Auth adapter.
-   *
-   * Better Auth's Drizzle adapter resolves `findOne({ model: "name" })` calls
-   * against a flat `schema` record. When a module's plugins (e.g. the JWT or
-   * OAuth provider plugin) operate on module-owned tables, those tables must
-   * be registered with the adapter — otherwise the plugin fails with
-   * `"Drizzle Adapter: The model X was not found in the schema object."`.
-   *
-   * Return a flat map whose keys are the camelCase model names Better Auth
-   * expects (e.g. `"jwks"`, `"oauthClient"`, `"oauthAccessToken"`) and whose
-   * values are the Drizzle table instances from the module's `schema.ts`.
-   * The values are typed as `unknown` here to keep `drizzle-orm` out of the
-   * published core surface — the boot integration site in
-   * `packages/db/src/auth.ts` merges them into the adapter config as-is.
-   *
-   * Called once at boot, during `createAuth()`, immediately before the
-   * Better Auth instance is constructed.
-   */
-  drizzleSchemas?(): Record<string, unknown>;
-
-  /**
    * Named hooks (first-match-wins).
    * The platform invokes hooks by name — only the first module that provides
    * a given hook is called. For broadcast-to-all semantics, use `events`.
@@ -230,63 +183,6 @@ export interface AppstrateModule {
    * `AppConfig` alongside module features.
    */
   appConfigContribution?(): Promise<Record<string, unknown>> | Record<string, unknown>;
-
-  /**
-   * Public API surface exposed to other modules.
-   *
-   * Read by peers via `services.modules.get(id)?.api`. Typed as `unknown`
-   * here so the core contract stays ignorant of any specific module's
-   * shape; modules that consume a peer's API import that peer's published
-   * typings (or cast at the call site) to recover strong typing.
-   *
-   * Example: the OIDC module exposes `verifyEndUserAccessToken` so any
-   * module accepting OAuth2 Bearer JWTs can re-verify tokens without
-   * re-implementing JWKS fetch + caching + signature parsing.
-   */
-  api?: unknown;
-
-  /**
-   * Additional OAuth2 scopes contributed by this module to the OIDC
-   * vocabulary. Aggregated by the OIDC module at boot and included in:
-   *   1. `.well-known/openid-configuration#scopes_supported`
-   *   2. `assertValidScopes` (so operator-registered clients can request them)
-   *   3. `GET /api/oauth/scopes`
-   *
-   * Scopes are NOT translated into core permissions — they remain opaque
-   * strings that the contributing module's own middleware enforces by
-   * reading the JWT's `scope` claim. Pick stable, namespaced strings
-   * (e.g. `tasks:read`, `tasks:write`) that won't collide with other
-   * modules' scopes.
-   *
-   * The `${string}:${string}` template literal is a compile-time guard
-   * against single-word scopes (which are reserved for the OIDC identity
-   * vocabulary `openid|profile|email|offline_access`). The platform
-   * additionally enforces `^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$` at boot
-   * — modules with malformed scopes fail-fast with a clear error.
-   *
-   * **Recommended pattern** — preserve compile-time narrowing inside the
-   * contributing module by exporting a typed `as const` tuple alongside
-   * the module export:
-   *
-   * ```ts
-   * export const TASKS_SCOPES = ["tasks:read", "tasks:write"] as const;
-   * export type TasksScope = (typeof TASKS_SCOPES)[number];
-   *
-   * const tasksModule: AppstrateModule = {
-   *   manifest: { id: "tasks", name: "Tasks", version: "1.0.0" },
-   *   oidcScopes: [...TASKS_SCOPES],
-   *   // ...
-   * };
-   * ```
-   *
-   * Consumers of the module's middleware (or any code reading `jwt.scope`)
-   * import `TasksScope` to recover the literal union — typing is lost only
-   * at the core boundary, not within the module's own surface.
-   *
-   * No-op when the OIDC module is absent — declaring scopes on a platform
-   * that doesn't load OIDC just goes unused.
-   */
-  oidcScopes?: ReadonlyArray<`${string}:${string}`>;
 
   /**
    * RBAC contribution: declare resources owned by this module and how the
@@ -994,32 +890,10 @@ export interface RunConnectionMissingParams {
 // ---------------------------------------------------------------------------
 
 export interface ModuleInitContext {
-  /** PostgreSQL connection string, or null in PGlite mode. */
-  databaseUrl: string | null;
   /** Redis connection string, or null when Redis is absent. */
   redisUrl: string | null;
   /** Public-facing URL of the platform (for OAuth callbacks, etc.). */
   appUrl: string;
-  /** Whether running in embedded DB mode (PGlite). */
-  isEmbeddedDb: boolean;
-  /**
-   * Apply Drizzle migrations for a module.
-   * Handles both PostgreSQL and PGlite. Each module gets its own migration
-   * tracking table (`__drizzle_migrations_<moduleId>`), with hyphens in
-   * `moduleId` replaced by underscores so the identifier is a valid SQL name
-   * (e.g. `my-module` → `__drizzle_migrations_my_module`).
-   *
-   * @param moduleId - Module identifier (e.g. "webhooks", "cloud")
-   * @param migrationsDir - Absolute path to the module's migrations directory
-   * @param opts.requireCoreTables - Optional list of core table names that MUST
-   *   exist before the module migration runs. Modules that use backward FK
-   *   references should declare them here so a broken boot order fails loudly.
-   */
-  applyMigrations: (
-    moduleId: string,
-    migrationsDir: string,
-    opts?: { requireCoreTables?: readonly string[] },
-  ) => Promise<void>;
   /** Lazy email sender (breaks circular deps at module load time). */
   getSendMail: () => Promise<(to: string, subject: string, html: string) => void>;
   /** Query helper: get org admin emails. */
@@ -1035,12 +909,11 @@ export interface ModuleInitContext {
    *
    * ## Security
    *
-   * `services` grants modules privileged access to the platform — they can
-   * abort runs, emit events, subscribe to the realtime bus, talk to the
-   * container orchestrator, and read/write run state across orgs. Modules
-   * are therefore trusted code on par with `apps/api` itself. Only load
-   * modules you control or have audited — never treat `MODULES=` as a
-   * safe extension point for untrusted packages.
+   * `services` grants modules privileged, cross-org access to the platform
+   * (today: reading the per-run `llm_usage` ledger). Modules are therefore
+   * trusted code on par with `apps/api` itself. Only load modules you control
+   * or have audited — never treat `MODULES=` as a safe extension point for
+   * untrusted packages.
    */
   services: PlatformServices;
 }
@@ -1048,148 +921,34 @@ export interface ModuleInitContext {
 // ---------------------------------------------------------------------------
 // PlatformServices — injected platform capabilities
 //
-// Namespaced sub-objects for discoverability. Keep the surface minimal —
-// only capabilities with stable cross-module demand belong here. Signatures
-// fix arity, argument names, and return cardinality (object vs array vs
-// void). DTO payloads use minimal public shapes from `platform-types.ts`
-// (PlatformPackage, PlatformModel, PlatformApplication, …) — concrete
-// apps/api rows remain assignable thanks to their open index signature.
+// Deliberately minimal: a capability lands here ONLY when a real cross-tenant
+// consumer needs it (the same razor `scripts/verify-module-contract.ts`
+// applies to the `AppstrateModule` members). Today the sole consumer is the
+// `cloud` billing module, which reads the per-run `llm_usage` ledger via
+// `runs.listLlmUsage`. The previous broad surface (orchestrator / pubsub /
+// realtime / inline / packages / models / applications / run CRUD) mirrored
+// the in-process `chat` module that has since been removed — it carried zero
+// live consumers, so it was dropped rather than left as speculative API.
+// Re-add a member here the moment a second consumer genuinely needs it.
 // ---------------------------------------------------------------------------
-
-/** Updates accepted by `runs.update`. Open shape — future fields OK. */
-export interface RunUpdate {
-  status?: string;
-  result?: Record<string, unknown>;
-  state?: Record<string, unknown>;
-  error?: string;
-  [key: string]: unknown;
-}
-
-/** Log level accepted by `runs.appendLog`. */
-export type RunLogLevel = "debug" | "info" | "warn" | "error";
 
 export interface PlatformServices {
   /** Structured JSON logger (pino). */
   logger: Logger;
-  /** Container orchestrator singleton accessor. Synchronous — instance is cached. */
-  orchestrator: { get(): ContainerOrchestrator };
-  /** Pub/Sub adapter accessor. Always async — Redis impl loads lazily. */
-  pubsub: { get(): Promise<PubSub> };
-  /** Tier/mode detection — surfaces which optional infrastructure is present. */
-  env: {
-    hasRedis(): boolean;
-    hasExternalDb(): boolean;
-  };
-  /** Org-scoped model catalog operations. */
-  models: {
-    load(orgId: string, modelDbId: string): Promise<PlatformModel | null>;
-    listForOrg(orgId: string): Promise<PlatformModel[]>;
-  };
-  /** Package catalog accessors. */
-  packages: {
-    get(
-      packageId: string,
-      orgId: string,
-      opts?: { includeEphemeral?: boolean },
-    ): Promise<PlatformPackage | null>;
-    isInlineShadow(packageId: string): boolean;
-    /**
-     * Free-text search across the org catalog (system packages + the
-     * caller's org). Matches `id` and manifest fields (`name`,
-     * `displayName`, `description`) via case-insensitive substring.
-     * Ephemeral shadow rows are excluded. Callers requesting `limit`
-     * results should pass `limit + 1` to derive `hasMore` without a
-     * separate count — the service caps the returned rows at `limit`.
-     */
-    search(args: {
-      query: string;
-      orgId: string;
-      kind: "agent" | "skill";
-      limit?: number;
-    }): Promise<PlatformPackage[]>;
-  };
-  /** Application helpers. */
-  applications: {
-    getDefault(orgId: string): Promise<PlatformApplication | null>;
-  };
-  /**
-   * Run lifecycle operations (append log, update, abort).
-   *
-   * `appendLog` / `update` take a single args object so future fields are
-   * non-breaking and the three id parameters (`runId` / `orgId` /
-   * `applicationId`) cannot be silently swapped at the call site.
-   */
+  /** Run-ledger read surface. */
   runs: {
     /**
-     * Org-scoped run snapshot read. Returns `null` on a cross-org id or
-     * a nonexistent run — 404 semantics without existence leak.
+     * Per-call `llm_usage` ledger rows for a run, org-scoped and filtered by
+     * `source` (e.g. `["runner", "proxy"]`). A read into the canonical platform
+     * usage ledger WITHOUT a cross-module SQL join — a consumer that aggregates
+     * per-call usage (analytics, an external usage store) reads here rather than
+     * joining `llm_usage` directly. Returns `{ id, costUsd, source }[]`; the
+     * caller reconciles on `id` against its own store.
      */
-    get(args: { runId: string; orgId: string }): Promise<Run | null>;
-    /**
-     * Log tail for a run, org-scoped. `order: "asc"` (default) is
-     * chronological insertion order (`id ASC`); `"desc"` returns the
-     * most recent entries first for tailing use cases.
-     */
-    listLogs(args: {
+    listLlmUsage(args: {
       runId: string;
       orgId: string;
-      limit?: number;
-      order?: "asc" | "desc";
-    }): Promise<RunLog[]>;
-    /** Returns the inserted log row id. */
-    appendLog(args: {
-      runId: string;
-      orgId: string;
-      type: string;
-      event?: string | null;
-      message?: string | null;
-      data?: Record<string, unknown> | null;
-      level?: RunLogLevel;
-    }): Promise<number>;
-    update(args: {
-      runId: string;
-      orgId: string;
-      applicationId: string;
-      updates: RunUpdate;
-    }): Promise<void>;
-    abort(runId: string): void;
-  };
-  /**
-   * Inline run lifecycle — preflight (validate without side effects) and
-   * `run` (preflight + insert shadow package + fire pipeline). `run` mirrors
-   * what `POST /api/runs/inline` does server-side; modules that schedule
-   * one-shot agent executions (slash commands, webhooks, module-owned cron)
-   * call it directly without duplicating the shadow-insert + pipeline dance.
-   */
-  inline: {
-    preflight(params: InlinePreflightInput): Promise<InlinePreflightResult>;
-    /**
-     * Trigger an inline agent run end-to-end. Returns once the pipeline
-     * has accepted the run; the client streams progress via the existing
-     * realtime SSE endpoint.
-     *
-     * Throws on validation / pipeline failures (same shape `POST /api/runs/inline`
-     * surfaces as a `problem+json` body).
-     */
-    run(params: {
-      orgId: string;
-      applicationId: string;
-      actor: Actor | null;
-      body: InlineRunBody;
-      apiKeyId?: string;
-    }): Promise<{ runId: string; packageId: string }>;
-  };
-  /** Realtime SSE subscriber registry. */
-  realtime: {
-    addSubscriber(sub: RealtimeSubscriber): void;
-    removeSubscriber(id: string): void;
-  };
-  /** Module registry accessors (for cross-module lookups and event emission). */
-  modules: {
-    get(id: string): AppstrateModule | null;
-    emit<K extends keyof ModuleEvents>(
-      event: K,
-      ...args: Parameters<ModuleEvents[K]>
-    ): Promise<void>;
+      sources: readonly string[];
+    }): Promise<Array<{ id: number; costUsd: number; source: string }>>;
   };
 }

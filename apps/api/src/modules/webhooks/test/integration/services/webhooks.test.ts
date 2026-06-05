@@ -16,7 +16,7 @@ import {
   initWebhookWorker,
   shutdownWebhookWorker,
 } from "../../../service.ts";
-import { webhookDeliveries } from "../../../schema.ts";
+import { webhookDeliveries } from "@appstrate/db/schema";
 
 setDefaultTimeout(30_000);
 

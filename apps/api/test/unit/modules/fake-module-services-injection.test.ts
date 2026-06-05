@@ -51,27 +51,12 @@ describe("Module loader — ctx.services injection end-to-end", () => {
   // net). This file deliberately covers only the loader → init → service-call
   // path, so it doesn't duplicate that namespace-existence sweep.
 
-  it("allows the module to invoke pure services that touch no infra", () => {
-    // `env.hasRedis()` / `env.hasExternalDb()` are synchronous, side-effect
-    // free, and return booleans regardless of tier. A module using them to
-    // branch on deployment topology (e.g. skip a scheduled worker when
-    // Redis is absent) would exercise this exact call path.
+  it("exposes the minimal service surface (logger + runs.listLlmUsage)", () => {
+    // The injected surface is intentionally tiny — a module gets the logger
+    // and the per-run ledger read, nothing else. `logger.info` is a
+    // synchronous, side-effect-free call any module can make at init.
     const s = capturedServices!;
-    expect(typeof s.env.hasRedis()).toBe("boolean");
-    expect(typeof s.env.hasExternalDb()).toBe("boolean");
-
-    // `packages.isInlineShadow` is a synchronous pure predicate — safe to
-    // call from any module without touching the DB.
-    expect(s.packages.isInlineShadow("@inline/anything")).toBe(true);
-    expect(s.packages.isInlineShadow("@scope/real-pkg")).toBe(false);
-  });
-
-  it("allows the module to look itself up via services.modules.get", () => {
-    // After init, the module is registered in the loader's map — a
-    // representative cross-module coordination path.
-    const s = capturedServices!;
-    const found = s.modules.get("test-fake-services-injection");
-    expect(found).not.toBeNull();
-    expect(found?.manifest.id).toBe("test-fake-services-injection");
+    expect(typeof s.logger.info).toBe("function");
+    expect(typeof s.runs.listLlmUsage).toBe("function");
   });
 });

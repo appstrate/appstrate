@@ -42,7 +42,7 @@ import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import oidcModule from "../../../index.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { ensureCliClient } from "../../../services/ensure-cli-client.ts";
-import { cliRefreshToken, deviceCode } from "../../../schema.ts";
+import { cliRefreshToken, deviceCode } from "@appstrate/db/schema";
 import { _hashRefreshTokenForTesting } from "../../../services/cli-tokens.ts";
 import {
   verifyEndUserAccessToken as verifyToken,
@@ -433,7 +433,7 @@ describe("POST /api/auth/cli/token — grant_type=refresh_token", () => {
     // mint time and must match the client's CURRENT surface.
     const { refreshToken: first } = await loginAndGetPair();
 
-    const { oauthClient } = await import("../../../schema.ts");
+    const { oauthClient } = await import("@appstrate/db/schema");
     await db
       .update(oauthClient)
       .set({ scopes: ["openid", "profile", "offline_access"] }) // email removed
@@ -773,7 +773,7 @@ describe("POST /api/auth/cli/revoke", () => {
     // operators can still spot a compromised token showing up from an
     // unexpected client id.
     const { prefixedId } = await import("../../../../../lib/ids.ts");
-    const { oauthClient } = await import("../../../schema.ts");
+    const { oauthClient } = await import("@appstrate/db/schema");
     const attackerClientId = "attacker-cli";
     await db.insert(oauthClient).values({
       id: prefixedId("oac"),

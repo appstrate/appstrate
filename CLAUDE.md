@@ -149,14 +149,9 @@ Formalized system for optional features. Contract in `@appstrate/core/module` (p
 Essentials:
 
 - **Discovery**: loader resolves each `MODULES` specifier against `apps/api/src/modules/<id>/index.ts` first, then npm import. No registration table — drop a directory + add id to `MODULES`.
-- **Lifecycle**: core migrations → discover built-ins → topological sort by `manifest.dependencies` → aggregate permissions → `init()` (module migrations + workers) → `createRouter()` → running → `shutdown()`. All declared modules required; any failure is fatal.
-- **Module-owned schemas**: tables in `modules/<name>/schema.ts`, migrations in `drizzle/migrations/`, per-module tracking table `__drizzle_migrations_<id>`, applied in `init()` via `applyModuleMigrations()`. FK rule: backward refs (module→core) via Drizzle `.references()`; forward refs (core→module) impossible — use raw SQL in the module migration. Core never references module tables.
-- **Built-in dirs** (`apps/api/src/modules/`): `webhooks` (clean `onRunStatusChange` boundary), `oidc` (end-user OAuth 2.1 IdP — reference consumer of `authStrategies()` / `betterAuthPlugins()` / `drizzleSchemas()`), `core-providers` (openai/anthropic/openai-compatible model providers via `modelProviders()`, owns no tables). `@appstrate/module-codex` + `@appstrate/module-claude-code` (in the `MODULES` default) are workspace **npm** modules under `packages/module-*`, not built-in dirs.
-
-  | Module   | Tables owned                                                                                                                                                                                                         |
-  | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | webhooks | `webhooks`, `webhook_deliveries`                                                                                                                                                                                     |
-  | oidc     | `jwks`, `device_codes`, `oauth_clients`, `oauth_access_tokens`, `oauth_refresh_tokens`, `oauth_consents`, `cli_refresh_tokens`, `oidc_end_user_profiles`, `application_smtp_configs`, `application_social_providers` |
+- **Lifecycle**: core migrations (incl. all module tables) → discover built-ins → topological sort by `manifest.dependencies` → aggregate permissions → `init()` (workers only — no migrations) → `createRouter()` → running → `shutdown()`. All declared modules required; any failure is fatal.
+- **Modules own no tables** (core 2.23.0+): a module is pure behavior. All OSS tables — including those a module reads/writes — live in the **core schema** (`packages/db/src/schema/`) and are created by the system migration pipeline at boot. No module `schema.ts` / `drizzle/migrations/` / `__drizzle_migrations_<id>`, no `drizzleSchemas()` / `ctx.applyMigrations` (removed). A module imports its tables from `@appstrate/db/schema`; Better Auth resolves them from the core barrel directly. Cross-module data access goes via API/events, never a SQL join. A separate-tenant module (`@appstrate/cloud`) runs its **own DB** + migrations and reads platform data through `ctx.services` (e.g. `services.runs.listLlmUsage`).
+- **Built-in dirs** (`apps/api/src/modules/`): `webhooks` (clean `onRunStatusChange` boundary; tables `webhooks`/`webhook_deliveries` in core schema), `oidc` (end-user OAuth 2.1 IdP — reference consumer of `authStrategies()` / `betterAuthPlugins()`; its 10 OAuth/jwks tables live in core schema `schema/oidc.ts`), `core-providers` (openai/anthropic/openai-compatible model providers via `modelProviders()`, owns no tables). `@appstrate/module-codex` + `@appstrate/module-claude-code` (in the `MODULES` default) are workspace **npm** modules under `packages/module-*`, not built-in dirs.
 
 - **Hooks vs Events**: Hooks (`callHook`) — `beforeRun`/`afterRun` are first-match-wins gates/patches; `beforeSignup`/`afterSignup` are broadcast to all. Events (`emitEvent`) broadcast, side-effect only (`onRunStatusChange`/`onOrgCreate`/`onOrgDelete`), errors isolated. Platform calls by name, never by module ID.
 - **Permissions**: RBAC co-owned by core + modules. Core catalog in `@appstrate/core/permissions`; role-grant matrix in `apps/api/src/lib/permissions.ts`. Modules extend via declaration merging on `AppstrateModuleResources` + `permissionsContribution()`. All three guards (`requirePermission`, `requireCorePermission`, `requireModulePermission`) delegate to `makePermissionGuard` in core.
@@ -179,7 +174,7 @@ Tier 0 (zero-install) requires only Bun.
 
 - **New API route**: route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi`.
 - **DB migration (core)**: edit `packages/db/src/schema.ts` → `bun run db:generate` (needs `DATABASE_URL` for drizzle-kit). Applied automatically at boot (PGlite + PostgreSQL) — no manual `db:migrate`.
-- **DB migration (module)**: schema in `modules/<name>/schema.ts`, migrations in `drizzle/migrations/`, run in `init()` via `applyModuleMigrations()`.
+- **Module tables**: there are none separately — a module's tables live in the core schema (`packages/db/src/schema/<domain>.ts`) and migrate with core. No per-module migration step.
 - **Quality gate**: `bun run check` (turbo check = tsc across packages + `verify-openapi`).
 - **Tests**: `bun test` from root runs all packages in one process. See **Testing** below.
 
@@ -323,7 +318,7 @@ When working on routes, consult the corresponding `apps/api/src/openapi/paths/` 
 
 ## Database
 
-Core schema: `packages/db/src/schema.ts` (Drizzle). Module tables: `apps/api/src/modules/<name>/schema.ts`. All migrations (core + module) applied automatically at boot — no manual `db:migrate`. `bun run db:generate` for new core migrations. No RLS — app-level security by `orgId` (+ `applicationId`). Key headless tables: `applications` (`app_`), `endUsers` (`eu_`), `applicationPackages`.
+Core schema: `packages/db/src/schema/` (Drizzle, barrel via `schema.ts`) — includes the tables modules read/write (e.g. `schema/oidc.ts`, `schema/webhooks.ts`). Modules own no separate schema. All migrations applied automatically at boot — no manual `db:migrate`. `bun run db:generate` for new migrations. No RLS — app-level security by `orgId` (+ `applicationId`). Key headless tables: `applications` (`app_`), `endUsers` (`eu_`), `applicationPackages`.
 
 ## Environment Variables
 

@@ -25,11 +25,8 @@ import type { ModuleInitContext } from "@appstrate/core/module";
 
 function mockCtx(): ModuleInitContext {
   return {
-    databaseUrl: null,
     redisUrl: null,
     appUrl: "http://localhost:3000",
-    isEmbeddedDb: true,
-    applyMigrations: async () => {},
     getSendMail: async () => () => {},
     getOrgAdminEmails: async () => [],
     services: {} as ModuleInitContext["services"],

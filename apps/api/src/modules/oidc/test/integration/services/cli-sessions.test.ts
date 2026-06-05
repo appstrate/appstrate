@@ -31,7 +31,7 @@ import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import oidcModule from "../../../index.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { ensureCliClient } from "../../../services/ensure-cli-client.ts";
-import { cliRefreshToken, deviceCode } from "../../../schema.ts";
+import { cliRefreshToken, deviceCode } from "@appstrate/db/schema";
 
 const app = getTestApp({ modules: [oidcModule] });
 

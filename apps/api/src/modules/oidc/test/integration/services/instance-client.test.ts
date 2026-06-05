@@ -20,7 +20,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
-import { oauthClient } from "../../../schema.ts";
+import { oauthClient } from "@appstrate/db/schema";
 
 const originalAppUrl = process.env.APP_URL;
 let jwksServer: ReturnType<typeof Bun.serve> | null = null;

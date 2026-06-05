@@ -127,7 +127,7 @@ The end-user-facing HTML pages (login, register, consent, magic-link, forgot/res
 
 ## Routing scope
 
-The OIDC admin endpoints (`/api/oauth/clients*`, `/api/oauth/scopes`) are **org-scoped** and gated by the `X-Org-Id` header (same as any other org-scoped core route). They do NOT require `X-Application-Id`: clients are created against a specific `referencedOrgId` (org-level clients) or `referencedApplicationId` (application-level clients) passed in the request body, so the binding is explicit per-call. The module manifest therefore declares no `appScopedPaths`.
+The OIDC admin endpoints (`/api/oauth/clients*`, `/api/oauth/scopes`) are **org-scoped** and gated by the `X-Org-Id` header (same as any other org-scoped core route). They do NOT require `X-Application-Id`: clients are created against a specific `referencedOrgId` (org-level clients) or `referencedApplicationId` (application-level clients) passed in the request body, so the binding is explicit per-call. The OIDC routes are therefore not app-scoped.
 
 End-user-facing routes under `/api/oauth/*` resolve the target application from the `client_id` query parameter, not from a header.
 
@@ -194,7 +194,7 @@ Refuses when:
 `betterAuthPlugins()` returns `[jwt, oauthProvider]` (both from `better-auth/plugins` and `@better-auth/oauth-provider@^1.6`).
 
 - **`jwt`**: configured with ES256 keypair. Populates the module's `jwks` table and serves `/api/auth/jwks` automatically. Required by `@better-auth/oauth-provider` (it throws `jwt_config` at token mint time otherwise).
-- **`oauthProvider`**: OAuth 2.1 authorization server. Wires `/api/auth/oauth2/authorize`, `/token`, `/userinfo`, `/revoke`, `/introspect`, plus `/api/auth/.well-known/openid-configuration`. Reads and writes the module-owned `oauth_client`, `oauth_access_token`, `oauth_refresh_token`, and `oauth_consent` tables through the `drizzleSchemas()` hook on the module manifest (which merges them into the Better Auth Drizzle adapter's model map at boot).
+- **`oauthProvider`**: OAuth 2.1 authorization server. Wires `/api/auth/oauth2/authorize`, `/token`, `/userinfo`, `/revoke`, `/introspect`, plus `/api/auth/.well-known/openid-configuration`. Reads and writes the `oauth_client`, `oauth_access_token`, `oauth_refresh_token`, and `oauth_consent` tables — which live in the **core schema** (`packages/db/src/schema/oidc.ts`) and are resolved by the Better Auth Drizzle adapter from the barrel at boot.
 
 Plugin configuration highlights:
 

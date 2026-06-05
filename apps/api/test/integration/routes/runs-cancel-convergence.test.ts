@@ -99,11 +99,8 @@ async function installAfterRunSpy(): Promise<AfterRunSpy> {
     },
   };
   await loadModulesFromInstances([mod], {
-    databaseUrl: null,
     redisUrl: null,
     appUrl: "http://localhost:3000",
-    isEmbeddedDb: true,
-    applyMigrations: async () => {},
     getSendMail: async () => () => {},
     getOrgAdminEmails: async () => [],
     services: {} as never,

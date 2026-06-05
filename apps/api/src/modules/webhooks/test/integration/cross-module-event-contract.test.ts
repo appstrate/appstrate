@@ -26,7 +26,7 @@ import { truncateAll } from "../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../test/helpers/auth.ts";
 import webhooksModule from "../../index.ts";
 import { createWebhook, initWebhookWorker, shutdownWebhookWorker } from "../../service.ts";
-import { webhookDeliveries } from "../../schema.ts";
+import { webhookDeliveries } from "@appstrate/db/schema";
 
 setDefaultTimeout(30_000);
 

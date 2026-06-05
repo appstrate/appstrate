@@ -33,7 +33,7 @@ import { db } from "@appstrate/db/client";
 import { decryptCredentials, encryptCredentials } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import type { SmtpConfigView } from "@appstrate/shared-types";
-import { applicationSmtpConfigs } from "../schema.ts";
+import { applicationSmtpConfigs } from "@appstrate/db/schema";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { logger } from "../../../lib/logger.ts";

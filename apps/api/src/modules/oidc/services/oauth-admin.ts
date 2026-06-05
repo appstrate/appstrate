@@ -41,7 +41,7 @@
 import { eq, or, inArray, asc } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
-import { oauthClient } from "../schema.ts";
+import { oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getAppstrateScopeSet } from "../auth/scopes.ts";
@@ -93,16 +93,15 @@ export class OAuthAdminValidationError extends Error {
 
 function assertValidScopes(scopes: readonly string[] | undefined): void {
   if (!scopes || scopes.length === 0) return;
-  // Read the scope set fresh each call so module-contributed scopes registered
-  // at boot via `AppstrateModule.oidcScopes` are honored without restart.
+  // OIDC owns its scope vocabulary directly (identity scopes + OIDC_ALLOWED_SCOPES).
   const allowed = getAppstrateScopeSet();
   const invalid = scopes.filter((s) => !allowed.has(s));
   if (invalid.length > 0) {
     throw new OAuthAdminValidationError(
       "scopes",
       `OIDC: unknown scopes rejected at service boundary: ${invalid.join(", ")}. ` +
-        `Only scopes in the OIDC vocabulary (identity scopes + OIDC_ALLOWED_SCOPES + ` +
-        `module-contributed scopes) may be registered.`,
+        `Only scopes in the OIDC vocabulary (identity scopes + OIDC_ALLOWED_SCOPES) ` +
+        `may be registered.`,
     );
   }
 }

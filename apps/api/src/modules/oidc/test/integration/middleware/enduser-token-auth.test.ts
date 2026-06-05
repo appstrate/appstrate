@@ -30,7 +30,7 @@ import { db } from "@appstrate/db/client";
 import { endUsers, applications } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
-import { oidcEndUserProfiles } from "../../../schema.ts";
+import { oidcEndUserProfiles } from "@appstrate/db/schema";
 import { prefixedId } from "../../../../../lib/ids.ts";
 
 // NOTE: env + JWKS server must be set BEFORE importing anything that

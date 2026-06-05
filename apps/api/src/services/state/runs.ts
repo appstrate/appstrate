@@ -970,3 +970,29 @@ export async function listOrphanRunIds(): Promise<string[]> {
     .where(and(inArray(runs.status, [...activeRunStatusValues]), lt(runs.lastHeartbeatAt, cutoff)));
   return rows.map((r) => r.id);
 }
+
+/**
+ * Per-call `llm_usage` ledger rows for a run, org-scoped and filtered by source.
+ *
+ * Exposed to modules via `PlatformServices.runs.listLlmUsage` so a consumer that
+ * aggregates per-call usage reads the canonical platform ledger through its API
+ * instead of a cross-module SQL join into `llm_usage`. The caller reconciles on
+ * the returned `id`s against its own store.
+ */
+export async function listLlmUsageForRun(args: {
+  runId: string;
+  orgId: string;
+  sources: readonly string[];
+}): Promise<Array<{ id: number; costUsd: number; source: string }>> {
+  if (args.sources.length === 0) return [];
+  return db
+    .select({ id: llmUsage.id, costUsd: llmUsage.costUsd, source: llmUsage.source })
+    .from(llmUsage)
+    .where(
+      and(
+        eq(llmUsage.runId, args.runId),
+        eq(llmUsage.orgId, args.orgId),
+        inArray(llmUsage.source, args.sources as (typeof llmUsage.$inferSelect)["source"][]),
+      ),
+    );
+}

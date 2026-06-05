@@ -1,16 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { pgTable, text, timestamp, boolean, integer, uuid, index } from "drizzle-orm/pg-core";
-import { organizations, applications, packages } from "@appstrate/db/schema";
+import {
+  pgTable,
+  text,
+  timestamp,
+  boolean,
+  integer,
+  uuid,
+  index,
+  check,
+} from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { organizations } from "./organizations.ts";
+import { applications } from "./applications.ts";
+import { packages } from "./packages.ts";
 
-// Webhooks module — owns the webhooks and webhook_deliveries tables.
-//
-// FKs to core tables are declared via Drizzle `.references()` so the schema
-// is self-documenting and usable with Drizzle's query builder. Core tables
-// always exist before the module runs (core migrations run first at boot).
-// For the reverse direction (core → module), modules must emit raw SQL
-// inside their own migration — Drizzle cannot express it without leaking
-// the module schema into core.
+// Webhooks tables — centralized into the core schema (formerly owned by the
+// webhooks module). The system migration pipeline (`applyCoreMigrations`)
+// creates them at boot; they exist regardless of whether the webhooks module
+// is loaded in `MODULES`. Behavior (routes, delivery worker, RBAC) stays in
+// `apps/api/src/modules/webhooks`.
 
 // Webhooks are polymorphic across scoping level, mirroring the OIDC
 // `oauth_clients` model:
@@ -19,8 +28,6 @@ import { organizations, applications, packages } from "@appstrate/db/schema";
 //     in the org. `applicationId` is NULL.
 //   - `level: "application"` — the webhook subscribes to events from a single
 //     application pinned at creation. `applicationId` is NOT NULL.
-//
-// A DB-level CHECK constraint enforces exactly one shape per row.
 export const webhooks = pgTable(
   "webhooks",
   {
@@ -53,6 +60,12 @@ export const webhooks = pgTable(
     index("idx_webhooks_org_id").on(table.orgId),
     index("idx_webhooks_application_id").on(table.applicationId),
     index("idx_webhooks_app_enabled").on(table.applicationId, table.enabled),
+    // Preserved verbatim from the module's raw-SQL migration (0000_initial.sql).
+    check("webhooks_level_values", sql`level IN ('org', 'application')`),
+    check(
+      "webhooks_level_check",
+      sql`(level = 'org' AND application_id IS NULL) OR (level = 'application' AND application_id IS NOT NULL)`,
+    ),
   ],
 );
 

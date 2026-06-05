@@ -90,11 +90,11 @@ export async function boot(): Promise<void> {
 
   // Initialize Better Auth AFTER modules have registered their plugin +
   // schema contributions. `createAuth()` narrows the `unknown[]` from the
-  // core contract to Better Auth's plugin list type, and merges module
-  // Drizzle schemas into the adapter's model map so plugins like
-  // @better-auth/oauth-provider can resolve their own tables.
+  // core contract to Better Auth's plugin list type. Module tables (e.g.
+  // OIDC's oauth_clients/jwks) now live in the core schema barrel, so the
+  // Better Auth adapter resolves them directly — no module schema injection.
   const contributions = getModuleContributions();
-  createAuth(contributions.betterAuthPlugins as BetterAuthPluginList, contributions.drizzleSchemas);
+  createAuth(contributions.betterAuthPlugins as BetterAuthPluginList);
 
   // Wire module contributions that were declared on the module contract
   for (const mod of getModules().values()) {

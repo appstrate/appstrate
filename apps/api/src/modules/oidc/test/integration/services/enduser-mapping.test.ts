@@ -21,7 +21,7 @@ import {
   UnverifiedEmailConflictError,
   AppSignupClosedError,
 } from "../../../services/enduser-mapping.ts";
-import { oidcEndUserProfiles } from "../../../schema.ts";
+import { oidcEndUserProfiles } from "@appstrate/db/schema";
 import { prefixedId } from "../../../../../lib/ids.ts";
 
 describe("resolveOrCreateEndUser", () => {

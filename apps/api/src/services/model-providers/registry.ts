@@ -45,7 +45,7 @@ const _byId = new Map<string, ModelProviderDefinition>();
  * because they identify DB credential rows; a silent overwrite would mean
  * one of the two definitions is unreachable at lookup time, which is
  * exactly the class of bug the module-loader guards against for Drizzle
- * tables and appScopedPaths.
+ * tables and Better Auth model names.
  */
 export function registerModelProvider(def: ModelProviderDefinition): void {
   if (_byId.has(def.providerId)) {

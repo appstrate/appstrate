@@ -64,7 +64,7 @@ import { createAuthEndpoint, getSessionFromCtx } from "better-auth/api";
 import { APIError } from "better-auth/api";
 import * as z from "zod";
 import { db } from "@appstrate/db/client";
-import { oauthClient } from "../schema.ts";
+import { oauthClient } from "@appstrate/db/schema";
 import {
   CliTokenError,
   exchangeDeviceCodeForTokens,

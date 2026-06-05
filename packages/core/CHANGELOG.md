@@ -5,6 +5,41 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.24.0] — 2026-06-05
+
+Module-contract cleanup + table-centralization (PR #586, supersedes #577/#583).
+
+> **BREAKING (type surface).** Members were removed from the published
+> `@appstrate/core/module` and `@appstrate/core/platform-types` subpaths. No
+> in-tree or first-party consumer references the removed members (the only
+> `PlatformServices` consumer, `@appstrate/cloud`, reads solely
+> `runs.listLlmUsage`, which is retained), so the practical blast radius is
+> zero — hence a minor bump rather than a major. An external module that
+> implemented any removed member under `satisfies`/excess-property checks would
+> need to drop it.
+
+### Removed
+
+- **`AppstrateModule` contract** — dead members with no real consumer:
+  `appScopedPaths`, `api` (+ `OidcModuleApi`), `oidcScopes`, `drizzleSchemas`.
+- **`ModuleInitContext`** — `applyMigrations`, `databaseUrl`, `isEmbeddedDb`
+  (modules own no tables; a separate-tenant module runs its own DB/migrations).
+- **`PlatformServices`** trimmed to `{ logger, runs: { listLlmUsage } }` —
+  removed the speculative chat-era surface (`orchestrator`, `pubsub`, `env`,
+  `models`, `packages`, `applications`, `inline`, `realtime`, `modules`, and
+  `runs` CRUD/`abort`), plus the now-orphaned `RunUpdate` / `RunLogLevel` types.
+- **`@appstrate/core/platform-types`** — types that only shaped the removed
+  `PlatformServices` members: `PlatformPackage`, `PlatformPackageDependency`,
+  `PlatformModel`, `PlatformApplication`, `RealtimeSubscriber`,
+  `RealtimeSubscriberFilter`, `InlinePreflightInput`, `InlinePreflightResult`,
+  `InlinePreflightMode`.
+
+### Added
+
+- **`PlatformServices.runs.listLlmUsage`** — billing-free read into the platform
+  `llm_usage` ledger (`{ id, costUsd, source }[]`), letting a metering module
+  reconcile per-call usage without a cross-module SQL join.
+
 ## [2.20.0] — 2026-05-16
 
 ### Added

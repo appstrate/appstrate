@@ -100,7 +100,7 @@ import {
 } from "./pages/activate.ts";
 import { SOCIAL_SIGN_IN_SCRIPT } from "./pages/social-sign-in-script.ts";
 import { getAuth } from "@appstrate/db/auth";
-import { oauthClient, deviceCode } from "./schema.ts";
+import { oauthClient, deviceCode } from "@appstrate/db/schema";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
