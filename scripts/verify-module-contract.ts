@@ -35,9 +35,22 @@ import type { AppstrateModule } from "@appstrate/core/module";
 import { Glob } from "bun";
 import { resolve, dirname } from "node:path";
 
-const POLICY = (process.env.MODULE_CONTRACT_POLICY ?? "fail") as "warn" | "fail" | "off";
+// Default-secure (`fail`). The `MODULE_CONTRACT_POLICY` downgrade exists for
+// local iteration only — under CI it is ignored so a green pipeline can never
+// be bought with `MODULE_CONTRACT_POLICY=off`.
+const POLICY = process.env.CI
+  ? "fail"
+  : ((process.env.MODULE_CONTRACT_POLICY ?? "fail") as "warn" | "fail" | "off");
 const ROOT = resolve(dirname(Bun.fileURLToPath(import.meta.url)), "..");
 const WORKSPACE = resolve(ROOT, "..");
+
+/**
+ * The ONLY members allowed to carry `kind: "lifecycle"` (universal plumbing,
+ * exempt from the owner-count + scan-drift policy). Pinning this prevents the
+ * bypass where a real extension member is relabeled `lifecycle` with empty
+ * owners to skip every hard check while still satisfying the compile gate.
+ */
+const LIFECYCLE_ALLOWLIST = new Set<string>(["shutdown"]);
 
 /**
  * Every member of `AppstrateModule` except the required lifecycle pair
@@ -185,6 +198,17 @@ const warnings: string[] = []; // soft hints — derived from the best-effort so
 const { observed, present: presentModules } = await scanDeclarers();
 
 for (const [member, entry] of Object.entries(LEDGER) as [ContractMember, LedgerEntry][]) {
+  // ── Lifecycle is the broadest exemption (skips owner-count + scan-drift),
+  //    so guard which members may claim it. Anything outside the allowlist
+  //    must be a real extension/seam and earn its keep. ──
+  if (entry.kind === "lifecycle" && !LIFECYCLE_ALLOWLIST.has(member)) {
+    problems.push(
+      `illegal lifecycle: \`${member}\` is classified \`lifecycle\` but only ` +
+        `${[...LIFECYCLE_ALLOWLIST].map((m) => `\`${m}\``).join(", ")} may be. ` +
+        `Reclassify as \`extension\` (>= 2 owners) or \`seam\` (justified single-owner).`,
+    );
+  }
+
   // ── Ledger policy (hard) — the ledger is the reviewed source of truth ──
   if (entry.kind === "extension") {
     const ownerCount = entry.owners.length;
