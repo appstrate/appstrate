@@ -487,9 +487,10 @@ function buildBasePlugins(
 //
 // The Better Auth instance is constructed lazily by `createAuth()` during
 // boot, AFTER modules have registered their plugin contributions via
-// `AppstrateModule.betterAuthPlugins()` (and companion Drizzle tables via
-// `AppstrateModule.drizzleSchemas()`). All consumers must call `getAuth()`
-// at request time / post-boot — never at module-evaluation time.
+// `AppstrateModule.betterAuthPlugins()`. Module tables live in the core
+// schema (resolved from the barrel), so no per-module schema merge is
+// needed. All consumers must call `getAuth()` at request time / post-boot
+// — never at module-evaluation time.
 //
 // Test harness: `test/setup/preload.ts` calls `createAuth([], {})` during
 // preload so module test runs boot cleanly.
@@ -938,9 +939,8 @@ let _lastExtraPlugins: BetterAuthPluginList = [];
  * Construct the Better Auth singleton. Idempotent — subsequent calls are
  * no-ops. Must be called once during boot, after modules have loaded, so
  * that any plugins contributed via `AppstrateModule.betterAuthPlugins()`
- * (and their companion Drizzle tables via
- * `AppstrateModule.drizzleSchemas()`) are merged with `basePlugins` and the
- * core schema before the instance is built.
+ * are merged with `basePlugins`. Module tables already live in the core
+ * schema, so the Drizzle adapter resolves them from the barrel directly.
  */
 export function createAuth(extraPlugins: BetterAuthPluginList = []): void {
   if (_auth) return;

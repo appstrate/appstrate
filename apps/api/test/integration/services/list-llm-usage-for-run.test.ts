@@ -2,7 +2,7 @@
 
 /**
  * `listLlmUsageForRun` — the platform accessor (`PlatformServices.runs.listLlmUsage`)
- * a metering/billing module uses to read the canonical `llm_usage` ledger
+ * a metering module / external usage store uses to read the canonical `llm_usage` ledger
  * WITHOUT a cross-module SQL join. Locks down: source filtering, org scoping,
  * and the empty-sources short-circuit.
  */
@@ -23,7 +23,7 @@ describe("listLlmUsageForRun", () => {
     await seedAgent({ id: "@meterorg/agent", orgId: ctx.orgId, createdBy: ctx.user.id });
   });
 
-  it("returns billable rows filtered by source, scoped to the org", async () => {
+  it("returns usage rows filtered by source, scoped to the org", async () => {
     const run = await seedRun({
       packageId: "@meterorg/agent",
       orgId: ctx.orgId,

@@ -125,8 +125,9 @@ export class InstanceClientSyncError extends Error {
 /**
  * Entry point — reconcile the declaration against the DB.
  *
- * MUST be called after `applyMigrations` and after `ensureInstanceClient()`
- * in `oidcModule.init()`. Throws on any parse, drift, or collision error.
+ * MUST be called after `ensureInstanceClient()` in `oidcModule.init()`
+ * (core migrations have already created the tables at boot). Throws on any
+ * parse, drift, or collision error.
  */
 export async function syncInstanceClientsFromEnv(): Promise<void> {
   const env = getEnv();
