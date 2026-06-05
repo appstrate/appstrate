@@ -2,15 +2,19 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, XCircle, Puzzle, Users, Check } from "lucide-react";
+import { AlertTriangle, XCircle, Puzzle, Users, Check, Loader2 } from "lucide-react";
+import type { AgentIntegrationEntry } from "@appstrate/shared-types";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "./spinner";
 import { InlineConnectButton } from "./integration-connect/inline-connect-button";
-import { pickDefaultAuth } from "./integration-connect/pick-default-auth";
 import { connectionDisplayLabel } from "./integration-connect/connection-label";
-import { useIntegrationDetail, useIntegrationConnections } from "../hooks/use-integrations";
+import {
+  resolveAction,
+  resolutionBlocksRun,
+} from "./integration-connect/integration-run-readiness";
+import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/use-integrations";
 
 /**
  * Recovery surface for the run-kickoff 412 emitted by
@@ -67,6 +71,19 @@ interface MissingConnectionsModalProps {
   open: boolean;
   onClose: () => void;
   errors: MissingIntegrationFieldError[];
+  /**
+   * The agent whose run 412'd. Keys the per-integration server resolution
+   * (`GET /agent-resolution/:agentId`) each row consumes so its status + CTA
+   * stay in lockstep with the Connexions tab and never re-derive from the
+   * static 412 payload. Omitted only by callers without the agent in context.
+   */
+  agentPackageId?: string;
+  /**
+   * The agent's declared integration entries (tools/scopes per integration).
+   * Forwarded to the connect CTA so a fresh connection requests exactly the
+   * scopes THIS agent needs (avoids an immediate insufficient_scopes re-run).
+   */
+  integrationEntries?: AgentIntegrationEntry[];
   /** Re-run with the picked overrides (drives the must_choose picker). */
   onRetryWithOverrides: (overrides: ConnectionOverridesMap) => void;
   /** Disables the retry button while the new run is in flight. */
@@ -77,6 +94,8 @@ export function MissingConnectionsModal({
   open,
   onClose,
   errors,
+  agentPackageId,
+  integrationEntries,
   onRetryWithOverrides,
   retrying,
 }: MissingConnectionsModalProps) {
@@ -137,9 +156,19 @@ export function MissingConnectionsModal({
       }
     >
       <p className="text-muted-foreground mb-3 text-sm">{t("missingConnections.intro")}</p>
-      <div className="space-y-2">
+      {/* Cap the list height so a long set of integrations scrolls inside the
+          modal instead of overflowing past it (and pushing the footer out of
+          view). `-mr-2 pr-2` insets the scrollbar without clipping row borders. */}
+      <div className="-mr-2 max-h-[55vh] space-y-2 overflow-y-auto pr-2">
         {integrationErrors.map((err, i) => (
-          <MissingRow key={`${err.field}-${i}`} err={err} pickFor={pickFor} onPick={setPick} />
+          <MissingRow
+            key={`${err.field}-${i}`}
+            err={err}
+            agentPackageId={agentPackageId}
+            integrationEntries={integrationEntries}
+            pickFor={pickFor}
+            onPick={setPick}
+          />
         ))}
       </div>
     </Modal>
@@ -148,10 +177,14 @@ export function MissingConnectionsModal({
 
 function MissingRow({
   err,
+  agentPackageId,
+  integrationEntries,
   pickFor,
   onPick,
 }: {
   err: MissingIntegrationFieldError;
+  agentPackageId?: string;
+  integrationEntries?: AgentIntegrationEntry[];
   pickFor: (integrationId: string) => string | undefined;
   onPick: (integrationId: string, connectionId: string) => void;
 }) {
@@ -159,37 +192,6 @@ function MissingRow({
   const packageId = parseField(err.field);
   const { data: detail } = useIntegrationDetail(packageId);
   const isMustChoose = err.code === "must_choose_connection";
-  const isReconnect = err.code === "needs_reconnection" || err.code === "insufficient_scopes";
-  // Fetch the connection list when we render the must_choose picker, or when a
-  // reconnect/upgrade row needs the dead connection's own auth_key to bind a
-  // single (non-dropdown) renew button to the right method. Still skipped on the
-  // common not_connected rows (no connection_id), saving a round trip there.
-  const needsConnections = isMustChoose || (isReconnect && !!err.connection_id);
-  const { data: connections, refetch: refetchConnections } = useIntegrationConnections(
-    needsConnections ? packageId : undefined,
-  );
-  // The dead/under-scoped connection this row acts on (when known).
-  const reconnectConn = err.connection_id
-    ? (connections ?? []).find((c) => c.id === err.connection_id)
-    : undefined;
-  // The row clears itself live the moment the underlying connection is healthy
-  // again: the renew flow forces a refetch (see `onConnected` below) and the
-  // `connection_update` SSE / popup invalidation also refresh this list, so the
-  // CTA flips to a resolved state without a manual re-run.
-  //   • needs_reconnection → resolved once the flag is cleared.
-  //   • insufficient_scopes (upgrade) → resolved once the granted scopes cover
-  //     every previously-missing scope. The re-consent requests them
-  //     explicitly, so they land literally in `scopes_granted` (a parent that
-  //     only *implies* a missing child won't match — conservative, never a
-  //     false "resolved").
-  const resolved =
-    !!reconnectConn &&
-    (err.code === "needs_reconnection"
-      ? !reconnectConn.needs_reconnection
-      : err.code === "insufficient_scopes"
-        ? !reconnectConn.needs_reconnection &&
-          (err.missing_scopes ?? []).every((s) => reconnectConn.scopes_granted.includes(s))
-        : false);
   // Structural failures (integration not active in the app, package missing
   // or invalid manifest) can't be fixed by connecting — an admin must
   // activate the integration or the agent must drop the dependency. Suppress
@@ -198,6 +200,32 @@ function MissingRow({
     err.code === "integration_not_active" ||
     err.code === "package_not_found" ||
     err.code === "not_installed_or_invalid_manifest";
+
+  // Server-authoritative verdict — the SAME `IntegrationAgentResolution` the
+  // Connexions tab card and the launch-readiness badge consume. The row no
+  // longer re-derives status/CTA from the static 412 payload, so the three
+  // surfaces can never disagree and the row updates live: the connect/renew
+  // flow invalidates the `["integrations", …]` prefix (OAuth popup close,
+  // fields-connect success, `connection_update` SSE), which this query sits
+  // under, so it refetches and the row flips to resolved without a manual
+  // Re-run. must_choose still recovers through the picker + Re-run below.
+  const { data: resolution } = useIntegrationAgentResolution(
+    isStructural ? undefined : packageId,
+    isStructural ? undefined : agentPackageId,
+  );
+  const entry = integrationEntries?.find((e) => e.id === packageId);
+  const action =
+    resolution && detail && !isMustChoose
+      ? resolveAction(resolution, detail.manifest, entry?.tools, entry?.scopes)
+      : null;
+  // Resolved = the run-kickoff gate would no longer reject this integration.
+  // Single predicate shared with the badge, so resolved here ⇔ not blocking there.
+  const resolved = !!resolution && !isMustChoose && !resolutionBlocksRun(resolution);
+  // Awaiting the first verdict (non-structural, non-must_choose rows): hold the
+  // CTA until we know whether it's a connect / reconnect / upgrade.
+  const loadingVerdict = !isStructural && !isMustChoose && !resolution;
+
+  const isReconnect = action?.intent === "reconnect" || action?.intent === "upgrade";
   const Icon = resolved ? Check : isMustChoose ? Users : isReconnect ? AlertTriangle : XCircle;
   const colorClass = resolved
     ? "text-emerald-600"
@@ -207,17 +235,14 @@ function MissingRow({
         ? "text-amber-500"
         : "text-destructive";
 
-  // Pick the auth to act on. `field` is integration-level (`integrations.{id}`);
-  // the chosen connection carries its own `auth_key`. We only need an authKey
-  // for the reconnect/upgrade/connect CTA (to drive the OAuth method). On a
-  // reconnect/upgrade the dead connection already pins a method, so resolve its
-  // auth_key for a single button bound to that method (no method-picker — there
-  // is nothing to choose); fall back to the manifest default until the
-  // connection list loads.
-  const targetAuthKey = reconnectConn?.auth_key ?? pickDefaultAuth(detail?.manifest.auths);
   const displayName = detail?.manifest.display_name ?? packageId;
+  // must_choose candidates come from the live verdict (own + shared accessible
+  // connections), not the 412 snapshot — the picker stays accurate as the set
+  // changes. Falls back to the 412-supplied ids until the verdict lands.
   const candidateIds = err.candidateConnectionIds ?? [];
-  const candidates = (connections ?? []).filter((c) => candidateIds.includes(c.id));
+  const candidates = (resolution?.candidates ?? []).filter(
+    (c) => candidateIds.length === 0 || candidateIds.includes(c.id),
+  );
   const pickedId = isMustChoose ? pickFor(packageId) : undefined;
 
   return (
@@ -235,26 +260,23 @@ function MissingRow({
             </div>
           </div>
         </div>
-        {!isMustChoose && !isStructural && !resolved && targetAuthKey && (
-          <InlineConnectButton
-            packageId={packageId}
-            authKey={targetAuthKey}
-            {...(err.missing_scopes ? { scopes: err.missing_scopes } : {})}
-            {...(err.connection_id ? { connectionId: err.connection_id } : {})}
-            {...(isReconnect ? { lockToAuthKey: true } : {})}
-            intent={
-              err.code === "insufficient_scopes"
-                ? "upgrade"
-                : err.code === "needs_reconnection"
-                  ? "reconnect"
-                  : "connect"
-            }
-            // Force this row's connection list to refetch the moment the renew
-            // popup closes / a fields connect succeeds, so the row flips to its
-            // resolved state immediately instead of waiting on a global cache
-            // invalidation (or a page reload).
-            onConnected={() => void refetchConnections()}
-          />
+        {loadingVerdict ? (
+          <Loader2 className="text-muted-foreground size-4 shrink-0 animate-spin" />
+        ) : (
+          !isMustChoose &&
+          !isStructural &&
+          !resolved &&
+          action && (
+            <InlineConnectButton
+              packageId={packageId}
+              authKey={action.authKey}
+              intent={action.intent}
+              {...(action.scopes ? { scopes: action.scopes } : {})}
+              {...(action.intent !== "connect" && action.connectionId
+                ? { connectionId: action.connectionId, lockToAuthKey: true }
+                : {})}
+            />
+          )
         )}
       </div>
       {isMustChoose && candidates.length > 0 && (
