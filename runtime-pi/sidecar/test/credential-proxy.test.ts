@@ -179,6 +179,38 @@ describe("executeApiCall — 401 retry path", () => {
     expect(deps.reportedAuthFailures.has("gmail")).toBe(false);
   });
 
+  it("does NOT retry when the refresh returns null (terminal — credential flagged platform-side)", async () => {
+    // A null refresh result means the platform `/refresh` could not rotate the
+    // credential (revoked / unrefreshable / non-oauth2 401) and has flagged the
+    // connection needsReconnection. The proxy must NOT re-issue the request
+    // with a stale token — single upstream call.
+    let calls = 0;
+    const fetchFn = mock(async () => {
+      calls += 1;
+      return new Response("expired", { status: 401 });
+    });
+    const refreshCredentials = mock(async () => null);
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      refreshCredentials,
+    });
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.response.status).toBe(401);
+    expect(calls).toBe(1);
+    expect(refreshCredentials).toHaveBeenCalledTimes(1);
+    expect(deps.reportedAuthFailures.has("gmail")).toBe(true);
+  });
+
   it("does NOT replay a streaming-request body on 401", async () => {
     let upstreamCalls = 0;
     const fetchFn = mock(async (url: string | URL) => {

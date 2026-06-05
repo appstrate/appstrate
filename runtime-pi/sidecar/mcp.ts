@@ -1547,7 +1547,7 @@ export interface ApiCallIntegrationConfig {
   integrationId: string;
   /** Resolve the integration's credentials into the proxy payload. */
   fetchCredentials: ApiCallDeps["fetchCredentials"];
-  /** Force-refresh on a mid-run 401 and re-resolve. */
+  /** Force-refresh on a mid-run 401 and re-resolve (null when not rotated). */
   refreshCredentials: NonNullable<ApiCallDeps["refreshCredentials"]>;
   /**
    * Resumable-upload protocols this integration's `apiCall` declared

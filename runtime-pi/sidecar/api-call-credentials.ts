@@ -30,7 +30,14 @@ import type { IntegrationCredentialsSource } from "./integration-credentials-sou
 
 export interface ApiCallCredentialAdapter {
   fetchCredentials: (integrationId: string) => Promise<ProxyCredentialsPayload>;
-  refreshCredentials: (integrationId: string) => Promise<ProxyCredentialsPayload>;
+  /**
+   * Force a refresh on a mid-run 401. Returns the re-snapshotted payload when
+   * the credential was actually rotated (caller retries the request once), or
+   * `null` when it was not — the platform `/refresh` already flagged the
+   * connection on a terminal failure, so the caller must NOT retry with a
+   * stale token.
+   */
+  refreshCredentials: (integrationId: string) => Promise<ProxyCredentialsPayload | null>;
 }
 
 /**
@@ -62,11 +69,23 @@ export function createApiCallCredentialAdapter(opts: {
   return {
     fetchCredentials: async () => toPayload(),
     refreshCredentials: async () => {
-      // `refreshOnUnauthorized` is optional on the source (static api_key
-      // sources have no refresh hook); the optional call short-circuits the
-      // whole chain when absent, so we just re-read the current payload.
-      await source.refreshOnUnauthorized?.(authKey).catch(() => false);
-      return toPayload();
+      // A connect.tool session whose `reauth_on` EXCLUDES 401 (handler
+      // registered, but `shouldReauth(401)` false): the manifest declared a 401
+      // is not a re-login trigger. Don't re-acquire — return null so the proxy
+      // passes the 401 through untouched (no re-login, no flag). Mirrors the
+      // MITM listener's `reauthExcluded` gate.
+      if (
+        source.hasReloginHandler?.(authKey) === true &&
+        source.shouldReauth?.(authKey, 401) !== true
+      ) {
+        return null;
+      }
+      // Retry ONLY when the credential was actually rotated / re-acquired. A
+      // false result (terminal 410 → connection flagged, or transient/cooldown)
+      // means re-issuing would just 401 again — return null so the proxy skips
+      // the retry instead of masking a dead credential as a success.
+      const rotated = await source.refreshOnUnauthorized(authKey).catch(() => false);
+      return rotated ? toPayload() : null;
     },
   };
 }

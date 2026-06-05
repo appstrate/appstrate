@@ -397,6 +397,30 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
     // Second call: served entirely from cache, zero further fetches.
     expect(fetchCountAfterSecondCall).toBe(0);
   });
+
+  it("does NOT negatively-cache a failed discovery — a later call re-discovers", async () => {
+    // A transient discovery outage must not be cached for the process lifetime
+    // (that would brick refresh for an issuer-only provider). After a failing
+    // first attempt, a subsequent call re-fetches and succeeds.
+    let phase: "fail" | "ok" = "fail";
+    await withFetch(
+      (async () =>
+        phase === "fail"
+          ? new Response("503", { status: 503 })
+          : jsonResponse({
+              issuer: "https://idp.example.com",
+              authorization_endpoint: "https://idp.example.com/oauth/authorize",
+              token_endpoint: "https://idp.example.com/oauth/token",
+            })) as unknown as typeof fetch,
+      async () => {
+        const r1 = await resolveOAuthEndpoints({ issuer: "https://idp.example.com" });
+        expect(r1.tokenEndpoint).toBeUndefined(); // discovery failed, nothing cached
+        phase = "ok";
+        const r2 = await resolveOAuthEndpoints({ issuer: "https://idp.example.com" });
+        expect(r2.tokenEndpoint).toBe("https://idp.example.com/oauth/token"); // re-discovered
+      },
+    );
+  });
 });
 
 describe("resolveOAuthEndpoints — registration_endpoint projection (RFC 7591)", () => {

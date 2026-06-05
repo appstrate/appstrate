@@ -406,6 +406,45 @@ describe("resolveConnections — fallback (cascade layer 5)", () => {
     expect(result.errors[0]!.code).toBe("must_choose_connection");
     expect(result.errors[0]!.candidateConnectionIds).toEqual(expect.arrayContaining([a.id, b.id]));
   });
+
+  it("auto-resolves the single HEALTHY candidate even when a dead sibling exists", () => {
+    const dead = conn({ needsReconnection: true });
+    const healthy = conn({ authKey: "pat" });
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [dead, healthy],
+      pins: [],
+    });
+    expect(result.errors).toHaveLength(0);
+    expect(result.resolved[INTEG]!.connectionId).toBe(healthy.id);
+    expect(result.resolved[INTEG]!.source).toBe("fallback_auto");
+  });
+
+  it("must_choose lists only LIVE candidates (flagged ones excluded from the picker)", () => {
+    const a = conn({});
+    const b = conn({ authKey: "pat" });
+    const dead = conn({ authKey: "extra", needsReconnection: true });
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [a, b, dead],
+      pins: [],
+    });
+    expect(result.errors[0]!.code).toBe("must_choose_connection");
+    expect(result.errors[0]!.candidateConnectionIds).toEqual(expect.arrayContaining([a.id, b.id]));
+    expect(result.errors[0]!.candidateConnectionIds!).not.toContain(dead.id);
+  });
+
+  it("emits needs_reconnection when EVERY candidate is flagged", () => {
+    const d1 = conn({ needsReconnection: true });
+    const d2 = conn({ authKey: "pat", needsReconnection: true });
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [d1, d2],
+      pins: [],
+    });
+    expect(result.errors[0]!.code).toBe("needs_reconnection");
+    expect([d1.id, d2.id]).toContain(result.errors[0]!.connectionId!);
+  });
 });
 
 describe("resolveConnections — health checks", () => {

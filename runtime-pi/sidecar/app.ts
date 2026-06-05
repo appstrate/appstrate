@@ -49,7 +49,7 @@ export const SIDECAR_IDLE_TIMEOUT_SECONDS = 255;
 export interface AppDeps {
   config: SidecarConfig;
   fetchCredentials: (integrationId: string) => Promise<CredentialsResponse>;
-  refreshCredentials?: (integrationId: string) => Promise<CredentialsResponse>;
+  refreshCredentials?: NonNullable<ApiCallDeps["refreshCredentials"]>;
   cookieJar: Map<string, string[]>;
   fetchFn?: typeof fetch; // default: global fetch — injectable for tests
   isReady?: () => boolean; // default: () => true — controls /health

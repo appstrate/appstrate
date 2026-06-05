@@ -32,7 +32,8 @@ import {
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
 import { encryptCredentials } from "@appstrate/connect";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, runs } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 
 const app = getTestApp();
 
@@ -326,12 +327,14 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     expect(res.status).toBe(404);
   });
 
-  // ─── Happy path on a non-OAuth auth (no refresh side-effect) ──
+  // ─── Terminal on a non-OAuth auth (the unified flagging path) ──
 
-  it("ALLOW: returns the live payload for an api_key auth (no refresh required)", async () => {
-    // api_key auths don't trigger refresh — the response shape must still
-    // be identical to the GET happy path. This pins the route as a working
-    // alias of the read surface for non-OAuth auths.
+  it("flags needsReconnection + records run metadata + 410 for a non-OAuth auth on a forced refresh", async () => {
+    // A forced /refresh only happens after an upstream 401. A non-OAuth
+    // (api_key) credential cannot be refreshed → it is dead → the route flags
+    // the connection, stamps the run's degraded_integrations, and returns 410
+    // (the sidecar maps that to "don't retry"). This is the single place a
+    // terminal auth failure is recorded — no separate report endpoint.
     await seedIntegration(INTEGRATION, true);
     await seedConnection(INTEGRATION);
 
@@ -339,12 +342,16 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
     });
+    expect(res.status).toBe(410);
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      auths: Array<{ auth_key: string; fields: Record<string, string> }>;
-    };
-    expect(body.auths).toHaveLength(1);
-    expect(body.auths[0]!.fields.api_key).toBe("live-secret-value");
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, INTEGRATION));
+    expect(row!.needsReconnection).toBe(true);
+
+    const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
+    const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
+    expect(meta?.degraded_integrations).toContain(INTEGRATION);
   });
 });

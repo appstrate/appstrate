@@ -28,7 +28,7 @@
  *                                                  v
  *                                         fetch upstream HTTPS
  *                                                  v
- *                                  (401 + retry401? → refresh, retry once)
+ *                       (401 on an injected auth → /refresh; retry once if rotated)
  *                                                  v
  *                                          response back over TLS
  *
@@ -77,17 +77,30 @@ import type { CertMinter } from "./integration-cert-minter.ts";
 export interface MitmCredentialSource {
   current(): IntegrationCredentialsPayload;
   deliveryPlans(): Readonly<Record<string, HttpDeliveryPlan>>;
+  /**
+   * Force a refresh after an upstream 401 (or a connect.tool re-login). Returns
+   * true when the credential was rotated / re-minted (the listener retries the
+   * request once). The platform `/refresh` it calls flags the connection
+   * needsReconnection on a terminal failure, so a false result just means
+   * "don't retry" — the dead-credential bookkeeping is platform-side.
+   */
   refreshOnUnauthorized?(authKey: string): Promise<boolean>;
   /**
    * connect.tool mid-run re-login (P3) — when this returns true for
    * `(authKey, status)`, the listener treats `status` as a re-acquire trigger:
    * it calls {@link refreshOnUnauthorized} (which routes to the registered
    * re-login handler), rebuilds the action with the fresh session, and retries
-   * the request once — even when the response wasn't a 401 and OAuth's
-   * `retry401` isn't set. Optional — sources that don't implement it behave
-   * exactly as before (OAuth-only 401 retry).
+   * the request once — even when the response wasn't a 401.
    */
   shouldReauth?(authKey: string, status: number): boolean;
+  /**
+   * True when a connect.tool re-login handler is registered for `authKey` (any
+   * trigger status). Lets the listener leave a 401 that the manifest's
+   * `reauth_on` deliberately EXCLUDES untouched, rather than mistaking the
+   * session auth for a dead static credential and replaying / flagging it.
+   * Optional — sources without it behave as a plain static credential.
+   */
+  hasReloginHandler?(authKey: string): boolean;
   /**
    * Connect-login primitive (P1) — when this returns a non-null bag, the
    * listener substitutes `{{key}}` placeholders into the outbound URL,
@@ -719,52 +732,81 @@ async function handleInnerRequest(
     return new Response(`MITM upstream error: ${(err as Error).message}`, { status: 502 });
   }
 
-  // Two retry paths converge here:
-  //   - OAuth (existing): a 401 on an auth whose plan declared `retry401`
-  //     triggers a platform token-refresh + single retry.
-  //   - connect.tool re-login (P3): any status the manifest's
-  //     `auth._meta["dev.appstrate/connect"].reauth_on` declares (default
-  //     `[401]`) triggers a re-run of the integration's login tool + single
-  //     retry. The source's
-  //     `refreshOnUnauthorized` routes to the registered re-login handler;
-  //     `setSessionOutputs` (inside the handler) updates the source's
-  //     deliveryPlans, so the rebuilt action injects the fresh session header.
-  const oauthRetry = response.status === 401 && action.retry401;
+  // Recovery paths converge here:
+  //   - Any 401 on an auth whose credential we INJECTED forces a platform
+  //     refresh. For OAuth it rotates the token and we retry once; for a
+  //     non-OAuth auth (api_key/basic) the platform `/refresh` has nothing to
+  //     refresh after a 401, so it flags the connection needsReconnection and
+  //     returns false — no retry. This is what restores "a terminal 401
+  //     invalidates the connection" for EVERY auth type (the 401-is-about-our-
+  //     credential gate = injectedHeader !== null; a 403 is left untouched).
+  //   - connect.tool re-login (P3): a status the manifest's `reauth_on`
+  //     declares (default `[401]`) re-runs the login tool; `setSessionOutputs`
+  //     updates the source's deliveryPlans so the rebuilt action injects the
+  //     fresh session header.
+  const matchedAuthKey = action.matchedAuth?.authKey ?? null;
+  const got401 = response.status === 401 && !!action.matchedAuth && action.injectedHeader !== null;
   const connectReauth =
     !!action.matchedAuth &&
-    credentials.shouldReauth?.(action.matchedAuth.authKey, response.status) === true;
-  if ((oauthRetry || connectReauth) && action.matchedAuth && credentials.refreshOnUnauthorized) {
-    const refreshed = await credentials
-      .refreshOnUnauthorized(action.matchedAuth.authKey)
-      .catch(() => false);
+    matchedAuthKey !== null &&
+    credentials.shouldReauth?.(matchedAuthKey, response.status) === true;
+  // A connect.tool session auth whose `reauth_on` deliberately EXCLUDES this
+  // status (`shouldReauth` false but a re-login handler IS registered): the
+  // manifest declared this 401 is NOT a session-death signal. Leave the
+  // response untouched — no stale replay, no re-login, no flag (the pre-P3
+  // pass-through). Without this gate the auth would be mistaken for a dead
+  // static credential (replayed + flagged) AND re-logged-in regardless, since
+  // `refreshOnUnauthorized` runs the handler without re-checking the status.
+  const reauthExcluded =
+    got401 &&
+    !connectReauth &&
+    matchedAuthKey !== null &&
+    credentials.hasReloginHandler?.(matchedAuthKey) === true;
+  let retried = false;
+  let lastAction = action;
+
+  // Rebuild the action from the source's CURRENT state (fresh after a refresh /
+  // re-login, identical for a same-credential replay) and re-issue the request
+  // once. Returns the new response, or null if the retry threw.
+  const refetch = async (): Promise<Response | null> => {
+    const a = buildAction();
+    lastAction = a;
+    const outbound = buildOutboundHeaders(
+      headersForOutbound,
+      sniHost,
+      a.strippedHeaderNames,
+      a.injectedHeader,
+    );
+    try {
+      return await fetchFn(targetUrl, {
+        method: req.method,
+        headers: outbound,
+        ...(body.byteLength > 0 ? { body } : {}),
+        redirect: "manual",
+        signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
+      });
+    } catch (err) {
+      emit({ kind: "upstream-error", url: targetUrl, error: `retry: ${(err as Error).message}` });
+      return null;
+    }
+  };
+
+  // A 401 on our injected credential (or a connect.tool re-login trigger):
+  // force a platform refresh — rotates the token for oauth, flags the
+  // connection needsReconnection for a non-oauth auth (nothing to refresh after
+  // a 401). A successful refresh / re-login replays the request once.
+  if (
+    (got401 || connectReauth) &&
+    !reauthExcluded &&
+    matchedAuthKey !== null &&
+    credentials.refreshOnUnauthorized
+  ) {
+    const refreshed = await credentials.refreshOnUnauthorized(matchedAuthKey).catch(() => false);
     if (refreshed) {
-      const action2 = buildAction();
-      const outbound2 = buildOutboundHeaders(
-        headersForOutbound,
-        sniHost,
-        action2.strippedHeaderNames,
-        action2.injectedHeader,
-      );
-      try {
-        response = await fetchFn(targetUrl, {
-          method: req.method,
-          headers: outbound2,
-          ...(body.byteLength > 0 ? { body } : {}),
-          redirect: "manual",
-          signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
-        });
-        emit({
-          kind: "request-forwarded",
-          url: targetUrl,
-          method: req.method,
-          status: response.status,
-          authKey: action2.matchedAuth?.authKey ?? null,
-          retried: true,
-          headerInjected: action2.injectedHeader !== null,
-        });
-        return passthroughResponse(response);
-      } catch (err) {
-        emit({ kind: "upstream-error", url: targetUrl, error: `retry: ${(err as Error).message}` });
+      const replay = await refetch();
+      if (replay) {
+        response = replay;
+        retried = true;
       }
     }
   }
@@ -774,9 +816,9 @@ async function handleInnerRequest(
     url: targetUrl,
     method: req.method,
     status: response.status,
-    authKey: action.matchedAuth?.authKey ?? null,
-    retried: false,
-    headerInjected: action.injectedHeader !== null,
+    authKey: lastAction.matchedAuth?.authKey ?? null,
+    retried,
+    headerInjected: lastAction.injectedHeader !== null,
   });
   return passthroughResponse(response);
 }

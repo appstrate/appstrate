@@ -204,6 +204,15 @@ export interface IntegrationCredentialsSource extends MitmCredentialSource {
    */
   shouldReauth(authKey: string, status: number): boolean;
   /**
+   * True when a connect.tool re-login handler is registered for `authKey`,
+   * regardless of which statuses trigger it. Distinguishes a connect.tool
+   * session auth (which re-acquires its credential) from a plain static
+   * credential (api_key/basic) — the listener uses it to leave a 401 that the
+   * manifest's `reauth_on` deliberately EXCLUDES untouched (no stale replay, no
+   * re-login), instead of treating it as a dead static credential.
+   */
+  hasReloginHandler(authKey: string): boolean;
+  /**
    * Override the base's optional
    * {@link MitmCredentialSource.refreshOnUnauthorized} as REQUIRED — this
    * factory always wires it (routes to the registered re-login handler, else
@@ -313,6 +322,8 @@ export function createIntegrationCredentialsSource(
         cooldownMs: minRefreshIntervalMs,
         elapsedMs: now - last,
       });
+      // Cooldown — a recent attempt is still in its backoff window. Don't
+      // retry now (the platform already saw this 401 and flagged if terminal).
       return false;
     }
     const existing = inflight.get(authKey);
@@ -369,6 +380,7 @@ export function createIntegrationCredentialsSource(
         authKey,
         error: err instanceof Error ? err.message : String(err),
       });
+      // Network failure reaching the platform — retryable; don't retry now.
       return false;
     }
     if (res.status === 410) {
@@ -383,6 +395,9 @@ export function createIntegrationCredentialsSource(
       });
       // Mark cooldown so we don't retry for at least the full interval.
       lastRefreshAt.set(authKey, Date.now());
+      // 410 = the platform flagged the connection needsReconnection (revoked
+      // token, unrefreshable oauth2, or a non-oauth2 auth that 401'd). The
+      // credential is dead — do not retry.
       return false;
     }
     if (!res.ok) {
@@ -391,6 +406,8 @@ export function createIntegrationCredentialsSource(
         authKey,
         status: res.status,
       });
+      // 502 (transient upstream refresh failure) and any other non-2xx: the
+      // cached credential may still be valid. Don't retry now.
       return false;
     }
     let next: IntegrationCredentialsWire;
@@ -465,6 +482,7 @@ export function createIntegrationCredentialsSource(
       const entry = reloginHandlers.get(authKey);
       return entry ? entry.reauthStatuses.has(status) : false;
     },
+    hasReloginHandler: (authKey) => reloginHandlers.has(authKey),
   };
 }
 

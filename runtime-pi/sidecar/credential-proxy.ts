@@ -130,7 +130,14 @@ export interface ApiCallDeps {
   cookieJar: Map<string, string[]>;
   fetchFn: typeof fetch;
   fetchCredentials: (integrationId: string) => Promise<CredentialsResponse>;
-  refreshCredentials?: (integrationId: string) => Promise<CredentialsResponse>;
+  /**
+   * Force a refresh on a mid-run 401. Resolves to the fresh credentials when
+   * the token was actually rotated (the caller replays the request once), or
+   * `null` when it was not — on a terminal failure the platform `/refresh`
+   * already flagged the connection `needsReconnection`, so the caller must NOT
+   * retry with a stale token.
+   */
+  refreshCredentials?: (integrationId: string) => Promise<CredentialsResponse | null>;
   /**
    * Set tracking which integrations already had a persistent auth
    * failure logged in this run. Mutated by the function — shared
@@ -354,9 +361,12 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 
   let authRefreshed = false;
 
-  // 7b. Retry on 401 — refresh credentials, re-issue the call. Only
-  //     possible on the buffered path (streaming bodies are consumed
-  //     once and cannot be replayed).
+  // 7b. Retry on 401 — force a refresh and re-issue the call. The platform
+  //     `/refresh` flags the connection needsReconnection when the credential
+  //     is terminally dead (revoked / unrefreshable / a non-oauth2 auth that
+  //     401'd), so a `null` result means "do not retry". A non-null result is
+  //     a genuine token rotation; replay once (buffered bodies only — streaming
+  //     bodies are consumed once and cannot be replayed).
   if (
     upstream.status === 401 &&
     refreshCredentials &&
@@ -364,23 +374,21 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     config.runToken &&
     !reportedAuthFailures.has(integrationId)
   ) {
-    try {
-      const refreshed = await refreshCredentials(integrationId);
+    const fresh = await refreshCredentials(integrationId).catch(() => null);
+    if (fresh) {
       if (body.kind !== "streaming") {
         try {
-          const r = await doUpstreamRequest(refreshed);
+          const r = await doUpstreamRequest(fresh);
           upstream = r.response;
           upstreamFinalUrl = r.finalUrl;
         } catch (err) {
           return wrapRequestError(err, resolvedUrl);
         }
       } else {
-        // Body already consumed — surface the rotated-but-still-401
-        // signal to the caller, which adds X-Auth-Refreshed.
+        // Body already consumed — surface the rotated-but-still-401 signal to
+        // the caller, which adds X-Auth-Refreshed.
         authRefreshed = true;
       }
-    } catch {
-      // Refresh itself failed (invalid_grant, revoked token).
     }
   }
 
@@ -389,13 +397,13 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //    (final hop only — bodies can't be replayed).
   mergeSetCookieIntoJar(upstream.headers.getSetCookie(), cookieJar, integrationId);
 
-  // 9. Log persistent auth failures locally (once per integration per
-  //    run, only if the retry above did NOT fix it). The Set also
-  //    gates the 401-retry path above so a dead credential triggers
-  //    at most one refresh attempt per integration.
+  // 9. Log a persistent auth failure once per integration per run. The flag is
+  //    set platform-side by the `/refresh` call above (which returns null on a
+  //    terminal credential); here we only gate the one-refresh-attempt-per-run
+  //    behaviour and surface a log line.
   if (upstream.status === 401 && !reportedAuthFailures.has(integrationId)) {
     reportedAuthFailures.add(integrationId);
-    logger.warn("Upstream returned 401 after retry", { integrationId });
+    logger.warn("Upstream returned 401 after refresh attempt", { integrationId });
   }
 
   return { ok: true, response: upstream, finalUrl: upstreamFinalUrl, authRefreshed };

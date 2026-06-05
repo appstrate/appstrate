@@ -225,8 +225,8 @@ describe("createApiCallCredentialAdapter — connect.tool session via shared sou
   });
 });
 
-describe("createApiCallCredentialAdapter — legacy refresh re-snapshot", () => {
-  it("refreshCredentials triggers refreshOnUnauthorized and re-snapshots", async () => {
+describe("createApiCallCredentialAdapter — refresh re-snapshot", () => {
+  it("refreshCredentials triggers refresh, re-snapshots, and returns the rotated payload", async () => {
     let refreshed = false;
     const source = fakeSource(
       {
@@ -244,7 +244,48 @@ describe("createApiCallCredentialAdapter — legacy refresh re-snapshot", () => 
       authKey: "primary",
       authorizedUris: ["https://api.example.com/**"],
     });
-    await adapter.refreshCredentials("@scope/integ");
+    const result = await adapter.refreshCredentials("@scope/integ");
     expect(refreshed).toBe(true);
+    expect(result?.credentials[PROXY_INJECTED_FIELD]).toBe("AT");
+  });
+
+  function connectToolSource(reauthStatuses: number[]): IntegrationCredentialsSource {
+    return {
+      current: () => ({
+        auths: [{ authKey: "session", authType: "custom", fields: { cookie: "C" } }],
+      }),
+      deliveryPlans: () => ({}),
+      refreshOnUnauthorized: async () => true,
+      hasReloginHandler: (authKey: string) => authKey === "session",
+      shouldReauth: (authKey: string, status: number) =>
+        authKey === "session" && reauthStatuses.includes(status),
+      snapshot: () => ({ auths: [], deliveryPlans: {}, expiresAtEpochMs: {} }),
+    } as unknown as IntegrationCredentialsSource;
+  }
+
+  it("connect.tool auth whose reauth_on EXCLUDES 401: refreshCredentials no-ops (pass-through)", async () => {
+    // The manifest declared 401 is not a re-login trigger → the proxy must NOT
+    // re-acquire and must NOT flag — the 401 passes through.
+    const adapter = createApiCallCredentialAdapter({
+      source: connectToolSource([403]),
+      authKey: "session",
+      authorizedUris: ["https://api.example.com/**"],
+    });
+    expect(await adapter.refreshCredentials("@scope/integ")).toBeNull();
+  });
+
+  it("refreshCredentials returns null when the credential was NOT rotated", async () => {
+    const source = {
+      current: () => ({ auths: [] }),
+      deliveryPlans: () => ({}),
+      refreshOnUnauthorized: async () => false,
+      snapshot: () => ({ auths: [], deliveryPlans: {}, expiresAtEpochMs: {} }),
+    } as unknown as IntegrationCredentialsSource;
+    const adapter = createApiCallCredentialAdapter({
+      source,
+      authKey: "primary",
+      authorizedUris: ["https://api.example.com/**"],
+    });
+    expect(await adapter.refreshCredentials("@scope/integ")).toBeNull();
   });
 });

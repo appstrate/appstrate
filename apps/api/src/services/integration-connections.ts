@@ -20,7 +20,7 @@
  * module is the write side that populates it.
  */
 
-import { and, eq, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   applicationPackages,
@@ -205,7 +205,10 @@ async function loadActorConnection(
         or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
         ...(context.connectionId ? [eq(integrationConnections.id, context.connectionId)] : []),
       ),
-    );
+    )
+    // Stable order so the fetch (GET) and the forced refresh (POST) on a
+    // multi-connection actor always resolve — and flag — the SAME sibling row.
+    .orderBy(asc(integrationConnections.createdAt), asc(integrationConnections.id));
   if (rows.length === 0) return null;
 
   // When a connectionId override is set, the WHERE clause already narrowed

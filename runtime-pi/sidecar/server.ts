@@ -129,7 +129,7 @@ async function fetchCredentials(integrationId: string): Promise<CredentialsRespo
   return res.json() as Promise<CredentialsResponse>;
 }
 
-async function refreshCredentials(integrationId: string): Promise<CredentialsResponse> {
+async function refreshCredentials(integrationId: string): Promise<CredentialsResponse | null> {
   const res = await fetch(
     `${config.platformApiUrl}/internal/credentials/${integrationId}/refresh`,
     {
@@ -137,9 +137,9 @@ async function refreshCredentials(integrationId: string): Promise<CredentialsRes
       headers: { Authorization: `Bearer ${config.runToken}` },
     },
   );
-  if (!res.ok) {
-    throw new Error(`Failed to refresh credentials for ${integrationId}: ${res.status}`);
-  }
+  // Legacy BYOI path. Any non-OK (incl. 410) → not rotated → the proxy skips
+  // the retry. This path has no AFPS connection row, so flagging is a no-op here.
+  if (!res.ok) return null;
   return res.json() as Promise<CredentialsResponse>;
 }
 

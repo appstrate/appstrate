@@ -21,6 +21,7 @@
 
 import {
   resolveAfpsHttpDelivery,
+  RefreshError,
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type HttpDeliveryPlan,
   type ResolvedAuthCredentials,
@@ -144,18 +145,75 @@ export async function resolveLiveIntegrationCredentials(
     ? connection.expiresAt.getTime()
     : null;
 
+  // A FORCED refresh only ever happens after the sidecar saw an upstream 401.
+  // When the credential cannot be recovered (a revoked refresh token is handled
+  // inline below; here: an oauth2 auth with no refresh client, or any
+  // non-oauth2 auth which has nothing to refresh), the credential is dead:
+  // flag the connection for re-connect and surface 410 so the sidecar stops
+  // retrying and the next-launch readiness gate fires. Shared by both terminal
+  // branches so they cannot drift.
+  const flagTerminalAndThrow = async (reason: string): Promise<never> => {
+    await markIntegrationConnectionNeedsReconnection(connection.id);
+    logger.warn(
+      "Integration credential unrefreshable on forced refresh — flagging needsReconnection",
+      {
+        runId: context.runId,
+        integrationId,
+        authKey,
+        reason,
+      },
+    );
+    throw gone(
+      "INTEGRATION_CONNECTION_NEEDS_RECONNECTION",
+      `Integration '${integrationId}' auth '${authKey}' could not be refreshed (${reason}) — needs re-connection`,
+    );
+  };
+
   // Decide whether to refresh.
   const needsRefresh =
     authDef.type === "oauth2" &&
     (options.forceRefresh === true || isWithinLeadWindow(connection.expiresAt));
 
   if (needsRefresh) {
-    const refreshContext = await buildIntegrationOAuthRefreshContext(
-      integrationId,
-      authKey,
-      authDef,
-      context.applicationId,
-    );
+    let refreshContext;
+    try {
+      refreshContext = await buildIntegrationOAuthRefreshContext(
+        integrationId,
+        authKey,
+        authDef,
+        context.applicationId,
+      );
+    } catch (err) {
+      // Transient token-endpoint discovery failure on an issuer-only manifest —
+      // NEVER terminal (the row stays untouched; the next run re-discovers).
+      if (err instanceof RefreshError && err.kind === "transient") {
+        if (options.forceRefresh === true) {
+          // Forced = the sidecar already saw an upstream 401, so the cached
+          // token is known-bad. We can't refresh right now → 502 so the sidecar
+          // keeps the original 401 and backs off.
+          logger.warn("Integration token endpoint discovery transient failure (forced refresh)", {
+            runId: context.runId,
+            integrationId,
+            authKey,
+            error: err.message,
+          });
+          throw badGateway(
+            `Integration '${integrationId}' auth '${authKey}' token endpoint discovery failed (transient)`,
+          );
+        }
+        // Proactive (lead-window) path: the cached token is still valid (we're
+        // merely ahead of expiry). A discovery blip must NOT fail the run —
+        // serve the cached credential unchanged and let a later real 401 drive
+        // forced re-discovery. `refreshContext` left null → refresh skipped.
+        logger.info(
+          "Integration token endpoint discovery transient failure on proactive refresh — serving cached credential",
+          { runId: context.runId, integrationId, authKey, error: err.message },
+        );
+        refreshContext = null;
+      } else {
+        throw err;
+      }
+    }
     if (refreshContext) {
       // Re-acquisition = fast-path refresh_token POST. `needsRefresh`
       // already gated type=oauth2, so this is the only refreshable auth.
@@ -243,7 +301,20 @@ export async function resolveLiveIntegrationCredentials(
           });
         }
       }
+    } else if (options.forceRefresh === true) {
+      // OAuth2 but `buildIntegrationOAuthRefreshContext` returned null — no
+      // per-app OAuth client (DCR / system-wide / shared) or no token_endpoint,
+      // so the token can never be refreshed. Terminal.
+      await flagTerminalAndThrow("no OAuth client or token endpoint");
     }
+  } else if (options.forceRefresh === true) {
+    // A FORCED refresh of a NON-oauth2 auth (api_key / basic / a custom auth
+    // with no connect.tool re-login handler — those route to re-login in the
+    // sidecar and never reach here). There is nothing to refresh and the
+    // sidecar only forces a refresh after a 401, so the credential is dead.
+    // This is what restores the "any terminal 401 invalidates the connection"
+    // guarantee for non-OAuth integrations — without a separate report path.
+    await flagTerminalAndThrow(`auth type '${authDef.type}' is not refreshable`);
   }
 
   const http = authDef.delivery?.http;

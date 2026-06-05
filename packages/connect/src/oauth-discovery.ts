@@ -117,8 +117,9 @@ function buildDiscoveryProbes(issuer: string): string[] {
  * burst doesn't hammer the IdP's well-known endpoints. Process-lifetime is
  * the conservative ceiling (no neighbouring TTL cache pattern exists in this
  * package, and tests reset state by reloading the module); operators who need
- * a refresh roll the process. `null` cached entries represent "discovery
- * attempted and failed" so we don't retry on every connect during an outage.
+ * a refresh roll the process. Only SUCCESSFUL projections are cached — a failed
+ * discovery is left uncached so the next call re-discovers (a negative entry
+ * would permanently disable enrichment / brick refresh on a transient blip).
  *
  * Cache is keyed by the trimmed-trailing-slash issuer string — the exact same
  * normalisation used for the §7.3 issuer-equality check below.
@@ -131,7 +132,7 @@ interface CachedDiscovery {
   discoveredAuthorizationEndpoint?: string;
   discoveredTokenEndpoint?: string;
 }
-const discoveryCache = new Map<string, CachedDiscovery | null>();
+const discoveryCache = new Map<string, CachedDiscovery>();
 
 /** Test-only hook so unit tests can run with a clean cache state. */
 export function __clearOAuthDiscoveryCache(): void {
@@ -165,20 +166,20 @@ export async function resolveOAuthEndpoints(
 
   const configuredIssuer = trimTrailingSlash(input.issuer);
 
-  // Cache hit — apply enrichment without any network I/O.
-  if (discoveryCache.has(configuredIssuer)) {
-    const cached = discoveryCache.get(configuredIssuer);
-    if (cached) {
-      if (!authorizationEndpoint && cached.discoveredAuthorizationEndpoint) {
-        authorizationEndpoint = cached.discoveredAuthorizationEndpoint;
-      }
-      if (!tokenEndpoint && cached.discoveredTokenEndpoint) {
-        tokenEndpoint = cached.discoveredTokenEndpoint;
-      }
-      codeChallengeMethodsSupported = cached.codeChallengeMethodsSupported;
-      userinfoEndpoint = cached.userinfoEndpoint;
-      registrationEndpoint = cached.registrationEndpoint;
+  // Cache hit — apply enrichment without any network I/O. Only successful
+  // projections are cached (no negative entries), so a miss simply falls
+  // through to a fresh discovery below.
+  const cached = discoveryCache.get(configuredIssuer);
+  if (cached) {
+    if (!authorizationEndpoint && cached.discoveredAuthorizationEndpoint) {
+      authorizationEndpoint = cached.discoveredAuthorizationEndpoint;
     }
+    if (!tokenEndpoint && cached.discoveredTokenEndpoint) {
+      tokenEndpoint = cached.discoveredTokenEndpoint;
+    }
+    codeChallengeMethodsSupported = cached.codeChallengeMethodsSupported;
+    userinfoEndpoint = cached.userinfoEndpoint;
+    registrationEndpoint = cached.registrationEndpoint;
     return {
       authorizationEndpoint,
       tokenEndpoint,
@@ -251,27 +252,27 @@ export async function resolveOAuthEndpoints(
     }
   }
 
-  // Cache the projection (or null on total failure) so subsequent connects on
-  // the same issuer don't re-fetch. A null cache entry still short-circuits
-  // — silent fallback to manual values is the spec-mandated behaviour.
+  // Cache ONLY a successful projection. A total failure is NOT cached: it is
+  // typically transient (IdP/network blip), and a process-lifetime negative
+  // entry would permanently disable enrichment — and, on the refresh path,
+  // permanently brick token refresh for an issuer-only provider until restart.
+  // Leaving it uncached means the next call re-discovers; the spec-mandated
+  // silent fallback to manual endpoints still holds for THIS call.
   const anyDiscovered =
     discoveredAuthorizationEndpoint !== undefined ||
     discoveredTokenEndpoint !== undefined ||
     codeChallengeMethodsSupported !== undefined ||
     userinfoEndpoint !== undefined ||
     registrationEndpoint !== undefined;
-  discoveryCache.set(
-    configuredIssuer,
-    anyDiscovered
-      ? {
-          discoveredAuthorizationEndpoint,
-          discoveredTokenEndpoint,
-          codeChallengeMethodsSupported,
-          userinfoEndpoint,
-          registrationEndpoint,
-        }
-      : null,
-  );
+  if (anyDiscovered) {
+    discoveryCache.set(configuredIssuer, {
+      discoveredAuthorizationEndpoint,
+      discoveredTokenEndpoint,
+      codeChallengeMethodsSupported,
+      userinfoEndpoint,
+      registrationEndpoint,
+    });
+  }
 
   // Manual endpoints always win — discovery fills only the gaps.
   if (!authorizationEndpoint && discoveredAuthorizationEndpoint) {
@@ -301,6 +302,11 @@ interface DiscoveryDocument {
 
 /** Best-effort fetch + parse of a discovery document. Returns `null` on any failure. */
 async function fetchDiscoveryDocument(url: string): Promise<DiscoveryDocument | null> {
+  // NB: deliberately NOT SSRF-guarded. The probe host comes from the
+  // manifest-author-controlled `issuer` (not agent input), the token EXCHANGE
+  // that follows POSTs to the same host unguarded, and self-hosted deployments
+  // legitimately run an internal IdP on a private address — blocking private
+  // targets here would break those without closing the (publish-time) hole.
   try {
     const res = await fetch(url, {
       method: "GET",

@@ -25,6 +25,7 @@
 import {
   resolveAfpsHttpDelivery,
   buildProxyCredentialsPayload,
+  RefreshError,
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type ProxyCredentialsPayload,
 } from "@appstrate/connect";
@@ -129,12 +130,29 @@ export async function forceRefreshIntegrationProxyCredentials(
   const authDef = auths[connection.authKey];
   if (!authDef || authDef.type !== "oauth2") return null;
 
-  const refreshContext = await buildIntegrationOAuthRefreshContext(
-    input.integrationId,
-    connection.authKey,
-    authDef,
-    input.applicationId,
-  );
+  let refreshContext;
+  try {
+    refreshContext = await buildIntegrationOAuthRefreshContext(
+      input.integrationId,
+      connection.authKey,
+      authDef,
+      input.applicationId,
+    );
+  } catch (err) {
+    // Transient token-endpoint discovery failure (issuer-only manifest) —
+    // surface as not-refreshed; the route keeps the original 401, the row is
+    // untouched, the next run re-discovers. Same handling as a transient
+    // exchange failure below.
+    if (err instanceof RefreshError && err.kind === "transient") {
+      logger.warn("credential-proxy: integration token endpoint discovery transient failure", {
+        integrationId: input.integrationId,
+        authKey: connection.authKey,
+        error: err.message,
+      });
+      return null;
+    }
+    throw err;
+  }
   if (!refreshContext) return null;
 
   // Re-acquisition = fast-path refresh_token POST. `authDef.type` is gated
