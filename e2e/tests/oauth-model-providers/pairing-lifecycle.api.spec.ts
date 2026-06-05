@@ -24,7 +24,7 @@
  *   6. GET  /model-provider-credentials → new row carries
  *                                 `authMode:"oauth2"`, `source:"custom"`,
  *                                 `providerId:"<provider>"`,
- *                                 `needsReconnection:false`
+ *                                 `needs_reconnection:false`
  *   7. POST /pair/redeem token replay → 410
  *   8. DELETE credential        → 204, gone from the list
  *   9. DELETE /pairing/<bogus>  → 204 idempotent (wrong-id is silent)
@@ -82,8 +82,8 @@ interface CredentialRow {
   authMode: "oauth2" | "api_key";
   source: "built-in" | "custom";
   providerId?: string;
-  needsReconnection?: boolean;
-  oauthEmail?: string | null;
+  needs_reconnection?: boolean;
+  oauth_email?: string | null;
 }
 
 for (const provider of PROVIDER_CASES) {
@@ -179,8 +179,8 @@ for (const provider of PROVIDER_CASES) {
         expect(row?.authMode).toBe("oauth2");
         expect(row?.source).toBe("custom");
         expect(row?.providerId).toBe(provider.id);
-        expect(row?.needsReconnection).toBe(false);
-        expect(row?.oauthEmail).toBe(SYNTHETIC_EMAIL);
+        expect(row?.needs_reconnection).toBe(false);
+        expect(row?.oauth_email).toBe(SYNTHETIC_EMAIL);
 
         // 7. Same bearer cannot be replayed — pairings are single-use.
         const replayBody: Record<string, unknown> = {
