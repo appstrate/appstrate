@@ -22,6 +22,7 @@ import {
   performRefreshTokenExchange,
   decryptCredentials,
   decryptCredentialsToStringMap,
+  resolveOAuthEndpoints,
 } from "@appstrate/connect";
 import type {
   RefreshContext as IntegrationRefreshContext,
@@ -318,13 +319,25 @@ export async function buildIntegrationOAuthRefreshContext(
   applicationId: string,
 ): Promise<IntegrationRefreshContext | null> {
   if (authDef.type !== "oauth2") return null;
-  // AFPS §7.3: refresh POSTs to `token_endpoint` (the old `tokenUrl` /
-  // `refreshUrl` split is gone). The endpoint may be filled by discovery from
-  // `issuer` — but the refresh path needs a concrete URL, so require it here.
+  // AFPS §7.3: refresh POSTs to `token_endpoint`. When the manifest declares
+  // only an `issuer` (Drive/OneDrive and other issuer-only providers), resolve
+  // the endpoint with the SAME OIDC/RFC-8414 discovery the authorize flow uses
+  // (`resolveOAuthEndpoints`, cached per-issuer). Without this, issuer-only
+  // connections connect fine but can NEVER refresh — they die when the access
+  // token expires (~1h) and the user is stuck re-connecting hourly.
   const afpsAuth = authDef;
-  const tokenEndpoint = afpsAuth.token_endpoint;
+  const { tokenEndpoint } = await resolveOAuthEndpoints({
+    issuer: afpsAuth.issuer,
+    tokenEndpoint: afpsAuth.token_endpoint,
+  });
   if (!tokenEndpoint) {
-    logger.info("Integration auth refresh skipped — no token_endpoint", { packageId, authKey });
+    logger.info(
+      "Integration auth refresh skipped — no token_endpoint (issuer discovery yielded none)",
+      {
+        packageId,
+        authKey,
+      },
+    );
     return null;
   }
   const [client] = await db

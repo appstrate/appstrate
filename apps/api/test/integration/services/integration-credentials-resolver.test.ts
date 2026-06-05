@@ -32,7 +32,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
-import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { encryptCredentials } from "@appstrate/connect";
 import { resolveLiveIntegrationCredentials } from "../../../src/services/integration-credentials-resolver.ts";
@@ -41,7 +41,10 @@ const INTEGRATION_ID = "@official/gmail";
 
 // ── Controllable upstream token endpoint ─────────────────────
 interface TokenServer {
+  /** Token endpoint URL (`{origin}/token`). */
   url: string;
+  /** Issuer origin — set as a manifest `issuer` to exercise OIDC discovery. */
+  origin: string;
   setResponse: (body: Record<string, unknown> | string, status?: number) => void;
   stop: () => void;
 }
@@ -62,14 +65,28 @@ function startTokenServer(): TokenServer {
   ).Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
-    fetch: () =>
-      new Response(typeof nextBody === "string" ? nextBody : JSON.stringify(nextBody), {
+    fetch: (req) => {
+      const u = new URL(req.url);
+      // Serve an RFC 8414 / OIDC discovery doc on the well-known probes so an
+      // issuer-only manifest can resolve its token_endpoint (the issuer member
+      // MUST equal the configured issuer for the §7.3 equality check to pass).
+      if (u.pathname.includes("/.well-known/")) {
+        const origin = `${u.protocol}//${u.host}`;
+        return Response.json({
+          issuer: origin,
+          authorization_endpoint: `${origin}/authorize`,
+          token_endpoint: `${origin}/token`,
+        });
+      }
+      return new Response(typeof nextBody === "string" ? nextBody : JSON.stringify(nextBody), {
         status: nextStatus,
         headers: { "Content-Type": "application/json" },
-      }),
+      });
+    },
   });
   return {
     url: `http://${server.hostname}:${server.port}/token`,
+    origin: `http://${server.hostname}:${server.port}`,
     setResponse: (body, status = 200) => {
       nextBody = body;
       nextStatus = status;
@@ -114,6 +131,17 @@ function gmailManifest(tokenUrl: string): Record<string, unknown> {
       delete_message: { required_scopes: { primary: ["delete"] } },
     },
   };
+}
+
+/** Same as {@link gmailManifest} but issuer-only (no explicit endpoints) — the
+ * token_endpoint must be resolved via OIDC discovery from `issuer`. */
+function issuerOnlyGmailManifest(issuer: string): Record<string, unknown> {
+  const m = gmailManifest("unused") as {
+    auths: { primary: Record<string, unknown> };
+  };
+  const { authorization_endpoint: _a, token_endpoint: _t, ...rest } = m.auths.primary;
+  m.auths.primary = { ...rest, issuer };
+  return m as Record<string, unknown>;
 }
 
 function agentManifest(name: string, tools: string[]): Record<string, unknown> {
@@ -274,6 +302,28 @@ describe("resolveLiveIntegrationCredentials", () => {
     // merely because it lacks a refresh client.
     await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {});
     expect(await needsReconnection(connId)).toBe(false);
+  });
+
+  it("discovers token_endpoint from issuer and refreshes an issuer-only oauth2 auth (no flag)", async () => {
+    // Drive/OneDrive-style manifest: `issuer` only, no literal token_endpoint.
+    // The refresh path must resolve the endpoint via OIDC discovery (same as the
+    // connect flow) instead of giving up — otherwise the connection would die +
+    // get flagged on every token expiry.
+    await db
+      .update(packages)
+      .set({ draftManifest: issuerOnlyGmailManifest(token.origin) })
+      .where(eq(packages.id, INTEGRATION_ID));
+    const connId = await seedConnection({ userId: ctx.user.id });
+    token.setResponse({ access_token: "discovered-access", expires_in: 3600 });
+
+    const result = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+      forceRefresh: true,
+    });
+
+    // Refresh succeeded via discovery → NOT flagged, fresh token surfaced.
+    expect(await needsReconnection(connId)).toBe(false);
+    const primary = result.auths.find((a) => a.authKey === "primary");
+    expect(primary?.fields.access_token).toBe("discovered-access");
   });
 
   it("flips needsReconnection when a scope shrink drops below the installed-agent floor", async () => {
