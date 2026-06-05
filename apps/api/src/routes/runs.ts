@@ -24,6 +24,7 @@ import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
+import { assertExplicitModelExists } from "../services/org-models.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
@@ -83,6 +84,12 @@ export function createRunsRouter() {
         configOverride,
         connectionOverrides,
       } = inputResult;
+
+      // An explicit per-run `modelId` override must reference a real model
+      // (system key or org-model UUID). Reject unknown/malformed values with a
+      // clean 404 rather than letting them silently fall through to the org
+      // default downstream (or crash the uuid cast — see loadModel).
+      await assertExplicitModelExists(orgId, modelIdOverride);
 
       // Shared preflight: resolve config, validate readiness. Threading
       // `connectionOverrides` here is what makes the

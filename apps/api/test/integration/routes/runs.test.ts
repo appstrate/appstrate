@@ -196,6 +196,63 @@ describe("Runs API", () => {
     });
   });
 
+  // ─── POST /api/agents/:scope/:name/run — modelId override ──
+  //
+  // Regression for #544: an explicit, caller-supplied `modelId` that is not a
+  // real model reference must produce a clean 404, not an unhandled 500. A
+  // non-UUID value (e.g. a human-readable model name) used to reach the
+  // `org_models.id` uuid column and make Postgres raise
+  // `invalid input syntax for type uuid`, which bubbled up as a 500.
+  describe("POST /api/agents/:scope/:name/run — modelId override", () => {
+    async function seedNoInputAgent() {
+      await seedAgent({
+        id: "@runorg/model-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@runorg/model-agent",
+          version: "0.1.0",
+          type: "agent",
+          description: "Agent without input schema",
+        },
+        draftContent: "Do the thing.",
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@runorg/model-agent",
+      );
+    }
+
+    it("returns 404 (not 500) for a non-UUID modelId", async () => {
+      await seedNoInputAgent();
+
+      const res = await app.request("/api/agents/@runorg/model-agent/run", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: {}, modelId: "gpt-5.5" }),
+      });
+
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { detail?: string };
+      expect(body.detail).toContain("gpt-5.5");
+    });
+
+    it("returns 404 for a well-formed but unknown modelId UUID", async () => {
+      await seedNoInputAgent();
+
+      const res = await app.request("/api/agents/@runorg/model-agent/run", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          input: {},
+          modelId: "5af6e114-c264-479d-8c13-ed981b96e972",
+        }),
+      });
+
+      expect(res.status).toBe(404);
+    });
+  });
+
   // ─── GET /api/agents/:scope/:name/runs ─────────────────────
 
   describe("GET /api/agents/:scope/:name/runs", () => {

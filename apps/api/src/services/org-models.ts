@@ -8,6 +8,7 @@ import { lookupCatalogModel } from "./pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
+import { notFound } from "../lib/errors.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
@@ -503,6 +504,30 @@ export async function resolveModel(
   return null;
 }
 
+/**
+ * True when a DB error is Postgres `22P02` (invalid_text_representation) — the
+ * class raised when a non-UUID string is compared against a `uuid` column.
+ * Matches on the SQLSTATE code with a message fallback, and walks the `cause`
+ * chain since Drizzle wraps the driver error in a `DrizzleQueryError`. Covers
+ * both the Tier-0 embedded driver (PGlite) and a real server (postgres.js).
+ */
+function isInvalidTextRepresentation(err: unknown): boolean {
+  let current: unknown = err;
+  for (let depth = 0; current != null && depth < 5; depth++) {
+    if (typeof current === "object") {
+      if ((current as { code?: unknown }).code === "22P02") return true;
+      const message = (current as { message?: unknown }).message;
+      if (typeof message === "string" && message.includes("invalid input syntax for type uuid")) {
+        return true;
+      }
+      current = (current as { cause?: unknown }).cause;
+    } else {
+      break;
+    }
+  }
+  return false;
+}
+
 export async function loadModel(orgId: string, modelDbId: string): Promise<ResolvedModel | null> {
   // Check system models first
   const system = getSystemModels();
@@ -511,22 +536,35 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     return buildSystemResolvedModel(systemDef);
   }
 
-  // Check DB
-  const [row] = await db
-    .select({
-      modelId: orgModels.modelId,
-      credentialId: orgModels.credentialId,
-      enabled: orgModels.enabled,
-      label: orgModels.label,
-      input: orgModels.input,
-      contextWindow: orgModels.contextWindow,
-      maxTokens: orgModels.maxTokens,
-      reasoning: orgModels.reasoning,
-      cost: orgModels.cost,
-    })
-    .from(orgModels)
-    .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
-    .limit(1);
+  // Check DB. `orgModels.id` is a `uuid` column — a `modelDbId` that isn't a
+  // valid UUID (e.g. a human-readable model name like `gpt-5.5`) makes Postgres
+  // raise `invalid input syntax for type uuid` rather than returning no rows.
+  // Normalise that one cast failure into "not found" (null) so callers see a
+  // clean 4xx instead of a 500; rethrow any other error (e.g. a real DB outage)
+  // rather than masking it as a missing model. Same hazard handled in
+  // `llm-proxy/core.ts`.
+  let row: (DbOrgModelRow & { enabled: boolean }) | undefined;
+  try {
+    [row] = await db
+      .select({
+        modelId: orgModels.modelId,
+        credentialId: orgModels.credentialId,
+        enabled: orgModels.enabled,
+        label: orgModels.label,
+        input: orgModels.input,
+        contextWindow: orgModels.contextWindow,
+        maxTokens: orgModels.maxTokens,
+        reasoning: orgModels.reasoning,
+        cost: orgModels.cost,
+      })
+      .from(orgModels)
+      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
+      .limit(1);
+  } catch (err) {
+    // `22P02` = invalid_text_representation (the uuid cast failure).
+    if (isInvalidTextRepresentation(err)) return null;
+    throw err;
+  }
 
   if (!row || !row.enabled) return null;
 
@@ -534,6 +572,30 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   if (!creds) return null;
 
   return buildDbResolvedModel(row, creds);
+}
+
+/**
+ * Validate an explicit, caller-supplied `modelId` (run body / schedule row).
+ *
+ * `loadModel` resolves both system-model keys and org-model UUIDs, returning
+ * null for anything else (including non-UUID strings, which it now swallows
+ * rather than letting Postgres throw). A null here means the caller referenced
+ * a model that doesn't exist — surface a deterministic 404 with a helpful
+ * message instead of silently falling through to the org default (which is the
+ * intended graceful behaviour only for persisted agent-column pins resolved via
+ * {@link resolveModel}).
+ *
+ * No-op when `modelId` is null/undefined (no explicit override supplied).
+ */
+export async function assertExplicitModelExists(
+  orgId: string,
+  modelId: string | null | undefined,
+): Promise<void> {
+  if (!modelId) return;
+  const model = await loadModel(orgId, modelId);
+  if (!model) {
+    throw notFound(`Model '${modelId}' not found — expected a model UUID or a system model key`);
+  }
 }
 
 // --- Connection test ---

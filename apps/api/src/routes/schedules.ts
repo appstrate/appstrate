@@ -19,6 +19,7 @@ import { invalidRequest, notFound, parseBody, validationFailed } from "../lib/er
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
+import { assertExplicitModelExists } from "../services/org-models.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/runs.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -118,6 +119,11 @@ export function createSchedulesRouter() {
       }
 
       const scope = getAppScope(c);
+
+      // Reject a `model_id_override` that references no real model up front, so
+      // a bad id fails at schedule-create time instead of silently each tick.
+      await assertExplicitModelExists(scope.orgId, data.model_id_override);
+
       const schedule = await createSchedule(scope, agent.id, actor, {
         name: data.name,
         cronExpression: data.cron_expression,
@@ -169,6 +175,10 @@ export function createSchedulesRouter() {
     if (data.cron_expression && !isValidCron(data.cron_expression)) {
       throw invalidRequest("Invalid cron expression", "cron_expression");
     }
+
+    // Reject a `model_id_override` that references no real model (no-op when
+    // the field isn't part of this patch).
+    await assertExplicitModelExists(scope.orgId, data.model_id_override);
 
     // Translate snake_case wire fields to internal camelCase for the service.
     const schedule = await updateSchedule(scope, id, {
