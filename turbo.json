@@ -72,6 +72,12 @@
     },
     "//#verify:module-isolation": {
       "cache": false
+    },
+    "//#verify:module-contract": {
+      "cache": false
+    },
+    "//#typecheck:scripts": {
+      "inputs": ["scripts/verify-module-contract.ts", "scripts/tsconfig.json", "tsconfig.base.json"]
     }
   }
 }

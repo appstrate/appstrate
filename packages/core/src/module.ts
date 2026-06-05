@@ -16,20 +16,6 @@ import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
 import type { ModelApiShape, OAuthWireFormat } from "./sidecar-types.ts";
-import type {
-  Actor,
-  ContainerOrchestrator,
-  InlinePreflightInput,
-  InlinePreflightResult,
-  InlineRunBody,
-  PlatformApplication,
-  PlatformModel,
-  PlatformPackage,
-  PubSub,
-  RealtimeSubscriber,
-  Run,
-  RunLog,
-} from "./platform-types.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -923,12 +909,11 @@ export interface ModuleInitContext {
    *
    * ## Security
    *
-   * `services` grants modules privileged access to the platform — they can
-   * abort runs, emit events, subscribe to the realtime bus, talk to the
-   * container orchestrator, and read/write run state across orgs. Modules
-   * are therefore trusted code on par with `apps/api` itself. Only load
-   * modules you control or have audited — never treat `MODULES=` as a
-   * safe extension point for untrusted packages.
+   * `services` grants modules privileged, cross-org access to the platform
+   * (today: reading the per-run `llm_usage` ledger). Modules are therefore
+   * trusted code on par with `apps/api` itself. Only load modules you control
+   * or have audited — never treat `MODULES=` as a safe extension point for
+   * untrusted packages.
    */
   services: PlatformServices;
 }
@@ -936,111 +921,22 @@ export interface ModuleInitContext {
 // ---------------------------------------------------------------------------
 // PlatformServices — injected platform capabilities
 //
-// Namespaced sub-objects for discoverability. Keep the surface minimal —
-// only capabilities with stable cross-module demand belong here. Signatures
-// fix arity, argument names, and return cardinality (object vs array vs
-// void). DTO payloads use minimal public shapes from `platform-types.ts`
-// (PlatformPackage, PlatformModel, PlatformApplication, …) — concrete
-// apps/api rows remain assignable thanks to their open index signature.
+// Deliberately minimal: a capability lands here ONLY when a real cross-tenant
+// consumer needs it (the same razor `scripts/verify-module-contract.ts`
+// applies to the `AppstrateModule` members). Today the sole consumer is the
+// `cloud` billing module, which reads the per-run `llm_usage` ledger via
+// `runs.listLlmUsage`. The previous broad surface (orchestrator / pubsub /
+// realtime / inline / packages / models / applications / run CRUD) mirrored
+// the in-process `chat` module that has since been removed — it carried zero
+// live consumers, so it was dropped rather than left as speculative API.
+// Re-add a member here the moment a second consumer genuinely needs it.
 // ---------------------------------------------------------------------------
-
-/** Updates accepted by `runs.update`. Open shape — future fields OK. */
-export interface RunUpdate {
-  status?: string;
-  result?: Record<string, unknown>;
-  state?: Record<string, unknown>;
-  error?: string;
-  [key: string]: unknown;
-}
-
-/** Log level accepted by `runs.appendLog`. */
-export type RunLogLevel = "debug" | "info" | "warn" | "error";
 
 export interface PlatformServices {
   /** Structured JSON logger (pino). */
   logger: Logger;
-  /** Container orchestrator singleton accessor. Synchronous — instance is cached. */
-  orchestrator: { get(): ContainerOrchestrator };
-  /** Pub/Sub adapter accessor. Always async — Redis impl loads lazily. */
-  pubsub: { get(): Promise<PubSub> };
-  /** Tier/mode detection — surfaces which optional infrastructure is present. */
-  env: {
-    hasRedis(): boolean;
-    hasExternalDb(): boolean;
-  };
-  /** Org-scoped model catalog operations. */
-  models: {
-    load(orgId: string, modelDbId: string): Promise<PlatformModel | null>;
-    listForOrg(orgId: string): Promise<PlatformModel[]>;
-  };
-  /** Package catalog accessors. */
-  packages: {
-    get(
-      packageId: string,
-      orgId: string,
-      opts?: { includeEphemeral?: boolean },
-    ): Promise<PlatformPackage | null>;
-    isInlineShadow(packageId: string): boolean;
-    /**
-     * Free-text search across the org catalog (system packages + the
-     * caller's org). Matches `id` and manifest fields (`name`,
-     * `displayName`, `description`) via case-insensitive substring.
-     * Ephemeral shadow rows are excluded. Callers requesting `limit`
-     * results should pass `limit + 1` to derive `hasMore` without a
-     * separate count — the service caps the returned rows at `limit`.
-     */
-    search(args: {
-      query: string;
-      orgId: string;
-      kind: "agent" | "skill";
-      limit?: number;
-    }): Promise<PlatformPackage[]>;
-  };
-  /** Application helpers. */
-  applications: {
-    getDefault(orgId: string): Promise<PlatformApplication | null>;
-  };
-  /**
-   * Run lifecycle operations (append log, update, abort).
-   *
-   * `appendLog` / `update` take a single args object so future fields are
-   * non-breaking and the three id parameters (`runId` / `orgId` /
-   * `applicationId`) cannot be silently swapped at the call site.
-   */
+  /** Run-ledger read surface. */
   runs: {
-    /**
-     * Org-scoped run snapshot read. Returns `null` on a cross-org id or
-     * a nonexistent run — 404 semantics without existence leak.
-     */
-    get(args: { runId: string; orgId: string }): Promise<Run | null>;
-    /**
-     * Log tail for a run, org-scoped. `order: "asc"` (default) is
-     * chronological insertion order (`id ASC`); `"desc"` returns the
-     * most recent entries first for tailing use cases.
-     */
-    listLogs(args: {
-      runId: string;
-      orgId: string;
-      limit?: number;
-      order?: "asc" | "desc";
-    }): Promise<RunLog[]>;
-    /** Returns the inserted log row id. */
-    appendLog(args: {
-      runId: string;
-      orgId: string;
-      type: string;
-      event?: string | null;
-      message?: string | null;
-      data?: Record<string, unknown> | null;
-      level?: RunLogLevel;
-    }): Promise<number>;
-    update(args: {
-      runId: string;
-      orgId: string;
-      applicationId: string;
-      updates: RunUpdate;
-    }): Promise<void>;
-    abort(runId: string): void;
     /**
      * Per-call `llm_usage` ledger rows for a run, org-scoped and filtered by
      * `source` (e.g. `["runner", "proxy"]`). A read into the canonical platform
@@ -1054,43 +950,5 @@ export interface PlatformServices {
       orgId: string;
       sources: readonly string[];
     }): Promise<Array<{ id: number; costUsd: number; source: string }>>;
-  };
-  /**
-   * Inline run lifecycle — preflight (validate without side effects) and
-   * `run` (preflight + insert shadow package + fire pipeline). `run` mirrors
-   * what `POST /api/runs/inline` does server-side; modules that schedule
-   * one-shot agent executions (slash commands, webhooks, module-owned cron)
-   * call it directly without duplicating the shadow-insert + pipeline dance.
-   */
-  inline: {
-    preflight(params: InlinePreflightInput): Promise<InlinePreflightResult>;
-    /**
-     * Trigger an inline agent run end-to-end. Returns once the pipeline
-     * has accepted the run; the client streams progress via the existing
-     * realtime SSE endpoint.
-     *
-     * Throws on validation / pipeline failures (same shape `POST /api/runs/inline`
-     * surfaces as a `problem+json` body).
-     */
-    run(params: {
-      orgId: string;
-      applicationId: string;
-      actor: Actor | null;
-      body: InlineRunBody;
-      apiKeyId?: string;
-    }): Promise<{ runId: string; packageId: string }>;
-  };
-  /** Realtime SSE subscriber registry. */
-  realtime: {
-    addSubscriber(sub: RealtimeSubscriber): void;
-    removeSubscriber(id: string): void;
-  };
-  /** Module registry accessors (for cross-module lookups and event emission). */
-  modules: {
-    get(id: string): AppstrateModule | null;
-    emit<K extends keyof ModuleEvents>(
-      event: K,
-      ...args: Parameters<ModuleEvents[K]>
-    ): Promise<void>;
   };
 }

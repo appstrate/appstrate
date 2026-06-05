@@ -100,10 +100,10 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   },
   hooks: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "cloud", "module-codex", "module-claude-code"],
+    owners: ["oidc", "cloud", "module-codex"],
   },
-  events: { kind: "extension", owners: ["oidc", "webhooks", "cloud"] },
-  features: { kind: "extension", owners: ["oidc", "webhooks"] },
+  events: { kind: "extension", owners: ["webhooks", "cloud"] },
+  features: { kind: "extension", owners: ["oidc", "webhooks", "cloud"] },
   modelProviders: {
     kind: "extension",
     owners: ["core-providers", "module-codex", "module-claude-code"],
@@ -111,7 +111,7 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   openApiPaths: { kind: "extension", owners: ["oidc", "webhooks", "cloud"] },
   openApiComponentSchemas: { kind: "extension", owners: ["oidc", "webhooks", "cloud"] },
   openApiTags: { kind: "extension", owners: ["oidc", "webhooks", "cloud"] },
-  openApiSchemas: { kind: "extension", owners: ["oidc", "webhooks", "cloud"] },
+  openApiSchemas: { kind: "extension", owners: ["oidc", "webhooks"] },
 
   // ── seam — single-owner is legal; removing forces a layering violation ──
   authStrategies: {
@@ -125,12 +125,6 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
     owners: ["oidc"],
     justification:
       "@appstrate/db/auth.ts builds the auth instance below the module layer; cannot import oidc.",
-  },
-  drizzleSchemas: {
-    kind: "seam",
-    owners: ["oidc"],
-    justification:
-      "Better Auth Drizzle adapter needs module tables registered at createAuth() in @appstrate/db.",
   },
   appConfigContribution: {
     kind: "seam",
@@ -146,9 +140,14 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   },
 } satisfies Record<ContractMember, LedgerEntry>;
 
-/** Detect a top-level object-literal member declaration: `member:` or `member(`. */
+/**
+ * Detect a top-level object-literal member declaration on its own indented
+ * line: `member:` (value), `member(` (method), or `member,` (ES shorthand —
+ * how cloud declares `openApiPaths,`/`openApiTags,`). The scan is best-effort
+ * (warnings only), so a stray false positive is a nudge, not a gate.
+ */
 function declaresMember(source: string, member: string): boolean {
-  return new RegExp(`(^|\\n)\\s+${member}\\s*[:(]`).test(source);
+  return new RegExp(`(^|\\n)\\s+(async\\s+)?${member}\\s*[:(,]`).test(source);
 }
 
 async function moduleIsPresent(root: string): Promise<boolean> {
@@ -225,7 +224,10 @@ for (const [member, entry] of Object.entries(LEDGER) as [ContractMember, LedgerE
   }
 
   // ── Scan drift (soft) — assistive only; the scan can't see members
-  //    assembled dynamically, so disagreement is a nudge, not a gate. ──
+  //    assembled dynamically, so disagreement is a nudge, not a gate.
+  //    Lifecycle members (shutdown) are universal plumbing — their owner
+  //    list is intentionally empty, so drift-policing them is pure noise. ──
+  if (entry.kind === "lifecycle") continue;
   const seen = observed.get(member)!;
   const ledgerOwners = new Set(entry.owners);
   for (const mod of seen) {
