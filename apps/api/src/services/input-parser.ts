@@ -124,6 +124,47 @@ export function assertDocsWithinCap(files: { size: number }[], maxBytes: number)
 }
 
 /**
+ * Cap on how many input documents stream into the run workspace at once. Each
+ * in-flight stream holds a storage-adapter buffer (~5 MiB for the S3 multipart
+ * part), so an unbounded `Promise.all` over a large array-file field could pin
+ * `documents × 5 MiB`. Bounding it keeps the per-run streaming memory floor flat
+ * regardless of document count.
+ */
+const DOC_STREAM_CONCURRENCY = 4;
+
+/**
+ * Map over `items` running at most `limit` callbacks concurrently, preserving
+ * input order in the result. On the first rejection, in-flight callbacks are
+ * allowed to settle but no new ones start, and the rejection propagates — the
+ * caller rolls back any partial work (here: the run workspace, by doc name, so
+ * stragglers that finished are cleaned regardless).
+ */
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  let aborted = false;
+  async function worker(): Promise<void> {
+    while (!aborted) {
+      const i = nextIndex++;
+      if (i >= items.length) break;
+      try {
+        results[i] = await fn(items[i]!, i);
+      } catch (err) {
+        aborted = true;
+        throw err;
+      }
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
+/**
  * Parse and validate the run request body. Returns parsed input + resolved
  * uploaded files. Throws `ApiError` (invalidRequest / notFound) on any
  * validation or resolution failure.
@@ -182,8 +223,10 @@ export async function parseRequestInput(
       // for this run; no run row or bundle exists yet, so the doc objects +
       // manifest are the only state to clean.
       try {
-        const consumed = await Promise.all(
-          resolved.map(async ({ ref, id }, i) => {
+        const consumed = await mapWithConcurrency(
+          resolved,
+          DOC_STREAM_CONCURRENCY,
+          async ({ ref, id }, i) => {
             const docName = docNames[i]!;
             const declaredSize = metas.get(id)!.size;
             // Sink: sniff the head, count bytes, and pipe everything to the run
@@ -227,7 +270,7 @@ export async function parseRequestInput(
               size: meta.size,
               docName,
             };
-          }),
+          },
         );
 
         // Write the documents manifest once every document has streamed — it

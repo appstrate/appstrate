@@ -117,11 +117,19 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       const key = makeKey(bucket, path);
       // `@aws-sdk/lib-storage` Upload runs a multipart upload that consumes the
       // source stream chunk-by-chunk with backpressure — no full buffering and
-      // no need to know the content length up front. The default 5 MiB part
-      // size is the floor S3 allows for multipart parts.
+      // no need to know the content length up front.
+      //
+      // `partSize` is pinned to the 5 MiB S3 floor and `queueSize` to 1 so the
+      // in-flight buffer is one part (~5 MiB) rather than the SDK default of
+      // queueSize 4 × 5 MiB = ~20 MiB. This keeps per-stream memory bounded and
+      // predictable when many documents stream concurrently; the trade-off is no
+      // parallel part upload per object, which is fine for input documents
+      // (modest sizes, latency dominated by the copy itself, not part fan-out).
       const upload = new Upload({
         client,
         params: { Bucket: config.bucket, Key: key, Body: stream },
+        partSize: 5 * 1024 * 1024,
+        queueSize: 1,
       });
       await upload.done();
       return key;
