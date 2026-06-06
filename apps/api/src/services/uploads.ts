@@ -29,7 +29,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { StorageAlreadyExistsError } from "@appstrate/core/storage";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
-import { invalidRequest, notFound, conflict, gone } from "../lib/errors.ts";
+import { invalidRequest, notFound, conflict, gone, type ApiError } from "../lib/errors.ts";
 
 /** Strip charset / boundary / other parameters from a MIME string and lowercase it. */
 function normalizeMime(mime: string): string {
@@ -269,14 +269,39 @@ export async function peekUploads(
 }
 
 /**
- * Look up an upload row, verify ownership + freshness, claim it atomically,
- * then STREAM the payload through `sink` (which pipes it to its destination)
- * while validating size + magic-byte MIME on the fly — the platform never
- * buffers the whole upload in memory.
+ * Diagnose why an atomic claim returned no row, on the cold (failure) path only,
+ * so the caller still gets a precise error instead of a generic conflict. Reads
+ * the row by id and maps: missing / cross-tenant → not-found, past expiry →
+ * gone, otherwise (already consumed, or re-claimable after a race) → conflict.
+ * Returns the error to throw rather than throwing, so the caller's control flow
+ * narrows `row` to defined.
+ */
+async function unclaimableUploadError(
+  uploadId: string,
+  ctx: { orgId: string; applicationId: string },
+): Promise<ApiError> {
+  const [row] = await db.select().from(uploads).where(eq(uploads.id, uploadId)).limit(1);
+  // Hide cross-tenant existence behind the same not-found as a missing row.
+  if (!row || row.orgId !== ctx.orgId || row.applicationId !== ctx.applicationId) {
+    return notFound(`Upload '${uploadId}' not found`);
+  }
+  if (row.expiresAt.getTime() < Date.now()) {
+    return gone("upload_expired", `Upload '${uploadId}' has expired`);
+  }
+  return conflict("upload_consumed", `Upload '${uploadId}' has already been consumed`);
+}
+
+/**
+ * Claim an upload atomically, then STREAM the payload through `sink` (which pipes
+ * it to its destination) while validating size + magic-byte MIME on the fly —
+ * the platform never buffers the whole upload in memory.
  *
- * The claim (`UPDATE … WHERE consumedAt IS NULL RETURNING`) is what prevents
- * the TOCTOU double-consume — two concurrent runs posting the same URI will
- * see exactly one winning row.
+ * The claim is a single `UPDATE … WHERE consumedAt IS NULL … RETURNING` that both
+ * prevents the TOCTOU double-consume (two concurrent runs posting the same URI
+ * see exactly one winning row) AND returns the row data, so the happy path needs
+ * no separate SELECT. A returned row is, by construction, owned, fresh, and
+ * freshly-claimed; an empty result is diagnosed on the cold path for a precise
+ * error.
  *
  * Size + MIME are validated *after* the stream drains (size is only known at
  * end; MIME is sniffed from the head by the sink). On mismatch the claim is
@@ -292,23 +317,13 @@ export async function consumeUploadStream(
   ctx: { orgId: string; applicationId: string },
   sink: UploadStreamSink,
 ): Promise<UploadMeta> {
-  // Pre-check so we can return the right shape of error (not-found vs
-  // cross-tenant vs already-consumed vs expired). The atomic claim below
-  // is what makes concurrent calls safe — this SELECT is just UX.
-  const [row] = await db.select().from(uploads).where(eq(uploads.id, uploadId)).limit(1);
-  if (!row) throw notFound(`Upload '${uploadId}' not found`);
-  if (row.orgId !== ctx.orgId || row.applicationId !== ctx.applicationId) {
-    // Hide cross-tenant existence
-    throw notFound(`Upload '${uploadId}' not found`);
-  }
-  if (row.expiresAt.getTime() < Date.now()) {
-    throw gone("upload_expired", `Upload '${uploadId}' has expired`);
-  }
-
-  // Atomic claim: only the caller whose UPDATE flips NULL → claimedAt proceeds.
-  // Any racing caller gets zero rows back and is reported as already-consumed.
+  // Atomic claim that also reads the row: only the caller whose UPDATE flips
+  // NULL → claimedAt proceeds, and the same statement hands back the row data
+  // (storageKey, size, mime, name) needed below — no separate pre-check SELECT
+  // on the happy path. The WHERE guards (tenant + not-consumed + not-expired)
+  // make a returned row owned, fresh, and freshly-claimed by construction.
   const claimedAt = new Date();
-  const claimed = await db
+  const [row] = await db
     .update(uploads)
     .set({ consumedAt: claimedAt })
     .where(
@@ -320,9 +335,11 @@ export async function consumeUploadStream(
         sql`${uploads.expiresAt} >= now()`,
       ),
     )
-    .returning({ id: uploads.id });
-  if (claimed.length === 0) {
-    throw conflict("upload_consumed", `Upload '${uploadId}' has already been consumed`);
+    .returning();
+  // Nothing claimed → diagnose why on the cold path (not-found vs cross-tenant
+  // vs expired vs already-consumed) so the caller still gets a precise error.
+  if (!row) {
+    throw await unclaimableUploadError(uploadId, ctx);
   }
 
   // Past this point the claim has succeeded. If anything downstream throws
