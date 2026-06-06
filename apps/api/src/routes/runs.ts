@@ -13,6 +13,7 @@ import {
 } from "../services/state/runs.ts";
 import { getVersionDetail } from "../services/package-versions.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
+import { deleteRunWorkspace } from "../services/run-workspace-storage.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { mergeAndValidateConfigOverride } from "../services/agent-readiness.ts";
 import { abortRun } from "../services/run-tracker.ts";
@@ -69,86 +70,93 @@ export function createRunsRouter() {
         };
       }
 
-      const inputResult = await parseRequestInput(
-        c,
-        effectiveAgent.manifest.input?.schema
-          ? asJSONSchemaObject(effectiveAgent.manifest.input.schema)
-          : undefined,
-      );
-
-      const {
-        input: parsedInput,
-        uploadedFiles,
-        modelIdOverride,
-        proxyIdOverride,
-        configOverride,
-        connectionOverrides,
-      } = inputResult;
-
-      // An explicit per-run `modelId` override must reference a real model
-      // (system key or org-model UUID). Reject unknown/malformed values with a
-      // clean 404 rather than letting them silently fall through to the org
-      // default downstream (or crash the uuid cast — see loadModel).
-      await assertExplicitModelExists(orgId, modelIdOverride);
-
-      // Shared preflight: resolve config, validate readiness. Threading
-      // `connectionOverrides` here is what makes the
-      // MissingConnectionsModal retry actually work — readiness sees the
-      // caller's pick and skips the must_choose error on >1 candidates.
-      // Pre-fix, the readiness gate fired must_choose regardless of the
-      // override, so the picker UX loop never exited.
-      const {
-        config,
-        modelId: preflightModelId,
-        proxyId: preflightProxyId,
-      } = await resolveRunPreflight({
-        agent: effectiveAgent,
-        applicationId: c.get("applicationId"),
-        orgId,
-        actor,
-        connectionOverrides: connectionOverrides ?? null,
-      });
-
-      // Deep-merge any per-run `config` override on top of the persisted
-      // application config and re-validate against the manifest schema.
-      // Single helper shared with the scheduler so both paths converge to
-      // an identical resolved config for the same `(persisted, override)`.
-      const mergedConfig = mergeAndValidateConfigOverride(effectiveAgent, config, configOverride);
-
       // Single canonical prefix — `run_` — shared with inline + remote origins.
+      // Minted BEFORE input parsing so input documents can be streamed straight
+      // into this run's workspace namespace during consume (no buffering them in
+      // API memory until the run row exists). The run row is still created later
+      // with this same id.
       const runId = `run_${crypto.randomUUID()}`;
 
-      // Build file metadata for prompt context (no URLs — files injected directly into container)
-      const fileRefs = uploadedFiles?.map((f) => ({
-        fieldName: f.fieldName,
-        name: f.name,
-        type: f.type,
-        size: f.size,
-      }));
+      try {
+        const inputResult = await parseRequestInput(
+          c,
+          runId,
+          effectiveAgent.manifest.input?.schema
+            ? asJSONSchemaObject(effectiveAgent.manifest.input.schema)
+            : undefined,
+        );
 
-      const runner = await resolveRunnerContext(c);
-      await prepareAndExecuteRun({
-        runId,
-        agent: effectiveAgent,
-        orgId,
-        actor,
-        input: parsedInput,
-        files: fileRefs,
-        config: mergedConfig,
-        configOverride: configOverride ?? null,
-        modelId: modelIdOverride ?? preflightModelId,
-        proxyId: proxyIdOverride ?? preflightProxyId,
-        overrideVersionLabel,
-        applicationId: c.get("applicationId"),
-        uploadedFiles,
-        apiKeyId: c.get("apiKeyId") ?? undefined,
-        connectionOverrides: connectionOverrides ?? null,
-        traceparent: c.get("traceparent"),
-        runnerName: runner.name,
-        runnerKind: runner.kind,
-      });
+        const {
+          input: parsedInput,
+          uploadedFiles,
+          modelIdOverride,
+          proxyIdOverride,
+          configOverride,
+          connectionOverrides,
+        } = inputResult;
 
-      return c.json({ runId });
+        // An explicit per-run `modelId` override must reference a real model
+        // (system key or org-model UUID). Reject unknown/malformed values with a
+        // clean 404 rather than letting them silently fall through to the org
+        // default downstream (or crash the uuid cast — see loadModel).
+        await assertExplicitModelExists(orgId, modelIdOverride);
+
+        // Shared preflight: resolve config, validate readiness. Threading
+        // `connectionOverrides` here is what makes the
+        // MissingConnectionsModal retry actually work — readiness sees the
+        // caller's pick and skips the must_choose error on >1 candidates.
+        // Pre-fix, the readiness gate fired must_choose regardless of the
+        // override, so the picker UX loop never exited.
+        const {
+          config,
+          modelId: preflightModelId,
+          proxyId: preflightProxyId,
+        } = await resolveRunPreflight({
+          agent: effectiveAgent,
+          applicationId: c.get("applicationId"),
+          orgId,
+          actor,
+          connectionOverrides: connectionOverrides ?? null,
+        });
+
+        // Deep-merge any per-run `config` override on top of the persisted
+        // application config and re-validate against the manifest schema.
+        // Single helper shared with the scheduler so both paths converge to
+        // an identical resolved config for the same `(persisted, override)`.
+        const mergedConfig = mergeAndValidateConfigOverride(effectiveAgent, config, configOverride);
+
+        const runner = await resolveRunnerContext(c);
+        await prepareAndExecuteRun({
+          runId,
+          agent: effectiveAgent,
+          orgId,
+          actor,
+          input: parsedInput,
+          // File metadata for prompt context — the document bytes were already
+          // streamed into the run workspace during consume.
+          files: uploadedFiles,
+          config: mergedConfig,
+          configOverride: configOverride ?? null,
+          modelId: modelIdOverride ?? preflightModelId,
+          proxyId: proxyIdOverride ?? preflightProxyId,
+          overrideVersionLabel,
+          applicationId: c.get("applicationId"),
+          apiKeyId: c.get("apiKeyId") ?? undefined,
+          connectionOverrides: connectionOverrides ?? null,
+          traceparent: c.get("traceparent"),
+          runnerName: runner.name,
+          runnerKind: runner.kind,
+        });
+
+        return c.json({ runId });
+      } catch (err) {
+        // Roll back any input documents streamed into the run workspace before
+        // the run launched (size/MIME mismatch, failed preflight, …). Once
+        // `prepareAndExecuteRun` resolves the run owns its own teardown, so this
+        // only fires on the pre-launch error path. Best-effort + idempotent.
+        await deleteRunWorkspace(runId);
+        throw err;
+      }
     },
   );
 

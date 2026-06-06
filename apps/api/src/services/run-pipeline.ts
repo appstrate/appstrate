@@ -21,7 +21,7 @@ import { getOrchestrator } from "./orchestrator/index.ts";
 import { ApiError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
-import type { UploadedFile, FileReference } from "./run-launcher/types.ts";
+import type { FileReference } from "./run-launcher/types.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -75,8 +75,6 @@ export interface RunPipelineParams {
   scheduleId?: string;
   /** Application ID — required for all runs. */
   applicationId: string;
-  /** Uploaded files to inject into the container. */
-  uploadedFiles?: UploadedFile[];
   /** API key ID that triggered the run (if auth via API key). */
   apiKeyId?: string;
   /**
@@ -185,7 +183,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     overrideVersionLabel,
     scheduleId,
     applicationId,
-    uploadedFiles,
     apiKeyId,
   } = params;
   // --- Step 1: Shared preflight gates (rate, concurrency, timeout cap,
@@ -346,7 +343,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     context,
     plan,
     agentPackage,
-    inputFiles: uploadedFiles,
     modelSource,
     sinkCredentials,
   }).catch((err) => {

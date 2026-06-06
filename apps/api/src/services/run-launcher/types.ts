@@ -11,15 +11,17 @@ import type { ResolvedModel } from "../org-models.ts";
 export type { ToolMeta, TokenUsage, ResolvedModel };
 export { modelCostSchema, tokenUsageSchema };
 
-export interface UploadedFile {
+/**
+ * Reference to an input document surfaced to a run — field, filename, MIME, and
+ * size. Document bytes are streamed into the run workspace during upload-consume,
+ * so this carries metadata only (no content).
+ */
+export interface FileReference {
   fieldName: string;
   name: string;
   type: string;
   size: number;
-  buffer: Buffer;
 }
-
-export type FileReference = Omit<UploadedFile, "buffer">;
 
 /**
  * Platform-specific run configuration — everything that does NOT fit in the
@@ -71,10 +73,12 @@ export interface AppstrateRunPlan {
   timeout: number;
 
   // --- Files ---
-  /** File references surfaced in the prompt ("## Documents" section). */
+  /**
+   * Input-document references surfaced in the prompt ("## Documents" section).
+   * The document bytes themselves are streamed into the run workspace during
+   * upload-consume — the plan carries only metadata, never the content.
+   */
   files?: FileReference[];
-  /** Uploaded file buffers — materialised into the container workspace. */
-  inputFiles?: UploadedFile[];
   /** Packaged bundle ZIP — injected as `/workspace/agent-package.afps`. */
   agentPackage?: Buffer | null;
 

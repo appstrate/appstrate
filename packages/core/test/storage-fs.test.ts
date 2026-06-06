@@ -83,6 +83,32 @@ describe("createFileSystemStorage", () => {
     });
   });
 
+  describe("uploadStream", () => {
+    it("streams data to disk and round-trips it", async () => {
+      const content = "streamed-to-disk payload";
+      await storage.uploadStream("strm", "out.txt", new Response(content).body!);
+      const result = await storage.downloadFile("strm", "out.txt");
+      expect(new TextDecoder().decode(result!)).toBe(content);
+    });
+
+    it("creates nested directories automatically", async () => {
+      await storage.uploadStream("strm", "x/y/z/file.bin", new Response("nested").body!);
+      const result = await storage.downloadFile("strm", "x/y/z/file.bin");
+      expect(new TextDecoder().decode(result!)).toBe("nested");
+    });
+
+    it("returns the storage key", async () => {
+      const key = await storage.uploadStream("b", "p/f.bin", new Response("k").body!);
+      expect(key).toBe(join("b", "p", "f.bin"));
+    });
+
+    it("rejects exclusive uploads (unsupported on the stream path)", async () => {
+      await expect(
+        storage.uploadStream("b", "excl.bin", new Response("x").body!, { exclusive: true }),
+      ).rejects.toThrow(/exclusive/);
+    });
+  });
+
   describe("downloadFile", () => {
     it("returns null for non-existent files", async () => {
       const result = await storage.downloadFile("bucket", "does-not-exist.txt");

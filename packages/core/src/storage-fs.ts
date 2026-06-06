@@ -145,6 +145,21 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
       return makeKey(bucket, path);
     },
 
+    async uploadStream(bucket, path, stream, opts) {
+      if (opts?.exclusive) {
+        throw new Error("uploadStream does not support exclusive uploads");
+      }
+      const fullPath = resolve(bucket, path);
+      await mkdir(dirname(fullPath), { recursive: true });
+      await verifyContainment(dirname(fullPath));
+      // Bun.write streams a Response body straight to disk without reading the
+      // whole payload into memory — wrap the web ReadableStream in a Response so
+      // it pipes chunk-by-chunk.
+      await Bun.write(fullPath, new Response(stream));
+      await verifyContainment(fullPath);
+      return makeKey(bucket, path);
+    },
+
     async downloadFile(bucket, path) {
       const fullPath = resolve(bucket, path);
       await verifyContainment(fullPath);

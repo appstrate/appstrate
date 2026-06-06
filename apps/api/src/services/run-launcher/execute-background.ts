@@ -4,7 +4,7 @@ import { logger } from "../../lib/logger.ts";
 import type { LoadedPackage } from "../../types/index.ts";
 import { updateRun } from "../state/runs.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import type { AppstrateRunPlan, UploadedFile } from "./types.ts";
+import type { AppstrateRunPlan } from "./types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { runPlatformContainer } from "./pi.ts";
 import type { PlatformContainerResult } from "./pi.ts";
@@ -25,7 +25,6 @@ export interface ExecuteAgentInBackgroundInput {
   context: ExecutionContext;
   plan: AppstrateRunPlan;
   agentPackage?: Buffer | null;
-  inputFiles?: UploadedFile[];
   modelSource?: string | null;
   /** Sink credentials minted by `run-pipeline.ts` and persisted on the run row. */
   sinkCredentials: SinkCredentials;
@@ -59,7 +58,6 @@ export async function executeAgentInBackground(
     context,
     plan,
     agentPackage,
-    inputFiles,
     modelSource,
     sinkCredentials,
   } = input;
@@ -90,7 +88,6 @@ export async function executeAgentInBackground(
     const runPlan: AppstrateRunPlan = {
       ...plan,
       agentPackage: agentPackage ?? undefined,
-      inputFiles,
     };
 
     let lifecycle: PlatformContainerResult;

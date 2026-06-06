@@ -55,6 +55,24 @@ export interface Storage {
     data: Uint8Array | Buffer,
     opts?: UploadFileOptions,
   ): Promise<string>;
+  /**
+   * Stream binary data to the given bucket/path without buffering the whole
+   * payload in memory. Prefer this over uploadFile() when the source is itself
+   * a stream (e.g. copying a large object between buckets) — it pipes from the
+   * source to the backend a chunk at a time. Backends: S3 uses a multipart
+   * upload (`@aws-sdk/lib-storage`), which handles an unknown content length;
+   * filesystem pipes the web stream straight to disk. Returns the storage key.
+   *
+   * `opts.exclusive` is NOT supported on this path (S3 multipart cannot send
+   * `If-None-Match: *`) and throws if set — callers needing exclusivity must
+   * use uploadFile(). Streamed destinations here are single-use keys.
+   */
+  uploadStream(
+    bucket: string,
+    path: string,
+    stream: ReadableStream<Uint8Array>,
+    opts?: UploadFileOptions,
+  ): Promise<string>;
   /** Download a file from storage. Returns null if the file does not exist. */
   downloadFile(bucket: string, path: string): Promise<Uint8Array | null>;
   /**

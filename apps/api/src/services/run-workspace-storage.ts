@@ -32,20 +32,6 @@ import { logger } from "../lib/logger.ts";
 
 const BUCKET = "run-workspace";
 
-/** One input document destined for the agent's `documents/<name>`. */
-export interface RunDocument {
-  /** Sanitised filename, no path prefix. */
-  name: string;
-  content: Buffer | Uint8Array;
-}
-
-/** What a run carries into its workspace: the AFPS bundle + input documents. */
-export interface RunWorkspaceUpload {
-  /** `agent-package.afps` bytes. Omitted only when the run has no package. */
-  bundle?: Buffer | Uint8Array;
-  documents: RunDocument[];
-}
-
 /** Manifest entry the agent uses to enumerate + fetch its documents. */
 export interface RunDocumentMeta {
   name: string;
@@ -62,38 +48,50 @@ const manifestKey = (runId: string): string => `${runId}/manifest.json`;
 const documentKey = (runId: string, name: string): string => `${runId}/documents/${name}`;
 
 /**
- * Provision a run's workspace storage: the bundle (`agent-package.afps`), one
- * object per input document, and the documents manifest. Overwrites any
- * existing objects (a run id is single-use). No-op for an absent bundle and no
- * documents.
+ * Stream a single input document into the run's workspace storage. The bytes
+ * are piped from the source stream straight to the document object without
+ * being buffered in API memory — the platform never holds the whole document.
+ *
+ * Documents are streamed in during upload-consume (before the run launches),
+ * not packaged with the bundle, so the manifest is written separately once all
+ * documents have streamed (see {@link writeRunDocumentsManifest}).
  */
-export async function uploadRunWorkspace(runId: string, upload: RunWorkspaceUpload): Promise<void> {
-  const ops: Promise<unknown>[] = [];
+export function streamRunDocument(
+  runId: string,
+  name: string,
+  stream: ReadableStream<Uint8Array>,
+): Promise<string> {
+  return storage.uploadStream(BUCKET, documentKey(runId, name), stream);
+}
 
-  if (upload.bundle) {
-    // The bundle is the `.afps` package — itself a ZIP the agent runtime reads.
-    // Stored verbatim (no extra archive wrapper); the agent writes it straight
-    // to its workspace root.
-    ops.push(storage.uploadFile(BUCKET, bundleKey(runId), upload.bundle));
-  }
+/**
+ * Write the documents manifest the agent uses to enumerate + fetch its inputs.
+ * Called once, after every document for the run has been streamed in.
+ */
+export function writeRunDocumentsManifest(
+  runId: string,
+  documents: RunDocumentMeta[],
+): Promise<string> {
+  const manifest: RunDocumentsManifest = { documents };
+  return storage.uploadFile(
+    BUCKET,
+    manifestKey(runId),
+    new TextEncoder().encode(JSON.stringify(manifest)),
+  );
+}
 
-  if (upload.documents.length > 0) {
-    for (const doc of upload.documents) {
-      ops.push(storage.uploadFile(BUCKET, documentKey(runId, doc.name), doc.content));
-    }
-    const manifest: RunDocumentsManifest = {
-      documents: upload.documents.map((d) => ({ name: d.name, size: d.content.byteLength })),
-    };
-    ops.push(
-      storage.uploadFile(
-        BUCKET,
-        manifestKey(runId),
-        new TextEncoder().encode(JSON.stringify(manifest)),
-      ),
-    );
-  }
-
-  await Promise.all(ops);
+/**
+ * Upload the run's AFPS bundle (`agent-package.afps` = manifest + prompt +
+ * skills). Small and constant — stored verbatim; the agent writes it straight
+ * to its workspace root. Input documents are streamed separately during
+ * upload-consume. No-op when the run has no package.
+ */
+export async function uploadRunBundle(
+  runId: string,
+  bundle: Buffer | Uint8Array | undefined,
+): Promise<void> {
+  if (!bundle) return;
+  await storage.uploadFile(BUCKET, bundleKey(runId), bundle);
 }
 
 /** Fetch the run's bundle (`agent-package.afps` bytes). Returns null when none. */
@@ -117,6 +115,27 @@ export function downloadRunDocumentStream(
   name: string,
 ): Promise<ReadableStream<Uint8Array> | null> {
   return storage.downloadStream(BUCKET, documentKey(runId, name));
+}
+
+/**
+ * Roll back documents streamed in during upload-consume when a run aborts
+ * before its row + bundle exist (e.g. a size/MIME mismatch or input-validation
+ * failure mid-trigger). The manifest is not yet the deletion index at this
+ * stage — it may be absent or partial — so the caller passes the doc names it
+ * attempted. Best-effort + idempotent on missing keys.
+ */
+export async function deleteRunDocuments(runId: string, names: string[]): Promise<void> {
+  const keys = [manifestKey(runId), ...names.map((n) => documentKey(runId, n))];
+  await Promise.all(
+    keys.map((k) =>
+      storage.deleteFile(BUCKET, k).catch((error) => {
+        logger.warn("Failed to delete run document (best-effort)", {
+          runId,
+          error: getErrorMessage(error),
+        });
+      }),
+    ),
+  );
 }
 
 /**

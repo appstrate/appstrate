@@ -91,12 +91,16 @@
   },
   "peerDependencies": {
     "@aws-sdk/client-s3": "^3",
+    "@aws-sdk/lib-storage": "^3",
     "@aws-sdk/s3-request-presigner": "^3",
     "hono": "^4.12.9",
     "typescript": "^5"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-s3": {
+      "optional": true
+    },
+    "@aws-sdk/lib-storage": {
       "optional": true
     },
     "@aws-sdk/s3-request-presigner": {
