@@ -582,12 +582,12 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     unregisterCleanup();
     // Swallow cleanup failures: every async op inside `runCleanup` has
     // its own `.catch`, so the only way the IIFE rejects is a sync throw
-    // from `heartbeat?.stop()` or `restoreOutputSchema()`. If that
-    // happens on the signal path, propagating the rejection would race
-    // with — and beat, since commander's path has fewer microtask hops —
-    // the coordinator's `process.exit(130)`, silently turning a user
-    // cancel into exit 1. Surface the failure on stderr instead so it
-    // remains visible, but don't compete for the exit code.
+    // from `heartbeat?.stop()`. If that happens on the signal path,
+    // propagating the rejection would race with — and beat, since
+    // commander's path has fewer microtask hops — the coordinator's
+    // `process.exit(130)`, silently turning a user cancel into exit 1.
+    // Surface the failure on stderr instead so it remains visible, but
+    // don't compete for the exit code.
     await runCleanup().catch((err) => {
       if (!opts.json) {
         process.stderr.write(`warn: cleanup failed: ${getErrorMessage(err)}\n`);

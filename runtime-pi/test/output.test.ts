@@ -72,6 +72,15 @@ describe("output runtime tool — schema exposure", () => {
       "JSON object to return as the run output",
     );
   });
+
+  it("makes the tool description mandatory-iff-schema (call contract)", () => {
+    // No declared output schema → calling `output` is optional (a
+    // side-effect-only run is a valid success).
+    expect(outputDef().descriptor.description).toContain("Optional");
+    // A declared output schema → the agent MUST call it exactly once.
+    const withSchema = outputDef({ type: "object", properties: { ok: { type: "boolean" } } });
+    expect(withSchema.descriptor.description).toContain("Call exactly once");
+  });
 });
 
 describe("output runtime tool — execute validation", () => {
