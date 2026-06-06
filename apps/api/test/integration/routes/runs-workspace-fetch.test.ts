@@ -30,7 +30,9 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import {
-  uploadRunWorkspace,
+  uploadRunBundle,
+  streamRunDocument,
+  writeRunDocumentsManifest,
   downloadRunWorkspace,
   downloadRunDocumentsManifest,
   downloadRunDocumentStream,
@@ -40,6 +42,28 @@ import {
 const app = getTestApp();
 
 const RUN_SECRET = "a".repeat(43); // matches mintSinkCredentials base64url(32 bytes)
+
+/**
+ * Provision a run workspace the way the production trigger now does: bundle via
+ * uploadRunBundle, each document streamed in, then the manifest written once.
+ * Mirrors the split that lets the platform stream documents through without
+ * buffering them (the bundle stays a verbatim upload).
+ */
+async function seedWorkspace(
+  runId: string,
+  upload: { bundle?: Buffer; documents: { name: string; content: Buffer }[] },
+): Promise<void> {
+  if (upload.bundle) await uploadRunBundle(runId, upload.bundle);
+  if (upload.documents.length > 0) {
+    for (const doc of upload.documents) {
+      await streamRunDocument(runId, doc.name, new Response(doc.content).body!);
+    }
+    await writeRunDocumentsManifest(
+      runId,
+      upload.documents.map((d) => ({ name: d.name, size: d.content.byteLength })),
+    );
+  }
+}
 
 function signedGetHeaders(secret: string): Record<string, string> {
   const msgId = `msg_${crypto.randomUUID()}`;
@@ -77,7 +101,7 @@ async function seedRunWithSink(
 describe("run-workspace storage round-trip", () => {
   it("uploads, downloads, and deletes the bundle + documents + manifest", async () => {
     const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    await uploadRunWorkspace(runId, {
+    await seedWorkspace(runId, {
       bundle: Buffer.from("PACKAGE-BYTES"),
       documents: [
         { name: "report.txt", content: Buffer.from("hello world") },
@@ -110,15 +134,15 @@ describe("run-workspace storage round-trip", () => {
 
   it("uploads only a bundle when there are no documents (no manifest)", async () => {
     const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    await uploadRunWorkspace(runId, { bundle: Buffer.from("BUNDLE"), documents: [] });
+    await seedWorkspace(runId, { bundle: Buffer.from("BUNDLE"), documents: [] });
     expect(await downloadRunWorkspace(runId)).not.toBeNull();
     expect(await downloadRunDocumentsManifest(runId)).toBeNull();
     await deleteRunWorkspace(runId);
   });
 
-  it("uploadRunWorkspace is a no-op with no bundle and no documents", async () => {
+  it("writes nothing with no bundle and no documents", async () => {
     const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    await uploadRunWorkspace(runId, { documents: [] });
+    await seedWorkspace(runId, { documents: [] });
     expect(await downloadRunWorkspace(runId)).toBeNull();
     expect(await downloadRunDocumentsManifest(runId)).toBeNull();
   });
@@ -141,7 +165,7 @@ describe("GET /api/runs/:runId/workspace", () => {
 
   it("returns the provisioned bundle to a signed request", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ws-agent");
-    await uploadRunWorkspace(runId, { bundle: Buffer.from("BUNDLE"), documents: [] });
+    await seedWorkspace(runId, { bundle: Buffer.from("BUNDLE"), documents: [] });
 
     const res = await app.request(`/api/runs/${runId}/workspace`, {
       method: "GET",
@@ -166,7 +190,7 @@ describe("GET /api/runs/:runId/workspace", () => {
 
   it("rejects an invalid signature with 401", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ws-agent");
-    await uploadRunWorkspace(runId, { bundle: Buffer.from("BUNDLE"), documents: [] });
+    await seedWorkspace(runId, { bundle: Buffer.from("BUNDLE"), documents: [] });
 
     const res = await app.request(`/api/runs/${runId}/workspace`, {
       method: "GET",
@@ -179,7 +203,7 @@ describe("GET /api/runs/:runId/workspace", () => {
 
   it("rejects a closed sink with 410", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ws-agent", { sinkClosedAt: new Date() });
-    await uploadRunWorkspace(runId, { bundle: Buffer.from("BUNDLE"), documents: [] });
+    await seedWorkspace(runId, { bundle: Buffer.from("BUNDLE"), documents: [] });
 
     const res = await app.request(`/api/runs/${runId}/workspace`, {
       method: "GET",
@@ -210,7 +234,7 @@ describe("GET /api/runs/:runId/documents[/:name]", () => {
 
   it("returns the manifest then streams each document", async () => {
     const runId = await seedRunWithSink(ctx, "@test/docs-agent");
-    await uploadRunWorkspace(runId, {
+    await seedWorkspace(runId, {
       bundle: Buffer.from("BUNDLE"),
       documents: [{ name: "a.txt", content: Buffer.from("doc-a") }],
     });
@@ -235,7 +259,7 @@ describe("GET /api/runs/:runId/documents[/:name]", () => {
 
   it("returns 404 on the manifest when the run carries no documents", async () => {
     const runId = await seedRunWithSink(ctx, "@test/docs-agent");
-    await uploadRunWorkspace(runId, { bundle: Buffer.from("BUNDLE"), documents: [] });
+    await seedWorkspace(runId, { bundle: Buffer.from("BUNDLE"), documents: [] });
 
     const res = await app.request(`/api/runs/${runId}/documents`, {
       method: "GET",
@@ -248,7 +272,7 @@ describe("GET /api/runs/:runId/documents[/:name]", () => {
 
   it("returns 404 for a document the run does not have", async () => {
     const runId = await seedRunWithSink(ctx, "@test/docs-agent");
-    await uploadRunWorkspace(runId, {
+    await seedWorkspace(runId, {
       bundle: Buffer.from("BUNDLE"),
       documents: [{ name: "a.txt", content: Buffer.from("doc-a") }],
     });
@@ -264,7 +288,7 @@ describe("GET /api/runs/:runId/documents[/:name]", () => {
 
   it("rejects an invalid signature with 401", async () => {
     const runId = await seedRunWithSink(ctx, "@test/docs-agent");
-    await uploadRunWorkspace(runId, {
+    await seedWorkspace(runId, {
       bundle: Buffer.from("BUNDLE"),
       documents: [{ name: "a.txt", content: Buffer.from("doc-a") }],
     });

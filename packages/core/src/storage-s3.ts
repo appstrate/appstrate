@@ -10,6 +10,7 @@ import {
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { Upload } from "@aws-sdk/lib-storage";
 import type { Storage, CreateUploadUrlOptions, UploadUrlDescriptor } from "./storage.ts";
 import { StorageAlreadyExistsError } from "./storage.ts";
 
@@ -106,6 +107,23 @@ export function createS3Storage(config: S3StorageConfig): Storage {
         }
         throw err;
       }
+      return key;
+    },
+
+    async uploadStream(bucket, path, stream, opts) {
+      if (opts?.exclusive) {
+        throw new Error("uploadStream does not support exclusive uploads");
+      }
+      const key = makeKey(bucket, path);
+      // `@aws-sdk/lib-storage` Upload runs a multipart upload that consumes the
+      // source stream chunk-by-chunk with backpressure — no full buffering and
+      // no need to know the content length up front. The default 5 MiB part
+      // size is the floor S3 allows for multipart parts.
+      const upload = new Upload({
+        client,
+        params: { Bucket: config.bucket, Key: key, Body: stream },
+      });
+      await upload.done();
       return key;
     },
 

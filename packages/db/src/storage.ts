@@ -43,6 +43,15 @@ export function uploadFile(
   return getStore().uploadFile(bucket, path, data, opts);
 }
 
+export function uploadStream(
+  bucket: string,
+  path: string,
+  stream: ReadableStream<Uint8Array>,
+  opts?: UploadFileOptions,
+): Promise<string> {
+  return getStore().uploadStream(bucket, path, stream, opts);
+}
+
 export function downloadFile(bucket: string, path: string): Promise<Uint8Array | null> {
   return getStore().downloadFile(bucket, path);
 }

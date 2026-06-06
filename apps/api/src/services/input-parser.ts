@@ -10,11 +10,18 @@
  */
 
 import type { Context } from "hono";
+import { fileTypeStream } from "file-type";
 import type { UploadedFile } from "./run-launcher/types.ts";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { validateInput } from "./schema.ts";
 import { invalidRequest, payloadTooLarge, validationFailed } from "../lib/errors.ts";
-import { consumeUpload, isUploadUri, parseUploadUri } from "./uploads.ts";
+import { consumeUploadStream, peekUploads, isUploadUri, parseUploadUri } from "./uploads.ts";
+import { sanitizeStorageKey } from "./file-storage.ts";
+import {
+  streamRunDocument,
+  writeRunDocumentsManifest,
+  deleteRunDocuments,
+} from "./run-workspace-storage.ts";
 import { getEnv } from "@appstrate/env";
 
 export interface ParsedInput {
@@ -123,6 +130,7 @@ export function assertDocsWithinCap(files: { size: number }[], maxBytes: number)
  */
 export async function parseRequestInput(
   c: Context,
+  runId: string,
   inputSchema?: JSONSchemaObject,
 ): Promise<ParsedInput> {
   let body: RunRequestBody = {};
@@ -139,41 +147,114 @@ export async function parseRequestInput(
     const refs = collectUploadRefs(inputSchema, input);
     const orgId = c.get("orgId");
     const applicationId = c.get("applicationId");
-    // Resolve all upload references in parallel — each `consumeUpload` is an
-    // independent atomic claim. For multi-file forms this cuts wall-time from
-    // O(N * roundtrip) to O(roundtrip).
-    uploadedFiles = await Promise.all(
-      refs.map(async (ref) => {
-        const id = parseUploadUri(ref.uri);
-        if (!id) throw invalidRequest(`Invalid upload URI '${ref.uri}'`, ref.fieldName);
-        const consumed = await consumeUpload(id, { orgId, applicationId });
-        return {
-          fieldName: ref.fieldName,
-          name: consumed.name,
-          type: consumed.mime,
-          size: consumed.size,
-          buffer: consumed.buffer,
-        };
-      }),
-    );
 
-    // Bound the total input-document payload. Documents are delivered to the
-    // agent out-of-band (fetched + streamed to disk), so an oversized payload
-    // is a policy violation rather than a crash — but enforcing it here also
-    // caps what the platform buffers per run. Reject before launch so the
-    // caller gets a clean 413 instead of a run that fails mid-flight.
-    assertDocsWithinCap(uploadedFiles, getEnv().WORKSPACE_MAX_DOCS_BYTES);
+    // Resolve every URI to an upload id up front so a malformed URI fails before
+    // we touch storage.
+    const resolved = refs.map((ref) => {
+      const id = parseUploadUri(ref.uri);
+      if (!id) throw invalidRequest(`Invalid upload URI '${ref.uri}'`, ref.fieldName);
+      return { ref, id };
+    });
 
-    const inputValidation = validateInput(input, inputSchema);
-    if (!inputValidation.valid) {
-      throw validationFailed(
-        inputValidation.errors.map((e) => ({
-          field: e.field ? `input.${e.field}` : "input",
-          code: "invalid_input",
-          title: "Invalid Input",
-          message: e.message,
-        })),
+    if (resolved.length > 0) {
+      // Bound the total input-document payload on DECLARED sizes BEFORE streaming
+      // any bytes. Documents are delivered to the agent out-of-band (fetched +
+      // streamed to disk), so an oversized payload is a policy violation rather
+      // than a crash. The per-file `bytes === size` check inside consume keeps
+      // each actual size ≤ its declared size, so a declared total under the cap
+      // bounds the actual total too. Reject before launch so the caller gets a
+      // clean 413 instead of a run that fails mid-flight.
+      const metas = await peekUploads(
+        resolved.map((r) => r.id),
+        { orgId, applicationId },
       );
+      assertDocsWithinCap([...metas.values()], getEnv().WORKSPACE_MAX_DOCS_BYTES);
+
+      // The run-workspace document object name. Must match the path the
+      // prompt-builder hands the agent (`./documents/<sanitizeStorageKey(name)>`)
+      // and the manifest entry the agent fetches by.
+      const docNames = resolved.map(({ id }) => sanitizeStorageKey(metas.get(id)!.name));
+
+      // Stream each upload straight from the uploads bucket into the run
+      // workspace — validating size + MIME on the fly — so the platform never
+      // buffers a whole document in memory. On ANY failure (bad URI, size/MIME
+      // mismatch, or input validation below) roll back every document streamed
+      // for this run; no run row or bundle exists yet, so the doc objects +
+      // manifest are the only state to clean.
+      try {
+        const consumed = await Promise.all(
+          resolved.map(async ({ ref, id }, i) => {
+            const docName = docNames[i]!;
+            // Sink: sniff the head, count bytes, and pipe everything to the run
+            // workspace. `fileTypeStream` re-emits the full stream and exposes
+            // `.fileType` once the head has been read — available after the pipe
+            // drains. The counting passthrough yields the size the size-check
+            // (and manifest) needs.
+            const meta = await consumeUploadStream(id, { orgId, applicationId }, async (src) => {
+              const detection = await fileTypeStream(src);
+              let bytes = 0;
+              const counter = new TransformStream<Uint8Array, Uint8Array>({
+                transform(chunk, controller) {
+                  bytes += chunk.byteLength;
+                  controller.enqueue(chunk);
+                },
+              });
+              await streamRunDocument(runId, docName, detection.pipeThrough(counter));
+              return { bytes, sniffedMime: detection.fileType?.mime };
+            });
+            return {
+              fieldName: ref.fieldName,
+              name: meta.name,
+              type: meta.mime,
+              size: meta.size,
+              docName,
+            };
+          }),
+        );
+
+        // Write the documents manifest once every document has streamed — it
+        // doubles as the agent's enumeration index and the run-workspace
+        // deletion index on teardown.
+        await writeRunDocumentsManifest(
+          runId,
+          consumed.map((d) => ({ name: d.docName, size: d.size })),
+        );
+
+        uploadedFiles = consumed.map(({ fieldName, name, type, size }) => ({
+          fieldName,
+          name,
+          type,
+          size,
+        }));
+
+        const inputValidation = validateInput(input, inputSchema);
+        if (!inputValidation.valid) {
+          throw validationFailed(
+            inputValidation.errors.map((e) => ({
+              field: e.field ? `input.${e.field}` : "input",
+              code: "invalid_input",
+              title: "Invalid Input",
+              message: e.message,
+            })),
+          );
+        }
+      } catch (err) {
+        await deleteRunDocuments(runId, docNames);
+        throw err;
+      }
+    } else {
+      // No file fields populated — still validate the JSON input shape.
+      const inputValidation = validateInput(input, inputSchema);
+      if (!inputValidation.valid) {
+        throw validationFailed(
+          inputValidation.errors.map((e) => ({
+            field: e.field ? `input.${e.field}` : "input",
+            code: "invalid_input",
+            title: "Invalid Input",
+            message: e.message,
+          })),
+        );
+      }
     }
   }
 

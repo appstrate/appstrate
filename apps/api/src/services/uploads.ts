@@ -16,12 +16,11 @@
  */
 
 import { and, eq, lt, isNull, isNotNull, inArray, or, sql } from "drizzle-orm";
-import { fileTypeFromBuffer } from "file-type";
 import { db } from "@appstrate/db/client";
 import { uploads } from "@appstrate/db/schema";
 import {
   uploadFile as storagePut,
-  downloadFile as storageGet,
+  downloadStream as storageDownloadStream,
   deleteFile as storageDelete,
   createUploadUrl,
 } from "@appstrate/db/storage";
@@ -55,14 +54,25 @@ export interface CreateUploadResponse {
   expiresAt: string;
 }
 
-/** Shape consumed by the run pipeline — mirrors UploadedFile from run-launcher/types. */
+/** Metadata for a consumed upload — the bytes have already been streamed to the
+ * caller's sink, so no buffer is carried. Mirrors UploadedFile (minus content)
+ * from run-launcher/types. */
 export interface ConsumedUpload {
   id: string;
   name: string;
   mime: string;
   size: number;
-  buffer: Buffer;
 }
+
+/**
+ * Sink the upload bytes are streamed through. Receives the upload's content as
+ * a stream and reports how many bytes it observed plus the magic-byte sniffed
+ * MIME (undefined for formats `file-type` cannot identify). The caller (consume)
+ * validates these against the declared upload row.
+ */
+export type UploadStreamSink = (
+  stream: ReadableStream<Uint8Array>,
+) => Promise<{ bytes: number; sniffedMime: string | undefined }>;
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -224,20 +234,67 @@ function isUnsniffableMime(mime: string): boolean {
   return false;
 }
 
+/** Declared metadata for a staged upload, read without claiming or downloading. */
+export interface UploadMeta {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+}
+
+/**
+ * Read declared metadata for a set of staged uploads — without claiming or
+ * downloading them. Verifies each exists, belongs to the caller's tenant, and
+ * has not expired (same error shapes as consume). Used to enforce the per-run
+ * document cap on *declared* sizes before any bytes are streamed: the per-file
+ * `bytes === size` check in consume keeps each actual size ≤ its declared size,
+ * so a declared total under the cap bounds the actual total too.
+ */
+export async function peekUploads(
+  uploadIds: string[],
+  ctx: { orgId: string; applicationId: string },
+): Promise<Map<string, UploadMeta>> {
+  if (uploadIds.length === 0) return new Map();
+  const rows = await db.select().from(uploads).where(inArray(uploads.id, uploadIds));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const result = new Map<string, UploadMeta>();
+  for (const id of uploadIds) {
+    const row = byId.get(id);
+    // Hide cross-tenant existence behind the same not-found as a missing row.
+    if (!row || row.orgId !== ctx.orgId || row.applicationId !== ctx.applicationId) {
+      throw notFound(`Upload '${id}' not found`);
+    }
+    if (row.expiresAt.getTime() < Date.now()) {
+      throw gone("upload_expired", `Upload '${id}' has expired`);
+    }
+    result.set(id, { id, name: row.name, mime: row.mime, size: row.size });
+  }
+  return result;
+}
+
 /**
  * Look up an upload row, verify ownership + freshness, claim it atomically,
- * download the payload, and sniff the MIME via magic bytes.
+ * then STREAM the payload through `sink` (which pipes it to its destination)
+ * while validating size + magic-byte MIME on the fly — the platform never
+ * buffers the whole upload in memory.
  *
  * The claim (`UPDATE … WHERE consumedAt IS NULL RETURNING`) is what prevents
  * the TOCTOU double-consume — two concurrent runs posting the same URI will
  * see exactly one winning row.
  *
+ * Size + MIME are validated *after* the stream drains (size is only known at
+ * end; MIME is sniffed from the head by the sink). On mismatch the claim is
+ * released and the source object dropped so the client can re-PUT. The sink's
+ * partially-written destination is NOT cleaned here — the caller owns the
+ * destination namespace (e.g. the run workspace) and rolls it back en bloc.
+ *
  * Throws `invalidRequest` / `notFound` / `conflict` / `gone` with stable
  * codes — callers map them back to RFC 9457 problem responses.
  */
-export async function consumeUpload(
+export async function consumeUploadStream(
   uploadId: string,
   ctx: { orgId: string; applicationId: string },
+  sink: UploadStreamSink,
 ): Promise<ConsumedUpload> {
   // Pre-check so we can return the right shape of error (not-found vs
   // cross-tenant vs already-consumed vs expired). The atomic claim below
@@ -280,28 +337,31 @@ export async function consumeUpload(
   const [bucket, ...rest] = row.storageKey.split("/");
   const path = rest.join("/");
   try {
-    const data = await storageGet(bucket!, path);
-    if (!data) {
+    const source = await storageDownloadStream(bucket!, path);
+    if (!source) {
       throw invalidRequest(`Upload '${uploadId}' binary is missing — client did not PUT the file`);
     }
 
-    const buffer = Buffer.from(data);
+    // Stream the bytes through the caller's sink (which pipes them to their
+    // destination). The sink reports the observed byte count and the MIME
+    // sniffed from the head — both are only known once the stream drains.
+    const { bytes, sniffedMime } = await sink(source);
 
     // Reject mismatched size outright — an attacker can declare 1KB in the
     // pre-signed request and PUT 100MB if the storage adapter doesn't enforce
     // ContentLength at sign time (S3 currently does not).
-    if (buffer.length !== row.size) {
+    if (bytes !== row.size) {
       logger.warn("upload size mismatch on consume", {
         uploadId,
         declared: row.size,
-        actual: buffer.length,
+        actual: bytes,
       });
       throw invalidRequest(
-        `Upload '${uploadId}' size mismatch: declared ${row.size} bytes, got ${buffer.length}`,
+        `Upload '${uploadId}' size mismatch: declared ${row.size} bytes, got ${bytes}`,
       );
     }
 
-    // Magic-byte MIME check (file-type reads first ~4100 bytes).
+    // Magic-byte MIME check (the sink sniffs the first ~4100 bytes of the head).
     //
     // When the manifest declares a concrete binary MIME (application/pdf,
     // image/png, …), we require `file-type` to recognise the bytes AND match.
@@ -315,25 +375,24 @@ export async function consumeUpload(
     //    the declared MIME for these — manifests that need binary-grade
     //    validation must declare a sniffable MIME.
     if (row.mime && row.mime !== "application/octet-stream" && !isUnsniffableMime(row.mime)) {
-      const sniffed = await fileTypeFromBuffer(buffer);
-      if (!sniffed || sniffed.mime !== row.mime) {
+      if (!sniffedMime || sniffedMime !== row.mime) {
         logger.warn("upload mime mismatch on consume", {
           uploadId,
           declared: row.mime,
-          sniffed: sniffed?.mime ?? null,
+          sniffed: sniffedMime ?? null,
         });
         throw invalidRequest(
-          sniffed
-            ? `Upload '${uploadId}' content type '${sniffed.mime}' does not match declared '${row.mime}'`
+          sniffedMime
+            ? `Upload '${uploadId}' content type '${sniffedMime}' does not match declared '${row.mime}'`
             : `Upload '${uploadId}' content does not match declared mime '${row.mime}'`,
         );
       }
     }
 
-    // The buffer is now in memory and will be injected into the run container.
-    // The storage copy is dead weight from here on — delete it best-effort so
-    // we don't leak S3/FS objects for every run. The GC's consumed-retention
-    // sweep is the safety net when this delete fails.
+    // Bytes have been streamed to the sink's destination. The source copy is
+    // dead weight from here on — delete it best-effort so we don't leak S3/FS
+    // objects for every run. The GC's consumed-retention sweep is the safety
+    // net when this delete fails.
     await storageDelete(bucket!, path).catch((delErr) => {
       logger.warn("failed to delete upload storage after consume", {
         uploadId,
@@ -345,8 +404,7 @@ export async function consumeUpload(
       id: uploadId,
       name: row.name,
       mime: row.mime,
-      size: buffer.length,
-      buffer,
+      size: bytes,
     };
   } catch (err) {
     // Order matters: delete the stored bytes FIRST, then release the claim.

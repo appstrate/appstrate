@@ -1,22 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration tests for `consumeUpload` — exercise the atomic claim that
+ * Integration tests for `consumeUploadStream` — exercise the atomic claim that
  * prevents two concurrent runs from consuming the same upload:// URI, plus
- * cross-tenant isolation and the expired/missing-binary paths.
+ * cross-tenant isolation, the streamed size/MIME validation, and the
+ * expired/missing-binary paths.
  *
- * Uses a real Postgres + filesystem storage; no routes exercised.
+ * Uses a real Postgres + filesystem storage; no routes exercised. The sink
+ * mirrors production — `fileTypeStream` sniffs the head, a manual drain counts
+ * the bytes — without writing to a run workspace, so the tests stay focused on
+ * consume semantics.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { fileTypeStream } from "file-type";
 import { db } from "@appstrate/db/client";
 import { uploads } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import {
-  consumeUpload,
+  consumeUploadStream,
   writeFsUploadContent,
   cleanupExpiredUploads,
+  type UploadStreamSink,
 } from "../../../src/services/uploads.ts";
 import {
   uploadFile as storagePut,
@@ -28,6 +34,23 @@ import { ApiError } from "../../../src/lib/errors.ts";
 
 const UPLOAD_BUCKET = "uploads";
 const PDF_BYTES = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a]); // %PDF-1.4\n
+
+/**
+ * Drain the upload stream the way the run-trigger sink does: sniff the MIME
+ * from the head via `fileTypeStream`, count every byte. Reports the actual size
+ * + sniffed MIME so consume can validate them against the declared upload row.
+ */
+const drainSink: UploadStreamSink = async (stream) => {
+  const detection = await fileTypeStream(stream);
+  let bytes = 0;
+  const reader = detection.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+  }
+  return { bytes, sniffedMime: detection.fileType?.mime };
+};
 
 async function seedUpload(
   ctx: { orgId: string; applicationId: string },
@@ -59,7 +82,7 @@ async function seedUpload(
   return opts.id;
 }
 
-describe("consumeUpload", () => {
+describe("consumeUploadStream", () => {
   beforeEach(async () => {
     await truncateAll();
   });
@@ -73,8 +96,8 @@ describe("consumeUpload", () => {
     );
 
     const settled = await Promise.allSettled([
-      consumeUpload(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }),
-      consumeUpload(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }),
+      consumeUploadStream(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }, drainSink),
+      consumeUploadStream(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }, drainSink),
     ]);
     const fulfilled = settled.filter((s) => s.status === "fulfilled");
     const rejected = settled.filter((s) => s.status === "rejected");
@@ -92,9 +115,13 @@ describe("consumeUpload", () => {
       { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       { id, bytes: PDF_BYTES },
     );
-    await consumeUpload(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    await consumeUploadStream(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }, drainSink);
     try {
-      await consumeUpload(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+      await consumeUploadStream(
+        id,
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        drainSink,
+      );
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -111,7 +138,11 @@ describe("consumeUpload", () => {
       { id, bytes: PDF_BYTES },
     );
     try {
-      await consumeUpload(id, { orgId: other.orgId, applicationId: other.defaultAppId });
+      await consumeUploadStream(
+        id,
+        { orgId: other.orgId, applicationId: other.defaultAppId },
+        drainSink,
+      );
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -127,7 +158,11 @@ describe("consumeUpload", () => {
       { id, bytes: PDF_BYTES, expiresInSec: -10 },
     );
     try {
-      await consumeUpload(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+      await consumeUploadStream(
+        id,
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        drainSink,
+      );
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -143,7 +178,11 @@ describe("consumeUpload", () => {
       { id, bytes: PDF_BYTES, sizeOverride: 1 },
     );
     try {
-      await consumeUpload(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+      await consumeUploadStream(
+        id,
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        drainSink,
+      );
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -160,7 +199,11 @@ describe("consumeUpload", () => {
       { id, bytes: PDF_BYTES, skipStoragePut: true },
     );
     try {
-      await consumeUpload(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+      await consumeUploadStream(
+        id,
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        drainSink,
+      );
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -176,10 +219,14 @@ describe("consumeUpload", () => {
       { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       { id, bytes, mime: "text/plain" },
     );
-    const consumed = await consumeUpload(id, {
-      orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
-    });
+    const consumed = await consumeUploadStream(
+      id,
+      {
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+      },
+      drainSink,
+    );
     expect(consumed.size).toBe(bytes.length);
     expect(consumed.mime).toBe("text/plain");
   });
@@ -193,7 +240,11 @@ describe("consumeUpload", () => {
       { id, bytes, mime: "application/pdf" },
     );
     try {
-      await consumeUpload(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+      await consumeUploadStream(
+        id,
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        drainSink,
+      );
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -211,7 +262,11 @@ describe("consumeUpload", () => {
       { id, bytes: PDF_BYTES, sizeOverride: PDF_BYTES.length + 1 },
     );
     try {
-      await consumeUpload(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+      await consumeUploadStream(
+        id,
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        drainSink,
+      );
       throw new Error("expected to throw");
     } catch (e) {
       expect((e as ApiError).status).toBe(400);
@@ -231,7 +286,7 @@ describe("consumeUpload", () => {
     );
     expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(true);
 
-    await consumeUpload(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    await consumeUploadStream(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }, drainSink);
 
     // Storage copy is dead weight after consume — must be gone.
     expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(false);
@@ -250,7 +305,11 @@ describe("consumeUpload", () => {
     );
     expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(true);
 
-    await consumeUpload(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }).catch(() => {});
+    await consumeUploadStream(
+      id,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      drainSink,
+    ).catch(() => {});
 
     // Release path drops the bytes so re-upload to a fresh slot can succeed.
     expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(false);

@@ -26,7 +26,6 @@ import { logger } from "../../lib/logger.ts";
 import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
 import { buildRuntimePiEnv } from "@appstrate/runner-pi";
-import { sanitizeStorageKey } from "../file-storage.ts";
 import {
   getOrchestrator,
   type ContainerOrchestrator,
@@ -36,7 +35,7 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
-import { uploadRunWorkspace, deleteRunWorkspace } from "../run-workspace-storage.ts";
+import { uploadRunBundle, deleteRunWorkspace } from "../run-workspace-storage.ts";
 
 import { getEnv } from "@appstrate/env";
 import { isOAuthModelProvider, getModelProvider } from "../model-providers/registry.ts";
@@ -68,10 +67,11 @@ export interface RunPlatformContainerInput {
   orchestrator?: ContainerOrchestrator;
   /**
    * Injectable workspace provisioning — production defaults to the
-   * run-workspace storage helpers. The agent fetches this archive itself at
-   * startup; tests substitute a capturing stub.
+   * run-workspace storage helpers. The agent fetches the bundle itself at
+   * startup; input documents were already streamed into the workspace during
+   * upload-consume. Tests substitute a capturing stub.
    */
-  uploadWorkspace?: typeof uploadRunWorkspace;
+  uploadBundle?: typeof uploadRunBundle;
   deleteWorkspace?: typeof deleteRunWorkspace;
 }
 
@@ -91,7 +91,7 @@ export async function runPlatformContainer(
 ): Promise<PlatformContainerResult> {
   const { runId, context, plan, sinkCredentials, signal } = input;
   const orch = input.orchestrator ?? getOrchestrator();
-  const uploadWorkspace = input.uploadWorkspace ?? uploadRunWorkspace;
+  const uploadBundle = input.uploadBundle ?? uploadRunBundle;
   const deleteWorkspace = input.deleteWorkspace ?? deleteRunWorkspace;
 
   const prompt = await buildPlatformSystemPrompt(context, plan);
@@ -241,35 +241,27 @@ export async function runPlatformContainer(
       traceparent: context.traceparent,
     });
 
-    // The bundle (small, constant) and input documents (large, variable) are
-    // provisioned separately: the agent extracts the bundle but streams each
-    // document straight to `documents/<name>` on disk, so it never buffers the
-    // whole payload. Document object names carry no path prefix — the agent
-    // writes them under `documents/` itself (matches the `./documents/<name>`
-    // paths the prompt-builder hands the agent).
-    const documents = (plan.inputFiles ?? []).map((f) => ({
-      name: sanitizeStorageKey(f.name),
-      content: f.buffer,
-    }));
-
     await orch.ensureImages(
       skipSidecar ? [getEnv().PI_IMAGE] : [getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE],
     );
 
-    // Sidecar + agent + workspace upload in parallel. The workspace archive
-    // (AFPS bundle + input documents) is uploaded to run-scoped storage; the
-    // agent container fetches and extracts it itself at startup
-    // (`GET /api/runs/:runId/workspace`). This replaces the old
-    // seed-into-the-run-volume delivery, whose correctness depended on the
-    // volume driver — a tmpfs-backed `local` volume is NOT shared between the
-    // short-lived seed helper and the agent container, so the bundle silently
-    // vanished and skills never materialised (issue #549). With the agent
-    // self-provisioning, the run volume is pure agent-local scratch again, so
-    // its backing (disk or tmpfs) is a free performance choice. The upload
-    // must finish before `startWorkload` (inside waitForWorkload) so the
-    // object exists when the agent boots; racing it alongside the create
-    // calls here satisfies that ordering. When `skipSidecar`, only the agent
-    // is created (it reaches the platform directly over its egress network).
+    // Sidecar + agent + bundle upload in parallel. The AFPS bundle is uploaded
+    // to run-scoped storage; the agent container fetches and extracts it itself
+    // at startup (`GET /api/runs/:runId/workspace`). Input documents were
+    // already streamed into the same run-workspace namespace during
+    // upload-consume — the agent fetches each one (`GET
+    // /api/runs/:runId/documents/:name`) and streams it to disk, never buffering
+    // the whole payload. This replaces the old seed-into-the-run-volume
+    // delivery, whose correctness depended on the volume driver — a tmpfs-backed
+    // `local` volume is NOT shared between the short-lived seed helper and the
+    // agent container, so the bundle silently vanished and skills never
+    // materialised (issue #549). With the agent self-provisioning, the run
+    // volume is pure agent-local scratch again, so its backing (disk or tmpfs)
+    // is a free performance choice. The upload must finish before
+    // `startWorkload` (inside waitForWorkload) so the object exists when the
+    // agent boots; racing it alongside the create calls here satisfies that
+    // ordering. When `skipSidecar`, only the agent is created (it reaches the
+    // platform directly over its egress network).
     const [sidecar, agent] = await Promise.all([
       skipSidecar ? Promise.resolve(undefined) : orch.createSidecar(runId, boundary, sidecarSpec),
       orch.createWorkload(
@@ -286,7 +278,7 @@ export async function runPlatformContainer(
         },
         boundary,
       ),
-      uploadWorkspace(runId, { bundle: plan.agentPackage ?? undefined, documents }),
+      uploadBundle(runId, plan.agentPackage ?? undefined),
     ]);
     sidecarHandle = sidecar;
     agentHandle = agent;
