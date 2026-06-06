@@ -130,6 +130,28 @@ describe("parseRequestInput — streamed document consume", () => {
     expect(row?.consumedAt).toBeNull();
   });
 
+  it("aborts mid-stream when an upload overshoots its declared size", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-stream-overshoot" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const id = "upl_stream_overshoot_1";
+    // Declares 5 bytes but stages ~64 KB — the declared-small / uploaded-huge
+    // abuse the early-abort guard exists for. The counter must error the stream
+    // before the whole object lands in the run workspace.
+    const huge = Buffer.concat([PDF_BYTES, Buffer.alloc(64 * 1024, 0x20)]);
+    await seedUpload(scope, { id, bytes: huge, sizeOverride: 5 });
+
+    const runId = `run_${crypto.randomUUID()}`;
+    await expect(
+      parseRequestInput(fakeCtx({ input: { doc: `upload://${id}` } }, scope), runId, fileSchema),
+    ).rejects.toMatchObject({ status: 400 });
+
+    // Workspace rolled back, claim released — same guarantees as any rejection.
+    expect(await downloadRunDocumentStream(runId, "file.pdf")).toBeNull();
+    expect(await downloadRunDocumentsManifest(runId)).toBeNull();
+    const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
+    expect(row?.consumedAt).toBeNull();
+  });
+
   it("rolls the workspace back on a MIME mismatch", async () => {
     const ctx = await createTestContext({ orgSlug: "org-stream-mime" });
     const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };

@@ -185,6 +185,7 @@ export async function parseRequestInput(
         const consumed = await Promise.all(
           resolved.map(async ({ ref, id }, i) => {
             const docName = docNames[i]!;
+            const declaredSize = metas.get(id)!.size;
             // Sink: sniff the head, count bytes, and pipe everything to the run
             // workspace. `fileTypeStream` re-emits the full stream and exposes
             // `.fileType` once the head has been read — available after the pipe
@@ -196,6 +197,23 @@ export async function parseRequestInput(
               const counter = new TransformStream<Uint8Array, Uint8Array>({
                 transform(chunk, controller) {
                   bytes += chunk.byteLength;
+                  // Abort the moment the stream overshoots the declared size,
+                  // rather than copying a declared-small / uploaded-huge object
+                  // into the run workspace in full just to delete it after the
+                  // post-drain size check. Errors the stream → the S3 multipart
+                  // upload aborts (or the FS write stops) → consume releases the
+                  // claim and the route rolls the workspace back. The
+                  // post-drain `bytes === size` check in consume still catches
+                  // the under-size case (and is the correctness backstop for any
+                  // sink that does not abort early).
+                  if (bytes > declaredSize) {
+                    controller.error(
+                      invalidRequest(
+                        `Upload '${id}' size mismatch: declared ${declaredSize} bytes, exceeded mid-stream`,
+                      ),
+                    );
+                    return;
+                  }
                   controller.enqueue(chunk);
                 },
               });
