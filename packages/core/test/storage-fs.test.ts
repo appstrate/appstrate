@@ -107,6 +107,80 @@ describe("createFileSystemStorage", () => {
         storage.uploadStream("b", "excl.bin", new Response("x").body!, { exclusive: true }),
       ).rejects.toThrow(/exclusive/);
     });
+
+    // Regression: a pre-buffered `new Response("string").body` stream resolves
+    // synchronously and masked the real bug. The production consume path feeds a
+    // file-backed stream piped through a TransformStream — that combination hung
+    // forever under the old `Bun.write(path, new Response(stream))` impl and
+    // wrote "[object ReadableStream]" under a bare `Bun.write(path, stream)`.
+    it("round-trips a file-backed stream piped through a TransformStream", async () => {
+      const payload = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a]);
+      await storage.uploadFile("strm", "source.bin", payload);
+      const source = await storage.downloadStream("strm", "source.bin");
+      expect(source).not.toBeNull();
+
+      let seen = 0;
+      const counter = new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          seen += chunk.byteLength;
+          controller.enqueue(chunk);
+        },
+      });
+
+      await storage.uploadStream("strm", "dest.bin", source!.pipeThrough(counter));
+
+      const result = await storage.downloadFile("strm", "dest.bin");
+      expect(result).toEqual(payload);
+      expect(seen).toBe(payload.byteLength);
+    });
+
+    it("flushes to disk mid-stream rather than buffering the whole payload", async () => {
+      // The sink must write progressively. A default FileSink buffers every
+      // chunk until end(); this asserts bytes hit disk *before* the stream
+      // closes, so resident memory stays bounded under large uploads.
+      const chunk = new Uint8Array(1024 * 1024); // 1 MiB
+      const totalChunks = 8;
+      let onDiskMidStream = -1;
+
+      const source = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (let i = 0; i < totalChunks; i++) controller.enqueue(chunk);
+          controller.close();
+        },
+      });
+
+      const probe = new TransformStream<Uint8Array, Uint8Array>({
+        async transform(c, controller) {
+          controller.enqueue(c);
+          // After the first chunk, give the sink a tick to flush, then read the
+          // on-disk size — it must be > 0 well before the stream ends.
+          if (onDiskMidStream === -1) {
+            await new Promise((r) => setTimeout(r, 0));
+            const partial = await storage.downloadFile("strm", "big.bin");
+            onDiskMidStream = partial?.byteLength ?? 0;
+          }
+        },
+      });
+
+      await storage.uploadStream("strm", "big.bin", source.pipeThrough(probe));
+
+      const result = await storage.downloadFile("strm", "big.bin");
+      expect(result?.byteLength).toBe(totalChunks * chunk.byteLength);
+      expect(onDiskMidStream).toBeGreaterThan(0);
+      expect(onDiskMidStream).toBeLessThan(totalChunks * chunk.byteLength);
+    });
+
+    it("propagates a mid-stream transform error and leaves a partial file the caller can roll back", async () => {
+      const boom = new TransformStream<Uint8Array, Uint8Array>({
+        transform(_chunk, controller) {
+          controller.error(new Error("boom"));
+        },
+      });
+      const source = new Response(new Uint8Array([1, 2, 3])).body!;
+      await expect(
+        storage.uploadStream("strm", "broken.bin", source.pipeThrough(boom)),
+      ).rejects.toThrow(/boom/);
+    });
   });
 
   describe("downloadFile", () => {
