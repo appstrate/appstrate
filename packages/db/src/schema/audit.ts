@@ -1,5 +1,4 @@
 import { pgTable, text, timestamp, bigserial, jsonb, uuid, index } from "drizzle-orm/pg-core";
-import { organizations } from "./organizations.ts";
 import { applications } from "./applications.ts";
 
 /**
@@ -12,14 +11,19 @@ import { applications } from "./applications.ts";
  * `user` / `end_user` / `api_key` / `system`, but module-owned mutations
  * (oidc client provisioning, …) may add their own kinds without a schema
  * migration.
+ *
+ * `org_id` is a denormalized reference, **not** a foreign key. An audit log
+ * is an immutable historical record: it must outlive the entities it
+ * describes. A FK to `organizations` would force a deleting org to either
+ * cascade-wipe its own audit trail (defeating the audit) or block on the
+ * constraint — so the `org.deleted` tombstone keeps the deleted org's id as
+ * a plain value with no referential dependency.
  */
 export const auditEvents = pgTable(
   "audit_events",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
-    orgId: uuid("org_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").notNull(),
     applicationId: text("application_id").references(() => applications.id, {
       onDelete: "set null",
     }),

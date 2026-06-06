@@ -29,6 +29,13 @@
       "when": 1780667328185,
       "tag": "0003_fold_oidc_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780751478770,
+      "tag": "0004_nasty_snowbird",
+      "breakpoints": true
     }
   ]
 }

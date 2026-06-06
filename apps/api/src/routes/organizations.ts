@@ -268,6 +268,8 @@ router.delete("/:orgId", async (c) => {
     throw new ApiError({ status: 400, code: "delete_failed", title: "Bad Request", detail: msg });
   }
 
+  // org_id on audit_events is denormalized (no FK), so this tombstone persists
+  // after the org row is gone — the audit trail outlives the org by design.
   await recordAuditFromContext(c, {
     action: "org.deleted",
     resourceType: "org",

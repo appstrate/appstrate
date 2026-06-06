@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import {
@@ -13,9 +13,15 @@ import {
 } from "../../helpers/auth.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
 import { assertDbHas } from "../../helpers/assertions.ts";
-import { organizations, orgInvitations, organizationMembers } from "@appstrate/db/schema";
+import {
+  organizations,
+  orgInvitations,
+  organizationMembers,
+  auditEvents,
+} from "@appstrate/db/schema";
 import { CURRENT_API_VERSION } from "../../../src/lib/api-versions.ts";
 import { getOrgSettings } from "../../../src/services/organizations.ts";
+import { recordAudit } from "../../../src/services/audit.ts";
 
 const app = getTestApp();
 
@@ -453,6 +459,60 @@ describe("Organizations API", () => {
       const ids = body.data.map((o) => o.id);
       expect(ids).toContain(ctxA.orgId);
       expect(ids).toContain(orgB.id);
+    });
+  });
+
+  describe("DELETE /api/orgs/:orgId", () => {
+    it("deletes the org and persists an org.deleted audit event (issue #546)", async () => {
+      const ctx = await createTestContext({ orgName: "Doomed Org", orgSlug: "doomed-org" });
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "DELETE",
+        headers: { Cookie: ctx.cookie },
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+
+      // Org row is gone.
+      const orgRows = await db.select().from(organizations).where(eq(organizations.id, ctx.orgId));
+      expect(orgRows).toHaveLength(0);
+
+      // The audit event survives the deletion: org_id is denormalized (no FK),
+      // so it keeps the deleted org's id.
+      const events = await db
+        .select()
+        .from(auditEvents)
+        .where(and(eq(auditEvents.action, "org.deleted"), eq(auditEvents.resourceId, ctx.orgId)));
+      expect(events).toHaveLength(1);
+      const row = events[0]!;
+      expect(row.orgId).toBe(ctx.orgId);
+      expect(row.resourceType).toBe("org");
+    });
+
+    it("retains the org's existing audit trail after deletion (no FK cascade)", async () => {
+      const ctx = await createTestContext({ orgSlug: "doomed-org-2" });
+
+      // A pre-existing audit row for the org.
+      await recordAudit({
+        orgId: ctx.orgId,
+        actorType: "user",
+        actorId: ctx.user.id,
+        action: "connection.created",
+        resourceType: "connection",
+        resourceId: "conn_keepme",
+      });
+
+      await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "DELETE",
+        headers: { Cookie: ctx.cookie },
+      });
+
+      // The historical row outlives its org instead of being cascade-wiped.
+      const rows = await db.select().from(auditEvents).where(eq(auditEvents.orgId, ctx.orgId));
+      const actions = rows.map((r) => r.action);
+      expect(actions).toContain("connection.created");
+      expect(actions).toContain("org.deleted");
     });
   });
 });
