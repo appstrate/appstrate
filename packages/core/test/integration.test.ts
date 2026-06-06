@@ -1251,6 +1251,28 @@ describe("connectableAuthKeysForAgent", () => {
       "pat",
     ]);
   });
+
+  it("offers declared auths for an api_call integration with no tools/scopes", () => {
+    // api_call-only integration (source.kind "none", api vendor extension):
+    // the agent consumes it via api_call with an explicit auth_key pin, so it
+    // has no tools/scopes yet still needs a connection. The picker MUST offer
+    // it — this is the empty schedule-override box bug.
+    const m = parse(
+      baseManifest({
+        source: { kind: "none" },
+        auths: {
+          primary: {
+            type: "api_key",
+            credentials: { schema: { type: "object", properties: {} } },
+            authorized_uris: ["https://api/**"],
+            delivery: { env: { K: { value: "{$credential.k}" } } },
+          },
+        },
+        _meta: { "dev.appstrate/api": { auths: { primary: {} } } },
+      }),
+    );
+    expect(connectableAuthKeysForAgent(m, undefined, undefined)).toEqual(["primary"]);
+  });
 });
 
 function multiAuthManifest_(): IntegrationManifest {
