@@ -22,6 +22,7 @@
  */
 
 import type { Api, Model } from "@mariozechner/pi-ai";
+import { deriveProviderFromApi, PROVIDER_BY_API } from "@appstrate/runner-pi";
 import { listModelPresets, PROXY_SUPPORTED_APIS, type ModelPreset } from "../../lib/models.ts";
 
 export type ModelSource = "env" | "preset";
@@ -61,17 +62,6 @@ export interface PresetResolutionInputs {
   presetsLoader?: (profileName: string) => Promise<ModelPreset[]>;
 }
 
-const PROVIDER_BY_API: Record<string, string> = {
-  "anthropic-messages": "anthropic",
-  "openai-completions": "openai",
-  "openai-responses": "openai",
-  "mistral-conversations": "mistral",
-  "google-generative-ai": "google",
-  "google-vertex": "google-vertex",
-  "azure-openai-responses": "azure-openai-responses",
-  "bedrock-converse-stream": "amazon-bedrock",
-};
-
 const ENV_KEY_BY_PROVIDER: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
@@ -93,8 +83,14 @@ export function resolveModel(flags: ModelFlags): ResolvedModel {
   const api = flags.modelApi ?? process.env.APPSTRATE_MODEL_API ?? "anthropic-messages";
   const modelId = flags.model ?? process.env.APPSTRATE_MODEL_ID ?? "claude-sonnet-4-5";
 
-  const provider = PROVIDER_BY_API[api];
-  if (!provider) {
+  // Single source of truth: the api→provider table lives in
+  // `@appstrate/runner-pi` (shared with the in-container path).
+  // `deriveProviderFromApi` throws on an unknown api; rethrow as a
+  // CLI-shaped error with the accepted-values hint.
+  let provider: string;
+  try {
+    provider = deriveProviderFromApi(api);
+  } catch {
     throw new ModelResolutionError(
       `Unknown --model-api "${api}"`,
       `Accepted values: ${Object.keys(PROVIDER_BY_API).join(", ")}`,
@@ -189,7 +185,9 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
     id: preset.id,
     name: preset.label,
     api: preset.apiShape as Api,
-    provider: deriveProvider(preset.apiShape),
+    // preset.apiShape already passed the PROXY_SUPPORTED_APIS gate above,
+    // so it is always a known api here — derive without a fallback.
+    provider: deriveProviderFromApi(preset.apiShape),
     baseUrl,
     reasoning: preset.reasoning ?? false,
     input: (preset.input ?? ["text"]) as ("text" | "image")[],
@@ -280,10 +278,3 @@ function buildProxyBaseUrl(instance: string, api: string): string {
     `Supported today: ${Array.from(PROXY_SUPPORTED_APIS).join(", ")}. Pick a compatible preset or use --model-source env.`,
   );
 }
-
-function deriveProvider(api: string): string {
-  return PROVIDER_BY_API[api] ?? "custom";
-}
-
-/** Exported for tests. */
-export const _PROVIDER_BY_API_FOR_TESTING = PROVIDER_BY_API;
