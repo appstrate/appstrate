@@ -34,6 +34,7 @@ import {
   text,
   timestamp,
   boolean,
+  integer,
   uuid,
   index,
   uniqueIndex,
@@ -75,6 +76,18 @@ export const integrationConnections = pgTable(
       .default(sql`'{}'::text[]`),
     needsReconnection: boolean("needs_reconnection").notNull().default(false),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
+    // Consecutive token-refresh failures classified as *transient* (network /
+    // 5xx / parse — NOT `invalid_grant`, which flips `needsReconnection`
+    // immediately). A transient failure on a still-valid token is a no-op for
+    // the connection's usability (cached token keeps working), but a token that
+    // is expired AND has failed refresh repeatedly is effectively dead while
+    // looking healthy. This counter, gated on `expiresAt < now() - grace`,
+    // escalates such a connection to `needsReconnection` so the preflight
+    // resolver catches it with an actionable cause instead of every run dying
+    // opaquely at integration boot. Reset to 0 on any successful credential
+    // write (`persistCredentialBundle`).
+    refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
+    lastRefreshFailureAt: timestamp("last_refresh_failure_at", { withTimezone: true }),
     // User-facing display name, set at creation: the extracted identity
     // (email/login) when available, else "Connexion N" (N = existing connection
     // count + 1 in the same (app, integration, owner) group). Stable for the

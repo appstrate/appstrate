@@ -62,6 +62,8 @@ const CODE_DEFAULTS: Record<string, string> = {
   LOG_LEVEL: "info",
   MODULES: "oidc,webhooks,core-providers,@appstrate/module-codex,@appstrate/module-claude-code",
   OAUTH_REFRESH_WORKER_ENABLED: "false",
+  INTEGRATION_REFRESH_MAX_FAILURES: "5",
+  INTEGRATION_REFRESH_GRACE_SECONDS: "3600",
   REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS: "7200",
   REMOTE_RUN_SINK_MAX_TTL_SECONDS: "86400",
   REMOTE_RUN_REPLAY_WINDOW_SECONDS: "600",

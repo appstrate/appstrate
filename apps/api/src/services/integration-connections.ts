@@ -1062,6 +1062,12 @@ export async function persistCredentialBundle(
     credentialsEncrypted: ciphertext,
     expiresAt: input.expiresAt ?? null,
     needsReconnection: input.needsReconnection ?? false,
+    // Any successful credential write clears the transient-refresh streak — a
+    // working refresh (or a user reconnect) proves the connection is healthy
+    // again, so the escalation counter must not carry over. See
+    // `recordIntegrationRefreshFailure`.
+    refreshFailureCount: 0,
+    lastRefreshFailureAt: null,
     updatedAt: now,
   };
   if (input.accountId !== undefined) set.accountId = input.accountId;
@@ -1143,6 +1149,42 @@ export async function markIntegrationConnectionNeedsReconnection(
   await db
     .update(integrationConnections)
     .set({ needsReconnection: true, updatedAt: new Date() })
+    .where(eq(integrationConnections.id, connectionId));
+}
+
+/**
+ * Record a *transient* token-refresh failure (network / 5xx / parse — NOT
+ * `invalid_grant`, which flips `needsReconnection` immediately via
+ * {@link markIntegrationConnectionNeedsReconnection}). Atomic, race-safe:
+ * the increment and the escalation decision happen in one SQL statement so
+ * concurrent refreshes on the same row (overlapping runs) cannot lose a count.
+ *
+ * Escalation gate — `needsReconnection` is set to `true` only when BOTH:
+ *   1. this failure brings the streak to `>= maxFailures`, AND
+ *   2. the token is genuinely dead: `expires_at` is set AND already older than
+ *      `graceSeconds` ago.
+ *
+ * The expiry gate is what makes this safe: a transient upstream outage while
+ * the cached token is still valid (future `expires_at`) increments the counter
+ * but never escalates — the connection keeps working and a later refresh
+ * recovers (clearing the streak via `persistCredentialBundle`). Only a token
+ * that is expired-past-grace AND repeatedly unrefreshable — the silent-death
+ * case — gets flipped. `needsReconnection` is OR'd so a concurrently-set `true`
+ * (revoke / scope-shrink) is never cleared here.
+ */
+export async function recordIntegrationRefreshFailure(
+  connectionId: string,
+  maxFailures: number,
+  graceSeconds: number,
+): Promise<void> {
+  await db
+    .update(integrationConnections)
+    .set({
+      refreshFailureCount: sql`${integrationConnections.refreshFailureCount} + 1`,
+      lastRefreshFailureAt: sql`now()`,
+      needsReconnection: sql`${integrationConnections.needsReconnection} OR (${integrationConnections.refreshFailureCount} + 1 >= ${maxFailures} AND ${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${graceSeconds}))`,
+      updatedAt: sql`now()`,
+    })
     .where(eq(integrationConnections.id, connectionId));
 }
 
