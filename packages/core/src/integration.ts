@@ -610,8 +610,14 @@ export function isApiCallToolName(name: string): boolean {
  * (per-auth map) for consent inference — it is NOT an exclusivity lock. No
  * tool→auth hard-lock is modelled today, so any declared auth (e.g. a `pat`
  * alternative alongside `oauth`) can serve any selected tool. The picker must
- * therefore offer every declared auth, not just a scope-referenced one. Returns
- * `[]` when the agent picked zero tools and zero scopes (declared-but-inert).
+ * therefore offer every declared auth, not just a scope-referenced one.
+ *
+ * An integration that exposes `api_call` ({@link getApiCallConfigs}) is its own
+ * selection signal: the agent consumes it through `api_call` with an explicit
+ * `auth_key` pin, so it has no MCP tools/scopes to select yet still needs a
+ * connection (e.g. a `source.kind: "none"` REST integration). Returns `[]`
+ * only when the agent picked zero tools, zero scopes AND the integration
+ * exposes no api_call (genuinely declared-but-inert).
  */
 export function connectableAuthKeysForAgent(
   manifest: IntegrationManifest,
@@ -621,7 +627,8 @@ export function connectableAuthKeysForAgent(
   const hasSelection =
     isToolsWildcard(agentTools) ||
     (Array.isArray(agentTools) && agentTools.length > 0) ||
-    (agentScopes?.length ?? 0) > 0;
+    (agentScopes?.length ?? 0) > 0 ||
+    getApiCallConfigs(manifest).length > 0;
   if (!hasSelection) return [];
   return manifest.auths ? Object.keys(manifest.auths) : [];
 }
