@@ -28,6 +28,7 @@ import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { encryptCredentials } from "@appstrate/connect";
 import { forceRefreshIntegrationConnection } from "../../../src/services/integration-token-refresh.ts";
+import { recordIntegrationRefreshFailure } from "../../../src/services/integration-connections.ts";
 
 interface TokenServer {
   url: string;
@@ -243,3 +244,190 @@ async function fetchEncrypted(connId: string): Promise<string | null> {
     .where(eq(integrationConnections.id, connId));
   return row?.credentialsEncrypted ?? null;
 }
+
+/**
+ * Transient-refresh-failure escalation.
+ *
+ * `recordIntegrationRefreshFailure` increments a per-connection counter on
+ * every transient (non-`invalid_grant`) refresh failure and flips
+ * `needsReconnection` ONLY when the streak crosses the threshold AND the token
+ * is already expired past the grace window — the silent-death case behind the
+ * original Gmail scheduled-run incident. A successful credential write resets
+ * the counter (via `persistCredentialBundle`).
+ */
+describe("integration refresh-failure escalation", () => {
+  let ctx: TestContext;
+  let token: TokenServer;
+  const PACKAGE_ID = "@official/gmail";
+  const HOUR_MS = 3_600_000;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "refresh-esc" });
+    await seedPackage({
+      id: PACKAGE_ID,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: {
+        schema_version: "0.1",
+        type: "integration",
+        name: PACKAGE_ID,
+        version: "1.0.0",
+        display_name: "Gmail",
+        source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } },
+        auths: {
+          primary: {
+            type: "oauth2",
+            authorization_endpoint: "https://idp/a",
+            token_endpoint: "https://idp/token",
+            authorized_uris: ["https://api/*"],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Bearer ",
+                value: "{$credential.access_token}",
+              },
+            },
+          },
+        },
+      },
+    });
+    token = startTokenServer();
+  });
+
+  afterEach(() => {
+    token.stop();
+  });
+
+  async function seedConn(opts: {
+    expiresAt: Date | null;
+    refreshFailureCount?: number;
+    needsReconnection?: boolean;
+  }): Promise<string> {
+    const ciphertext = encryptCredentials({
+      access_token: "old-access",
+      accessToken: "old-access",
+      refresh_token: "rt-1",
+      refreshToken: "rt-1",
+    });
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: PACKAGE_ID,
+        authKey: "primary",
+        accountId: "acct-1",
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        credentialsEncrypted: ciphertext,
+        expiresAt: opts.expiresAt,
+        refreshFailureCount: opts.refreshFailureCount ?? 0,
+        needsReconnection: opts.needsReconnection ?? false,
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
+  }
+
+  function readRow(connId: string) {
+    return db
+      .select({
+        refreshFailureCount: integrationConnections.refreshFailureCount,
+        needsReconnection: integrationConnections.needsReconnection,
+        lastRefreshFailureAt: integrationConnections.lastRefreshFailureAt,
+      })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId))
+      .then((r) => r[0]!);
+  }
+
+  it("increments the counter but does NOT escalate while the token is still valid", async () => {
+    // Token valid for another hour — a transient upstream blip must not brick it.
+    const connId = await seedConn({ expiresAt: new Date(Date.now() + HOUR_MS) });
+
+    // Drive the streak to (and past) the threshold.
+    for (let i = 0; i < 4; i++) await recordIntegrationRefreshFailure(connId, 3, 3600);
+
+    const row = await readRow(connId);
+    expect(row.refreshFailureCount).toBe(4);
+    expect(row.needsReconnection).toBe(false); // expiry gate blocks escalation
+    expect(row.lastRefreshFailureAt).not.toBeNull();
+  });
+
+  it("does NOT escalate while the token is expired but within the grace window", async () => {
+    // Expired 10 min ago; grace is 1h → not yet escalatable.
+    const connId = await seedConn({ expiresAt: new Date(Date.now() - 10 * 60_000) });
+
+    for (let i = 0; i < 5; i++) await recordIntegrationRefreshFailure(connId, 3, 3600);
+
+    const row = await readRow(connId);
+    expect(row.refreshFailureCount).toBe(5);
+    expect(row.needsReconnection).toBe(false);
+  });
+
+  it("escalates to needsReconnection once expired past grace AND streak hits threshold", async () => {
+    // Expired 2h ago, grace 1h → past grace.
+    const connId = await seedConn({ expiresAt: new Date(Date.now() - 2 * HOUR_MS) });
+
+    await recordIntegrationRefreshFailure(connId, 3, 3600); // 1 — below threshold
+    expect((await readRow(connId)).needsReconnection).toBe(false);
+    await recordIntegrationRefreshFailure(connId, 3, 3600); // 2 — below threshold
+    expect((await readRow(connId)).needsReconnection).toBe(false);
+    await recordIntegrationRefreshFailure(connId, 3, 3600); // 3 — hits threshold
+
+    const row = await readRow(connId);
+    expect(row.refreshFailureCount).toBe(3);
+    expect(row.needsReconnection).toBe(true);
+  });
+
+  it("never clears a pre-existing needsReconnection (OR semantics)", async () => {
+    const connId = await seedConn({
+      expiresAt: new Date(Date.now() + HOUR_MS), // valid token — gate would say false
+      needsReconnection: true, // but already flagged (e.g. revoke)
+    });
+
+    await recordIntegrationRefreshFailure(connId, 3, 3600);
+
+    expect((await readRow(connId)).needsReconnection).toBe(true);
+  });
+
+  it("a successful refresh resets the failure streak", async () => {
+    // Seed an expired token with an accumulated streak (not yet escalated).
+    const connId = await seedConn({
+      expiresAt: new Date(Date.now() - 30 * 60_000),
+      refreshFailureCount: 2,
+    });
+    // Expired → reReadFreshness does not short-circuit → doRefresh runs.
+    token.setResponse({ access_token: "fresh-access", expires_in: 3600 });
+
+    await forceRefreshIntegrationConnection(
+      connId,
+      PACKAGE_ID,
+      "primary",
+      (await fetchEncrypted(connId))!,
+      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
+    );
+
+    const row = await readRow(connId);
+    expect(row.refreshFailureCount).toBe(0);
+    expect(row.lastRefreshFailureAt).toBeNull();
+    expect(row.needsReconnection).toBe(false);
+  });
+
+  it("a transient upstream failure during refresh increments the counter and rethrows", async () => {
+    const connId = await seedConn({ expiresAt: new Date(Date.now() - HOUR_MS) });
+    token.setResponse({ error: "temporarily_unavailable" }, 503); // 5xx → transient
+
+    await expect(
+      forceRefreshIntegrationConnection(
+        connId,
+        PACKAGE_ID,
+        "primary",
+        (await fetchEncrypted(connId))!,
+        { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
+      ),
+    ).rejects.toThrow();
+
+    expect((await readRow(connId)).refreshFailureCount).toBe(1);
+  });
+});

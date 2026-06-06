@@ -35,7 +35,9 @@ import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import {
   persistCredentialBundle,
   markIntegrationConnectionNeedsReconnection,
+  recordIntegrationRefreshFailure,
 } from "./integration-connections.ts";
+import { getEnv } from "@appstrate/env";
 
 export type { IntegrationRefreshContext };
 
@@ -171,11 +173,25 @@ async function doRefresh(
     }));
   } catch (err) {
     // Flip needsReconnection on a revoked refresh token so the dashboard
-    // prompts re-connect. Transient errors are NOT flagged — they may be
-    // temporary upstream issues. The wire mechanics + classification live
-    // in the shared exchange; only the table write-back is integration-side.
+    // prompts re-connect. The wire mechanics + classification live in the
+    // shared exchange; only the table write-back is integration-side.
     if (err instanceof RefreshError && err.kind === "revoked") {
       await markIntegrationConnectionNeedsReconnection(connectionId);
+    } else {
+      // Transient failure (network / 5xx / parse). A single transient error is
+      // NOT terminal — the cached token may still be valid. But a token that is
+      // already expired AND keeps failing refresh is silently dead while the
+      // row still looks healthy (the original Gmail scheduled-run bug). Record
+      // the failure; `recordIntegrationRefreshFailure` escalates to
+      // needsReconnection only once the streak crosses the threshold AND the
+      // token is expired past the grace window, so a transient upstream blip on
+      // a still-valid token never bricks the connection.
+      const env = getEnv();
+      await recordIntegrationRefreshFailure(
+        connectionId,
+        env.INTEGRATION_REFRESH_MAX_FAILURES,
+        env.INTEGRATION_REFRESH_GRACE_SECONDS,
+      );
     }
     throw err;
   }

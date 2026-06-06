@@ -268,6 +268,17 @@ const envSchema = z
       .default("false")
       .transform((s) => s.toLowerCase() === "true" || s === "1"),
 
+    // Integration connection refresh-failure escalation. When an OAuth token
+    // refresh fails *transiently* (not `invalid_grant`) this many times in a
+    // row AND the token is already expired past the grace window below, the
+    // connection is flipped to `needsReconnection` so the run preflight catches
+    // it early with an actionable "reconnect" cause instead of every scheduled
+    // run dying opaquely at integration boot. The expiry gate prevents a
+    // temporary upstream outage on a still-valid token from bricking the
+    // connection — escalation requires the token to be genuinely dead.
+    INTEGRATION_REFRESH_MAX_FAILURES: z.coerce.number().int().positive().default(5),
+    INTEGRATION_REFRESH_GRACE_SECONDS: z.coerce.number().int().nonnegative().default(3600),
+
     // Modules (comma-separated specifiers). API-key LLM calls are routed
     // directly to the upstream provider — retry is handled by the Pi SDK
     // natively (Retry-After honoring + jitter). The defaults are the

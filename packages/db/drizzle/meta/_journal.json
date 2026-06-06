@@ -36,6 +36,13 @@
       "when": 1780751478770,
       "tag": "0004_nasty_snowbird",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780752671543,
+      "tag": "0005_integration_refresh_failure_tracking",
+      "breakpoints": true
     }
   ]
 }
