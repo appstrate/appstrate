@@ -7,6 +7,13 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Storage, CreateUploadUrlOptions, UploadUrlDescriptor } from "./storage.ts";
 import { StorageAlreadyExistsError } from "./storage.ts";
 
+/**
+ * FileSink buffer watermark for `uploadStream` (bytes). The sink flushes to disk
+ * once pending writes cross this threshold, capping resident memory per stream.
+ * 1 MiB trades a few extra writes for bounded memory under the 256 MiB doc cap.
+ */
+const STREAM_FLUSH_BYTES = 1024 * 1024;
+
 /** Configuration for the filesystem storage backend. */
 export interface FileSystemStorageConfig {
   /** Root directory for all stored files. */
@@ -152,10 +159,46 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
       const fullPath = resolve(bucket, path);
       await mkdir(dirname(fullPath), { recursive: true });
       await verifyContainment(dirname(fullPath));
-      // Bun.write streams a Response body straight to disk without reading the
-      // whole payload into memory — wrap the web ReadableStream in a Response so
-      // it pipes chunk-by-chunk.
-      await Bun.write(fullPath, new Response(stream));
+      // Pull the web ReadableStream chunk-by-chunk into a FileSink — never
+      // buffering the whole payload in memory.
+      //
+      // We deliberately do NOT use `Bun.write(path, new Response(stream))`:
+      // for a non-trivial (file-backed / async / transform-piped) stream that
+      // call hangs indefinitely, and `Bun.write(path, stream)` without the
+      // Response wrapper silently stringifies the stream object to disk
+      // ("[object ReadableStream]") instead of streaming its bytes. The
+      // explicit reader loop drives the source — including any upstream
+      // TransformStream (e.g. the consume byte-counter) — and surfaces a
+      // mid-stream `controller.error()` as a thrown read so the caller can
+      // roll back the partially-written destination.
+      //
+      // `highWaterMark` is load-bearing: a default FileSink accumulates *every*
+      // written chunk in memory and flushes only on `end()`, which would
+      // reintroduce the full in-memory buffering this streaming path exists to
+      // avoid. With an explicit watermark the sink flushes to disk once the
+      // pending buffer crosses it, bounding resident memory to ~one watermark.
+      const writer = Bun.file(fullPath).writer({ highWaterMark: STREAM_FLUSH_BYTES });
+      const reader = stream.getReader();
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          writer.write(value);
+        }
+        await writer.end();
+      } catch (err) {
+        // Flush + close the sink so the partial file's fd is released (the
+        // caller rolls back the destination namespace), and cancel the source
+        // so its underlying fd/socket isn't leaked. `end()` returns a byte
+        // count (not a promise), so guard rather than chaining `.catch`.
+        try {
+          await writer.end();
+        } catch {
+          // already errored — nothing to recover
+        }
+        await reader.cancel(err).catch(() => {});
+        throw err;
+      }
       await verifyContainment(fullPath);
       return makeKey(bucket, path);
     },
