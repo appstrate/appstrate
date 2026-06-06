@@ -91,6 +91,48 @@ describe("registerDynamicClient (RFC 7591)", () => {
     ).rejects.toMatchObject({ name: "DynamicClientRegistrationError", status: 403 });
   });
 
+  it("parses the OAuth error_description from a rejection body", async () => {
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({
+          error: "invalid_request",
+          error_description: "Your integration is not currently allowlisted.",
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      )) as unknown as typeof fetch;
+    await expect(
+      registerDynamicClient({
+        registrationEndpoint: "https://as/register",
+        redirectUri: "https://app/cb",
+        clientName: "X",
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      name: "DynamicClientRegistrationError",
+      status: 400,
+      errorDescription: "Your integration is not currently allowlisted.",
+    });
+  });
+
+  it("leaves errorDescription undefined when the rejection body is not JSON", async () => {
+    const fetchImpl = (async () =>
+      new Response("plain text rejection", { status: 400 })) as unknown as typeof fetch;
+    try {
+      await registerDynamicClient({
+        registrationEndpoint: "https://as/register",
+        redirectUri: "https://app/cb",
+        clientName: "X",
+        fetchImpl,
+      });
+      throw new Error("expected registration to reject");
+    } catch (err) {
+      expect(err).toBeInstanceOf(DynamicClientRegistrationError);
+      const dcrErr = err as DynamicClientRegistrationError;
+      expect(dcrErr.status).toBe(400);
+      expect(dcrErr.errorDescription).toBeUndefined();
+    }
+  });
+
   it("throws when the response omits client_id", async () => {
     const fetchImpl = (async () => jsonResponse({ not_a_client: true })) as unknown as typeof fetch;
     await expect(
