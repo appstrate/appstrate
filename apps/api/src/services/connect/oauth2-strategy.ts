@@ -86,15 +86,23 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     );
     const client = resolved.client;
     if (!client) {
-      // Distinguish the two "no client" causes: an auto-provisioning auth
-      // (public client on a remote MCP integration) tries to self-register via
-      // CIMD/DCR, so a missing client means discovery/registration failed — not
-      // that an admin forgot to register. Confidential/classic auths still
-      // require a manually-registered client.
+      // Two families of "no client":
+      //   - auto-provisioning auth (public client on a remote MCP integration):
+      //     client acquisition failed. `resolved.provisioningFailure` carries
+      //     the complete reason + remedy, authored by whichever step failed (no
+      //     registration endpoint, blocked endpoint, AS rejection, network, …).
+      //     Render it verbatim — no per-cause branch.
+      //   - confidential/classic auth: an admin must pre-register a client.
+      if (usesAutoProvisionedClient(manifest, auth)) {
+        const failure = resolved.provisioningFailure;
+        const detail = failure?.message ?? "discovery or client registration failed";
+        const statusPart = failure?.status ? ` (HTTP ${failure.status})` : "";
+        throw forbidden(
+          `Could not automatically provision an OAuth client for '${ctx.integrationId}' auth '${ctx.authKey}'${statusPart}: ${detail}`,
+        );
+      }
       throw forbidden(
-        usesAutoProvisionedClient(manifest, auth)
-          ? `Could not automatically provision an OAuth client for '${ctx.integrationId}' auth '${ctx.authKey}': the authorization server did not advertise dynamic client registration, or discovery/registration failed. Register a client manually, or retry once the server is reachable.`
-          : `Administrator must register OAuth client credentials for '${ctx.integrationId}' auth '${ctx.authKey}' before connection`,
+        `Administrator must register OAuth client credentials for '${ctx.integrationId}' auth '${ctx.authKey}' before connection`,
       );
     }
     const effectiveRedirectUri = client.redirect_uri ?? redirectUri;

@@ -49,10 +49,31 @@ export interface DynamicClientRegistration {
 /** Raised when dynamic registration fails (non-2xx, malformed body, network). */
 export class DynamicClientRegistrationError extends Error {
   readonly status?: number;
-  constructor(message: string, status?: number) {
+  /**
+   * RFC 6749 §5.2 / RFC 7591 §3.2.2 `error_description`, when the AS returned a
+   * JSON error body — the human-readable reason registration was rejected (e.g.
+   * an allowlist notice). The actionable part to surface to the operator.
+   */
+  readonly errorDescription?: string;
+  constructor(message: string, status?: number, errorDescription?: string) {
     super(message);
     this.name = "DynamicClientRegistrationError";
     this.status = status;
+    this.errorDescription = errorDescription;
+  }
+}
+
+/**
+ * Best-effort extraction of the RFC 6749/7591 `error_description` from a
+ * registration error body. Returns `undefined` when the body isn't a JSON error
+ * object — the caller keeps the raw status/text.
+ */
+function parseOAuthErrorDescription(body: string): string | undefined {
+  try {
+    const json = JSON.parse(body) as { error_description?: unknown };
+    return typeof json.error_description === "string" ? json.error_description : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -109,6 +130,7 @@ export async function registerDynamicClient(
     throw new DynamicClientRegistrationError(
       `Dynamic client registration returned ${res.status}${detail ? `: ${detail}` : ""}`,
       res.status,
+      parseOAuthErrorDescription(detail),
     );
   }
 

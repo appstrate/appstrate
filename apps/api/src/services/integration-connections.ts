@@ -500,6 +500,17 @@ export interface ResolvedOAuthConnect {
   tokenEndpoint?: string;
   /** RFC 8707 resource indicator (discovered for MCP, else manifest `resource`). */
   resource?: string;
+  /**
+   * Set when auto-provisioning a client failed and `client` is null. The
+   * failing step authors the complete, operator-facing reason — *including the
+   * remedy* — so the caller renders it verbatim and never decides what to
+   * advise. Adding a failure point (no registration endpoint, blocked endpoint,
+   * AS rejection, network failure, future CIMD) is "set the field with its own
+   * message"; no new branch and no remedy heuristic in the caller. `status` is
+   * the authorization server's HTTP status when the failure came from a
+   * response, surfaced alongside the message.
+   */
+  provisioningFailure?: { message: string; status?: number };
 }
 
 /**
@@ -658,7 +669,13 @@ export async function ensureIntegrationOAuthClient(
   const registrationEndpoint = endpoints.registrationEndpoint;
   if (!registrationEndpoint) {
     logger.warn("auto-DCR: no registration_endpoint discovered", { packageId, authKey, issuer });
-    return resolved;
+    return {
+      ...resolved,
+      provisioningFailure: {
+        message:
+          "the authorization server did not advertise dynamic client registration; register an OAuth client manually, or retry once the server advertises it",
+      },
+    };
   }
 
   // SSRF guard — the endpoint is manifest/discovery-derived and we POST to it.
@@ -669,7 +686,13 @@ export async function ensureIntegrationOAuthClient(
       authKey,
       registrationEndpoint,
     });
-    return resolved;
+    return {
+      ...resolved,
+      provisioningFailure: {
+        message:
+          "the discovered registration endpoint was refused as an unsafe (loopback/internal) target; register an OAuth client manually instead",
+      },
+    };
   }
 
   // Narrow the concurrency window: re-check in case a parallel Connect just
@@ -723,7 +746,29 @@ export async function ensureIntegrationOAuthClient(
         status: err.status,
         err: err.message,
       });
-      return resolved;
+      // Two distinct DCR failures, authored explicitly (not inferred
+      // downstream): a server response (HTTP status present) is a deliberate
+      // refusal — surface the AS `error_description`, which carries its own
+      // remedy (e.g. an allowlist form). Fall back to a generic line rather
+      // than `err.message` so the raw (possibly non-JSON) response body is not
+      // echoed into the operator-facing 403 — it stays in the warn log above.
+      // No status means a network/timeout/malformed-body failure, where a retry
+      // is the remedy.
+      const reachedServer = err.status !== undefined;
+      return {
+        ...resolved,
+        provisioningFailure: reachedServer
+          ? {
+              message:
+                err.errorDescription ??
+                "the authorization server rejected dynamic client registration",
+              status: err.status,
+            }
+          : {
+              message:
+                "could not reach the authorization server to register a client; retry once it is reachable",
+            },
+      };
     }
     throw err;
   }
