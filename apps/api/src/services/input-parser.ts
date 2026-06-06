@@ -4,14 +4,15 @@
  * Request input parsing.
  *
  * The request body is always JSON. File fields carry `upload://upl_xxx` URIs
- * that point to previously staged uploads. Each URI is resolved into a
- * `UploadedFile` (buffer + metadata) via the uploads service, which also
- * performs magic-byte MIME validation and marks the upload as consumed.
+ * that point to previously staged uploads. Each URI is streamed straight from
+ * the uploads bucket into the run workspace via the uploads service (which
+ * performs size + magic-byte MIME validation and marks the upload as consumed),
+ * leaving a `FileReference` (metadata only — no buffer) on the parsed input.
  */
 
 import type { Context } from "hono";
 import { fileTypeStream } from "file-type";
-import type { UploadedFile } from "./run-launcher/types.ts";
+import type { FileReference } from "./run-launcher/types.ts";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { validateInput } from "./schema.ts";
 import { invalidRequest, payloadTooLarge, validationFailed } from "../lib/errors.ts";
@@ -26,7 +27,7 @@ import { getEnv } from "@appstrate/env";
 
 export interface ParsedInput {
   input?: Record<string, unknown>;
-  uploadedFiles?: UploadedFile[];
+  uploadedFiles?: FileReference[];
   /** Per-run model override (wire field `modelId` on the request body). */
   modelIdOverride?: string;
   /** Per-run proxy override (wire field `proxyId` on the request body). */
@@ -61,6 +62,21 @@ interface RunRequestBody {
   proxyId?: string;
   config?: Record<string, unknown>;
   connection_overrides?: Record<string, string>;
+}
+
+/** Validate `input` against the manifest schema, throwing `validationFailed` (422). */
+function assertInputValid(input: Record<string, unknown>, inputSchema: JSONSchemaObject): void {
+  const inputValidation = validateInput(input, inputSchema);
+  if (!inputValidation.valid) {
+    throw validationFailed(
+      inputValidation.errors.map((e) => ({
+        field: e.field ? `input.${e.field}` : "input",
+        code: "invalid_input",
+        title: "Invalid Input",
+        message: e.message,
+      })),
+    );
+  }
 }
 
 function getArrayItems(prop: JSONSchema7): JSONSchema7 | undefined {
@@ -182,7 +198,7 @@ export async function parseRequestInput(
     body = {};
   }
   const input = body.input ?? {};
-  let uploadedFiles: UploadedFile[] = [];
+  let uploadedFiles: FileReference[] = [];
 
   if (inputSchema) {
     const refs = collectUploadRefs(inputSchema, input);
@@ -197,32 +213,35 @@ export async function parseRequestInput(
       return { ref, id };
     });
 
-    if (resolved.length > 0) {
-      // Bound the total input-document payload on DECLARED sizes BEFORE streaming
-      // any bytes. Documents are delivered to the agent out-of-band (fetched +
-      // streamed to disk), so an oversized payload is a policy violation rather
-      // than a crash. The per-file `bytes === size` check inside consume keeps
-      // each actual size ≤ its declared size, so a declared total under the cap
-      // bounds the actual total too. Reject before launch so the caller gets a
-      // clean 413 instead of a run that fails mid-flight.
-      const metas = await peekUploads(
-        resolved.map((r) => r.id),
-        { orgId, applicationId },
-      );
-      assertDocsWithinCap([...metas.values()], getEnv().WORKSPACE_MAX_DOCS_BYTES);
+    // Document object names — set once uploads are streamed, used to roll the
+    // run workspace back if anything below the stream fails. Empty until we
+    // stream, so a pre-stream failure (bad URI, cap, peek) rolls back nothing.
+    let docNames: string[] = [];
+    try {
+      if (resolved.length > 0) {
+        // Bound the total input-document payload on DECLARED sizes BEFORE
+        // streaming any bytes. Documents are delivered to the agent out-of-band
+        // (fetched + streamed to disk), so an oversized payload is a policy
+        // violation rather than a crash. The per-file `bytes === size` check
+        // inside consume keeps each actual size ≤ its declared size, so a
+        // declared total under the cap bounds the actual total too. Reject
+        // before launch so the caller gets a clean 413 instead of a mid-flight
+        // run failure.
+        const metas = await peekUploads(
+          resolved.map((r) => r.id),
+          { orgId, applicationId },
+        );
+        assertDocsWithinCap([...metas.values()], getEnv().WORKSPACE_MAX_DOCS_BYTES);
 
-      // The run-workspace document object name. Must match the path the
-      // prompt-builder hands the agent (`./documents/<sanitizeStorageKey(name)>`)
-      // and the manifest entry the agent fetches by.
-      const docNames = resolved.map(({ id }) => sanitizeStorageKey(metas.get(id)!.name));
+        // The run-workspace document object name. Must match the path the
+        // prompt-builder hands the agent (`./documents/<sanitizeStorageKey(name)>`)
+        // and the manifest entry the agent fetches by.
+        docNames = resolved.map(({ id }) => sanitizeStorageKey(metas.get(id)!.name));
 
-      // Stream each upload straight from the uploads bucket into the run
-      // workspace — validating size + MIME on the fly — so the platform never
-      // buffers a whole document in memory. On ANY failure (bad URI, size/MIME
-      // mismatch, or input validation below) roll back every document streamed
-      // for this run; no run row or bundle exists yet, so the doc objects +
-      // manifest are the only state to clean.
-      try {
+        // Stream each upload straight from the uploads bucket into the run
+        // workspace — validating size + MIME on the fly — so the platform never
+        // buffers a whole document in memory. Bounded concurrency keeps the
+        // streaming memory floor flat regardless of document count.
         const consumed = await mapWithConcurrency(
           resolved,
           DOC_STREAM_CONCURRENCY,
@@ -245,9 +264,9 @@ export async function parseRequestInput(
                   // into the run workspace in full just to delete it after the
                   // post-drain size check. Errors the stream → the S3 multipart
                   // upload aborts (or the FS write stops) → consume releases the
-                  // claim and the route rolls the workspace back. The
-                  // post-drain `bytes === size` check in consume still catches
-                  // the under-size case (and is the correctness backstop for any
+                  // claim and the run workspace is rolled back. The post-drain
+                  // `bytes === size` check in consume still catches the
+                  // under-size case (and is the correctness backstop for any
                   // sink that does not abort early).
                   if (bytes > declaredSize) {
                     controller.error(
@@ -263,13 +282,7 @@ export async function parseRequestInput(
               await streamRunDocument(runId, docName, detection.pipeThrough(counter));
               return { bytes, sniffedMime: detection.fileType?.mime };
             });
-            return {
-              fieldName: ref.fieldName,
-              name: meta.name,
-              type: meta.mime,
-              size: meta.size,
-              docName,
-            };
+            return { fieldName: ref.fieldName, name: meta.name, type: meta.mime, size: meta.size };
           },
         );
 
@@ -278,44 +291,18 @@ export async function parseRequestInput(
         // deletion index on teardown.
         await writeRunDocumentsManifest(
           runId,
-          consumed.map((d) => ({ name: d.docName, size: d.size })),
+          consumed.map((d, i) => ({ name: docNames[i]!, size: d.size })),
         );
 
-        uploadedFiles = consumed.map(({ fieldName, name, type, size }) => ({
-          fieldName,
-          name,
-          type,
-          size,
-        }));
+        uploadedFiles = consumed;
+      }
 
-        const inputValidation = validateInput(input, inputSchema);
-        if (!inputValidation.valid) {
-          throw validationFailed(
-            inputValidation.errors.map((e) => ({
-              field: e.field ? `input.${e.field}` : "input",
-              code: "invalid_input",
-              title: "Invalid Input",
-              message: e.message,
-            })),
-          );
-        }
-      } catch (err) {
-        await deleteRunDocuments(runId, docNames);
-        throw err;
-      }
-    } else {
-      // No file fields populated — still validate the JSON input shape.
-      const inputValidation = validateInput(input, inputSchema);
-      if (!inputValidation.valid) {
-        throw validationFailed(
-          inputValidation.errors.map((e) => ({
-            field: e.field ? `input.${e.field}` : "input",
-            code: "invalid_input",
-            title: "Invalid Input",
-            message: e.message,
-          })),
-        );
-      }
+      // Validate the JSON input shape — once, whether or not the run carries
+      // documents. A failure here still rolls back any streamed documents.
+      assertInputValid(input, inputSchema);
+    } catch (err) {
+      if (docNames.length > 0) await deleteRunDocuments(runId, docNames);
+      throw err;
     }
   }
 

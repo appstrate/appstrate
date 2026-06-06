@@ -11,14 +11,17 @@ import type { ResolvedModel } from "../org-models.ts";
 export type { ToolMeta, TokenUsage, ResolvedModel };
 export { modelCostSchema, tokenUsageSchema };
 
-export interface UploadedFile {
+/**
+ * Reference to an input document surfaced to a run — field, filename, MIME, and
+ * size. Document bytes are streamed into the run workspace during upload-consume,
+ * so this carries metadata only (no content).
+ */
+export interface FileReference {
   fieldName: string;
   name: string;
   type: string;
   size: number;
 }
-
-export type FileReference = UploadedFile;
 
 /**
  * Platform-specific run configuration — everything that does NOT fit in the

@@ -6,7 +6,8 @@
  *   POST /api/uploads       → createUpload()  (row + signed URL)
  *   PUT  <signed url>       → (S3 direct, or /api/uploads/_content for FS)
  *   POST /api/agents/:id/run { input: { file: "upload://upl_xxx" } }
- *                            → consumeUpload() resolves to buffer, marks consumed
+ *                            → consumeUploadStream() streams the bytes to the
+ *                              caller's sink + marks consumed (no buffering)
  *
  * Security layers:
  *  - Auth + app context on POST /api/uploads (middleware)
@@ -54,10 +55,13 @@ export interface CreateUploadResponse {
   expiresAt: string;
 }
 
-/** Metadata for a consumed upload — the bytes have already been streamed to the
- * caller's sink, so no buffer is carried. Mirrors UploadedFile (minus content)
- * from run-launcher/types. */
-export interface ConsumedUpload {
+/**
+ * Declared metadata for a staged upload: shared by `peekUploads` (read without
+ * claiming) and `consumeUploadStream` (returned after the bytes have streamed to
+ * the caller's sink). No buffer is carried — mirrors the `FileReference` shape
+ * in run-launcher/types.
+ */
+export interface UploadMeta {
   id: string;
   name: string;
   mime: string;
@@ -234,14 +238,6 @@ function isUnsniffableMime(mime: string): boolean {
   return false;
 }
 
-/** Declared metadata for a staged upload, read without claiming or downloading. */
-export interface UploadMeta {
-  id: string;
-  name: string;
-  mime: string;
-  size: number;
-}
-
 /**
  * Read declared metadata for a set of staged uploads — without claiming or
  * downloading them. Verifies each exists, belongs to the caller's tenant, and
@@ -295,7 +291,7 @@ export async function consumeUploadStream(
   uploadId: string,
   ctx: { orgId: string; applicationId: string },
   sink: UploadStreamSink,
-): Promise<ConsumedUpload> {
+): Promise<UploadMeta> {
   // Pre-check so we can return the right shape of error (not-found vs
   // cross-tenant vs already-consumed vs expired). The atomic claim below
   // is what makes concurrent calls safe — this SELECT is just UX.
