@@ -90,16 +90,21 @@ Each text-path tool result carries a `dev.appstrate/token-budget` `_meta` payloa
 
 ## The `body.fromFile` contract
 
-The AFPS integration `api_call` tool exposes `body.fromFile` so agents can upload workspace files without base64-encoding them into a JSON tool argument. **The sidecar has no workspace mount and no knowledge of `fromFile`** — that contract is purely runtime-side:
+The integration `api_call` tool exposes `body.fromFile` so agents can send a workspace file without base64-encoding it into a JSON tool argument. **The sidecar has no workspace mount and no knowledge of `fromFile`** — it is always resolved runtime-side, before MCP, into the canonical wire form:
 
 1. The agent calls `{ns}__api_call` with `{ body: { fromFile: "report.pdf" } }`.
-2. The AFPS `IntegrationApiCallResolver` (`LocalIntegrationResolver` for local creds-file runs, `RemoteAppstrateIntegrationResolver` for remote-proxy runs) reads the workspace bytes locally via `resolveBodyForFetch` (path-safe, lstat-checked).
-3. JSON-RPC has no native byte type, so the resolver base64-encodes the bytes and ships them over MCP as `body: { fromBytes: <base64>, encoding: "base64" }`.
+2. The runtime reads the workspace bytes (path-safe via `resolveSafeFile` — symlink/escape refused).
+3. JSON-RPC has no native byte type, so the bytes are base64-encoded and shipped over MCP as `body: { fromBytes: <base64>, encoding: "base64" }`.
 4. The sidecar's `api_call` MCP handler decodes once and forwards the bytes byte-for-byte to upstream — never seeing the source path.
 
-The MCP `api_call.body` schema accepts either `string` (text/JSON) or `{ fromBytes, encoding: "base64" }` (binary). The `{ fromFile }`, `{ multipart }`, and inline-`Uint8Array` shapes are runtime-side conveniences resolved client-side before MCP — the sidecar only sees the canonical wire forms.
+**Two runtimes resolve it differently — same wire form, different ceilings:**
 
-The download counterpart (`responseMode.toFile`) is the same in reverse: the resolver reads the response bytes (inline text block or `resource_link` → `resources/read`) and writes them to the workspace before handing a `{ kind: "file", path, size, sha256 }` summary back to the agent.
+- **Standalone CLI / `appstrate run` (no sidecar)** — the AFPS `IntegrationApiCallResolver` (`LocalIntegrationResolver` for local creds-file runs, `RemoteAppstrateIntegrationResolver` for remote-proxy runs) makes the HTTP call itself via `resolveBodyForFetch` and can **stream** `fromFile` references larger than `STREAMING_THRESHOLD` straight from disk (up to `MAX_STREAMED_BODY_SIZE`).
+- **Platform (Docker + credential-isolating sidecar)** — the agent-side wrapper (`runtime-pi/mcp/api-call-body-resolver.ts`, wired by `direct.ts`) resolves `fromFile → fromBytes` and forwards to the sidecar, which owns the HTTP + credential injection. Because the bytes cross the agent→sidecar MCP boundary as base64 inside one JSON-RPC envelope, the platform **cannot stream** and caps at `MAX_REQUEST_BODY_SIZE` (default 10 MB; base64 ≈ 13.3 MB, within the 16 MB `MAX_MCP_ENVELOPE_SIZE`). Larger payloads must use `{ns}__api_upload` (resumable protocols) or a dedicated integration.
+
+The MCP `api_call.body` schema advertises `{ fromFile }` alongside `string`, `{ fromBytes, encoding: "base64" }`, and `{ multipart }`, but `{ fromFile }` is a runtime-side convenience resolved client-side before MCP — the sidecar only ever decodes the canonical `{ fromBytes }` / inline-`multipart` wire forms.
+
+The download counterpart differs by runtime too: the CLI resolver supports an explicit `responseMode.toFile` (writes the response to a workspace path, returns a `{ kind: "file", path, size, sha256 }` summary). The platform has no `responseMode` — it **auto-spills** any response above the inline threshold to the blob store and materialises it to `resources/<file>` via `spillResourcesToWorkspace`, handing the agent a `resource_link → resources/read` path pointer.
 
 ## Upstream response-header propagation
 

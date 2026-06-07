@@ -51,6 +51,8 @@ import {
   createMcpServer,
   ErrorCode,
   McpError,
+  API_CALL_TOOL_META_KEY,
+  API_UPLOAD_TOOL_META_KEY,
   type AppstrateToolDefinition,
   type CallToolResult,
   type ReadResourceResult,
@@ -501,8 +503,12 @@ function buildSidecarTools(options: MountMcpOptions): {
       },
       body: {
         description:
-          "Request body. Three shapes:\n" +
+          "Request body. Shapes:\n" +
           "  - string: text/JSON endpoints.\n" +
+          "  - { fromFile: <workspace-relative path> }: send a workspace file's bytes as the " +
+          "body without base64-encoding it into this argument. Resolved agent-side (read + " +
+          "base64) before the call, so the file never enters the model context. Capped at " +
+          "SIDECAR_MAX_REQUEST_BODY_BYTES (buffered over MCP, not streamed — use api_upload for larger).\n" +
           "  - { fromBytes: <base64>, encoding: 'base64' }: binary uploads. " +
           "Standard base64 (RFC 4648 §4) only — no URL-safe alphabet, no whitespace.\n" +
           "  - { multipart: [...] }: multipart/form-data uploads. The sidecar " +
@@ -516,6 +522,18 @@ function buildSidecarTools(options: MountMcpOptions): {
           "SIDECAR_MAX_REQUEST_BODY_BYTES.",
         oneOf: [
           { type: "string" },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["fromFile"],
+            properties: {
+              fromFile: {
+                type: "string",
+                description:
+                  "Workspace-relative path; the runtime reads the file and sends its bytes as the request body.",
+              },
+            },
+          },
           {
             type: "object",
             additionalProperties: false,
@@ -620,6 +638,10 @@ function buildSidecarTools(options: MountMcpOptions): {
           "`resources` and are returned as a `resource_link`.",
         inputSchema:
           CREDENTIAL_PROXY_INPUT_SCHEMA as unknown as AppstrateToolDefinition["descriptor"]["inputSchema"],
+        // Capability marker (read agent-side by `direct.ts`) — routes this
+        // tool by an explicit, rename-safe flag instead of its
+        // `{ns}__api_call` name.
+        _meta: { [API_CALL_TOOL_META_KEY]: true },
       },
       handler: async (rawArgs) =>
         apiCallLimit
@@ -704,6 +726,10 @@ function buildSidecarTools(options: MountMcpOptions): {
             },
           },
         },
+        // Capability marker (read agent-side by `direct.ts`) — routes this
+        // tool by an explicit, rename-safe flag instead of its
+        // `{ns}__api_upload` name (protocols come from the schema enum).
+        _meta: { [API_UPLOAD_TOOL_META_KEY]: true },
       },
       // Advertise-only: the upload is executed agent-side (workspace
       // access), so a direct sidecar invocation cannot succeed.

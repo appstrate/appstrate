@@ -3,21 +3,19 @@
 /**
  * Unit tests for the `{ns}__api_upload` agent-side extension wiring:
  *
- *   - `isApiUploadToolName` recognises only `{ns}__api_upload` names.
  *   - `apiCallToolNameFor` maps an upload tool to its sibling api_call tool.
  *   - `buildApiUploadToolFactory` gates off (returns []) when the
  *     advertised descriptor declares no dispatchable `uploadProtocol`,
  *     and registers a Pi tool when it does.
  *   - Unknown protocol identifiers in the descriptor enum are filtered.
+ *
+ * (Tool DETECTION moved to the `dev.appstrate/api-upload` `_meta` marker —
+ * tested in `@appstrate/mcp-transport`'s `tool-meta` suite.)
  */
 
 import { describe, it, expect } from "bun:test";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
-import {
-  isApiUploadToolName,
-  apiCallToolNameFor,
-  buildApiUploadToolFactory,
-} from "../mcp/api-upload-extension.ts";
+import { apiCallToolNameFor, buildApiUploadToolFactory } from "../mcp/api-upload-extension.ts";
 
 const fakeMcp = {} as AppstrateMcpClient;
 
@@ -36,21 +34,6 @@ function uploadTool(
     },
   };
 }
-
-describe("isApiUploadToolName", () => {
-  it("matches `{ns}__api_upload`", () => {
-    expect(isApiUploadToolName("@scope/drive__api_upload")).toBe(true);
-    expect(isApiUploadToolName("gmail__api_upload")).toBe(true);
-  });
-
-  it("rejects api_call and other tools", () => {
-    expect(isApiUploadToolName("gmail__api_call")).toBe(false);
-    expect(isApiUploadToolName("run_history")).toBe(false);
-    expect(isApiUploadToolName("recall_memory")).toBe(false);
-    // The bare suffix with no namespace is not a valid tool name.
-    expect(isApiUploadToolName("__api_upload")).toBe(false);
-  });
-});
 
 describe("apiCallToolNameFor", () => {
   it("maps the upload tool to its sibling api_call tool", () => {

@@ -315,3 +315,14 @@ export {
   UPSTREAM_HEADER_ALLOWLIST,
   type UpstreamMeta,
 } from "./upstream-meta.ts";
+
+// Tool-descriptor `_meta` capability markers — let the agent runtime route
+// the api_call / api_upload tools by an explicit marker rather than the
+// tool name. Shared so the sidecar (stamps them) and runtime-pi (reads
+// them) agree on the key strings.
+export {
+  API_CALL_TOOL_META_KEY,
+  API_UPLOAD_TOOL_META_KEY,
+  isApiCallTool,
+  isApiUploadTool,
+} from "./tool-meta.ts";

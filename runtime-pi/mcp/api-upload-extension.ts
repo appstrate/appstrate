@@ -42,17 +42,11 @@ export const API_UPLOAD_TOOL_SUFFIX = "__api_upload";
 export const API_CALL_TOOL_SUFFIX = "__api_call";
 
 /**
- * `true` when an advertised sidecar tool name is a per-integration
- * `{ns}__api_upload` tool. `direct.ts` uses this to route the tool to
- * the agent-side resolver instead of forwarding it verbatim.
- */
-export function isApiUploadToolName(name: string): boolean {
-  return name.endsWith(API_UPLOAD_TOOL_SUFFIX) && name.length > API_UPLOAD_TOOL_SUFFIX.length;
-}
-
-/**
  * Map a `{ns}__api_upload` tool name to its sibling `{ns}__api_call`
- * tool name — the tool each chunk is dispatched through.
+ * tool name — the tool each chunk is dispatched through. This is a name
+ * DERIVATION (the sidecar guarantees the sibling exists under this exact
+ * name), not a capability guess — tool routing/detection is driven by the
+ * `dev.appstrate/api-*` `_meta` markers (see `@appstrate/mcp-transport`).
  */
 export function apiCallToolNameFor(uploadToolName: string): string {
   const ns = uploadToolName.slice(0, -API_UPLOAD_TOOL_SUFFIX.length);

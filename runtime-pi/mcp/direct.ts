@@ -26,7 +26,7 @@
  */
 
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
-import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
+import { isApiCallTool, isApiUploadTool, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { Type } from "@mariozechner/pi-ai";
 import {
   buildRuntimeToolFactories,
@@ -37,7 +37,8 @@ import {
 } from "@appstrate/runner-pi";
 import { reEmitRuntimeToolEvents } from "@appstrate/core/runtime-tool-defs";
 import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
-import { buildApiUploadToolFactory, isApiUploadToolName } from "./api-upload-extension.ts";
+import { buildApiUploadToolFactory } from "./api-upload-extension.ts";
+import { resolveApiCallBody, ApiCallBodyResolveError } from "./api-call-body-resolver.ts";
 
 /**
  * 3-line capability prompt (D5.1). Spliceable into a bundle's system
@@ -119,20 +120,26 @@ export async function buildMcpDirectFactories(
  * LLM side (Phase 1.4).
  */
 function buildIntegrationToolFactories(
-  advertised: ReadonlyArray<{ name: string; description?: string; inputSchema?: unknown }>,
+  advertised: ReadonlyArray<{
+    name: string;
+    description?: string;
+    inputSchema?: unknown;
+    _meta?: Record<string, unknown>;
+  }>,
   claimed: ReadonlySet<string>,
   opts: BuildMcpDirectFactoriesOptions,
 ): ExtensionFactory[] {
   const factories: ExtensionFactory[] = [];
   for (const tool of advertised) {
     if (claimed.has(tool.name)) continue;
-    // `{ns}__api_upload` tools are advertised by the sidecar (so the
-    // gating + schema live in one place) but executed agent-side: the
-    // resolver reads the workspace file, chunks it, and dispatches each
-    // chunk back through the sibling `{ns}__api_call` tool. Route them to
-    // the dedicated resolver instead of forwarding verbatim (a verbatim
-    // forward would hit the sidecar's advertise-only error handler).
-    if (isApiUploadToolName(tool.name)) {
+    // `api_upload` tools are advertised by the sidecar (so the gating +
+    // schema live in one place) but executed agent-side: the resolver reads
+    // the workspace file, chunks it, and dispatches each chunk back through
+    // the sibling `{ns}__api_call` tool. Route them to the dedicated
+    // resolver instead of forwarding verbatim (a verbatim forward would hit
+    // the sidecar's advertise-only error handler). Detected by the
+    // `dev.appstrate/api-upload` `_meta` marker, not the tool name.
+    if (isApiUploadTool(tool)) {
       factories.push(
         ...buildApiUploadToolFactory({
           tool,
@@ -144,6 +151,14 @@ function buildIntegrationToolFactories(
       );
       continue;
     }
+    // api_call tools accept `body: { fromFile }` — a workspace-relative
+    // path the sidecar can't read (no workspace mount). Resolve the bytes
+    // to the canonical `{ fromBytes }` wire form agent-side before
+    // forwarding, keeping the large body out of the model context. The
+    // `fromFile` variant is advertised by the sidecar's own schema; here we
+    // only resolve it. Detected by the `dev.appstrate/api-call` `_meta`
+    // marker, not the tool name.
+    const apiCall = isApiCallTool(tool);
     factories.push((pi) => {
       pi.registerTool({
         name: tool.name,
@@ -161,8 +176,37 @@ function buildIntegrationToolFactories(
             toolCallId,
             timestamp: startedAt,
           });
+          let args = (params as Record<string, unknown>) ?? {};
+          if (apiCall && args.body !== undefined) {
+            // Resolve `{ fromFile }` references to base64 wire form. A
+            // resolution failure (missing file, symlink, oversize) is a
+            // tool-level error the LLM can act on — not a run abort.
+            try {
+              args = {
+                ...args,
+                body: await resolveApiCallBody(args.body, { workspace: opts.workspace }),
+              };
+            } catch (err) {
+              if (err instanceof ApiCallBodyResolveError) {
+                opts.emit({
+                  type: `integration_tool.completed`,
+                  runId: opts.runId,
+                  tool: tool.name,
+                  toolCallId,
+                  durationMs: Date.now() - startedAt,
+                  isError: true,
+                  timestamp: Date.now(),
+                });
+                return callToolResultToPi({
+                  content: [{ type: "text" as const, text: err.message }],
+                  isError: true,
+                });
+              }
+              throw err;
+            }
+          }
           const result = await opts.mcp.callTool(
-            { name: tool.name, arguments: (params as Record<string, unknown>) ?? {} },
+            { name: tool.name, arguments: args },
             { ...(signal ? { signal } : {}) },
           );
           opts.emit({
