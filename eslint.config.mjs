@@ -58,13 +58,16 @@ export default tseslint.config(
     },
   },
   {
-    // Supply-chain guard: the single-vendor Pi SDK
-    // (@mariozechner/pi-ai, @mariozechner/pi-coding-agent) may only be
-    // imported through each package's `pi-sdk.ts` barrel, so swapping or
-    // forking it is a one-file change. Barrels are exempt via `ignores`.
-    // Rationale: docs/architecture/SUPPLY_CHAIN.md
+    // Supply-chain guard: the single-vendor Pi SDK (the whole
+    // `@mariozechner/pi-*` family — pi-ai, pi-coding-agent, and siblings
+    // pi-agent-core / pi-tui) may only be imported through each package's
+    // `pi-sdk.ts` barrel, so swapping or forking it is a one-file change.
+    // Barrels are exempt via `ignores`. `packages/afps-runtime/src` is
+    // SDK-agnostic and imports zero pi-* symbols today, so it has no barrel —
+    // the guard simply keeps it that way. Rationale: docs/architecture/SUPPLY_CHAIN.md
     files: [
       "packages/runner-pi/src/**/*.ts",
+      "packages/afps-runtime/src/**/*.ts",
       "apps/cli/src/**/*.ts",
       "apps/api/src/**/*.ts",
       "runtime-pi/**/*.ts",
@@ -83,12 +86,8 @@ export default tseslint.config(
         {
           patterns: [
             {
-              group: ["@mariozechner/pi-ai", "@mariozechner/pi-ai/*"],
-              message:
-                "Import the Pi SDK only through the package-local pi-sdk barrel (pi-sdk.ts) — see docs/architecture/SUPPLY_CHAIN.md",
-            },
-            {
-              group: ["@mariozechner/pi-coding-agent", "@mariozechner/pi-coding-agent/*"],
+              // `**` (not `*`) so deep subpaths like pi-ai/dist/foo are caught.
+              group: ["@mariozechner/pi-*", "@mariozechner/pi-*/**"],
               message:
                 "Import the Pi SDK only through the package-local pi-sdk barrel (pi-sdk.ts) — see docs/architecture/SUPPLY_CHAIN.md",
             },

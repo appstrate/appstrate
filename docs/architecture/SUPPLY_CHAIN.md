@@ -71,9 +71,19 @@ Because the SDK is imported only through the three `pi-sdk.ts` barrels, swapping
 the implementation is a change to those files alone — no agent logic moves.
 
 A `no-restricted-imports` rule in `eslint.config.mjs` forbids any direct
-`@mariozechner/pi-*` import outside the barrels (the barrels are exempted via
-`ignores`). This keeps the property true going forward — a new file that imports
-the SDK directly fails `bun run check`.
+`@mariozechner/pi-*` import (the whole vendor family — including subpaths) outside
+the barrels (the barrels are exempted via `ignores`). The guard covers every
+declared SDK consumer tree: `packages/runner-pi/src`, `runtime-pi`, `apps/cli/src`,
+`apps/api/src`, and `packages/afps-runtime/src`. `afps-runtime` is SDK-agnostic and
+imports zero pi-\* symbols today, so it has no barrel — the guard simply keeps it
+that way (a future direct import there fails `bun run check`). This keeps the
+property true going forward — a new file that imports the SDK directly fails
+`bun run check`.
+
+A barrel-completeness test (`test/supply-chain-barrels.test.ts`) asserts each
+barrel actually re-exports the value symbols its consumers import — a missing
+re-export is a runtime crash the lint guard cannot catch. Type-only re-exports are
+covered by `tsc` on the barrels' real consumers.
 
 ### Renovate / Dependabot
 
