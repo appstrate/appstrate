@@ -40,6 +40,21 @@ export interface McpToolContext {
 const DEFAULT_SEARCH_LIMIT = 25;
 const MAX_SEARCH_LIMIT = 100;
 const METHODS_WITH_BODY = new Set(["POST", "PUT", "PATCH"]);
+// Headers the caller may NOT set via the `headers` arg: the auth context is
+// forwarded from the inbound MCP request and must not be reshaped by the
+// model (no swapping credentials, switching org/app, or forging end-user
+// impersonation). Everything else (e.g. Credential-Proxy target headers) is
+// allowed — still bounded by RBAC on the dispatched route.
+const PROTECTED_HEADERS = new Set([
+  "authorization",
+  "cookie",
+  "host",
+  "content-length",
+  "x-org-id",
+  "x-application-id",
+  "appstrate-user",
+  "appstrate-version",
+]);
 // Cap the buffered response body so a large list endpoint can't dump
 // unbounded text into the model context. Truncation is flagged in the result.
 const MAX_RESPONSE_CHARS = 100_000;
@@ -178,12 +193,26 @@ function buildDescribeTool(): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
+/**
+ * Encode a path-param value for a single URL segment while preserving `@`.
+ *
+ * Package scopes carry an `@` sigil (`@appstrate/foo` → scope `@appstrate`)
+ * and ~30 routes match it literally (`/api/agents/{scope}/{name}`, the run
+ * trigger, schedules, fork, every scope get/list). `encodeURIComponent`
+ * turns `@` into `%40`, which those routes never match → 404. `@` is a
+ * valid RFC 3986 path char (sub-delim/pchar), so leaving it raw is correct;
+ * `/`, spaces, etc. stay percent-encoded to keep each value one segment.
+ */
+function encodePathSegment(value: string): string {
+  return encodeURIComponent(value).replace(/%40/g, "@");
+}
+
 function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknown>): string | null {
   let path = op.pathTemplate;
   for (const name of op.pathParams) {
     const value = pathParams[name];
     if (value === undefined || value === null) return null;
-    path = path.replace(`{${name}}`, encodeURIComponent(String(value)));
+    path = path.replace(`{${name}}`, encodePathSegment(String(value)));
   }
   return path;
 }
@@ -295,6 +324,14 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
           description: "JSON request body (for POST/PUT/PATCH).",
           additionalProperties: true,
         },
+        headers: {
+          type: "object",
+          description:
+            "Extra request headers (string values), e.g. target headers for the credential " +
+            "proxy. Auth headers (authorization, cookie, x-org-id, …) are forwarded from your " +
+            "session and cannot be overridden here.",
+          additionalProperties: { type: "string" },
+        },
       },
       required: ["operation_id"],
     },
@@ -328,6 +365,13 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     applyQuery(url, asRecord(args.query) ?? {});
 
     const headers = new Headers(ctx.authHeaders);
+    const extraHeaders = asRecord(args.headers);
+    if (extraHeaders) {
+      for (const [name, value] of Object.entries(extraHeaders)) {
+        if (PROTECTED_HEADERS.has(name.toLowerCase())) continue;
+        if (typeof value === "string") headers.set(name, value);
+      }
+    }
     const body = asRecord(args.body);
     const sendBody = body !== undefined && METHODS_WITH_BODY.has(op.method);
     if (sendBody) headers.set("content-type", "application/json");

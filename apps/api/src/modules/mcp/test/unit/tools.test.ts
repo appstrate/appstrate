@@ -137,6 +137,36 @@ describe("invoke_operation", () => {
     expect(pathname).not.toContain("{");
   });
 
+  it("preserves the @ scope sigil instead of percent-encoding it", async () => {
+    const op = firstOp((o) => o.pathParams.includes("scope"));
+    const values: Record<string, string> = {};
+    for (const name of op.pathParams) values[name] = name === "scope" ? "@appstrate" : "demo";
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: op.operationId, path_params: values }, noExtra);
+    const pathname = new URL(calls[0]!.url).pathname;
+    expect(pathname).toContain("@appstrate");
+    expect(pathname).not.toContain("%40");
+  });
+
+  it("forwards extra headers but never overrides forwarded auth headers", async () => {
+    const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    await byName.get("invoke_operation")!.handler(
+      {
+        operation_id: op.operationId,
+        headers: { "X-Target-Header": "abc", authorization: "Bearer HIJACK", "X-Org-Id": "evil" },
+      },
+      noExtra,
+    );
+    const sent = calls[0]!.headers;
+    expect(sent.get("x-target-header")).toBe("abc");
+    // Auth context stays as forwarded — the model cannot reshape it.
+    expect(sent.get("authorization")).toBe("Bearer tok");
+    expect(sent.get("x-org-id")).toBe("org_1");
+  });
+
   it("denies invocation without mcp:invoke", async () => {
     const op = firstOp(() => true);
     const { byName, calls } = makeTools(["mcp:read"]);
