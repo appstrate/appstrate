@@ -1183,3 +1183,144 @@ describe("executeApiCall — finalUrl exposure (#471)", () => {
     }
   });
 });
+
+describe("executeApiCall — debug diagnostic envelope (#404)", () => {
+  /**
+   * Capture stdout lines written by the sidecar logger during `fn`, restore
+   * the original writer afterwards, and return the parsed JSON log records.
+   * The diagnostic envelope is a `debug` line, so it lands on stdout.
+   */
+  async function captureLogs(
+    level: string | undefined,
+    fn: () => Promise<void>,
+  ): Promise<Array<Record<string, unknown>>> {
+    const prevLevel = process.env.LOG_LEVEL;
+    if (level === undefined) delete process.env.LOG_LEVEL;
+    else process.env.LOG_LEVEL = level;
+    const lines: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: unknown): boolean => {
+      lines.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      await fn();
+    } finally {
+      process.stdout.write = original;
+      if (prevLevel === undefined) delete process.env.LOG_LEVEL;
+      else process.env.LOG_LEVEL = prevLevel;
+    }
+    return lines
+      .join("")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+  }
+
+  const call = (deps: ApiCallDeps) =>
+    executeApiCall(
+      {
+        integrationId: "gmail",
+        targetUrl: "https://api.example.com/messages",
+        method: "GET",
+        callerHeaders: { "X-Custom": "x" },
+        body: { kind: "none" },
+      },
+      deps,
+    );
+
+  it("emits one structured envelope at LOG_LEVEL=debug with redacted headers", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response('{"data":1}', {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "Set-Cookie": "sess=abc; HttpOnly",
+            "WWW-Authenticate": "Bearer realm=x",
+          },
+        }),
+    );
+    const records = await captureLogs("debug", async () => {
+      const r = await call(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+      expect(r.ok).toBe(true);
+    });
+    const envelope = records.find((r) => r.msg === "integration api_call completed");
+    expect(envelope).toBeDefined();
+    expect(envelope!.integrationId).toBe("gmail");
+    expect(envelope!.method).toBe("GET");
+    expect(envelope!.host).toBe("api.example.com");
+    expect(envelope!.status).toBe(200);
+    expect(envelope!.hops).toBe(0);
+    expect(envelope!.redirected).toBe(false);
+    expect(envelope!.authMode).toBe("header");
+    expect(envelope!.injectedHeader).toBe("authorization");
+    expect(envelope!.urlPolicy).toBe("allowlist");
+    expect(typeof envelope!.durationMs).toBe("number");
+    // Request header names surface the injected `authorization` header — by
+    // NAME only, never its value.
+    const reqNames = (envelope!.requestHeaderNames as string[]).map((h) => h.toLowerCase());
+    expect(reqNames).toContain("authorization");
+    expect(reqNames).toContain("x-custom");
+    expect(JSON.stringify(envelope)).not.toContain("tok-123");
+    expect(JSON.stringify(envelope)).not.toContain("Bearer tok-123");
+    // Response headers drop the credential-bearing entries.
+    const respHeaders = envelope!.responseHeaders as Record<string, string>;
+    const respKeys = Object.keys(respHeaders).map((k) => k.toLowerCase());
+    expect(respKeys).not.toContain("set-cookie");
+    expect(respKeys).not.toContain("www-authenticate");
+    expect(respKeys).toContain("content-type");
+  });
+
+  it("is silent at the default LOG_LEVEL (info)", async () => {
+    const records = await captureLogs(undefined, async () => {
+      const r = await call(makeDeps());
+      expect(r.ok).toBe(true);
+    });
+    expect(records.find((r) => r.msg === "integration api_call completed")).toBeUndefined();
+  });
+
+  it("reports the redirect hop count and final host", async () => {
+    const fetchFn = mock(async (url: string | URL) => {
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.endsWith("/messages")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/inbox" },
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    const records = await captureLogs("debug", async () => {
+      const r = await call(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+      expect(r.ok).toBe(true);
+    });
+    const envelope = records.find((r) => r.msg === "integration api_call completed");
+    expect(envelope).toBeDefined();
+    expect(envelope!.hops).toBe(1);
+    expect(envelope!.redirected).toBe(true);
+    expect(envelope!.host).toBe("api.example.com");
+  });
+
+  it("labels authMode 'none' and urlPolicy 'allow_all' when no header is injected", async () => {
+    const fetchCredentials = mock(
+      async (): Promise<CredentialsResponse> => ({
+        credentials: {},
+        authorizedUris: null,
+        allowAllUris: true,
+        // No credentialHeaderName → no server-side injection (authMode "none").
+        // credentialFieldName is always populated server-side regardless.
+        credentialFieldName: "access_token",
+      }),
+    );
+    const records = await captureLogs("debug", async () => {
+      const r = await call(makeDeps({ fetchCredentials }));
+      expect(r.ok).toBe(true);
+    });
+    const envelope = records.find((r) => r.msg === "integration api_call completed");
+    expect(envelope).toBeDefined();
+    expect(envelope!.authMode).toBe("none");
+    expect(envelope!.injectedHeader).toBeNull();
+    expect(envelope!.urlPolicy).toBe("allow_all");
+  });
+});
