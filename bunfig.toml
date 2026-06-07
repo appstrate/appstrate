@@ -3,3 +3,17 @@ preload = ["./test/setup/preload.ts"]
 timeout = 15000
 coverageSkipTestFiles = true
 pathIgnorePatterns = ["e2e/**"]
+# Exclude non-product code from coverage so local `bun test --coverage` and the
+# Codecov upload agree. Kept in lockstep with the `ignore` list in .codecov.yml:
+# generated schema, type re-exports, the React SPA, the test harness, and scripts
+# carry no enforced coverage floor.
+coveragePathIgnorePatterns = [
+  "**/node_modules/**",
+  "**/*.d.ts",
+  "apps/web/**",
+  "test/**",
+  "scripts/**",
+  "packages/db/src/schema/**",
+  "packages/db/src/schema.ts",
+  "packages/shared-types/**",
+]
