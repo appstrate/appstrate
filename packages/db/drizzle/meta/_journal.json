@@ -43,6 +43,13 @@
       "when": 1780752671543,
       "tag": "0005_integration_refresh_failure_tracking",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1780844239357,
+      "tag": "0006_soft_moira_mactaggert",
+      "breakpoints": true
     }
   ]
 }

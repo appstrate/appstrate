@@ -144,6 +144,10 @@ export const oauthRefreshToken = pgTable("oauth_refresh_tokens", {
   revoked: timestamp("revoked"),
   authTime: timestamp("auth_time"),
   scopes: text("scopes").array().notNull(),
+  // RFC 8707 resource indicators (Better Auth 1.7+): the audiences this token
+  // was issued for. Optional — first-party flows that pass no `resource` leave
+  // it null.
+  resources: text("resources").array(),
 });
 
 export const oauthAccessToken = pgTable("oauth_access_tokens", {
@@ -159,6 +163,8 @@ export const oauthAccessToken = pgTable("oauth_access_tokens", {
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow(),
   scopes: text("scopes").array().notNull(),
+  // RFC 8707 resource indicators (Better Auth 1.7+) — see oauth_refresh_tokens.
+  resources: text("resources").array(),
 });
 
 export const oauthConsent = pgTable("oauth_consents", {
@@ -169,6 +175,9 @@ export const oauthConsent = pgTable("oauth_consents", {
   userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
   referenceId: text("reference_id"),
   scopes: text("scopes").array().notNull(),
+  // RFC 8707 resource indicators (Better Auth 1.7+) — the resources the user
+  // consented the client to access.
+  resources: text("resources").array(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

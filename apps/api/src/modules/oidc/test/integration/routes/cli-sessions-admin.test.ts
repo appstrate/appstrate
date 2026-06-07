@@ -73,6 +73,10 @@ async function loginCli(
   });
   expect(codeRes.status).toBe(200);
   const code = (await codeRes.json()) as { device_code: string; user_code: string };
+  // BA 1.7: claim the code (GET /device) before approving.
+  await app.request(`/api/auth/device?user_code=${encodeURIComponent(code.user_code)}`, {
+    headers: { Cookie: cookie },
+  });
   const approve = await app.request("/api/auth/device/approve", {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: cookie },
