@@ -13,8 +13,8 @@
  *   2. Honour `responseMode.toFile`. The sidecar has no workspace mount, so
  *      (like `body.fromFile`) this is resolved runtime-side: materialise the
  *      response body to the requested workspace path and hand the agent a
- *      `{ kind: "file", path, size, status, sha256 }` descriptor instead of
- *      the bytes — keeping large responses out of the model context with a
+ *      `{ kind: "file", path, size, status }` descriptor instead of the bytes
+ *      — keeping large responses out of the model context with a
  *      deterministic, agent-chosen path.
  *
  * When `responseMode.toFile` is absent, large responses still auto-spill to
@@ -34,7 +34,6 @@ interface ResultContentBlock {
   type: string;
   text?: string;
   uri?: string;
-  resource?: { uri?: string; text?: string; blob?: string };
 }
 interface ToolResult {
   content: ResultContentBlock[];
@@ -69,7 +68,11 @@ function decodeBase64(b64: string): Uint8Array {
   return new Uint8Array(Buffer.from(b64, "base64"));
 }
 
-/** Gather the full response body bytes from a result's content blocks. */
+/**
+ * Gather the full response body bytes from a result's content blocks.
+ * api_call returns inline `text` (small) or a `resource_link` (the sidecar
+ * spilled a large body to its blob store) — never an embedded `resource`.
+ */
 async function extractBodyBytes(
   result: ToolResult,
   readResource: ReadResource,
@@ -83,10 +86,6 @@ async function extractBodyBytes(
       const c = (await readResource(block.uri)).contents?.[0];
       if (c?.text != null) chunks.push(enc.encode(c.text));
       else if (c?.blob != null) chunks.push(decodeBase64(c.blob));
-    } else if (block.type === "resource" && block.resource) {
-      const inner = block.resource;
-      if (inner.text != null) chunks.push(enc.encode(inner.text));
-      else if (inner.blob != null) chunks.push(decodeBase64(inner.blob));
     }
   }
   const total = chunks.reduce((n, c) => n + c.byteLength, 0);
@@ -97,23 +96,6 @@ async function extractBodyBytes(
     off += c.byteLength;
   }
   return out;
-}
-
-function sha256Hex(bytes: Uint8Array): string {
-  const bun = (globalThis as { Bun?: { CryptoHasher: new (a: string) => BunHasher } }).Bun;
-  if (bun && typeof bun.CryptoHasher === "function") {
-    const h = new bun.CryptoHasher("sha256");
-    h.update(bytes);
-    return h.digest("hex");
-  }
-  // Node fallback (tests outside Bun) — require avoids pulling node:crypto into Bun bundles.
-  const { createHash } = require("node:crypto") as typeof import("node:crypto");
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
-interface BunHasher {
-  update(b: Uint8Array): void;
-  digest(enc: "hex"): string;
 }
 
 /**
@@ -136,7 +118,6 @@ export async function shapeApiCallResponse(
       kind: "file" as const,
       path: opts.toFile,
       size: bytes.byteLength,
-      sha256: sha256Hex(bytes),
       ...(status !== null ? { status } : {}),
     };
     return {

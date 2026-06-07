@@ -614,7 +614,7 @@ function buildSidecarTools(options: MountMcpOptions): {
             type: "string",
             description:
               "Workspace-relative path to write the response body to. The tool then returns a " +
-              "`{ kind: 'file', path, size, status, sha256 }` descriptor instead of the bytes. " +
+              "`{ kind: 'file', path, size, status }` descriptor instead of the bytes. " +
               "Without it, responses larger than the inline threshold auto-spill to `resources/<file>`.",
           },
         },

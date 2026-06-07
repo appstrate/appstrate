@@ -42,7 +42,7 @@ describe("shapeApiCallResponse — responseMode.toFile", () => {
     expect(descriptor.path).toBe("out.json");
     expect(descriptor.size).toBe(7);
     expect(descriptor.status).toBe(200);
-    expect(typeof descriptor.sha256).toBe("string");
+    expect(descriptor.sha256).toBeUndefined();
     expect(readFileSync(join(workspace, "out.json"), "utf8")).toBe('{"a":1}');
   });
 
