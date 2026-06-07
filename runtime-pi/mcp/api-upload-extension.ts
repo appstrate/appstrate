@@ -51,6 +51,20 @@ export function isApiUploadToolName(name: string): boolean {
 }
 
 /**
+ * `true` when an advertised sidecar tool name is a per-integration
+ * `{ns}__api_call` tool — both the single-auth `{ns}__api_call` form and
+ * the multi-auth `{ns}__api_call__{authKey}` variant. `direct.ts` uses
+ * this to resolve `body: { fromFile }` references agent-side before
+ * forwarding the canonical wire form to the sidecar.
+ */
+export function isApiCallToolName(name: string): boolean {
+  return (
+    (name.endsWith(API_CALL_TOOL_SUFFIX) && name.length > API_CALL_TOOL_SUFFIX.length) ||
+    name.includes(`${API_CALL_TOOL_SUFFIX}__`)
+  );
+}
+
+/**
  * Map a `{ns}__api_upload` tool name to its sibling `{ns}__api_call`
  * tool name — the tool each chunk is dispatched through.
  */

@@ -37,7 +37,16 @@ import {
 } from "@appstrate/runner-pi";
 import { reEmitRuntimeToolEvents } from "@appstrate/core/runtime-tool-defs";
 import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
-import { buildApiUploadToolFactory, isApiUploadToolName } from "./api-upload-extension.ts";
+import {
+  buildApiUploadToolFactory,
+  isApiUploadToolName,
+  isApiCallToolName,
+} from "./api-upload-extension.ts";
+import {
+  resolveApiCallBody,
+  augmentApiCallInputSchema,
+  ApiCallBodyResolveError,
+} from "./api-call-body-resolver.ts";
 
 /**
  * 3-line capability prompt (D5.1). Spliceable into a bundle's system
@@ -144,13 +153,25 @@ function buildIntegrationToolFactories(
       );
       continue;
     }
+    // `{ns}__api_call` tools accept a `body` that may reference a
+    // workspace file (`{ fromFile }`, multipart `{ name, fromFile }`).
+    // The sidecar has no workspace mount, so we (a) advertise the richer
+    // schema to the LLM and (b) resolve the file bytes to the canonical
+    // wire form (`{ fromBytes }` / inline byte-parts) agent-side before
+    // forwarding — keeping large request bodies out of the model context.
+    const apiCall = isApiCallToolName(tool.name);
     factories.push((pi) => {
       pi.registerTool({
         name: tool.name,
         label: tool.name,
         description: tool.description ?? `Integration tool: ${tool.name}`,
         parameters: Type.Unsafe<Record<string, unknown>>(
-          (tool.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
+          apiCall
+            ? augmentApiCallInputSchema(tool.inputSchema)
+            : ((tool.inputSchema as Record<string, unknown>) ?? {
+                type: "object",
+                properties: {},
+              }),
         ),
         async execute(toolCallId, params, signal) {
           const startedAt = Date.now();
@@ -161,8 +182,37 @@ function buildIntegrationToolFactories(
             toolCallId,
             timestamp: startedAt,
           });
+          let args = (params as Record<string, unknown>) ?? {};
+          if (apiCall && args.body !== undefined) {
+            // Resolve `{ fromFile }` references to base64 wire form. A
+            // resolution failure (missing file, symlink, oversize) is a
+            // tool-level error the LLM can act on — not a run abort.
+            try {
+              args = {
+                ...args,
+                body: await resolveApiCallBody(args.body, { workspace: opts.workspace }),
+              };
+            } catch (err) {
+              if (err instanceof ApiCallBodyResolveError) {
+                opts.emit({
+                  type: `integration_tool.completed`,
+                  runId: opts.runId,
+                  tool: tool.name,
+                  toolCallId,
+                  durationMs: Date.now() - startedAt,
+                  isError: true,
+                  timestamp: Date.now(),
+                });
+                return callToolResultToPi({
+                  content: [{ type: "text" as const, text: err.message }],
+                  isError: true,
+                });
+              }
+              throw err;
+            }
+          }
           const result = await opts.mcp.callTool(
-            { name: tool.name, arguments: (params as Record<string, unknown>) ?? {} },
+            { name: tool.name, arguments: args },
             { ...(signal ? { signal } : {}) },
           );
           opts.emit({
