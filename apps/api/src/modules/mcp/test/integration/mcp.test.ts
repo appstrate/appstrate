@@ -103,6 +103,31 @@ describe("mcp discovery + auth gate", () => {
     });
     expect(res.status).toBe(403);
   });
+
+  it("rejects GET on /api/mcp with 405 for an authenticated caller", async () => {
+    // Stateless transport (no session id, JSON response mode) does not serve a
+    // standalone SSE stream, so GET is Method Not Allowed. This is the
+    // behaviour the OpenAPI spec documents; assert it rather than trust it.
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const res = await app.request("/api/mcp", {
+      method: "GET",
+      headers: { ...headers, Accept: MCP_ACCEPT },
+    });
+    expect(res.status).toBe(405);
+    expect(res.headers.get("Allow")).toBe("POST");
+  });
+
+  it("rejects DELETE on /api/mcp with 405 (no session to terminate in stateless mode)", async () => {
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const res = await app.request("/api/mcp", { method: "DELETE", headers });
+    expect(res.status).toBe(405);
+    expect(res.headers.get("Allow")).toBe("POST");
+  });
+
+  it("rejects an unauthenticated GET on /api/mcp with 401 (auth runs before the transport)", async () => {
+    const res = await app.request("/api/mcp", { method: "GET", headers: { Accept: MCP_ACCEPT } });
+    expect(res.status).toBe(401);
+  });
 });
 
 describe("mcp tool round-trip", () => {
@@ -174,6 +199,37 @@ describe("mcp tool round-trip", () => {
       params: { name: "invoke_operation", arguments: { operation_id: op.operationId } },
     });
     expect(toolPayload(envelope).isError).toBe(true);
+  });
+
+  it("handles concurrent in-flight invoke_operation calls without cross-contamination", async () => {
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    // Distinct read-only GET operations with no path params: each request gets
+    // its own server+transport+tool context (router is stateless), so firing
+    // them concurrently must not bleed state between requests.
+    const ops = [...getCatalog().operations.values()]
+      .filter((o) => o.method === "GET" && o.pathParams.length === 0)
+      .slice(0, 8);
+    expect(ops.length).toBeGreaterThan(1);
+
+    const results = await Promise.all(
+      ops.map((op, i) =>
+        rpc(headers, {
+          jsonrpc: "2.0",
+          id: 100 + i,
+          method: "tools/call",
+          params: { name: "invoke_operation", arguments: { operation_id: op.operationId } },
+        }),
+      ),
+    );
+
+    // Every call resolved to a well-formed tool result with a numeric status,
+    // and each JSON-RPC response id matches its request id (no swapped envelopes).
+    results.forEach((res, i) => {
+      expect(res.status).toBe(200);
+      expect((res.envelope as { id?: number }).id ?? 100 + i).toBe(100 + i);
+      const payload = toolPayload(res.envelope);
+      expect(typeof payload.data.status).toBe("number");
+    });
   });
 
   it("completes the initialize handshake for a session caller", async () => {

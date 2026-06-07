@@ -21,6 +21,7 @@ import type { Context } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "@appstrate/mcp-transport";
 import { requireModulePermission } from "@appstrate/core/permissions";
+import { methodNotAllowed } from "../../lib/errors.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { getPlatformApp } from "../../lib/platform-app.ts";
 import { buildMcpTools, type Dispatch } from "./tools.ts";
@@ -93,7 +94,7 @@ export function createMcpRouter(): Hono<AppEnv> {
 
   app.use(MCP_PATH, requireModulePermission("mcp", "read"));
 
-  app.all(MCP_PATH, async (c) => {
+  app.post(MCP_PATH, async (c) => {
     const origin = new URL(c.req.url).origin;
     const permissions = c.get("permissions") ?? new Set<string>();
     const authHeaders = forwardAuthHeaders(c.req.raw.headers);
@@ -118,14 +119,11 @@ export function createMcpRouter(): Hono<AppEnv> {
 
     // Reconstruct the request so the SDK transport can read the body once.
     const raw = c.req.raw;
-    let forwarded = raw;
-    if (raw.method === "POST" || raw.method === "PUT" || raw.method === "PATCH") {
-      forwarded = new Request(raw.url, {
-        method: raw.method,
-        headers: raw.headers,
-        body: await raw.arrayBuffer(),
-      });
-    }
+    const forwarded = new Request(raw.url, {
+      method: raw.method,
+      headers: raw.headers,
+      body: await raw.arrayBuffer(),
+    });
 
     try {
       await server.connect(transport);
@@ -134,6 +132,16 @@ export function createMcpRouter(): Hono<AppEnv> {
       await transport.close();
       await server.close();
     }
+  });
+
+  // Stateless JSON-response transport serves no standalone server→client SSE
+  // stream (GET) and has no session to terminate (DELETE), so POST is the only
+  // meaningful verb. Reject everything else with 405 + `Allow: POST` rather
+  // than letting the SDK open a dangling GET SSE stream that never receives a
+  // message. Auth still runs first (global pipeline), so an unauthenticated
+  // request of any verb is rejected with 401 before reaching here.
+  app.all(MCP_PATH, () => {
+    throw methodNotAllowed(["POST"]);
   });
 
   return app;

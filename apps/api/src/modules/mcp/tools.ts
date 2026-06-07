@@ -227,7 +227,7 @@ function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknow
  *  - Non-text bodies (downloads, tarballs) are summarised, not decoded.
  *  - Text bodies are capped to bound context size.
  */
-async function readResponse(response: Response): Promise<CallToolResult> {
+export async function readResponse(response: Response): Promise<CallToolResult> {
   const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
   const isError = response.status >= 400;
 
