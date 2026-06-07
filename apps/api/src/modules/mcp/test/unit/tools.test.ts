@@ -1,0 +1,159 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Unit tests for the MCP catalog + the three progressive-disclosure tools.
+ * Pure logic — no DB. Dispatch is injected so we can assert exactly what
+ * request the platform would receive without booting the full app.
+ */
+
+import { describe, it, expect, beforeEach } from "bun:test";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import { getCatalog, resetCatalog, type CatalogOperation } from "../../catalog.ts";
+import { buildMcpTools, type Dispatch } from "../../tools.ts";
+
+// The handlers ignore `extra`; supply a typed placeholder.
+const noExtra = {} as unknown as AppstrateRequestExtra;
+
+function parseResult(result: CallToolResult): Record<string, unknown> {
+  const first = result.content[0];
+  if (!first || first.type !== "text") throw new Error("expected text content");
+  return JSON.parse(first.text) as Record<string, unknown>;
+}
+
+function makeTools(permissions: string[]) {
+  const calls: Request[] = [];
+  const dispatch: Dispatch = async (req) => {
+    calls.push(req);
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  const tools = buildMcpTools({
+    origin: "https://test.local",
+    authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
+    permissions: new Set(permissions),
+    dispatch,
+  });
+  const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
+  return { byName, calls };
+}
+
+function firstOp(predicate: (op: CatalogOperation) => boolean): CatalogOperation {
+  const op = [...getCatalog().operations.values()].find(predicate);
+  if (!op) throw new Error("no matching operation in catalog");
+  return op;
+}
+
+describe("mcp catalog", () => {
+  beforeEach(() => resetCatalog());
+
+  it("indexes core operations from the live spec", () => {
+    const { operations } = getCatalog();
+    expect(operations.size).toBeGreaterThan(50);
+  });
+
+  it("excludes the MCP server's own transport + discovery paths", () => {
+    for (const op of getCatalog().operations.values()) {
+      expect(op.pathTemplate).not.toBe("/api/mcp");
+      expect(op.pathTemplate.startsWith("/.well-known/oauth-protected-resource")).toBe(false);
+    }
+  });
+});
+
+describe("search_operations", () => {
+  beforeEach(() => resetCatalog());
+
+  it("returns keyword matches with method/path/summary", async () => {
+    const { byName } = makeTools(["mcp:read"]);
+    const res = await byName.get("search_operations")!.handler({ query: "agent" }, noExtra);
+    const body = parseResult(res);
+    expect(body.count as number).toBeGreaterThan(0);
+    const ops = body.operations as Array<Record<string, unknown>>;
+    expect(typeof ops[0]!.operation_id).toBe("string");
+    expect(typeof ops[0]!.method).toBe("string");
+  });
+
+  it("caps results at the requested limit", async () => {
+    const { byName } = makeTools(["mcp:read"]);
+    const res = await byName.get("search_operations")!.handler({ limit: 3 }, noExtra);
+    const body = parseResult(res);
+    expect((body.operations as unknown[]).length).toBeLessThanOrEqual(3);
+  });
+});
+
+describe("describe_operation", () => {
+  beforeEach(() => resetCatalog());
+
+  it("returns the operation definition", async () => {
+    const op = firstOp(() => true);
+    const { byName } = makeTools(["mcp:read"]);
+    const res = await byName
+      .get("describe_operation")!
+      .handler({ operation_id: op.operationId }, noExtra);
+    const body = parseResult(res);
+    expect(body.method).toBe(op.method);
+    expect(body.path).toBe(op.pathTemplate);
+  });
+
+  it("errors on an unknown operationId", async () => {
+    const { byName } = makeTools(["mcp:read"]);
+    const res = await byName
+      .get("describe_operation")!
+      .handler({ operation_id: "doesNotExist" }, noExtra);
+    expect(res.isError).toBe(true);
+  });
+});
+
+describe("invoke_operation", () => {
+  beforeEach(() => resetCatalog());
+
+  it("dispatches a GET operation in-process and forwards auth headers", async () => {
+    const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
+    const { byName, calls } = makeTools(["mcp:read", "mcp:invoke"]);
+    const res = await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: op.operationId }, noExtra);
+    const body = parseResult(res);
+    expect(body.status).toBe(200);
+    expect(calls.length).toBe(1);
+    expect(calls[0]!.method).toBe("GET");
+    expect(new URL(calls[0]!.url).pathname).toBe(op.pathTemplate);
+    expect(calls[0]!.headers.get("authorization")).toBe("Bearer tok");
+    expect(calls[0]!.headers.get("x-org-id")).toBe("org_1");
+  });
+
+  it("interpolates path params", async () => {
+    const op = firstOp((o) => o.method === "GET" && o.pathParams.length > 0);
+    const values: Record<string, string> = {};
+    for (const name of op.pathParams) values[name] = `v_${name}`;
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: op.operationId, path_params: values }, noExtra);
+    const pathname = new URL(calls[0]!.url).pathname;
+    for (const name of op.pathParams) expect(pathname).toContain(`v_${name}`);
+    expect(pathname).not.toContain("{");
+  });
+
+  it("denies invocation without mcp:invoke", async () => {
+    const op = firstOp(() => true);
+    const { byName, calls } = makeTools(["mcp:read"]);
+    const res = await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: op.operationId }, noExtra);
+    expect(res.isError).toBe(true);
+    expect(calls.length).toBe(0);
+  });
+
+  it("errors when required path params are missing", async () => {
+    const op = firstOp((o) => o.pathParams.length > 0);
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    const res = await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: op.operationId }, noExtra);
+    expect(res.isError).toBe(true);
+    expect(calls.length).toBe(0);
+  });
+});

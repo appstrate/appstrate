@@ -289,7 +289,7 @@ const envSchema = z
     MODULES: z
       .string()
       .default(
-        "oidc,webhooks,core-providers,@appstrate/module-codex,@appstrate/module-claude-code",
+        "oidc,webhooks,mcp,core-providers,@appstrate/module-codex,@appstrate/module-claude-code",
       ),
 
     // App

@@ -179,6 +179,10 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   // Infrastructure (read only, except model-provider-credentials which is admin-only)
   "models:read",
   "proxies:read",
+  // LLM proxy — members run completions through the platform with the org's
+  // configured models (powers first-party chat / remote CLI for ordinary
+  // members, not just admins). Usage metered per call in `llm_usage`.
+  "llm-proxy:call",
   // Developer tools
   "applications:read",
   "end-users:read",
