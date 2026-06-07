@@ -194,17 +194,19 @@ function buildDescribeTool(): AppstrateToolDefinition {
 }
 
 /**
- * Encode a path-param value for a single URL segment while preserving `@`.
+ * Encode a path-param value while preserving the two literals Appstrate's
+ * scoped-id routes match: `@` and `/`.
  *
- * Package scopes carry an `@` sigil (`@appstrate/foo` → scope `@appstrate`)
- * and ~30 routes match it literally (`/api/agents/{scope}/{name}`, the run
- * trigger, schedules, fork, every scope get/list). `encodeURIComponent`
- * turns `@` into `%40`, which those routes never match → 404. `@` is a
- * valid RFC 3986 path char (sub-delim/pchar), so leaving it raw is correct;
- * `/`, spaces, etc. stay percent-encoded to keep each value one segment.
+ * Package identifiers carry an `@` sigil and may span two segments — the
+ * `{scope}`/`{name}` split (`@appstrate` + `my-agent`) but also a single
+ * `{packageId}` param whose value IS `@scope/name` (the Integrations family:
+ * `/api/integrations/{packageId}` → route `:packageId{@[^/]+/[^/]+}`). The
+ * platform's own clients send both `@` and `/` raw, so `encodeURIComponent`
+ * (which turns them into `%40`/`%2F`) breaks route matching → 404. Restore
+ * both; everything else (spaces, etc.) stays percent-encoded.
  */
 function encodePathSegment(value: string): string {
-  return encodeURIComponent(value).replace(/%40/g, "@");
+  return encodeURIComponent(value).replace(/%40/g, "@").replace(/%2F/g, "/");
 }
 
 function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknown>): string | null {
@@ -327,9 +329,10 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         headers: {
           type: "object",
           description:
-            "Extra request headers (string values), e.g. target headers for the credential " +
-            "proxy. Auth headers (authorization, cookie, x-org-id, …) are forwarded from your " +
-            "session and cannot be overridden here.",
+            "Request headers (string values) for operations that declare an 'in: header' " +
+            "parameter, e.g. X-Integration-Id for the credential proxy. (Such params are also " +
+            "auto-detected if passed in `query`.) Auth headers (authorization, cookie, x-org-id, " +
+            "…) are forwarded from your session and cannot be overridden here.",
           additionalProperties: { type: "string" },
         },
       },
@@ -361,8 +364,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       );
     }
 
-    const url = new URL(path, ctx.origin);
-    applyQuery(url, asRecord(args.query) ?? {});
+    const query = asRecord(args.query) ?? {};
 
     const headers = new Headers(ctx.authHeaders);
     const extraHeaders = asRecord(args.headers);
@@ -372,6 +374,26 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         if (typeof value === "string") headers.set(name, value);
       }
     }
+    // Auto-map OpenAPI `in: header` parameters: a model often supplies a
+    // declared header value in `query` (or the operation simply requires a
+    // header it can't express otherwise, e.g. the Credential Proxy's
+    // X-Integration-Id). For each declared header param not already set,
+    // pull its value from `query` (case-insensitive) and move it to a header.
+    for (const headerName of op.headerParams) {
+      if (PROTECTED_HEADERS.has(headerName.toLowerCase())) continue;
+      if (headers.has(headerName)) continue;
+      const queryKey = Object.keys(query).find((k) => k.toLowerCase() === headerName.toLowerCase());
+      if (queryKey === undefined) continue;
+      const value = query[queryKey];
+      if (typeof value === "string" || typeof value === "number") {
+        headers.set(headerName, String(value));
+        delete query[queryKey];
+      }
+    }
+
+    const url = new URL(path, ctx.origin);
+    applyQuery(url, query);
+
     const body = asRecord(args.body);
     const sendBody = body !== undefined && METHODS_WITH_BODY.has(op.method);
     if (sendBody) headers.set("content-type", "application/json");

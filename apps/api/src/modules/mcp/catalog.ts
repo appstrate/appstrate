@@ -47,6 +47,8 @@ export interface CatalogOperation {
   description: string;
   /** Names of `{param}` placeholders in the path template. */
   pathParams: string[];
+  /** Names of OpenAPI `in: header` parameters this operation declares. */
+  headerParams: string[];
   /** Raw OpenAPI operation node (for `describe_operation`). */
   operation: OperationNode;
 }
@@ -71,6 +73,25 @@ function extractPathParams(pathTemplate: string): string[] {
 
 function isOperationNode(value: unknown): value is OperationNode {
   return typeof value === "object" && value !== null;
+}
+
+/**
+ * Names of `in: header` parameters declared by an operation. Lets
+ * invoke_operation route a value the model supplied (in any bag) to a real
+ * request header — required by e.g. the Credential Proxy family, which keys
+ * off `X-Integration-Id`. Auth-context headers are never sourced from here.
+ */
+function extractHeaderParams(node: OperationNode): string[] {
+  const params = node.parameters;
+  if (!Array.isArray(params)) return [];
+  const names: string[] = [];
+  for (const p of params) {
+    if (typeof p === "object" && p !== null) {
+      const param = p as { in?: unknown; name?: unknown };
+      if (param.in === "header" && typeof param.name === "string") names.push(param.name);
+    }
+  }
+  return names;
 }
 
 /** The MCP server's own endpoints, excluded from the operation catalog. */
@@ -111,6 +132,7 @@ export function getCatalog(): OperationCatalog {
         summary: typeof node.summary === "string" ? node.summary : "",
         description: typeof node.description === "string" ? node.description : "",
         pathParams: extractPathParams(pathTemplate),
+        headerParams: extractHeaderParams(node),
         operation: node,
       });
     }

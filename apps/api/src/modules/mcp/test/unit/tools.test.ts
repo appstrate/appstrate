@@ -150,6 +150,41 @@ describe("invoke_operation", () => {
     expect(pathname).not.toContain("%40");
   });
 
+  it("preserves a literal / inside a scoped-id path param", async () => {
+    // Integrations key off a single {packageId} param whose value is @scope/name.
+    const op = firstOp((o) => o.pathParams.length === 1 && o.pathParams[0] === "packageId");
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    await byName
+      .get("invoke_operation")!
+      .handler(
+        { operation_id: op.operationId, path_params: { packageId: "@appstrate/firecrawl" } },
+        noExtra,
+      );
+    const pathname = new URL(calls[0]!.url).pathname;
+    expect(pathname).toContain("@appstrate/firecrawl");
+    expect(pathname).not.toContain("%2F");
+    expect(pathname).not.toContain("%40");
+  });
+
+  it("auto-maps a declared header param supplied in query onto a real header", async () => {
+    const op = firstOp((o) => o.headerParams.includes("X-Integration-Id"));
+    const values: Record<string, string> = {};
+    for (const name of op.pathParams) values[name] = "x";
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    await byName.get("invoke_operation")!.handler(
+      {
+        operation_id: op.operationId,
+        path_params: values,
+        query: { "X-Integration-Id": "int_1" },
+      },
+      noExtra,
+    );
+    const req = calls[0]!;
+    expect(req.headers.get("X-Integration-Id")).toBe("int_1");
+    // Promoted out of the query string, not duplicated there.
+    expect(new URL(req.url).searchParams.has("X-Integration-Id")).toBe(false);
+  });
+
   it("forwards extra headers but never overrides forwarded auth headers", async () => {
     const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
     const { byName, calls } = makeTools(["mcp:invoke"]);
