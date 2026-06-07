@@ -29,6 +29,25 @@ const MCP_SERVER_VERSION = "1.0.0";
 const MCP_PATH = "/api/mcp";
 const PRM_PATH = "/.well-known/oauth-protected-resource";
 
+/**
+ * Server `instructions` injected into the client's system prompt at
+ * `initialize`. Deliberately meta and maintenance-free: it carries ONLY the
+ * cross-cutting context the tool descriptions and per-operation OpenAPI
+ * schemas can't (purpose, entity model, the `@` scope rule, async-run +
+ * SSE-not-callable behaviour). It never lists tools, counts, tags, or
+ * endpoints — those are discovered at runtime, so the surface can grow
+ * without touching this text.
+ */
+const SERVER_INSTRUCTIONS = `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you discover and call any operation of the Appstrate REST API — their own descriptions tell you how. Never guess an operationId or body shape; the describe step is the source of truth, and the surface is not fixed — if a capability might exist, search for it.
+
+## Core model
+Organization → Applications (id \`app_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. An agent is a package keyed by a scope/name pair where the scope starts with \`@\`; keep the \`@\` when you pass it (e.g. scope \`@appstrate\`, name \`my-agent\`).
+
+## Beyond the per-operation schemas
+- Runs are asynchronous: triggering one returns a runId, then it moves pending→running→success|failed|timeout|cancelled — poll a run get/list operation for status.
+- Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
+- Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.`;
+
 /** Auth-relevant headers forwarded onto in-process dispatched requests. */
 const FORWARDED_AUTH_HEADERS = [
   "authorization",
@@ -81,7 +100,11 @@ export function createMcpRouter(): Hono<AppEnv> {
     const dispatch: Dispatch = async (req) => getPlatformApp().fetch(req);
 
     const tools = buildMcpTools({ origin, permissions, authHeaders, dispatch });
-    const server = createMcpServer(tools, { name: "appstrate", version: MCP_SERVER_VERSION });
+    const server = createMcpServer(
+      tools,
+      { name: "appstrate", version: MCP_SERVER_VERSION },
+      { instructions: SERVER_INSTRUCTIONS },
+    );
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,

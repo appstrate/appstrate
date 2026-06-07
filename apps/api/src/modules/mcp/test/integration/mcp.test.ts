@@ -190,5 +190,11 @@ describe("mcp tool round-trip", () => {
     });
     expect(status).toBe(200);
     expect((envelope.result?.serverInfo as { name?: string })?.name).toBe("appstrate");
+    // Onboarding instructions are returned so the client can inject them into
+    // the system prompt before the model sees any tool schema.
+    const instructions = envelope.result?.instructions as string | undefined;
+    expect(typeof instructions).toBe("string");
+    expect(instructions).toContain("Appstrate");
+    expect(instructions).toContain("@appstrate");
   });
 });
