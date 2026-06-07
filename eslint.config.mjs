@@ -66,14 +66,13 @@ export default tseslint.config(
     files: [
       "packages/runner-pi/src/**/*.ts",
       "apps/cli/src/**/*.ts",
+      "apps/api/src/**/*.ts",
       "runtime-pi/**/*.ts",
     ],
     ignores: [
       "packages/runner-pi/src/pi-sdk.ts",
       "apps/cli/src/lib/pi-sdk.ts",
       "runtime-pi/pi-sdk.ts",
-      "runtime-pi/sidecar/**",
-      "runtime-pi/runners/**",
     ],
     languageOptions: {
       parser: tseslint.parser,
