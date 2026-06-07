@@ -11,7 +11,13 @@ coveragePathIgnorePatterns = [
   "**/node_modules/**",
   "**/*.d.ts",
   "apps/web/**",
-  "test/**",
+  # `**/test/**` (not `test/**`) so NESTED test harnesses are excluded too:
+  # Bun anchors `test/**` to the repo root, leaving apps/api/test/**,
+  # packages/*/test/**, apps/api/src/modules/*/test/** etc. instrumented as
+  # product code. The `**/` matches the `test` path segment (not the substring),
+  # so product dirs like apps/api/src/latest/** are preserved. Keep in lockstep
+  # with the `ignore` list in .codecov.yml.
+  "**/test/**",
   "scripts/**",
   "packages/db/src/schema/**",
   "packages/db/src/schema.ts",

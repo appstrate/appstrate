@@ -81,6 +81,13 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Fork-PR note: external contributors' PRs run with no access to repo
+      # secrets, so `secrets.CODECOV_TOKEN` is empty. codecov-action v6 then
+      # attempts a tokenless upload (supported for public repos); if that fails,
+      # `fail_ci_if_error: false` keeps this step — and the CI job — green. The
+      # Codecov `project` status is `informational: true` (.codecov.yml), so it
+      # never blocks a fork PR that could not upload. Same-repo PRs use the
+      # token and upload normally.
       - name: Upload unit coverage to Codecov
         if: always()
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1

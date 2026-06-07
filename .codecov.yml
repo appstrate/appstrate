@@ -7,6 +7,18 @@ coverage:
       default:
         target: 75%
         threshold: 2%
+        # informational = report the status but never set a failing/blocking
+        # check. Required during cold-start: `main` has NO integration
+        # carryforward baseline yet, so on a normal PR only the `unit` job runs
+        # and the project total is computed from unit coverage alone (dominated
+        # by ~0%-unit-covered backend files) → a red project status nobody can
+        # fix. It also keeps the project gate non-blocking for FORK PRs, which
+        # cannot read CODECOV_TOKEN (uploads no-op) and otherwise could not
+        # clear a required status. FLIP to blocking (remove this line) once
+        # `main` has a post-merge `integration` upload, i.e. a real combined
+        # baseline exists to carry forward. The 75% target is unchanged — only
+        # blocking-ness is relaxed during cold-start.
+        informational: true
     # NOTE: PRs that add code exercised only by the integration suite
     # (orchestrator, run-state, credential paths) should carry the
     # `integration` label so this `patch` gate and the `component_management`
@@ -78,7 +90,12 @@ component_management:
 
 ignore:
   - "apps/web/**"
-  - "test/**"
+  # `**/test/**` (not `test/**`) to also drop NESTED test harnesses
+  # (apps/api/test/**, packages/*/test/**, apps/api/src/modules/*/test/**, …).
+  # The `**/` matches the `test` path segment, not the substring, so product
+  # dirs such as apps/api/src/latest/** stay covered. Lockstep with
+  # bunfig.toml coveragePathIgnorePatterns.
+  - "**/test/**"
   - "scripts/**"
   - "packages/db/src/schema/**"
   - "packages/db/src/schema.ts"
