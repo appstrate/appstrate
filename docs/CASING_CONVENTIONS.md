@@ -324,6 +324,26 @@ Treat any new management-CRUD route on a BA plugin table the same way (mirror th
 
 ---
 
+## Package identifiers in URL paths
+
+A package (`@scope/name`) appears in API paths in **two shapes**, by an explicit rule:
+
+- **Single top-level package → `{scope}/{name}`** (two path params). Route pattern `/:scope{@[^/]+}/:name`. Used by agents, `packages/*` (registry tier), runs, schedules. ~34 routes.
+- **Route references ≥2 packages → `{packageId}`** (one param holding `@scope/name`). Route pattern `/:packageId{@[^/]+/[^/]+}`. Used by `/api/integrations/*` (runtime tier), where routes like `/integrations/{packageId}/agent-resolution/{agentPackageId}` carry two packages in one path — two `{scope}/{name}` pairs would be ambiguous to parse. ~19 routes.
+
+Both shapes resolve to the **same on-wire path** (`@foo/bar`); the difference is only how Hono splits it into params. So the choice is a route-authoring rule, not a wire-format difference.
+
+**Encoding (the footgun):** naive `encodeURIComponent(packageId)` 404s **both** route shapes — it percent-encodes `@`→`%40` and `/`→`%2F`, which the route regexes reject. Consumers MUST use **`encodePackageIdPath(packageId)` from `@appstrate/core/naming`** — it validates the id and encodes each segment while keeping the `@`/`/` separators literal. Do not hand-roll a path encoder; do not call `encodeURIComponent` on the whole id.
+
+```ts
+import { encodePackageIdPath } from "@appstrate/core/naming";
+api(`/integrations/${encodePackageIdPath(packageId)}/connections`);
+```
+
+This is the single canonical contract for frontend, SDK, github-action, and MCP consumers. (Filed as issue #609; the MCP server's prior client-side `encodePath` is superseded by this core helper.)
+
+---
+
 ## Field-name catalog (canonical)
 
 ### Manifest fields (AFPS — all snake_case)

@@ -6,6 +6,7 @@ import {
   stripScope,
   parseScopedName,
   buildPackageId,
+  encodePackageIdPath,
   isOwnedByOrg,
   isValidToolName,
   normalizeToolName,
@@ -111,6 +112,42 @@ describe("buildPackageId", () => {
 
   it('("@org", "a") → "@org/a"', () => {
     expect(buildPackageId("@org", "a")).toBe("@org/a");
+  });
+});
+
+describe("encodePackageIdPath", () => {
+  it('"@foo/bar" → "@foo/bar" (separators stay literal)', () => {
+    expect(encodePackageIdPath("@foo/bar")).toBe("@foo/bar");
+  });
+
+  it('"@org123/pkg-name" round-trips unchanged', () => {
+    expect(encodePackageIdPath("@org123/pkg-name")).toBe("@org123/pkg-name");
+  });
+
+  it("output matches both route regexes", () => {
+    const out = encodePackageIdPath("@acme/my-skill");
+    // /:packageId{@[^/]+/[^/]+}
+    expect(/^@[^/]+\/[^/]+$/.test(out)).toBe(true);
+    // /:scope{@[^/]+}/:name → first segment is the scope param
+    const [scope, name] = out.split("/");
+    expect(/^@[^/]+$/.test(scope!)).toBe(true);
+    expect(name).toBe("my-skill");
+  });
+
+  it("throws on missing @ prefix", () => {
+    expect(() => encodePackageIdPath("foo/bar")).toThrow("Invalid packageId");
+  });
+
+  it("throws on scope-only input", () => {
+    expect(() => encodePackageIdPath("@foo")).toThrow("Invalid packageId");
+  });
+
+  it("throws on nested (3-segment) input", () => {
+    expect(() => encodePackageIdPath("@foo/bar/baz")).toThrow("Invalid packageId");
+  });
+
+  it("throws on empty string", () => {
+    expect(() => encodePackageIdPath("")).toThrow("Invalid packageId");
   });
 });
 
