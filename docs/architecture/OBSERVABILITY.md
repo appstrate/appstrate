@@ -4,8 +4,10 @@ Production observability for the platform API, built on **OpenTelemetry** with
 **OTLP/HTTP** export. Addresses issue #616 item 1.
 
 > **Disabled by default.** With no collector configured the OTel bootstrap is a
-> complete no-op — zero spans, zero meters, zero allocations, zero behavior
-> change. OSS / self-hosted deployments that don't run a collector pay nothing.
+> complete no-op — zero per-request/per-run overhead and zero behavior change
+> when disabled. The heavy SDK packages are dynamically imported only on the
+> enabled path, so a disabled boot loads only the `@opentelemetry/api` no-op.
+> OSS / self-hosted deployments that don't run a collector pay nothing.
 
 ## Enabling
 
@@ -35,9 +37,10 @@ OTEL_SERVICE_NAME=appstrate-api
 
 ## Architecture
 
-- **Bootstrap**: `apps/api/src/observability/` — `initObservability()` is called
-  once in `apps/api/src/index.ts` before the server starts, and is defensive:
-  a misconfiguration disables telemetry rather than crashing boot.
+- **Bootstrap**: `apps/api/src/observability/` — `initObservability()` is
+  `await`ed once in `apps/api/src/index.ts` before the server starts (so the
+  lazily-imported SDK is wired before the first request), and is defensive: a
+  misconfiguration disables telemetry rather than crashing boot.
 - **Single AsyncLocalStorage**: spans do **not** fork a second trace store. The
   `runWithSpan` helper bridges the active OTel span's `SpanContext` into the
   existing logger trace context (`packages/core/src/logger.ts`), so **logs and
@@ -64,22 +67,26 @@ OTEL_SERVICE_NAME=appstrate-api
 
 ### Metrics (SLIs)
 
-| Metric                             | Type             | Tags                                  | Source                                     |
-| ---------------------------------- | ---------------- | ------------------------------------- | ------------------------------------------ |
-| `appstrate.run.duration_ms`        | histogram        | `status`                              | `finalizeRun` (CAS winner, exactly once)   |
-| `appstrate.run.terminal_total`     | counter          | `status`, `error_code`                | `finalizeRun` — failure-rate source        |
-| `appstrate.run.container_spawn_ms` | histogram        | `sidecar`                             | `runPlatformContainer` provisioning time   |
-| `appstrate.scheduler.queue_depth`  | observable gauge | —                                     | BullMQ / local queue `count()`             |
-| `appstrate.llm.latency_ms`         | histogram        | `api_shape`, `outcome`, `status_code` | platform LLM proxy (`routes/llm-proxy.ts`) |
+All durations carry `unit: "ms"`; the unit is not embedded in the metric name
+(OTel naming guidance). Counters omit a `_total` suffix — the Prometheus
+exporter appends it on export.
+
+| Metric                            | Type             | Tags                                  | Source                                     |
+| --------------------------------- | ---------------- | ------------------------------------- | ------------------------------------------ |
+| `appstrate.run.duration`          | histogram (ms)   | `status`                              | `finalizeRun` (CAS winner, exactly once)   |
+| `appstrate.run.terminal`          | counter          | `status`, `error_code`                | `finalizeRun` — failure-rate source        |
+| `appstrate.run.container_spawn`   | histogram (ms)   | `sidecar`                             | `runPlatformContainer` provisioning time   |
+| `appstrate.scheduler.queue_depth` | observable gauge | —                                     | BullMQ / local queue `count()`             |
+| `appstrate.llm.latency`           | histogram (ms)   | `api_shape`, `outcome`, `status_code` | platform LLM proxy (`routes/llm-proxy.ts`) |
 
 ## Service-level indicators (SLIs)
 
-- **Run latency** — `appstrate.run.duration_ms` (p50/p95/p99 by status).
-- **Run failure rate** — `appstrate.run.terminal_total` filtered by
+- **Run latency** — `appstrate.run.duration` (p50/p95/p99 by status).
+- **Run failure rate** — `appstrate.run.terminal` filtered by
   `status="failed"|"timeout"` over total.
-- **Container cold-start** — `appstrate.run.container_spawn_ms`.
+- **Container cold-start** — `appstrate.run.container_spawn`.
 - **Scheduler backlog** — `appstrate.scheduler.queue_depth`.
-- **LLM proxy latency** — `appstrate.llm.latency_ms`.
+- **LLM proxy latency** — `appstrate.llm.latency`.
 - **DB health latency** — already surfaced by `GET /health` (`checks.database.latency_ms`).
 
 ## Limitations / follow-ups

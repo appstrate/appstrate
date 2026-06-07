@@ -63,10 +63,12 @@ import type { AppEnv } from "./types/index.ts";
 const env = getEnv();
 
 // Initialize OpenTelemetry BEFORE any server wiring so spans + metrics are
-// available on the first request. Defensive: `initObservability` never throws
-// (a misconfiguration disables telemetry rather than crashing boot), and is a
-// complete no-op unless an OTLP endpoint is configured.
-initObservability();
+// available on the first request. Awaited at module top-level so the SDK (lazy-
+// imported only when enabled) is wired before the `export default` server is
+// read by Bun. Defensive: `initObservability` never throws (a misconfiguration
+// disables telemetry rather than crashing boot), and is a complete no-op —
+// loading only `@opentelemetry/api` — unless an OTLP endpoint is configured.
+await initObservability();
 
 const app = new Hono<AppEnv>();
 

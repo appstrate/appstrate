@@ -38,28 +38,20 @@ import {
   type Counter,
   type Context,
 } from "@opentelemetry/api";
-import {
+// The SDK packages below are TYPE-ONLY imports (erased at runtime). Their
+// runtime values are pulled in via dynamic `import()` inside the enabled
+// branch of `initObservability`, so a disabled boot loads only the
+// `@opentelemetry/api` no-op above — never the heavy SDK.
+import type {
   BasicTracerProvider,
-  BatchSpanProcessor,
-  SimpleSpanProcessor,
-  type SpanExporter,
-  type SpanProcessor,
+  SpanExporter,
+  SpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import {
-  MeterProvider,
-  PeriodicExportingMetricReader,
-  type MetricReader,
-} from "@opentelemetry/sdk-metrics";
-import { resourceFromAttributes } from "@opentelemetry/resources";
-import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
-import { W3CTraceContextPropagator } from "@opentelemetry/core";
-import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
-import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
-import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
+import type { MeterProvider, MetricReader } from "@opentelemetry/sdk-metrics";
 
 import { runWithTraceContext } from "@appstrate/core/logger";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { parseTraceparent } from "@appstrate/afps-runtime/transport";
+import { parseTraceparent, formatTraceparent } from "@appstrate/afps-runtime/transport";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 
@@ -101,10 +93,13 @@ export interface InitObservabilityOptions {
 /**
  * Initialize OpenTelemetry. Idempotent and defensive: a misconfiguration can
  * never crash boot — on any error we log and continue with observability
- * disabled. Safe to call once at process start, before the server begins
- * serving so span/metric context is available on the first request.
+ * disabled. Must be `await`ed once at process start, before the server begins
+ * serving, so span/metric context is available on the first request.
+ *
+ * Async because the heavy SDK packages are dynamically imported only on the
+ * enabled path — a disabled boot never loads or parses them.
  */
-export function initObservability(opts: InitObservabilityOptions = {}): void {
+export async function initObservability(opts: InitObservabilityOptions = {}): Promise<void> {
   if (initialized) return;
 
   const env = getEnv();
@@ -113,13 +108,36 @@ export function initObservability(opts: InitObservabilityOptions = {}): void {
 
   if (!isEnabled) {
     // True no-op mode. Mark initialized so repeat calls stay cheap; leave
-    // every OTel object unallocated.
+    // every OTel object unallocated. The SDK import() calls below never run
+    // on this path — only `@opentelemetry/api` (the no-op) is loaded.
     initialized = true;
     enabled = false;
     return;
   }
 
   try {
+    // Lazy-load the SDK only when telemetry is actually enabled, so OSS /
+    // no-collector deployments never pay the import+parse cost.
+    const [
+      { BasicTracerProvider, BatchSpanProcessor, SimpleSpanProcessor },
+      { MeterProvider, PeriodicExportingMetricReader },
+      { resourceFromAttributes },
+      { ATTR_SERVICE_NAME },
+      { W3CTraceContextPropagator },
+      { AsyncLocalStorageContextManager },
+      { OTLPTraceExporter },
+      { OTLPMetricExporter },
+    ] = await Promise.all([
+      import("@opentelemetry/sdk-trace-base"),
+      import("@opentelemetry/sdk-metrics"),
+      import("@opentelemetry/resources"),
+      import("@opentelemetry/semantic-conventions"),
+      import("@opentelemetry/core"),
+      import("@opentelemetry/context-async-hooks"),
+      import("@opentelemetry/exporter-trace-otlp-http"),
+      import("@opentelemetry/exporter-metrics-otlp-http"),
+    ]);
+
     const resource = resourceFromAttributes({ [ATTR_SERVICE_NAME]: env.OTEL_SERVICE_NAME });
 
     // Tracing — batch in production, simple (synchronous) when a test
@@ -188,18 +206,22 @@ export async function shutdownObservability(): Promise<void> {
 }
 
 function createInstruments(m: Meter): void {
-  runDuration = m.createHistogram("appstrate.run.duration_ms", {
+  // Unit lives in `unit:"ms"` only — not the metric name (OTel naming
+  // guidance: don't embed the unit in the instrument name). The Prometheus
+  // exporter also auto-appends `_total` to counters, so the counter name omits
+  // it to avoid a `_total_total` double suffix.
+  runDuration = m.createHistogram("appstrate.run.duration", {
     unit: "ms",
     description: "Wall-clock duration of a run from launch to terminal status.",
   });
-  runTerminal = m.createCounter("appstrate.run.terminal_total", {
+  runTerminal = m.createCounter("appstrate.run.terminal", {
     description: "Count of runs reaching a terminal status, tagged by status + error_code.",
   });
-  containerSpawn = m.createHistogram("appstrate.run.container_spawn_ms", {
+  containerSpawn = m.createHistogram("appstrate.run.container_spawn", {
     unit: "ms",
     description: "Time to provision the isolation boundary + sidecar/agent workloads.",
   });
-  llmLatency = m.createHistogram("appstrate.llm.latency_ms", {
+  llmLatency = m.createHistogram("appstrate.llm.latency", {
     unit: "ms",
     description: "Upstream LLM call latency observed at the platform proxy seam.",
   });
@@ -344,7 +366,12 @@ export function currentTraceparent(): string | undefined {
   if (!span) return undefined;
   const sc = span.spanContext();
   if (!sc.traceId || !sc.spanId) return undefined;
-  return `00-${sc.traceId}-${sc.spanId}-${flagsHex(sc.traceFlags)}`;
+  // Reuse the shared W3C serializer instead of re-templating the wire format.
+  return formatTraceparent({
+    traceId: sc.traceId,
+    spanId: sc.spanId,
+    flags: flagsHex(sc.traceFlags),
+  });
 }
 
 // ─── Metric recorders (all no-op when disabled) ──────────────────

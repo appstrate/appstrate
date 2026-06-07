@@ -163,16 +163,19 @@ async function handleProxy(
 
     return response;
   } catch (err) {
-    recordLlmLatency(Date.now() - started, {
-      api_shape: adapter.apiShape,
-      outcome: "error",
-    });
+    // Client-validation rejections are thrown before any upstream call, so
+    // they must NOT pollute the upstream-latency histogram. Record latency
+    // only for errors from an actual upstream attempt.
     if (err instanceof LlmProxyUnsupportedModelError) {
       throw invalidRequest(err.message);
     }
     if (err instanceof LlmProxyModelApiMismatchError) {
       throw invalidRequest(err.message, "model");
     }
+    recordLlmLatency(Date.now() - started, {
+      api_shape: adapter.apiShape,
+      outcome: "error",
+    });
     throw err;
   }
 }

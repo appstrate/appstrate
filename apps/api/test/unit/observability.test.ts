@@ -48,7 +48,7 @@ function findMetric(rms: ResourceMetrics[], name: string) {
 describe("observability — disabled (no-op)", () => {
   beforeEach(async () => {
     await _resetObservabilityForTesting();
-    initObservability({ enabled: false });
+    await initObservability({ enabled: false });
   });
 
   afterEach(async () => {
@@ -97,7 +97,7 @@ describe("observability — enabled (in-memory exporters)", () => {
     await _resetObservabilityForTesting();
     spanExporter = new InMemorySpanExporter();
     metricExporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
-    initObservability({
+    await initObservability({
       enabled: true,
       spanExporter,
       metricReader: new PeriodicExportingMetricReader({
@@ -145,9 +145,9 @@ describe("observability — enabled (in-memory exporters)", () => {
     await _forceFlushForTesting();
 
     const rms = metricExporter.getMetrics();
-    const duration = findMetric(rms, "appstrate.run.duration_ms");
-    const terminal = findMetric(rms, "appstrate.run.terminal_total");
-    const spawn = findMetric(rms, "appstrate.run.container_spawn_ms");
+    const duration = findMetric(rms, "appstrate.run.duration");
+    const terminal = findMetric(rms, "appstrate.run.terminal");
+    const spawn = findMetric(rms, "appstrate.run.container_spawn");
 
     expect(duration).toBeDefined();
     expect(terminal).toBeDefined();

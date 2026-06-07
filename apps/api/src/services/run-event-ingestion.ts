@@ -259,340 +259,340 @@ async function ingestInner(
  * from HttpSink end up applying once.
  */
 export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
+  // Finalize span — the single CAS-guarded convergence for every run
+  // termination path. Nests under the active request/run span when present.
+  // A true no-op when observability is disabled.
+  await runWithSpan(
+    "appstrate.run.finalize",
+    { attributes: { "appstrate.run.id": input.run.id } },
+    () => finalizeRunImpl(input),
+  );
+}
+
+async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   const { run, result } = input;
   const scope = { orgId: run.orgId, applicationId: run.applicationId };
 
-  // Finalize span — the single CAS-guarded convergence for every run
-  // termination path. Nests under the active request/run span when present.
-  await runWithSpan(
-    "appstrate.run.finalize",
-    { attributes: { "appstrate.run.id": run.id } },
-    async () => {
-      // 1. Flush any buffered events before we close the sink.
-      await drainBufferedEvents(run, { allowGaps: true });
+  // 1. Flush any buffered events before we close the sink.
+  await drainBufferedEvents(run, { allowGaps: true });
 
-      // 2. Load manifest for output-schema validation. `includeEphemeral: true`
-      //    keeps inline-run shadow packages addressable here.
-      const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
+  // 2. Load manifest for output-schema validation. `includeEphemeral: true`
+  //    keeps inline-run shadow packages addressable here.
+  const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
 
-      // 3. Derive final status + error message. Pure computation — no DB writes
-      //    before the CAS so concurrent synthesis + container-posted finalize
-      //    don't duplicate log rows or memories.
-      let status = mapTerminalStatus(result);
-      let errorMessage: string | null = result.error?.message ?? null;
-      let outputValidationErrors: string[] | null = null;
+  // 3. Derive final status + error message. Pure computation — no DB writes
+  //    before the CAS so concurrent synthesis + container-posted finalize
+  //    don't duplicate log rows or memories.
+  let status = mapTerminalStatus(result);
+  let errorMessage: string | null = result.error?.message ?? null;
+  let outputValidationErrors: string[] | null = null;
 
-      if (status === "success" && agent?.manifest.output?.schema) {
-        const outputRecord = isPlainRecord(result.output) ? result.output : {};
-        const validation = validateOutput(
-          outputRecord,
-          asJSONSchemaObject(agent.manifest.output.schema),
-        );
-        if (!validation.valid) {
-          status = "failed";
-          errorMessage = `Output validation failed: ${validation.errors.join("; ")}`;
-          outputValidationErrors = validation.errors;
-        }
-      }
+  if (status === "success" && agent?.manifest.output?.schema) {
+    const outputRecord = isPlainRecord(result.output) ? result.output : {};
+    const validation = validateOutput(
+      outputRecord,
+      asJSONSchemaObject(agent.manifest.output.schema),
+    );
+    if (!validation.valid) {
+      status = "failed";
+      errorMessage = `Output validation failed: ${validation.errors.join("; ")}`;
+      outputValidationErrors = validation.errors;
+    }
+  }
 
-      // Adapter-error backstop. The Pi SDK keeps the agent loop alive after
-      // an `appstrate.error` (e.g. OpenAI 429 TPM rate-limit exhausting the
-      // SDK's internal retries) so `runner.run()` resolves without throwing.
-      // The result then lacks an explicit `status` / `error`, defaults to
-      // `success`, and `output` is null because the LLM never produced one.
-      // The `runHadZeroTokens` heuristic below does NOT trigger when partial
-      // tokens were produced before the fatal adapter error. Without this
-      // check, a run that hit an unrecoverable upstream error is reported as
-      // `success` with `result: null`.
-      if (status === "success" && (result.output === null || result.output === undefined)) {
-        const lastAdapterError = await findLastAdapterError(run.id);
-        if (lastAdapterError !== null) {
-          status = "failed";
-          errorMessage = lastAdapterError;
-        }
-      }
+  // Adapter-error backstop. The Pi SDK keeps the agent loop alive after
+  // an `appstrate.error` (e.g. OpenAI 429 TPM rate-limit exhausting the
+  // SDK's internal retries) so `runner.run()` resolves without throwing.
+  // The result then lacks an explicit `status` / `error`, defaults to
+  // `success`, and `output` is null because the LLM never produced one.
+  // The `runHadZeroTokens` heuristic below does NOT trigger when partial
+  // tokens were produced before the fatal adapter error. Without this
+  // check, a run that hit an unrecoverable upstream error is reported as
+  // `success` with `result: null`.
+  if (status === "success" && (result.output === null || result.output === undefined)) {
+    const lastAdapterError = await findLastAdapterError(run.id);
+    if (lastAdapterError !== null) {
+      status = "failed";
+      errorMessage = lastAdapterError;
+    }
+  }
 
-      if (status === "success") {
-        const zeroTokens = await runHadZeroTokens(run.id, result);
-        if (zeroTokens) {
-          status = "failed";
-          errorMessage = llmUnreachableMessage(run);
-        }
-      }
+  if (status === "success") {
+    const zeroTokens = await runHadZeroTokens(run.id, result);
+    if (zeroTokens) {
+      status = "failed";
+      errorMessage = llmUnreachableMessage(run);
+    }
+  }
 
-      // 4. Build the persisted result payload — matches the legacy platform shape
-      //    so existing consumers of `runs.result.output` keep working.
-      const resultPayload: Record<string, unknown> = {};
-      if (result.output !== null && result.output !== undefined) {
-        resultPayload.output = result.output;
-      }
-      const resultToPersist =
-        Object.keys(resultPayload).length > 0 ? (resultPayload as Record<string, unknown>) : null;
+  // 4. Build the persisted result payload — matches the legacy platform shape
+  //    so existing consumers of `runs.result.output` keep working.
+  const resultPayload: Record<string, unknown> = {};
+  if (result.output !== null && result.output !== undefined) {
+    resultPayload.output = result.output;
+  }
+  const resultToPersist =
+    Object.keys(resultPayload).length > 0 ? (resultPayload as Record<string, unknown>) : null;
 
-      // 4b. Write the runner-source ledger row from `result.cost` when the
-      //     `appstrate.metric` event never landed (e.g. process exited
-      //     before the fire-and-forget POST resolved). The metric handler
-      //     and this fallback both target the same partial unique index
-      //     (run_id WHERE source='runner'); whichever lands first owns the
-      //     row, the other is a no-op via ON CONFLICT DO NOTHING — no
-      //     pre-check needed.
-      if (typeof result.cost === "number" && result.cost > 0) {
-        await writeRunnerLedgerRow({ orgId: run.orgId, applicationId: run.applicationId }, run.id, {
-          cost: result.cost,
-          usage: result.usage ?? null,
-        });
-      }
+  // 4b. Write the runner-source ledger row from `result.cost` when the
+  //     `appstrate.metric` event never landed (e.g. process exited
+  //     before the fire-and-forget POST resolved). The metric handler
+  //     and this fallback both target the same partial unique index
+  //     (run_id WHERE source='runner'); whichever lands first owns the
+  //     row, the other is a no-op via ON CONFLICT DO NOTHING — no
+  //     pre-check needed.
+  if (typeof result.cost === "number" && result.cost > 0) {
+    await writeRunnerLedgerRow({ orgId: run.orgId, applicationId: run.applicationId }, run.id, {
+      cost: result.cost,
+      usage: result.usage ?? null,
+    });
+  }
 
-      const cost = await computeRunCost(run.id);
-      const now = new Date();
-      const packageEphemeral = isInlineShadowPackageId(run.packageId);
-      // Wall-clock duration as the authoritative value. Runners (PiRunner,
-      // MockRunner, …) only measure their internal loop and often omit
-      // `durationMs` from the finalize payload — without this fallback the
-      // `duration` column stays null on every successful run and the UI
-      // loses the value the moment `isRunning` flips to false.
-      const resolvedDurationMs = result.durationMs ?? now.getTime() - run.startedAt.getTime();
+  const cost = await computeRunCost(run.id);
+  const now = new Date();
+  const packageEphemeral = isInlineShadowPackageId(run.packageId);
+  // Wall-clock duration as the authoritative value. Runners (PiRunner,
+  // MockRunner, …) only measure their internal loop and often omit
+  // `durationMs` from the finalize payload — without this fallback the
+  // `duration` column stays null on every successful run and the UI
+  // loses the value the moment `isRunning` flips to false.
+  const resolvedDurationMs = result.durationMs ?? now.getTime() - run.startedAt.getTime();
 
-      // 5. afterRun hook — the hook SHOULD be idempotent (callers may retry on
-      //    transient failures) so it runs before the CAS. Any metadata it
-      //    returns is included atomically in the same UPDATE.
-      // Forward `runs.model_source` so the `afterRun` hook can distinguish
-      // platform-paid runs (system models) from BYOK runs (org models) without
-      // a re-query. Cloud's billing handler keys credit recording on this —
-      // omitting the field made it silently bill every run as `"system"`.
-      const hookParams: RunStatusChangeParams = {
-        orgId: run.orgId,
-        runId: run.id,
-        packageId: run.packageId,
-        applicationId: run.applicationId,
-        status,
-        packageEphemeral,
-        duration: resolvedDurationMs,
-        ...(cost > 0 ? { cost } : {}),
-        ...(run.modelSource !== null ? { modelSource: run.modelSource } : {}),
-      };
-      let metadata: Record<string, unknown> | null = null;
-      try {
-        metadata = (await callHook("afterRun", hookParams)) ?? null;
-      } catch (err) {
-        logger.error("afterRun hook failed on remote run finalize", {
-          runId: run.id,
-          err: getErrorMessage(err),
-        });
-      }
+  // 5. afterRun hook — the hook SHOULD be idempotent (callers may retry on
+  //    transient failures) so it runs before the CAS. Any metadata it
+  //    returns is included atomically in the same UPDATE.
+  // Forward `runs.model_source` so the `afterRun` hook can distinguish
+  // platform-paid runs (system models) from BYOK runs (org models) without
+  // a re-query. Cloud's billing handler keys credit recording on this —
+  // omitting the field made it silently bill every run as `"system"`.
+  const hookParams: RunStatusChangeParams = {
+    orgId: run.orgId,
+    runId: run.id,
+    packageId: run.packageId,
+    applicationId: run.applicationId,
+    status,
+    packageEphemeral,
+    duration: resolvedDurationMs,
+    ...(cost > 0 ? { cost } : {}),
+    ...(run.modelSource !== null ? { modelSource: run.modelSource } : {}),
+  };
+  let metadata: Record<string, unknown> | null = null;
+  try {
+    metadata = (await callHook("afterRun", hookParams)) ?? null;
+  } catch (err) {
+    logger.error("afterRun hook failed on remote run finalize", {
+      runId: run.id,
+      err: getErrorMessage(err),
+    });
+  }
 
-      // 6. CAS close — single gate for all subsequent side effects. Concurrent
-      //    finalize retries (platform synthesis vs container POST) hit the same
-      //    row; the CAS lets exactly one proceed.
-      const checkpointSlot = result.pinned?.[CHECKPOINT_KEY];
-      const checkpointToPersist =
-        checkpointSlot !== undefined && isPlainRecord(checkpointSlot.content)
-          ? checkpointSlot.content
-          : null;
+  // 6. CAS close — single gate for all subsequent side effects. Concurrent
+  //    finalize retries (platform synthesis vs container POST) hit the same
+  //    row; the CAS lets exactly one proceed.
+  const checkpointSlot = result.pinned?.[CHECKPOINT_KEY];
+  const checkpointToPersist =
+    checkpointSlot !== undefined && isPlainRecord(checkpointSlot.content)
+      ? checkpointSlot.content
+      : null;
 
-      const rowsAffected = await db
-        .update(runs)
-        .set({
-          status,
-          result: resultToPersist,
-          error: errorMessage,
-          completedAt: now,
-          duration: resolvedDurationMs,
-          cost: cost > 0 ? cost : null,
-          sinkClosedAt: now,
-          notifiedAt: now,
-          // Per-run checkpoint snapshot — read by `getRecentRuns` to feed the
-          // sidecar `run_history` tool. The unified `package_persistence`
-          // store only keeps the latest checkpoint per actor (last-write-wins
-          // on the unique index); `runs.checkpoint` preserves the per-run
-          // history so agents can inspect what each prior run emitted.
-          ...(checkpointToPersist !== null ? { checkpoint: checkpointToPersist } : {}),
-          // When the runner ships authoritative usage in the finalize body
-          // we persist it here so `runs.tokenUsage` reflects reality even if
-          // the side-channel `appstrate.metric` event was dropped (network
-          // hiccup, container exit before the POST drained, …). The metric
-          // handler still runs the same UPDATE on its own path; whichever
-          // arrives second is a no-op overwrite of the same value.
-          ...(result.usage
-            ? { tokenUsage: result.usage as unknown as Record<string, unknown> }
-            : {}),
-          ...(metadata ? { metadata } : {}),
-        })
-        .where(and(eq(runs.id, run.id), sql`sink_closed_at IS NULL`))
-        .returning({ id: runs.id });
+  const rowsAffected = await db
+    .update(runs)
+    .set({
+      status,
+      result: resultToPersist,
+      error: errorMessage,
+      completedAt: now,
+      duration: resolvedDurationMs,
+      cost: cost > 0 ? cost : null,
+      sinkClosedAt: now,
+      notifiedAt: now,
+      // Per-run checkpoint snapshot — read by `getRecentRuns` to feed the
+      // sidecar `run_history` tool. The unified `package_persistence`
+      // store only keeps the latest checkpoint per actor (last-write-wins
+      // on the unique index); `runs.checkpoint` preserves the per-run
+      // history so agents can inspect what each prior run emitted.
+      ...(checkpointToPersist !== null ? { checkpoint: checkpointToPersist } : {}),
+      // When the runner ships authoritative usage in the finalize body
+      // we persist it here so `runs.tokenUsage` reflects reality even if
+      // the side-channel `appstrate.metric` event was dropped (network
+      // hiccup, container exit before the POST drained, …). The metric
+      // handler still runs the same UPDATE on its own path; whichever
+      // arrives second is a no-op overwrite of the same value.
+      ...(result.usage ? { tokenUsage: result.usage as unknown as Record<string, unknown> } : {}),
+      ...(metadata ? { metadata } : {}),
+    })
+    .where(and(eq(runs.id, run.id), sql`sink_closed_at IS NULL`))
+    .returning({ id: runs.id });
 
-      if (rowsAffected.length === 0) {
-        logger.debug("finalizeRun idempotent — sink already closed", { runId: run.id });
-        // Even on the no-op branch, clear any lingering throttle state so
-        // a long-running API process doesn't leak entries for retry-storm
-        // runs that all collapse onto the same id.
-        clearRunMetricBroadcastState(run.id);
-        return;
-      }
+  if (rowsAffected.length === 0) {
+    logger.debug("finalizeRun idempotent — sink already closed", { runId: run.id });
+    // Even on the no-op branch, clear any lingering throttle state so
+    // a long-running API process doesn't leak entries for retry-storm
+    // runs that all collapse onto the same id.
+    clearRunMetricBroadcastState(run.id);
+    return;
+  }
 
-      // Drop the per-run throttle state — the run is terminal, no further
-      // metric events will arrive. Bounds the broadcaster's in-memory map.
-      clearRunMetricBroadcastState(run.id);
+  // Drop the per-run throttle state — the run is terminal, no further
+  // metric events will arrive. Bounds the broadcaster's in-memory map.
+  clearRunMetricBroadcastState(run.id);
 
-      // SLI emission — exactly-once on the CAS winner. Run-duration histogram +
-      // terminal-status counter (the failure-rate source). No-op when disabled.
-      recordRunDuration(resolvedDurationMs, { status });
-      recordRunTerminal({ status, errorCode: result.error?.code });
+  // SLI emission — exactly-once on the CAS winner. Run-duration histogram +
+  // terminal-status counter (the failure-rate source). No-op when disabled.
+  recordRunDuration(resolvedDurationMs, { status });
+  recordRunTerminal({ status, errorCode: result.error?.code });
 
-      // Drop the run's workspace provisioning archive (the AFPS bundle + input
-      // docs the agent fetched at startup via GET /api/runs/:runId/workspace).
-      // This is the crash-safety net for the launcher's own happy-path teardown:
-      // finalizeRun is the single CAS-guarded convergence for every termination
-      // path — natural finalize, watchdog stall sweep, and container-exit
-      // synthesis — so the object is dropped even when the launcher teardown
-      // never runs (e.g. the API replica that launched the run crashed; a later
-      // watchdog tick on any replica still routes through here). Storage exposes
-      // no list/TTL primitive, so this deterministic by-runId delete is what
-      // prevents orphaned archives — not a time-based reaper.
-      //
-      // Fire-and-forget: cleanup must NOT sit on the critical path between the
-      // CAS close and the terminal status broadcast below — a slow/unreachable
-      // object store must never delay the run's terminal signal or the runner's
-      // finalize HTTP response. deleteRunWorkspace swallows + logs its own
-      // failures, and deleting a missing object (remote-origin runs never
-      // provision one) is a harmless idempotent no-op.
-      void deleteRunWorkspace(run.id);
+  // Drop the run's workspace provisioning archive (the AFPS bundle + input
+  // docs the agent fetched at startup via GET /api/runs/:runId/workspace).
+  // This is the crash-safety net for the launcher's own happy-path teardown:
+  // finalizeRun is the single CAS-guarded convergence for every termination
+  // path — natural finalize, watchdog stall sweep, and container-exit
+  // synthesis — so the object is dropped even when the launcher teardown
+  // never runs (e.g. the API replica that launched the run crashed; a later
+  // watchdog tick on any replica still routes through here). Storage exposes
+  // no list/TTL primitive, so this deterministic by-runId delete is what
+  // prevents orphaned archives — not a time-based reaper.
+  //
+  // Fire-and-forget: cleanup must NOT sit on the critical path between the
+  // CAS close and the terminal status broadcast below — a slow/unreachable
+  // object store must never delay the run's terminal signal or the runner's
+  // finalize HTTP response. deleteRunWorkspace swallows + logs its own
+  // failures, and deleting a missing object (remote-origin runs never
+  // provision one) is a harmless idempotent no-op.
+  void deleteRunWorkspace(run.id);
 
-      // 7. Side effects — only the CAS winner reaches here, so memories and
-      //    log rows are written exactly once.
-      if (outputValidationErrors) {
-        // Post-CAS best-effort: the run is already terminal, a transient
-        // log INSERT failure must not crash finalize. The validation
-        // failure is also surfaced via `runs.error` (CAS update above).
-        try {
-          await appendRunLog(
-            scope,
-            run.id,
-            "system",
-            "output_validation",
-            null,
-            { valid: false, errors: outputValidationErrors },
-            "error",
-          );
-        } catch (err) {
-          logger.error("finalize: appendRunLog output_validation failed", {
-            runId: run.id,
-            err: getErrorMessage(err),
-          });
-        }
-      }
-
-      // Resolve the run's actor for the unified persistence scope.
-      const [actorRow] = await db
-        .select({
-          userId: runs.userId,
-          endUserId: runs.endUserId,
-        })
-        .from(runs)
-        .where(eq(runs.id, run.id))
-        .limit(1);
-      const persistenceScope = scopeFromActor(
-        actorFromIds(actorRow?.userId ?? null, actorRow?.endUserId ?? null),
+  // 7. Side effects — only the CAS winner reaches here, so memories and
+  //    log rows are written exactly once.
+  if (outputValidationErrors) {
+    // Post-CAS best-effort: the run is already terminal, a transient
+    // log INSERT failure must not crash finalize. The validation
+    // failure is also surfaced via `runs.error` (CAS update above).
+    try {
+      await appendRunLog(
+        scope,
+        run.id,
+        "system",
+        "output_validation",
+        null,
+        { valid: false, errors: outputValidationErrors },
+        "error",
       );
+    } catch (err) {
+      logger.error("finalize: appendRunLog output_validation failed", {
+        runId: run.id,
+        err: getErrorMessage(err),
+      });
+    }
+  }
 
-      // Post-CAS best-effort: the run is already terminal in `runs`. Memory and
-      // pinned-slot persistence is agent-authored side-data — a transient store
-      // fault here must NOT strand the status-change broadcast below (the only
-      // signal that updates the UI / fires webhooks) nor 500 the runner for a run
-      // that is already committed terminal. Log + swallow, like the run-log writes
-      // further down. (Persistence faults are surfaced via the error log for ops.)
-      try {
-        if (result.memories?.length) {
-          // Split memories by declared scope and write each non-empty bucket.
-          const sharedContent: string[] = [];
-          const actorContent: string[] = [];
-          for (const m of result.memories) {
-            if (m.scope === "shared") sharedContent.push(m.content);
-            else actorContent.push(m.content);
-          }
-
-          if (actorContent.length > 0) {
-            await addUnifiedMemories(
-              run.packageId,
-              run.applicationId,
-              run.orgId,
-              persistenceScope,
-              actorContent,
-              run.id,
-            );
-          }
-          if (sharedContent.length > 0) {
-            await addUnifiedMemories(
-              run.packageId,
-              run.applicationId,
-              run.orgId,
-              { type: "shared" },
-              sharedContent,
-              run.id,
-            );
-          }
-        }
-
-        // Unified-persistence pinned-slot write — the single store for every
-        // named pinned slot the agent wrote via `pin({ key, content })`,
-        // including the carry-over `"checkpoint"` slot. Honors the AFPS
-        // scope when the runtime stamped one onto each slot; falls back to
-        // the run's actor scope.
-        if (result.pinned) {
-          for (const [key, slot] of Object.entries(result.pinned)) {
-            const slotScope =
-              slot.scope === "shared" ? { type: "shared" as const } : persistenceScope;
-            await upsertPinned(
-              run.packageId,
-              run.applicationId,
-              run.orgId,
-              slotScope,
-              key,
-              slot.content,
-              run.id,
-            );
-          }
-        }
-      } catch (err) {
-        logger.error("finalize: memory/pinned persistence failed (run already terminal)", {
-          runId: run.id,
-          err: getErrorMessage(err),
-        });
-      }
-
-      // Post-CAS best-effort: the run is already terminal in `runs`. A
-      // transient log INSERT failure here is logged and swallowed — the UI
-      // shows the run as complete from the row-level state regardless.
-      try {
-        if (status === "success" && resultToPersist) {
-          await appendRunLog(scope, run.id, "result", "result", null, resultToPersist, "info");
-        }
-        await appendRunLog(
-          scope,
-          run.id,
-          "system",
-          "run_completed",
-          null,
-          { runId: run.id, status, ...(errorMessage ? { error: errorMessage } : {}) },
-          status === "success" ? "info" : "error",
-        );
-      } catch (err) {
-        logger.error("finalize: appendRunLog terminal row failed", {
-          runId: run.id,
-          err: getErrorMessage(err),
-        });
-      }
-
-      // 8. Status-change broadcast with the enriched params (including
-      //    validation-failure errors and any afterRun metadata).
-      const broadcastParams: RunStatusChangeParams = {
-        ...hookParams,
-        ...(errorMessage ? { extra: { error: errorMessage } } : {}),
-        ...(resultToPersist && status === "success" ? { extra: { result: resultToPersist } } : {}),
-      };
-      void emitEvent("onRunStatusChange", broadcastParams);
-    },
+  // Resolve the run's actor for the unified persistence scope.
+  const [actorRow] = await db
+    .select({
+      userId: runs.userId,
+      endUserId: runs.endUserId,
+    })
+    .from(runs)
+    .where(eq(runs.id, run.id))
+    .limit(1);
+  const persistenceScope = scopeFromActor(
+    actorFromIds(actorRow?.userId ?? null, actorRow?.endUserId ?? null),
   );
+
+  // Post-CAS best-effort: the run is already terminal in `runs`. Memory and
+  // pinned-slot persistence is agent-authored side-data — a transient store
+  // fault here must NOT strand the status-change broadcast below (the only
+  // signal that updates the UI / fires webhooks) nor 500 the runner for a run
+  // that is already committed terminal. Log + swallow, like the run-log writes
+  // further down. (Persistence faults are surfaced via the error log for ops.)
+  try {
+    if (result.memories?.length) {
+      // Split memories by declared scope and write each non-empty bucket.
+      const sharedContent: string[] = [];
+      const actorContent: string[] = [];
+      for (const m of result.memories) {
+        if (m.scope === "shared") sharedContent.push(m.content);
+        else actorContent.push(m.content);
+      }
+
+      if (actorContent.length > 0) {
+        await addUnifiedMemories(
+          run.packageId,
+          run.applicationId,
+          run.orgId,
+          persistenceScope,
+          actorContent,
+          run.id,
+        );
+      }
+      if (sharedContent.length > 0) {
+        await addUnifiedMemories(
+          run.packageId,
+          run.applicationId,
+          run.orgId,
+          { type: "shared" },
+          sharedContent,
+          run.id,
+        );
+      }
+    }
+
+    // Unified-persistence pinned-slot write — the single store for every
+    // named pinned slot the agent wrote via `pin({ key, content })`,
+    // including the carry-over `"checkpoint"` slot. Honors the AFPS
+    // scope when the runtime stamped one onto each slot; falls back to
+    // the run's actor scope.
+    if (result.pinned) {
+      for (const [key, slot] of Object.entries(result.pinned)) {
+        const slotScope = slot.scope === "shared" ? { type: "shared" as const } : persistenceScope;
+        await upsertPinned(
+          run.packageId,
+          run.applicationId,
+          run.orgId,
+          slotScope,
+          key,
+          slot.content,
+          run.id,
+        );
+      }
+    }
+  } catch (err) {
+    logger.error("finalize: memory/pinned persistence failed (run already terminal)", {
+      runId: run.id,
+      err: getErrorMessage(err),
+    });
+  }
+
+  // Post-CAS best-effort: the run is already terminal in `runs`. A
+  // transient log INSERT failure here is logged and swallowed — the UI
+  // shows the run as complete from the row-level state regardless.
+  try {
+    if (status === "success" && resultToPersist) {
+      await appendRunLog(scope, run.id, "result", "result", null, resultToPersist, "info");
+    }
+    await appendRunLog(
+      scope,
+      run.id,
+      "system",
+      "run_completed",
+      null,
+      { runId: run.id, status, ...(errorMessage ? { error: errorMessage } : {}) },
+      status === "success" ? "info" : "error",
+    );
+  } catch (err) {
+    logger.error("finalize: appendRunLog terminal row failed", {
+      runId: run.id,
+      err: getErrorMessage(err),
+    });
+  }
+
+  // 8. Status-change broadcast with the enriched params (including
+  //    validation-failure errors and any afterRun metadata).
+  const broadcastParams: RunStatusChangeParams = {
+    ...hookParams,
+    ...(errorMessage ? { extra: { error: errorMessage } } : {}),
+    ...(resultToPersist && status === "success" ? { extra: { result: resultToPersist } } : {}),
+  };
+  void emitEvent("onRunStatusChange", broadcastParams);
 }
 
 /**
