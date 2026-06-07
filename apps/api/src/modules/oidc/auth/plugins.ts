@@ -60,7 +60,8 @@ import { cliTokenPlugin } from "./cli-plugin.ts";
 import { assertUserRealm } from "./realm-check.ts";
 import { getAppstrateScopes, OIDC_IDENTITY_SCOPES } from "./scopes.ts";
 import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
-import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { isBlockedUrlWithDns } from "../../../lib/ssrf-dns.ts";
+import { markClientSelfService } from "../services/oauth-admin.ts";
 import { getMcpResourceUri } from "../../mcp/resource.ts";
 
 export type ActorType = "dashboard_user" | "end_user" | "user";
@@ -311,13 +312,26 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // `client_id_metadata_document_supported` in the well-known metadata.
     //
     // The plugin already enforces SSRF (private/link-local/cloud-metadata
-    // ranges), a 5s timeout, a 5KB body cap, JSON-only, and no redirects. We
-    // layer the platform's own SSRF denylist via allowFetch as defence in depth
-    // (it also blocks internal Docker hostnames like `sidecar`/`agent`). Origin
-    // binding (redirect/post-logout/client URIs must share the client_id origin)
-    // is left at its secure default.
+    // ranges), a 5s timeout, a 5KB body cap, JSON-only, and no redirects. The
+    // upstream guard and our `isBlockedUrl` are both LITERAL (no DNS), so we
+    // resolve DNS here in `allowFetch` (the documented hostname-defense seam)
+    // and block any URL whose A/AAAA resolves to a private/internal address —
+    // closing the rebind-to-internal vector for the metadata-document fetch.
+    // Also blocks internal Docker hostnames (`sidecar`/`agent`). Origin binding
+    // (redirect/post-logout/client URIs must share the client_id origin) is
+    // left at its secure default.
     cimd({
-      allowFetch: (url) => !isBlockedUrl(url),
+      allowFetch: async (url) => !(await isBlockedUrlWithDns(url)),
+      // A CIMD client is written straight to the DB by the plugin with no
+      // platform `level`, so `buildClaimsForClient` would reject its tokens.
+      // Stamp it as a self-service instance client (same model as a DCR
+      // client) so it can mint instance tokens — which the RFC 8707 audience
+      // confinement then restricts to the protected resource it was issued
+      // for. Without this the entire CIMD onboarding path mints nothing.
+      onClientCreated: async ({ client }) => {
+        const clientId = (client as { clientId?: unknown }).clientId;
+        if (typeof clientId === "string") await markClientSelfService(clientId);
+      },
     }),
   ];
 }

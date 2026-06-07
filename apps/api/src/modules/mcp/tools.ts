@@ -22,6 +22,7 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
+import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
@@ -102,6 +103,13 @@ const PROTECTED_HEADERS = new Set([
   "x-application-id",
   "appstrate-user",
   "appstrate-version",
+  // The internal self-dispatch marker is set by THIS layer (see the dispatch
+  // request build below) and exempts the request from outbound resource-
+  // audience confinement. A client-supplied value would be a forgery attempt —
+  // drop it here so only our authoritative, nonce-valued header survives. (Even
+  // without this, the value must equal an unguessable per-process secret, so a
+  // forgery cannot succeed; this is defence in depth.)
+  internalDispatchHeader()[0],
 ]);
 // Cap the buffered response body so a large list endpoint can't dump
 // unbounded text into the model context. Truncation is flagged in the result.
@@ -271,12 +279,43 @@ function encodePathSegment(value: string): string {
   return encodeURIComponent(value).replace(/%40/g, "@").replace(/%2F/g, "/");
 }
 
+/**
+ * Whether a caller-supplied path-param value is safe to interpolate without
+ * altering the route the `operationId` binds to.
+ *
+ * `encodePathSegment` deliberately restores `/` (for scoped ids), so an
+ * unchecked value could smuggle extra path structure: `name="../api-keys"`
+ * would normalise `/api/agents/../api-keys` → `/api/agents/api-keys`, and
+ * `name="x/runs"` would re-route to `/api/agents/x/runs` — both dispatching a
+ * DIFFERENT operation than the audited `operationId` (and mis-recording the
+ * audit trail). `path_params` is `additionalProperties: true`, so the value is
+ * fully client-controlled.
+ *
+ * Rules: no control chars or backslashes; no empty / `.` / `..` segments
+ * (traversal, leading/trailing/double slash); and slashes are allowed ONLY for
+ * a scoped package id — leading `@` with exactly one internal slash
+ * (`@scope/name`). Every other value must be a single path segment.
+ */
+function isSafePathParamValue(value: string): boolean {
+  if (value === "") return false;
+  // eslint-disable-next-line no-control-regex -- intentionally matching control chars
+  if (/[\u0000-\u001f\u007f\\]/.test(value)) return false;
+  const segments = value.split("/");
+  for (const seg of segments) {
+    if (seg === "" || seg === "." || seg === "..") return false;
+  }
+  if (segments.length > 1 && !(value.startsWith("@") && segments.length === 2)) return false;
+  return true;
+}
+
 function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknown>): string | null {
   let path = op.pathTemplate;
   for (const name of op.pathParams) {
     const value = pathParams[name];
     if (value === undefined || value === null) return null;
-    path = path.replace(`{${name}}`, encodePathSegment(String(value)));
+    const raw = String(value);
+    if (!isSafePathParamValue(raw)) return null;
+    path = path.replace(`{${name}}`, encodePathSegment(raw));
   }
   return path;
 }
@@ -489,6 +528,15 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     const body = asRecord(args.body);
     const sendBody = body !== undefined && METHODS_WITH_BODY.has(op.method);
     if (sendBody) headers.set("content-type", "application/json");
+
+    // Mark this as a trusted in-process self-dispatch. The inbound MCP request
+    // already cleared the `/api/mcp` resource boundary's audience check; this
+    // re-entry targets a non-resource route (`/api/agents`, …) carrying the
+    // same audience-bound token, which the outbound half of
+    // `enforceResourceAudience` would otherwise reject. The marker value is an
+    // unguessable per-process secret, so it cannot be forged from outside (and
+    // any client-supplied copy was dropped by PROTECTED_HEADERS above).
+    headers.set(...internalDispatchHeader());
 
     const request = new Request(url.toString(), {
       method: op.method,

@@ -391,6 +391,62 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
   return { ...mapRow(inserted[0]!), clientSecret: plaintextSecret };
 }
 
+// ─── Self-service onboarding (DCR / CIMD) ──────────────────────────────────────
+
+/**
+ * Stamp a self-registered (RFC 7591 DCR or CIMD) OAuth client as a
+ * self-service **instance** client.
+ *
+ * Self-registered clients are written WITHOUT the platform's polymorphic
+ * `level` in their `metadata` (the native DCR insert and the CIMD plugin both
+ * bypass `createClient`), so `customAccessTokenClaims` →
+ * `buildClaimsForClient` would reject every token they request
+ * (`metadata missing level`). This marks them `level: "instance"` so they mint
+ * instance tokens — which the RFC 8707 audience confinement
+ * (`protected-resources.ts`) then restricts to the single protected resource
+ * the token was issued for (the only resource a self-service client may request
+ * — enforced at `/oauth2/token`, see `oidcGuardsPlugin`). The token carries the
+ * connecting user's authority but is usable ONLY at that resource.
+ *
+ * `selfService: true` is also recorded so the token endpoint can recognise
+ * these clients and enforce the resource restriction; it is the discriminator
+ * between an admin-provisioned instance client (the dashboard SPA / CLI, which
+ * may target the platform audience) and a self-registered one (which may not).
+ *
+ * Merges into any metadata the registration already wrote, and keeps the SQL
+ * `level` column in lockstep. Idempotent: a CIMD client refreshed/re-resolved
+ * is safely re-stamped. Best-effort cache invalidation so the next mint reads
+ * the stamped row.
+ */
+export async function markClientSelfService(clientId: string): Promise<void> {
+  const [row] = await db
+    .select({ metadata: oauthClient.metadata })
+    .from(oauthClient)
+    .where(eq(oauthClient.clientId, clientId))
+    .limit(1);
+  if (!row) return;
+
+  let metadata: Record<string, unknown> = {};
+  if (row.metadata) {
+    try {
+      const parsed = JSON.parse(row.metadata) as unknown;
+      if (parsed && typeof parsed === "object") metadata = parsed as Record<string, unknown>;
+    } catch {
+      // Corrupt metadata → overwrite with a clean self-service marker rather
+      // than carry the garbage forward.
+    }
+  }
+  metadata.level = "instance";
+  metadata.clientId = clientId;
+  metadata.selfService = true;
+
+  await db
+    .update(oauthClient)
+    .set({ level: "instance", metadata: JSON.stringify(metadata), updatedAt: new Date() })
+    .where(eq(oauthClient.clientId, clientId));
+  cacheInvalidate(clientId);
+}
+
 // ─── Update / delete / rotate ─────────────────────────────────────────────────
 
 export async function deleteClient(clientId: string): Promise<OAuthClientRecord | null> {

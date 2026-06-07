@@ -22,11 +22,13 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "@appstrate/mcp-transport";
+import { getEnv } from "@appstrate/env";
 import { requireModulePermission } from "@appstrate/core/permissions";
-import { methodNotAllowed, unauthorized } from "../../lib/errors.ts";
+import { methodNotAllowed } from "../../lib/errors.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
 import { logger } from "../../lib/logger.ts";
 import { registerAuthChallenge } from "../../lib/auth-challenges.ts";
+import { registerProtectedResource } from "../../lib/protected-resources.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { getPlatformApp } from "../../lib/platform-app.ts";
@@ -81,33 +83,6 @@ function forwardAuthHeaders(src: Headers): Headers {
   return out;
 }
 
-/**
- * RFC 8707 resource-server audience binding. The MCP spec requires the server
- * to "validate that access tokens were issued specifically for them" and
- * "reject tokens that do not include them in the audience claim".
- *
- * Only OAuth Bearer tokens carry an audience (the oidc strategy surfaces it as
- * `authExtra.tokenAudiences`). When present, the token MUST list this server's
- * canonical resource URI; otherwise it was issued for a different resource and
- * is rejected with 401 (the challenge responder then attaches the
- * `WWW-Authenticate` so the client can re-acquire a correctly-scoped token).
- *
- * Cookie sessions and API keys carry no token audience (`tokenAudiences`
- * undefined) → first-party callers are unaffected. An MCP-audience token that
- * reaches other platform routes is contained by RBAC (it holds only mcp:*
- * permissions), so this check is the MCP-direction half of audience isolation.
- */
-export const requireMcpAudience = async (c: Context<AppEnv>, next: () => Promise<void>) => {
-  const extra = c.get("authExtra") as { tokenAudiences?: unknown } | undefined;
-  const audiences = extra?.tokenAudiences;
-  // No bearer-token audience → cookie/API-key first-party caller. Allow.
-  if (!Array.isArray(audiences)) return next();
-  if (!audiences.includes(getMcpResourceUri())) {
-    throw unauthorized("Access token is not audience-bound to this MCP resource.");
-  }
-  return next();
-};
-
 export function createMcpRouter(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
@@ -119,25 +94,44 @@ export function createMcpRouter(): Hono<AppEnv> {
   // (`/.well-known/oauth-protected-resource/api/mcp`): RFC 9728 §3.1 has a
   // client derive the metadata URL by inserting the well-known segment before
   // the resource's path, so a strict client probes the suffixed form.
+  //
+  // The advertised `resource` MUST be the canonical APP_URL-derived URI
+  // (`getMcpResourceUri()`), NOT the request origin: it is the exact string the
+  // client echoes back as the RFC 8707 `resource` at the token endpoint, where
+  // it must match the AS `validAudiences` (also APP_URL-derived) and the
+  // resource-server audience check. Behind a reverse proxy where the public
+  // origin differs from an internal request host, an origin-derived value would
+  // silently break audience binding. `authorization_servers` / doc URLs derive
+  // from the same APP_URL base so discovery stays consistent.
   const protectedResourceMetadata = (c: Context<AppEnv>) => {
-    const origin = new URL(c.req.url).origin;
+    const appBase = getEnv().APP_URL.replace(/\/+$/, "");
     return c.json({
-      resource: `${origin}${MCP_PATH}`,
-      authorization_servers: [origin],
+      resource: getMcpResourceUri(),
+      authorization_servers: [appBase],
       scopes_supported: [...MCP_SCOPES],
       bearer_methods_supported: ["header"],
-      resource_documentation: `${origin}/api/docs`,
+      resource_documentation: `${appBase}/api/docs`,
     });
   };
   app.get(PRM_PATH, protectedResourceMetadata);
   app.get(`${PRM_PATH}${MCP_PATH}`, protectedResourceMetadata);
 
+  // RFC 8707 audience binding: `/api/mcp` is a protected resource. A bearer
+  // token must be issued for it (its `aud` must include the canonical URI) to
+  // be accepted here, and a token issued for it may not be replayed on other
+  // routes — both halves enforced generically by `enforceResourceAudience` in
+  // the auth pipeline. Registered with the same canonical URI the PRM/AS use.
+  registerProtectedResource(MCP_PATH, getMcpResourceUri);
+
   // RFC 9728 §5.1 challenge: on a 401 (no/invalid token) or 403 (insufficient
   // scope) the generic responder attaches this so a spec-compliant client
   // (Claude Code, …) discovers the PRM URL and starts/steps-up an OAuth flow.
-  // Point at the path-insertion PRM variant (the form a strict client probes).
-  registerAuthChallenge(MCP_PATH, ({ origin, status }) => {
-    const resourceMetadata = `${origin}${PRM_PATH}${MCP_PATH}`;
+  // Point at the path-insertion PRM variant (the form a strict client probes),
+  // anchored on the canonical APP_URL base for the same proxy-safety reason as
+  // the PRM `resource` above.
+  registerAuthChallenge(MCP_PATH, ({ status }) => {
+    const appBase = getEnv().APP_URL.replace(/\/+$/, "");
+    const resourceMetadata = `${appBase}${PRM_PATH}${MCP_PATH}`;
     const base = `Bearer resource_metadata="${resourceMetadata}", scope="${MCP_SCOPES.join(" ")}"`;
     // 403 here means the caller authenticated but lacks an mcp scope — signal
     // step-up per RFC 6750 §3.1 so the client requests the missing scope.
@@ -145,10 +139,10 @@ export function createMcpRouter(): Hono<AppEnv> {
   });
 
   // Rate-limit before the permission check so repeated probing (including by a
-  // caller that will 403) is bounded too. Auth runs earlier in the global
-  // pipeline, so the identity is already resolved here.
+  // caller that will 403) is bounded too. Auth + audience binding run earlier
+  // in the global pipeline, so the identity is already resolved here and an
+  // audience-mismatched token was already rejected.
   app.use(MCP_PATH, rateLimitMcp(MCP_RATE_LIMIT_PER_MIN));
-  app.use(MCP_PATH, requireMcpAudience);
   app.use(MCP_PATH, requireModulePermission("mcp", "read"));
 
   app.post(MCP_PATH, async (c) => {

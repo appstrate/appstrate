@@ -64,7 +64,14 @@ What happens under the hood:
      to identity + MCP scopes and rate-limited.
 4. The user logs in and consents in the browser; the client receives an access
    token **audience-bound** to `https://YOUR_INSTANCE/api/mcp` (RFC 8707). The
-   MCP server rejects any token not issued for it.
+   MCP server rejects any token not issued for it, and the token is rejected on
+   every OTHER platform route — it can only ever drive `/api/mcp`.
+
+> **Organization context.** An OAuth-onboarded client acts as the connecting
+> user, who may belong to several organizations. Send the target org with an
+> `X-Org-Id: org_xxx` header (same as the API-key path); without it the request
+> has no organization to resolve permissions against. A client that supports
+> custom headers (Claude Code: `--header`) can set it once at connect time.
 
 ### Self-hosting requirements for Path B
 
@@ -78,10 +85,17 @@ What happens under the hood:
 
 ### Security notes
 
-- **Audience binding (RFC 8707):** tokens are bound to `<APP_URL>/api/mcp`.
-  A token issued for a different resource is rejected at `/api/mcp` with `401`.
-  Cookie- and API-key-authenticated callers carry no token audience and are
-  unaffected.
+- **Audience binding (RFC 8707), both directions:** tokens are bound to
+  `<APP_URL>/api/mcp`. A token issued for a different resource is rejected at
+  `/api/mcp` with `401` (inbound); and an `/api/mcp` token presented to any
+  other platform route is also rejected with `401` (outbound confinement). An
+  OAuth MCP client carries the connecting user's full authority but can exercise
+  it **only** through the MCP surface — the token cannot be lifted and replayed
+  against the rest of the REST API. Self-service (CIMD/DCR) clients are
+  additionally forbidden at the token endpoint from requesting any audience
+  other than a protected resource, so they can never obtain a platform-wide
+  token in the first place. Cookie- and API-key-authenticated callers carry no
+  token audience and are unaffected by either check.
 - **CIMD fetch is SSRF-protected:** private/link-local/cloud-metadata ranges are
   blocked, with a 5s timeout, a 5KB body cap, JSON-only responses, and no
   redirect following — plus the platform's own host denylist.

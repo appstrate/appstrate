@@ -9,6 +9,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
+import { getEnv } from "@appstrate/env";
 import { auditEvents } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll, db } from "../../../../../test/helpers/db.ts";
@@ -97,9 +98,13 @@ describe("mcp discovery + auth gate", () => {
     const challenge = res.headers.get("WWW-Authenticate");
     expect(challenge).not.toBeNull();
     expect(challenge!).toContain("Bearer");
-    // Points at the path-insertion PRM variant so the client can discover the AS.
+    // Points at the path-insertion PRM variant so the client can discover the
+    // AS. Anchored on the canonical APP_URL base (NOT the request origin) so
+    // audience binding stays correct behind a reverse proxy — see
+    // `mcp/router.ts` / `mcp/resource.ts`.
+    const appBase = getEnv().APP_URL.replace(/\/+$/, "");
     expect(challenge!).toContain(
-      'resource_metadata="http://localhost/.well-known/oauth-protected-resource/api/mcp"',
+      `resource_metadata="${appBase}/.well-known/oauth-protected-resource/api/mcp"`,
     );
     expect(challenge!).toContain('scope="mcp:read mcp:invoke"');
     // No token presented → not a step-up, so no insufficient_scope error.

@@ -29,6 +29,7 @@ import { isEndUserInApp } from "../services/end-users.ts";
 import { ApiError, unauthorized } from "./errors.ts";
 import { clearStaleAuthCookies } from "./auth-cookies.ts";
 import { authChallengeResponder } from "./auth-challenges.ts";
+import { enforceResourceAudience } from "./protected-resources.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "./permissions.ts";
 import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
 import { logger } from "./logger.ts";
@@ -248,6 +249,20 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     if (skipAuth(c.req.path, publicPaths(), c.req.raw.headers)) return next();
     if (!c.get("user")) return next();
     return realmGuard(c, next);
+  });
+
+  // RFC 8707 audience confinement for OAuth bearer tokens. A token bound to a
+  // protected resource (e.g. `/api/mcp`) must be presented to that resource and
+  // may not be replayed elsewhere — see `protected-resources.ts`. Runs after
+  // auth (needs `authExtra.tokenAudiences`) but before org-context/permission
+  // resolution, so an audience-mismatched token is rejected before any
+  // resource work. No-op for cookie/API-key callers (no token audience) and
+  // when no resource is registered.
+  const resourceAudienceGuard = enforceResourceAudience();
+  app.use("*", async (c, next) => {
+    if (skipAuth(c.req.path, publicPaths(), c.req.raw.headers)) return next();
+    if (!c.get("user")) return next();
+    return resourceAudienceGuard(c, next);
   });
 
   // Org context middleware: require X-Org-Id for org-scoped /api/* routes.
