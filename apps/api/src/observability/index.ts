@@ -9,17 +9,13 @@
 export {
   initObservability,
   shutdownObservability,
-  isObservabilityEnabled,
   setQueueDepthProvider,
   runWithSpan,
-  currentSpan,
   currentTraceparent,
   recordRunDuration,
   recordRunTerminal,
   recordContainerSpawn,
   recordLlmLatency,
-  type SpanOptions,
-  type InitObservabilityOptions,
 } from "./otel.ts";
 
 export { observability } from "./middleware.ts";

@@ -161,7 +161,9 @@ export async function initObservability(opts: InitObservabilityOptions = {}): Pr
       opts.metricReader ??
       new PeriodicExportingMetricReader({
         exporter: new OTLPMetricExporter(),
-        exportIntervalMillis: env.OTEL_METRIC_EXPORT_INTERVAL_MS,
+        // Fixed 60s flush cadence — fresh enough for dashboards, cheap on
+        // export traffic. No custom env knob (YAGNI).
+        exportIntervalMillis: 60_000,
       });
     const mp = new MeterProvider({ resource, readers: [reader] });
     metrics.setGlobalMeterProvider(mp);
@@ -206,23 +208,26 @@ export async function shutdownObservability(): Promise<void> {
 }
 
 function createInstruments(m: Meter): void {
-  // Unit lives in `unit:"ms"` only — not the metric name (OTel naming
-  // guidance: don't embed the unit in the instrument name). The Prometheus
-  // exporter also auto-appends `_total` to counters, so the counter name omits
-  // it to avoid a `_total_total` double suffix.
+  // Durations are recorded in SECONDS (`unit:"s"`, per OTel semconv): runs span
+  // ~1s to minutes, which lands inside the SDK's default histogram bucket range
+  // — recording raw milliseconds (top default bucket 10000ms) dumped every run
+  // into the (10000,+inf) overflow bucket, making p50/p95/p99 unusable. The
+  // unit lives in `unit` only — not the metric name (OTel naming guidance). The
+  // Prometheus exporter also auto-appends `_total` to counters, so the counter
+  // name omits it to avoid a `_total_total` double suffix.
   runDuration = m.createHistogram("appstrate.run.duration", {
-    unit: "ms",
+    unit: "s",
     description: "Wall-clock duration of a run from launch to terminal status.",
   });
   runTerminal = m.createCounter("appstrate.run.terminal", {
     description: "Count of runs reaching a terminal status, tagged by status + error_code.",
   });
   containerSpawn = m.createHistogram("appstrate.run.container_spawn", {
-    unit: "ms",
+    unit: "s",
     description: "Time to provision the isolation boundary + sidecar/agent workloads.",
   });
   llmLatency = m.createHistogram("appstrate.llm.latency", {
-    unit: "ms",
+    unit: "s",
     description: "Upstream LLM call latency observed at the platform proxy seam.",
   });
   m.createObservableGauge("appstrate.scheduler.queue_depth", {
@@ -376,22 +381,39 @@ export function currentTraceparent(): string | undefined {
 
 // ─── Metric recorders (all no-op when disabled) ──────────────────
 
+// Duration histograms record SECONDS (see createInstruments). Callers measure
+// in milliseconds at the seam, so each recorder divides by 1000 on the way in.
+const MS_PER_S = 1000;
+
+/**
+ * Allowlist of stable run-failure codes (documented on `RunError.code` in
+ * `@appstrate/afps-runtime`). Clamping the metric label to this set keeps the
+ * `error_code` dimension's cardinality bounded — a runner-controlled string can
+ * never explode it. Unknown codes map to `"other"`, absent maps to `"none"`.
+ */
+const RUN_ERROR_CODES = new Set(["timeout", "manifest_invalid", "provider_unauthorized"]);
+
+function clampErrorCode(code: string | undefined): string {
+  if (code === undefined) return "none";
+  return RUN_ERROR_CODES.has(code) ? code : "other";
+}
+
 export function recordRunDuration(durationMs: number, attrs: { status: string }): void {
   if (!enabled) return;
-  runDuration?.record(durationMs, attrs);
+  runDuration?.record(durationMs / MS_PER_S, attrs);
 }
 
 export function recordRunTerminal(attrs: { status: string; errorCode?: string }): void {
   if (!enabled) return;
   runTerminal?.add(1, {
     status: attrs.status,
-    error_code: attrs.errorCode ?? "none",
+    error_code: clampErrorCode(attrs.errorCode),
   });
 }
 
 export function recordContainerSpawn(durationMs: number, attrs?: { sidecar?: boolean }): void {
   if (!enabled) return;
-  containerSpawn?.record(durationMs, { sidecar: attrs?.sidecar ?? false });
+  containerSpawn?.record(durationMs / MS_PER_S, { sidecar: attrs?.sidecar ?? false });
 }
 
 export function recordLlmLatency(
@@ -399,7 +421,7 @@ export function recordLlmLatency(
   attrs: { api_shape?: string; status?: number; outcome: "success" | "error" },
 ): void {
   if (!enabled) return;
-  llmLatency?.record(durationMs, {
+  llmLatency?.record(durationMs / MS_PER_S, {
     api_shape: attrs.api_shape ?? "unknown",
     outcome: attrs.outcome,
     ...(attrs.status !== undefined ? { status_code: attrs.status } : {}),

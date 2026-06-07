@@ -69,7 +69,14 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
     logger.info("Shutting down modules...");
     await shutdownModules();
 
-    // Flush any buffered spans/metrics before the process exits.
+    // Flush any buffered spans/metrics before the process exits. INVARIANT:
+    // this runs AFTER in-flight runs are drained (above) and AFTER worker
+    // shutdown, so the terminal-status counters + run-duration histograms those
+    // paths emit are already recorded — and it is `await`ed, so the buffered
+    // BatchSpanProcessor + PeriodicExportingMetricReader actually flush before
+    // the DB/Redis teardown below races the event loop to exit. Keep this
+    // ordering: flush last among the telemetry-producing teardown steps, but
+    // before the connection close + `process.exit(0)`.
     await shutdownObservability();
 
     logger.info("Closing database and infrastructure connections...");

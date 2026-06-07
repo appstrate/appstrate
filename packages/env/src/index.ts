@@ -366,9 +366,17 @@ const envSchema = z
     // `service.name` resource attribute on every span/metric — the dimension
     // collectors group by. Defaults to the platform API service identity.
     OTEL_SERVICE_NAME: z.string().default("appstrate-api"),
-    // PeriodicExportingMetricReader flush interval (ms). Lower = fresher
-    // dashboards at the cost of more export traffic. Ignored when disabled.
-    OTEL_METRIC_EXPORT_INTERVAL_MS: z.coerce.number().int().positive().default(60000),
+    // Trust the inbound W3C `traceparent` header for SERVER-span parenting.
+    // Default OFF: a public-facing API must not let an unauthenticated caller
+    // splice the server span into an attacker-chosen trace (trace spoofing /
+    // log-correlation injection). When off, a fresh root span is started — a
+    // SERVER span is still emitted, just not parented from the header. Enable
+    // only when the platform sits behind a trusted gateway that strips/sets
+    // `traceparent` for external callers.
+    OTEL_TRUST_INCOMING_TRACE: z
+      .string()
+      .default("false")
+      .transform((s) => s.toLowerCase() === "true" || s === "1"),
 
     // Run — execution backend: "docker" (isolated containers) or "process" (default, Bun subprocesses, no isolation)
     RUN_ADAPTER: z.enum(["docker", "process"]).default("process"),

@@ -158,11 +158,34 @@ describe("observability — enabled (in-memory exporters)", () => {
       0,
     );
     expect(durationCount).toBe(1);
+    // Durations are recorded in SECONDS — 1234ms → 1.234s (not raw ms, which
+    // would overflow the SDK's default histogram buckets).
+    const durationSum = duration!.dataPoints.reduce(
+      (n, p) => n + (p.value as { sum: number }).sum,
+      0,
+    );
+    expect(durationSum).toBeCloseTo(1.234, 6);
+    const spawnSum = spawn!.dataPoints.reduce((n, p) => n + (p.value as { sum: number }).sum, 0);
+    expect(spawnSum).toBeCloseTo(0.05, 6);
 
     const terminalTotal = terminal!.dataPoints.reduce((n, p) => n + (p.value as number), 0);
     expect(terminalTotal).toBe(1);
     expect(terminal!.dataPoints[0]?.attributes.status).toBe("success");
     expect(terminal!.dataPoints[0]?.attributes.error_code).toBe("none");
+  });
+
+  it("clamps the terminal error_code label to the bounded allowlist", async () => {
+    // Known stable code passes through; an arbitrary runner string collapses to
+    // "other" so the dimension's cardinality stays bounded.
+    recordRunTerminal({ status: "failed", errorCode: "timeout" });
+    recordRunTerminal({ status: "failed", errorCode: "totally-made-up-code" });
+    await _forceFlushForTesting();
+
+    const terminal = findMetric(metricExporter.getMetrics(), "appstrate.run.terminal");
+    const codes = new Set(terminal!.dataPoints.map((p) => p.attributes.error_code));
+    expect(codes.has("timeout")).toBe(true);
+    expect(codes.has("other")).toBe(true);
+    expect(codes.has("totally-made-up-code")).toBe(false);
   });
 
   it("flows trace_id from an inbound traceparent into the span AND the logger context", async () => {

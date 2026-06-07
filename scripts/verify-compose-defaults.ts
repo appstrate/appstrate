@@ -62,7 +62,7 @@ const CODE_DEFAULTS: Record<string, string> = {
   LOG_LEVEL: "info",
   OTEL_ENABLED: "false",
   OTEL_SERVICE_NAME: "appstrate-api",
-  OTEL_METRIC_EXPORT_INTERVAL_MS: "60000",
+  OTEL_TRUST_INCOMING_TRACE: "false",
   MODULES: "oidc,webhooks,core-providers,@appstrate/module-codex,@appstrate/module-claude-code",
   OAUTH_REFRESH_WORKER_ENABLED: "false",
   INTEGRATION_REFRESH_MAX_FAILURES: "5",
