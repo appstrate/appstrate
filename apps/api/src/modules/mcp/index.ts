@@ -38,8 +38,12 @@ const mcpModule: AppstrateModule = {
     return createMcpRouter();
   },
 
-  // RFC 9728 metadata is public discovery — no auth.
-  publicPaths: ["/.well-known/oauth-protected-resource"],
+  // RFC 9728 metadata is public discovery — no auth. Both the bare well-known
+  // and the path-insertion variant (RFC 9728 §3.1) are served.
+  publicPaths: [
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-protected-resource/api/mcp",
+  ],
 
   openApiPaths() {
     return mcpPaths;

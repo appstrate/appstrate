@@ -17,6 +17,7 @@
  */
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "@appstrate/mcp-transport";
 import { requireModulePermission } from "@appstrate/core/permissions";
@@ -53,15 +54,23 @@ export function createMcpRouter(): Hono<AppEnv> {
   // RFC 9728 Protected Resource Metadata — public (declared in module
   // publicPaths). Points clients at this instance's OAuth authorization
   // server (served by the oidc module at /.well-known/oauth-authorization-server).
-  app.get(PRM_PATH, (c) => {
+  //
+  // Served at BOTH the bare well-known and the path-insertion variant
+  // (`/.well-known/oauth-protected-resource/api/mcp`): RFC 9728 §3.1 has a
+  // client derive the metadata URL by inserting the well-known segment before
+  // the resource's path, so a strict client probes the suffixed form.
+  const protectedResourceMetadata = (c: Context<AppEnv>) => {
     const origin = new URL(c.req.url).origin;
     return c.json({
       resource: `${origin}${MCP_PATH}`,
       authorization_servers: [origin],
+      scopes_supported: ["mcp:read", "mcp:invoke"],
       bearer_methods_supported: ["header"],
       resource_documentation: `${origin}/api/docs`,
     });
-  });
+  };
+  app.get(PRM_PATH, protectedResourceMetadata);
+  app.get(`${PRM_PATH}${MCP_PATH}`, protectedResourceMetadata);
 
   app.use(MCP_PATH, requireModulePermission("mcp", "read"));
 
@@ -76,9 +85,11 @@ export function createMcpRouter(): Hono<AppEnv> {
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
-      // Host-header / DNS-rebinding is handled upstream by CORS + the
-      // platform's trusted-origin config; the transport check would reject
-      // legitimate reverse-proxied hosts.
+      // Disabled deliberately: the SDK's Host-header allowlist would reject
+      // legitimate reverse-proxied hosts, and the rebinding threat it guards
+      // (a browser tricked into POSTing to a localhost MCP server) doesn't
+      // apply here — `/api/mcp` requires platform auth (Bearer/API key, or a
+      // SameSite session cookie), so a cross-site page cannot drive it.
       enableDnsRebindingProtection: false,
     });
 

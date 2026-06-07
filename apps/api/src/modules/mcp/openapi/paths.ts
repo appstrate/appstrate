@@ -54,15 +54,16 @@ export const mcpPaths = {
     get: {
       operationId: "mcpStreamableHttpGet",
       tags: ["MCP"],
-      summary: "MCP Streamable HTTP stream",
+      summary: "MCP Streamable HTTP (GET)",
       description:
-        "Server-initiated stream channel for the MCP Streamable HTTP transport. Requires the " +
-        "`mcp:read` permission.",
+        "The GET channel of the MCP Streamable HTTP transport. This server runs in stateless " +
+        "mode (no standalone server-initiated SSE stream), so GET returns 405; clients POST " +
+        "JSON-RPC messages instead. Requires the `mcp:read` permission.",
       security: [{ bearerJwt: [] }, { bearerApiKey: [] }, { cookieAuth: [] }],
       responses: {
-        "200": { description: "Event stream (text/event-stream) or JSON-RPC response." },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "405": { description: "Method Not Allowed — stateless server has no GET stream." },
       },
     },
   },

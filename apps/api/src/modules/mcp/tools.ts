@@ -40,6 +40,9 @@ export interface McpToolContext {
 const DEFAULT_SEARCH_LIMIT = 25;
 const MAX_SEARCH_LIMIT = 100;
 const METHODS_WITH_BODY = new Set(["POST", "PUT", "PATCH"]);
+// Cap the buffered response body so a large list endpoint can't dump
+// unbounded text into the model context. Truncation is flagged in the result.
+const MAX_RESPONSE_CHARS = 100_000;
 
 function textResult(payload: unknown, isError = false): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }], isError };
@@ -71,6 +74,12 @@ function buildSearchTool(): AppstrateToolDefinition {
       "Search the Appstrate API for operations by keyword and/or tag. Returns matching " +
       "operationIds with their HTTP method, path, and summary. Use this first to discover " +
       "which operation to call, then describe_operation for its input schema.",
+    annotations: {
+      title: "Search API operations",
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -129,6 +138,12 @@ function buildDescribeTool(): AppstrateToolDefinition {
       "Return the full OpenAPI definition for one operation (parameters, request body, " +
       "responses) with all referenced component schemas inlined, so you can construct a " +
       "valid invoke_operation call.",
+    annotations: {
+      title: "Describe API operation",
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -173,6 +188,66 @@ function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknow
   return path;
 }
 
+/**
+ * Read a dispatched response into a tool result, defensively:
+ *  - Streaming (`text/event-stream`) bodies are refused, NOT buffered —
+ *    `.text()` on an open SSE stream never resolves and would hang the
+ *    server promise (the platform exposes SSE GET operations).
+ *  - Non-text bodies (downloads, tarballs) are summarised, not decoded.
+ *  - Text bodies are capped to bound context size.
+ */
+async function readResponse(response: Response): Promise<CallToolResult> {
+  const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+  const isError = response.status >= 400;
+
+  if (contentType.includes("text/event-stream")) {
+    return textResult(
+      {
+        status: response.status,
+        error:
+          "This operation streams (text/event-stream) and is not supported via invoke_operation. Consume the realtime/SSE endpoint directly.",
+      },
+      true,
+    );
+  }
+
+  const isTextual =
+    contentType.includes("json") || contentType.startsWith("text/") || contentType === "";
+  if (!isTextual) {
+    const len = response.headers.get("content-length");
+    return textResult(
+      {
+        status: response.status,
+        note: "Non-text response body omitted.",
+        content_type: contentType,
+        bytes: len ? Number(len) : null,
+      },
+      isError,
+    );
+  }
+
+  let raw = await response.text();
+  let truncated = false;
+  if (raw.length > MAX_RESPONSE_CHARS) {
+    raw = raw.slice(0, MAX_RESPONSE_CHARS);
+    truncated = true;
+  }
+
+  let body: unknown = raw;
+  if (!truncated && contentType.includes("json") && raw) {
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      body = raw;
+    }
+  }
+
+  return textResult(
+    { status: response.status, ...(truncated ? { truncated: true } : {}), body },
+    isError,
+  );
+}
+
 function applyQuery(url: URL, query: Record<string, unknown>): void {
   for (const [key, value] of Object.entries(query)) {
     if (value === undefined || value === null) continue;
@@ -191,6 +266,16 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       "Execute an Appstrate API operation. Call describe_operation first to learn its " +
       "path_params, query, and body shapes. Runs with your own credentials and permissions; " +
       "the request is validated and authorized exactly as the equivalent REST call.",
+    annotations: {
+      title: "Invoke API operation",
+      // Dispatches any of ~222 operations, including POST/PUT/DELETE — declare
+      // it non-read-only, potentially destructive, non-idempotent, open-world
+      // so clients prompt for confirmation appropriately.
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -254,17 +339,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     });
 
     const response = await ctx.dispatch(request);
-    const raw = await response.text();
-    let parsed: unknown = raw;
-    if ((response.headers.get("content-type") ?? "").includes("application/json") && raw) {
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        parsed = raw;
-      }
-    }
-
-    return textResult({ status: response.status, body: parsed }, response.status >= 400);
+    return readResponse(response);
   };
 
   return { descriptor, handler };
