@@ -274,6 +274,24 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
     return { status: res.status(), body: (await res.json()) as Record<string, unknown> };
   }
 
+  async function refresh(
+    request: APIRequestContext,
+    clientId: string,
+    refreshToken: string,
+    resource: string,
+  ) {
+    const res = await request.post(`${BASE}/api/auth/oauth2/token`, {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      form: {
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: clientId,
+        resource,
+      },
+    });
+    return { status: res.status(), body: (await res.json()) as Record<string, unknown> };
+  }
+
   test("self-service client cannot mint a token for the broad platform audience", async ({
     request,
   }) => {
@@ -338,6 +356,47 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
 
       // Outbound confinement: the SAME token on a non-resource route is rejected.
       // The token cannot be lifted from the MCP surface to the rest of the API.
+      const lifted = await anon.get(`${BASE}/api/applications`, {
+        headers: { ...headers, "X-Application-Id": orgContext.org.defaultAppId },
+      });
+      expect(lifted.status()).toBe(401);
+    } finally {
+      await anon.dispose();
+    }
+  });
+
+  test("a refreshed token stays audience-bound and confined", async ({
+    playwright,
+    orgContext,
+  }) => {
+    // RFC 8707 resources persist on the refresh-token row (Better Auth 1.7) and
+    // the token-endpoint guard runs on the refresh_token grant too, so a
+    // refreshed access token must keep the SAME confinement: usable at /api/mcp,
+    // rejected everywhere else. Without this, a client could launder a confined
+    // token into an unconfined one across a refresh.
+    const anon = await playwright.request.newContext();
+    try {
+      const clientId = await registerDcrClient(anon);
+      const { code, verifier } = await authorizeToCode(anon, orgContext.auth.cookie, clientId);
+      const minted = await exchange(anon, clientId, code, verifier, MCP_URL);
+      expect(minted.status).toBe(200);
+      const refreshToken = minted.body.refresh_token as string;
+      expect(typeof refreshToken).toBe("string"); // offline_access was requested
+
+      const refreshed = await refresh(anon, clientId, refreshToken, MCP_URL);
+      expect(refreshed.status).toBe(200);
+      const newToken = refreshed.body.access_token as string;
+      expect(typeof newToken).toBe("string");
+      expect(newToken).not.toBe(minted.body.access_token);
+
+      const headers = { Authorization: `Bearer ${newToken}`, "X-Org-Id": orgContext.org.orgId };
+
+      // Refreshed token still drives /api/mcp.
+      const init = await mcpRpc(anon, headers, INIT);
+      expect(init.status).toBe(200);
+      expect(init.envelope.result?.serverInfo).toBeTruthy();
+
+      // ...and is still confined off the MCP surface.
       const lifted = await anon.get(`${BASE}/api/applications`, {
         headers: { ...headers, "X-Application-Id": orgContext.org.defaultAppId },
       });

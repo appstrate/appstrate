@@ -223,6 +223,31 @@ describe("mcp tool round-trip", () => {
     expect(toolPayload(envelope).isError).toBe(true);
   });
 
+  it("cannot escalate past the caller's REST permissions (defence in depth)", async () => {
+    // THE central security promise: an `mcp:invoke` token can call
+    // invoke_operation, but the DISPATCHED operation still enforces its OWN
+    // permission. A key scoped to mcp:* ONLY (effective perms = the intersection
+    // of requested scopes ∩ role, so it carries no api-keys:read) must NOT be
+    // able to read api keys through MCP — the underlying route returns 403, and
+    // the MCP layer does not bypass it. Without this, MCP would be a privilege-
+    // escalation hole; with it, MCP can never exceed what the credential could
+    // do over REST.
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      // listApiKeys (GET /api/api-keys) requires api-keys:read — a permission
+      // this mcp-only key does not hold.
+      params: { name: "invoke_operation", arguments: { operation_id: "listApiKeys" } },
+    });
+    const payload = toolPayload(envelope);
+    // The dispatch HAPPENED (mcp:invoke present) but the op denied it: the tool
+    // result carries the route's own 403, not a bypass and not a 200.
+    expect(payload.data.status).toBe(403);
+    expect(payload.isError).toBe(true);
+  });
+
   it("handles concurrent in-flight invoke_operation calls without cross-contamination", async () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     // Distinct read-only GET operations with no path params: each request gets
