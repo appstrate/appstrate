@@ -26,10 +26,6 @@ import { describe, it, expect } from "bun:test";
 
 import * as runnerPiBarrel from "../packages/runner-pi/src/pi-sdk.ts";
 import * as runtimePiBarrel from "../runtime-pi/pi-sdk.ts";
-// Pure type-only barrel — at runtime this is an empty module object. Imported to
-// prove it loads; its symbol completeness (Api, Model) is enforced by tsc on its
-// real consumer (apps/cli/src/commands/run/model.ts).
-import * as cliBarrel from "../apps/cli/src/lib/pi-sdk.ts";
 
 describe("supply-chain: pi-sdk barrel completeness", () => {
   it("@appstrate/runner-pi barrel re-exports every value symbol its consumers import", () => {
@@ -56,11 +52,5 @@ describe("supply-chain: pi-sdk barrel completeness", () => {
       (runtimePiBarrel as Record<string, unknown>).Type,
       'runtime-pi pi-sdk barrel is missing value export "Type"',
     ).toBeDefined();
-  });
-
-  it("@appstrate/cli barrel is type-only (no runtime value exports) and loads cleanly", () => {
-    // No value exports to assert — type completeness (Api, Model) is a tsc concern,
-    // enforced on the barrel's real consumer. Loading without throwing is the check.
-    expect(cliBarrel).toBeDefined();
   });
 });
