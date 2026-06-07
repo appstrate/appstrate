@@ -16,7 +16,7 @@
         "@commitlint/cli": "^20.5.2",
         "@commitlint/config-conventional": "^20.5.0",
         "@eslint/js": "^10.0.1",
-        "@mariozechner/pi-ai": "^0.70.6",
+        "@mariozechner/pi-ai": "0.70.6",
         "@readme/openapi-parser": "^6.0.1",
         "@redocly/openapi-core": "^2.30.2",
         "@types/bun": "latest",
@@ -71,7 +71,7 @@
         "zod": "^4.4.3",
       },
       "devDependencies": {
-        "@mariozechner/pi-coding-agent": "^0.70.6",
+        "@mariozechner/pi-coding-agent": "0.70.6",
         "@types/bun": "latest",
         "@types/ioredis": "^5.0.0",
         "@types/nodemailer": "^8.0.0",
@@ -87,8 +87,8 @@
       "dependencies": {
         "@apidevtools/swagger-parser": "^12.1.0",
         "@clack/prompts": "^1.2.0",
-        "@mariozechner/pi-ai": "^0.70.6",
-        "@mariozechner/pi-coding-agent": "^0.70.6",
+        "@mariozechner/pi-ai": "0.70.6",
+        "@mariozechner/pi-coding-agent": "0.70.6",
         "@napi-rs/keyring": "^1.2.0",
         "async-mutex": "^0.5.0",
         "commander": "^14.0.3",
@@ -197,14 +197,14 @@
       },
       "devDependencies": {
         "@appstrate/core": "workspace:*",
-        "@mariozechner/pi-ai": "^0.70.6",
-        "@mariozechner/pi-coding-agent": "^0.70.6",
+        "@mariozechner/pi-ai": "0.70.6",
+        "@mariozechner/pi-coding-agent": "0.70.6",
         "@types/mustache": "^4.2.6",
         "@types/semver": "^7.7.1",
       },
       "peerDependencies": {
-        "@mariozechner/pi-ai": "^0.70.6",
-        "@mariozechner/pi-coding-agent": "^0.70.6",
+        "@mariozechner/pi-ai": "0.70.6",
+        "@mariozechner/pi-coding-agent": "0.70.6",
       },
       "optionalPeers": [
         "@mariozechner/pi-ai",
@@ -236,7 +236,7 @@
     },
     "packages/core": {
       "name": "@appstrate/core",
-      "version": "2.24.0",
+      "version": "2.26.0",
       "dependencies": {
         "@afps-spec/schema": "^0.6.0",
         "@appstrate/afps-shared": "^0.1.0",
@@ -332,12 +332,12 @@
         "ajv": "^8.20.0",
       },
       "devDependencies": {
-        "@mariozechner/pi-ai": "^0.70.6",
-        "@mariozechner/pi-coding-agent": "^0.70.6",
+        "@mariozechner/pi-ai": "0.70.6",
+        "@mariozechner/pi-coding-agent": "0.70.6",
       },
       "peerDependencies": {
-        "@mariozechner/pi-ai": "^0.70.6",
-        "@mariozechner/pi-coding-agent": "^0.70.6",
+        "@mariozechner/pi-ai": "0.70.6",
+        "@mariozechner/pi-coding-agent": "0.70.6",
       },
     },
     "packages/shared-types": {
@@ -393,8 +393,8 @@
         "@appstrate/core": "workspace:*",
         "@appstrate/mcp-transport": "workspace:*",
         "@appstrate/runner-pi": "workspace:*",
-        "@mariozechner/pi-ai": "^0.70.6",
-        "@mariozechner/pi-coding-agent": "^0.70.6",
+        "@mariozechner/pi-ai": "0.70.6",
+        "@mariozechner/pi-coding-agent": "0.70.6",
       },
     },
     "runtime-pi/sidecar": {
