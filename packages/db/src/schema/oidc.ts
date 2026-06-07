@@ -104,7 +104,14 @@ export const oauthClient = pgTable(
     requirePKCE: boolean("require_pkce"),
     metadata: text("metadata"),
     // ─── Appstrate polymorphic fields ────────────────────────────────────────
-    level: text("level", { enum: ["org", "application", "instance"] }).notNull(),
+    // Defaults to `instance` so self-registered clients (RFC 7591 DCR /
+    // CIMD) — which Better Auth inserts without the platform's polymorphic
+    // discriminator — land as instance-level public clients (no org/app
+    // reference, satisfying the level CHECK below). Admin-managed creation
+    // always sets `level` explicitly, so the default never applies there.
+    level: text("level", { enum: ["org", "application", "instance"] })
+      .notNull()
+      .default("instance"),
     referencedOrgId: uuid("referenced_org_id").references(() => organizations.id, {
       onDelete: "cascade",
     }),

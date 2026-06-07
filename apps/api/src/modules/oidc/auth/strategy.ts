@@ -115,29 +115,37 @@ export const oidcAuthStrategy: AuthStrategy = {
       }
     }
 
+    let resolution: AuthResolution | null;
     if (claims.actorType === "user") {
-      return resolveInstanceUser(claims).then((resolution) => {
-        // Surface the CLI family id on `c.var.extra.cliFamilyId` so route
-        // handlers (and `lib/runner-context.ts`) can resolve the runner's
-        // device name without re-parsing the JWT.
-        if (resolution && claims.cliFamilyId) {
-          return {
-            ...resolution,
-            extra: { ...(resolution.extra ?? {}), cliFamilyId: claims.cliFamilyId },
-          };
-        }
-        return resolution;
-      });
+      resolution = await resolveInstanceUser(claims);
+      // Surface the CLI family id on `c.var.extra.cliFamilyId` so route
+      // handlers (and `lib/runner-context.ts`) can resolve the runner's
+      // device name without re-parsing the JWT.
+      if (resolution && claims.cliFamilyId) {
+        resolution = {
+          ...resolution,
+          extra: { ...(resolution.extra ?? {}), cliFamilyId: claims.cliFamilyId },
+        };
+      }
+    } else if (claims.actorType === "dashboard_user") {
+      resolution = await resolveDashboardUser(claims);
+    } else if (claims.actorType === "end_user") {
+      resolution = await resolveEndUser(claims);
+    } else {
+      // No actor_type claim — malformed token. Fall through so core
+      // Bearer / cookie auth gets a chance to handle it.
+      return null;
     }
-    if (claims.actorType === "dashboard_user") {
-      return resolveDashboardUser(claims);
+
+    // Surface the token's RFC 8707 audiences so a resource server (e.g. the
+    // MCP server at `/api/mcp`) can enforce that the token was issued for it.
+    if (resolution) {
+      resolution = {
+        ...resolution,
+        extra: { ...(resolution.extra ?? {}), tokenAudiences: claims.audiences },
+      };
     }
-    if (claims.actorType === "end_user") {
-      return resolveEndUser(claims);
-    }
-    // No actor_type claim — malformed token. Fall through so core
-    // Bearer / cookie auth gets a chance to handle it.
-    return null;
+    return resolution;
   },
 };
 

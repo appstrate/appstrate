@@ -53,6 +53,11 @@ const TOKEN_RL_POINTS = 30;
 const AUTHORIZE_RL_POINTS = 30;
 const INTROSPECT_RL_POINTS = 60;
 const REVOKE_RL_POINTS = 60;
+// Unauthenticated Dynamic Client Registration (RFC 7591) — each call inserts
+// an oauth_clients row, so an unbounded endpoint is a DB-bloat / resource-
+// exhaustion vector. A real client registers once (then reuses its client_id),
+// so 10/min/IP is generous for legitimate use and tight against abuse.
+const REGISTER_RL_POINTS = 10;
 // CLI device flow — per-IP limit on `/device/code`. The endpoint is a
 // write (inserts a row) and rarely called more than once per login;
 // 10/min/IP is a loose ceiling.
@@ -719,6 +724,14 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
           matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/revoke",
           handler: createAuthMiddleware(async (ctx) => {
             await enforceRateLimit("oauth-revoke", REVOKE_RL_POINTS, ctx.request);
+          }),
+        },
+        {
+          // RFC 7591 Dynamic Client Registration — unauthenticated + write, so
+          // rate-limit per IP (see REGISTER_RL_POINTS).
+          matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/register",
+          handler: createAuthMiddleware(async (ctx) => {
+            await enforceRateLimit("oauth-register", REGISTER_RL_POINTS, ctx.request);
           }),
         },
       ],

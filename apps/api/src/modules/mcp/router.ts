@@ -23,13 +23,14 @@ import type { Context } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "@appstrate/mcp-transport";
 import { requireModulePermission } from "@appstrate/core/permissions";
-import { methodNotAllowed } from "../../lib/errors.ts";
+import { methodNotAllowed, unauthorized } from "../../lib/errors.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
 import { logger } from "../../lib/logger.ts";
 import { registerAuthChallenge } from "../../lib/auth-challenges.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { getPlatformApp } from "../../lib/platform-app.ts";
+import { getMcpResourceUri } from "./resource.ts";
 import { buildMcpTools, type Dispatch, type McpObserver } from "./tools.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
@@ -80,6 +81,33 @@ function forwardAuthHeaders(src: Headers): Headers {
   return out;
 }
 
+/**
+ * RFC 8707 resource-server audience binding. The MCP spec requires the server
+ * to "validate that access tokens were issued specifically for them" and
+ * "reject tokens that do not include them in the audience claim".
+ *
+ * Only OAuth Bearer tokens carry an audience (the oidc strategy surfaces it as
+ * `authExtra.tokenAudiences`). When present, the token MUST list this server's
+ * canonical resource URI; otherwise it was issued for a different resource and
+ * is rejected with 401 (the challenge responder then attaches the
+ * `WWW-Authenticate` so the client can re-acquire a correctly-scoped token).
+ *
+ * Cookie sessions and API keys carry no token audience (`tokenAudiences`
+ * undefined) → first-party callers are unaffected. An MCP-audience token that
+ * reaches other platform routes is contained by RBAC (it holds only mcp:*
+ * permissions), so this check is the MCP-direction half of audience isolation.
+ */
+export const requireMcpAudience = async (c: Context<AppEnv>, next: () => Promise<void>) => {
+  const extra = c.get("authExtra") as { tokenAudiences?: unknown } | undefined;
+  const audiences = extra?.tokenAudiences;
+  // No bearer-token audience → cookie/API-key first-party caller. Allow.
+  if (!Array.isArray(audiences)) return next();
+  if (!audiences.includes(getMcpResourceUri())) {
+    throw unauthorized("Access token is not audience-bound to this MCP resource.");
+  }
+  return next();
+};
+
 export function createMcpRouter(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
@@ -120,6 +148,7 @@ export function createMcpRouter(): Hono<AppEnv> {
   // caller that will 403) is bounded too. Auth runs earlier in the global
   // pipeline, so the identity is already resolved here.
   app.use(MCP_PATH, rateLimitMcp(MCP_RATE_LIMIT_PER_MIN));
+  app.use(MCP_PATH, requireMcpAudience);
   app.use(MCP_PATH, requireModulePermission("mcp", "read"));
 
   app.post(MCP_PATH, async (c) => {
