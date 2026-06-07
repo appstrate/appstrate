@@ -8,8 +8,10 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { and, eq } from "drizzle-orm";
+import { auditEvents } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
-import { truncateAll } from "../../../../../test/helpers/db.ts";
+import { truncateAll, db } from "../../../../../test/helpers/db.ts";
 import { createTestContext, orgOnlyHeaders } from "../../../../../test/helpers/auth.ts";
 import { seedApiKey } from "../../../../../test/helpers/seed.ts";
 import { setPlatformApp } from "../../../../lib/platform-app.ts";
@@ -252,5 +254,109 @@ describe("mcp tool round-trip", () => {
     expect(typeof instructions).toBe("string");
     expect(instructions).toContain("Appstrate");
     expect(instructions).toContain("@appstrate");
+  });
+});
+
+describe("mcp audit + rate limiting", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    resetCatalog();
+  });
+
+  it("records an mcp.operation.invoked audit row for a successful invoke", async () => {
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const op = [...getCatalog().operations.values()].find(
+      (o) => o.method === "GET" && o.pathParams.length === 0,
+    )!;
+    await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "invoke_operation", arguments: { operation_id: op.operationId } },
+    });
+    // Audit inserts are flushed before the response returns, so the row exists.
+    const rows = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "mcp.operation.invoked"),
+          eq(auditEvents.resourceId, op.operationId),
+        ),
+      );
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.resourceType).toBe("mcp_operation");
+    expect(rows[0]!.actorType).toBe("api_key");
+    expect((rows[0]!.after as Record<string, unknown>).outcome).toBe("invoked");
+  });
+
+  it("records an mcp.operation.denied audit row when the caller lacks mcp:invoke", async () => {
+    const headers = await apiKeyHeaders(["mcp:read"]);
+    const op = [...getCatalog().operations.values()][0]!;
+    await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "invoke_operation", arguments: { operation_id: op.operationId } },
+    });
+    const rows = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "mcp.operation.denied"));
+    expect(rows.length).toBe(1);
+    expect((rows[0]!.after as Record<string, unknown>).outcome).toBe("denied");
+  });
+
+  it("does NOT audit read-only search/describe calls", async () => {
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "search_operations", arguments: { query: "agent" } },
+    });
+    const rows = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceType, "mcp_operation"));
+    expect(rows.length).toBe(0);
+  });
+
+  it("emits IETF RateLimit headers and rejects bursts beyond the limit with 429", async () => {
+    // One fixed identity (same API key) so every request keys to the same
+    // rate-limit bucket. The limit is 120/min; fire enough to trip it.
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const init = {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "t", version: "1" },
+      },
+    } as const;
+
+    const first = await app.request("/api/mcp", {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      body: JSON.stringify(init),
+    });
+    expect(first.status).toBe(200);
+    expect(first.headers.get("RateLimit")).toContain("limit=120");
+
+    let sawRateLimit = false;
+    for (let i = 0; i < 125 && !sawRateLimit; i++) {
+      const res = await app.request("/api/mcp", {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+        body: JSON.stringify(init),
+      });
+      if (res.status === 429) {
+        sawRateLimit = true;
+        expect(res.headers.get("Retry-After")).not.toBeNull();
+      }
+    }
+    expect(sawRateLimit).toBe(true);
   });
 });

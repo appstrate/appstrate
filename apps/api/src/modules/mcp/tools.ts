@@ -26,6 +26,40 @@ import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./c
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
 
+/** The three tools, named for telemetry/audit. */
+export type McpToolName = "search_operations" | "describe_operation" | "invoke_operation";
+
+/** Outcome of an `invoke_operation` call, for audit + telemetry. */
+export type McpInvokeOutcome =
+  /** Caller lacks `mcp:invoke` — no dispatch happened (security-relevant). */
+  | "denied"
+  /** Client error before dispatch (unknown operationId, missing path params). */
+  | "rejected"
+  /** Dispatched in-process; `status` carries the operation's HTTP status. */
+  | "invoked";
+
+/**
+ * A structured observation emitted by a tool handler. The tool layer stays
+ * transport-agnostic: it emits plain data and lets the caller (the HTTP
+ * router) decide what to do with it (audit log, telemetry). This keeps the
+ * tools reusable by a future code-execution surface that has no Hono context.
+ */
+export interface McpToolEvent {
+  tool: McpToolName;
+  /** Wall-clock duration of the handler, milliseconds. */
+  durationMs: number;
+  /** `search_operations`: number of matches returned. */
+  resultCount?: number;
+  /** `invoke_operation`: which operation, its method/path, and the outcome. */
+  operationId?: string;
+  method?: string;
+  path?: string;
+  status?: number;
+  outcome?: McpInvokeOutcome;
+}
+
+export type McpObserver = (event: McpToolEvent) => void;
+
 export interface McpToolContext {
   /** Origin of the inbound `/mcp` request, e.g. `https://instance.example`. */
   origin: string;
@@ -35,6 +69,20 @@ export interface McpToolContext {
   permissions: ReadonlySet<string>;
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
+  /**
+   * Optional sink for audit + telemetry events. Defaults to a no-op so unit
+   * tests and any non-HTTP caller need not provide one.
+   */
+  observe?: McpObserver;
+}
+
+/** Never let an observer error affect the tool result. */
+function emit(ctx: McpToolContext, event: McpToolEvent): void {
+  try {
+    ctx.observe?.(event);
+  } catch {
+    // Telemetry/audit is best-effort; swallow.
+  }
 }
 
 const DEFAULT_SEARCH_LIMIT = 25;
@@ -82,7 +130,7 @@ function scoreOperation(op: CatalogOperation, tokens: string[]): number {
   return score;
 }
 
-function buildSearchTool(): AppstrateToolDefinition {
+function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "search_operations",
     description:
@@ -114,6 +162,7 @@ function buildSearchTool(): AppstrateToolDefinition {
   };
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+    const start = performance.now();
     const { operations } = getCatalog();
     const query = asString(args.query)?.trim().toLowerCase() ?? "";
     const tag = asString(args.tag)?.toLowerCase();
@@ -129,6 +178,12 @@ function buildSearchTool(): AppstrateToolDefinition {
       .filter(({ score }) => tokens.length === 0 || score > 0)
       .sort((a, b) => b.score - a.score || a.op.operationId.localeCompare(b.op.operationId))
       .slice(0, limit);
+
+    emit(ctx, {
+      tool: "search_operations",
+      durationMs: performance.now() - start,
+      resultCount: scored.length,
+    });
 
     return textResult({
       count: scored.length,
@@ -146,7 +201,7 @@ function buildSearchTool(): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-function buildDescribeTool(): AppstrateToolDefinition {
+function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "describe_operation",
     description:
@@ -169,12 +224,19 @@ function buildDescribeTool(): AppstrateToolDefinition {
   };
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+    const start = performance.now();
     const operationId = asString(args.operation_id);
     if (!operationId) return textResult({ error: "operation_id is required." }, true);
 
     const { operations, componentSchemas } = getCatalog();
     const op = operations.get(operationId);
     if (!op) return textResult({ error: `Unknown operationId: ${operationId}` }, true);
+
+    emit(ctx, {
+      tool: "describe_operation",
+      durationMs: performance.now() - start,
+      operationId,
+    });
 
     return textResult({
       operation_id: op.operationId,
@@ -341,23 +403,53 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
   };
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+    const start = performance.now();
+    const operationId = asString(args.operation_id);
+
     if (!ctx.permissions.has("mcp:invoke")) {
+      emit(ctx, {
+        tool: "invoke_operation",
+        durationMs: performance.now() - start,
+        operationId,
+        outcome: "denied",
+      });
       return textResult(
         { error: "Permission 'mcp:invoke' is required to invoke operations." },
         true,
       );
     }
 
-    const operationId = asString(args.operation_id);
-    if (!operationId) return textResult({ error: "operation_id is required." }, true);
+    if (!operationId) {
+      emit(ctx, {
+        tool: "invoke_operation",
+        durationMs: performance.now() - start,
+        outcome: "rejected",
+      });
+      return textResult({ error: "operation_id is required." }, true);
+    }
 
     const { operations } = getCatalog();
     const op = operations.get(operationId);
-    if (!op) return textResult({ error: `Unknown operationId: ${operationId}` }, true);
+    if (!op) {
+      emit(ctx, {
+        tool: "invoke_operation",
+        durationMs: performance.now() - start,
+        operationId,
+        outcome: "rejected",
+      });
+      return textResult({ error: `Unknown operationId: ${operationId}` }, true);
+    }
 
     const pathParams = asRecord(args.path_params) ?? {};
     const path = interpolatePath(op, pathParams);
     if (path === null) {
+      emit(ctx, {
+        tool: "invoke_operation",
+        durationMs: performance.now() - start,
+        operationId,
+        method: op.method,
+        outcome: "rejected",
+      });
       return textResult(
         { error: `Missing path_params. Required: ${op.pathParams.join(", ")}` },
         true,
@@ -405,6 +497,15 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     });
 
     const response = await ctx.dispatch(request);
+    emit(ctx, {
+      tool: "invoke_operation",
+      durationMs: performance.now() - start,
+      operationId,
+      method: op.method,
+      path,
+      status: response.status,
+      outcome: "invoked",
+    });
     return readResponse(response);
   };
 
@@ -413,5 +514,5 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
 /** Build the per-request tool set. Handlers close over the caller's auth context. */
 export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
-  return [buildSearchTool(), buildDescribeTool(), buildInvokeTool(ctx)];
+  return [buildSearchTool(ctx), buildDescribeTool(ctx), buildInvokeTool(ctx)];
 }

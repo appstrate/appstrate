@@ -22,13 +22,20 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { createMcpServer } from "@appstrate/mcp-transport";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { methodNotAllowed } from "../../lib/errors.ts";
+import { rateLimitMcp } from "../../middleware/rate-limit.ts";
+import { logger } from "../../lib/logger.ts";
+import { recordAuditFromContext } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { getPlatformApp } from "../../lib/platform-app.ts";
-import { buildMcpTools, type Dispatch } from "./tools.ts";
+import { buildMcpTools, type Dispatch, type McpObserver } from "./tools.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 const MCP_PATH = "/api/mcp";
 const PRM_PATH = "/.well-known/oauth-protected-resource";
+// JSON-RPC envelope-granularity limit per caller per minute. Sized for
+// interactive agent loops (search → describe → invoke, repeated) while still
+// bounding cheap abuse of search/describe, which touch no rate-limited route.
+const MCP_RATE_LIMIT_PER_MIN = 120;
 
 /**
  * Server `instructions` injected into the client's system prompt at
@@ -92,6 +99,10 @@ export function createMcpRouter(): Hono<AppEnv> {
   app.get(PRM_PATH, protectedResourceMetadata);
   app.get(`${PRM_PATH}${MCP_PATH}`, protectedResourceMetadata);
 
+  // Rate-limit before the permission check so repeated probing (including by a
+  // caller that will 403) is bounded too. Auth runs earlier in the global
+  // pipeline, so the identity is already resolved here.
+  app.use(MCP_PATH, rateLimitMcp(MCP_RATE_LIMIT_PER_MIN));
   app.use(MCP_PATH, requireModulePermission("mcp", "read"));
 
   app.post(MCP_PATH, async (c) => {
@@ -100,7 +111,50 @@ export function createMcpRouter(): Hono<AppEnv> {
     const authHeaders = forwardAuthHeaders(c.req.raw.headers);
     const dispatch: Dispatch = async (req) => getPlatformApp().fetch(req);
 
-    const tools = buildMcpTools({ origin, permissions, authHeaders, dispatch });
+    // Audit + telemetry sink. The tool layer emits plain data; here we decide
+    // what to do with it: structured telemetry for every tool call, and a
+    // durable audit row for invoke_operation outcomes (the underlying route
+    // self-audits its own mutation, but the MCP indirection is recorded
+    // separately so the trail shows the call arrived via MCP). Reads
+    // (search/describe) are metadata browsing and are not audited.
+    //
+    // Audit inserts are collected and awaited before the response returns, so
+    // the trail is not lost if the process is recycled between requests (the
+    // insert is itself best-effort and never throws — recordAudit swallows).
+    const pendingAudits: Promise<unknown>[] = [];
+    const observe: McpObserver = (event) => {
+      logger.info("mcp.tool_call", {
+        requestId: c.get("requestId"),
+        tool: event.tool,
+        durationMs: Math.round(event.durationMs),
+        operationId: event.operationId,
+        method: event.method,
+        path: event.path,
+        status: event.status,
+        outcome: event.outcome,
+        resultCount: event.resultCount,
+      });
+      if (
+        event.tool === "invoke_operation" &&
+        (event.outcome === "invoked" || event.outcome === "denied")
+      ) {
+        pendingAudits.push(
+          recordAuditFromContext(c, {
+            action: event.outcome === "denied" ? "mcp.operation.denied" : "mcp.operation.invoked",
+            resourceType: "mcp_operation",
+            resourceId: event.operationId ?? null,
+            after: {
+              method: event.method ?? null,
+              path: event.path ?? null,
+              status: event.status ?? null,
+              outcome: event.outcome,
+            },
+          }),
+        );
+      }
+    };
+
+    const tools = buildMcpTools({ origin, permissions, authHeaders, dispatch, observe });
     const server = createMcpServer(
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
@@ -127,7 +181,11 @@ export function createMcpRouter(): Hono<AppEnv> {
 
     try {
       await server.connect(transport);
-      return await transport.handleRequest(forwarded);
+      const response = await transport.handleRequest(forwarded);
+      // Flush audit inserts before responding so the trail survives a process
+      // recycle. allSettled — a failed insert is already swallowed upstream.
+      if (pendingAudits.length > 0) await Promise.allSettled(pendingAudits);
+      return response;
     } finally {
       await transport.close();
       await server.close();
