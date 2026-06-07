@@ -51,6 +51,8 @@ import {
   createMcpServer,
   ErrorCode,
   McpError,
+  API_CALL_TOOL_META_KEY,
+  API_UPLOAD_TOOL_META_KEY,
   type AppstrateToolDefinition,
   type CallToolResult,
   type ReadResourceResult,
@@ -620,6 +622,12 @@ function buildSidecarTools(options: MountMcpOptions): {
           "`resources` and are returned as a `resource_link`.",
         inputSchema:
           CREDENTIAL_PROXY_INPUT_SCHEMA as unknown as AppstrateToolDefinition["descriptor"]["inputSchema"],
+        // Capability marker (read agent-side by `direct.ts`): this tool
+        // accepts `body: { fromFile }` references, which the runtime
+        // resolves to canonical wire bytes before the MCP call. Routing on
+        // the marker — not the `{ns}__api_call` name — keeps the contract
+        // explicit and rename-safe.
+        _meta: { [API_CALL_TOOL_META_KEY]: { body_from_file: true } },
       },
       handler: async (rawArgs) =>
         apiCallLimit
@@ -704,6 +712,11 @@ function buildSidecarTools(options: MountMcpOptions): {
             },
           },
         },
+        // Capability marker (read agent-side by `direct.ts`): identifies
+        // this as the resumable upload tool and carries its dispatchable
+        // protocols, so routing does not depend on the `{ns}__api_upload`
+        // name.
+        _meta: { [API_UPLOAD_TOOL_META_KEY]: { protocols } },
       },
       // Advertise-only: the upload is executed agent-side (workspace
       // access), so a direct sidecar invocation cannot succeed.

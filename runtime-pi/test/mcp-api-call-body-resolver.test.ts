@@ -22,7 +22,6 @@ import {
   augmentApiCallInputSchema,
   ApiCallBodyResolveError,
 } from "../mcp/api-call-body-resolver.ts";
-import { isApiCallToolName } from "../mcp/api-upload-extension.ts";
 
 function freshWorkspace(): string {
   return mkdtempSync(join(tmpdir(), "apicall-body-"));
@@ -230,18 +229,5 @@ describe("augmentApiCallInputSchema", () => {
 
   it("tolerates a null / non-object schema", () => {
     expect(augmentApiCallInputSchema(null)).toEqual({ type: "object", properties: {} });
-  });
-});
-
-describe("isApiCallToolName", () => {
-  it("matches single-auth and multi-auth api_call tools", () => {
-    expect(isApiCallToolName("tractr_fathom__api_call")).toBe(true);
-    expect(isApiCallToolName("tractr_fathom__api_call__primary")).toBe(true);
-  });
-
-  it("rejects upload tools, runtime tools, and the bare suffix", () => {
-    expect(isApiCallToolName("x__api_upload")).toBe(false);
-    expect(isApiCallToolName("run_history")).toBe(false);
-    expect(isApiCallToolName("__api_call")).toBe(false);
   });
 });

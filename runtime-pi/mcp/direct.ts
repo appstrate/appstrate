@@ -26,7 +26,11 @@
  */
 
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
-import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
+import {
+  readApiCallToolMeta,
+  readApiUploadToolMeta,
+  type AppstrateMcpClient,
+} from "@appstrate/mcp-transport";
 import { Type } from "@mariozechner/pi-ai";
 import {
   buildRuntimeToolFactories,
@@ -37,11 +41,7 @@ import {
 } from "@appstrate/runner-pi";
 import { reEmitRuntimeToolEvents } from "@appstrate/core/runtime-tool-defs";
 import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
-import {
-  buildApiUploadToolFactory,
-  isApiUploadToolName,
-  isApiCallToolName,
-} from "./api-upload-extension.ts";
+import { buildApiUploadToolFactory } from "./api-upload-extension.ts";
 import {
   resolveApiCallBody,
   augmentApiCallInputSchema,
@@ -128,20 +128,26 @@ export async function buildMcpDirectFactories(
  * LLM side (Phase 1.4).
  */
 function buildIntegrationToolFactories(
-  advertised: ReadonlyArray<{ name: string; description?: string; inputSchema?: unknown }>,
+  advertised: ReadonlyArray<{
+    name: string;
+    description?: string;
+    inputSchema?: unknown;
+    _meta?: Record<string, unknown>;
+  }>,
   claimed: ReadonlySet<string>,
   opts: BuildMcpDirectFactoriesOptions,
 ): ExtensionFactory[] {
   const factories: ExtensionFactory[] = [];
   for (const tool of advertised) {
     if (claimed.has(tool.name)) continue;
-    // `{ns}__api_upload` tools are advertised by the sidecar (so the
-    // gating + schema live in one place) but executed agent-side: the
-    // resolver reads the workspace file, chunks it, and dispatches each
-    // chunk back through the sibling `{ns}__api_call` tool. Route them to
-    // the dedicated resolver instead of forwarding verbatim (a verbatim
-    // forward would hit the sidecar's advertise-only error handler).
-    if (isApiUploadToolName(tool.name)) {
+    // `api_upload` tools are advertised by the sidecar (so the gating +
+    // schema live in one place) but executed agent-side: the resolver reads
+    // the workspace file, chunks it, and dispatches each chunk back through
+    // the sibling `{ns}__api_call` tool. Route them to the dedicated
+    // resolver instead of forwarding verbatim (a verbatim forward would hit
+    // the sidecar's advertise-only error handler). Detected by the
+    // `dev.appstrate/api-upload` `_meta` marker, not the tool name.
+    if (readApiUploadToolMeta(tool)) {
       factories.push(
         ...buildApiUploadToolFactory({
           tool,
@@ -153,13 +159,14 @@ function buildIntegrationToolFactories(
       );
       continue;
     }
-    // `{ns}__api_call` tools accept a `body` that may reference a
-    // workspace file (`{ fromFile }`, multipart `{ name, fromFile }`).
-    // The sidecar has no workspace mount, so we (a) advertise the richer
-    // schema to the LLM and (b) resolve the file bytes to the canonical
-    // wire form (`{ fromBytes }` / inline byte-parts) agent-side before
-    // forwarding — keeping large request bodies out of the model context.
-    const apiCall = isApiCallToolName(tool.name);
+    // api_call tools accept a `body` that may reference a workspace file
+    // (`{ fromFile }`, multipart `{ name, fromFile }`). The sidecar has no
+    // workspace mount, so we (a) advertise the richer schema to the LLM and
+    // (b) resolve the file bytes to the canonical wire form (`{ fromBytes }`
+    // / inline byte-parts) agent-side before forwarding — keeping large
+    // request bodies out of the model context. Detected by the
+    // `dev.appstrate/api-call` `_meta` marker, not the tool name.
+    const apiCall = readApiCallToolMeta(tool) !== null;
     factories.push((pi) => {
       pi.registerTool({
         name: tool.name,
