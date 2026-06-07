@@ -13,6 +13,11 @@
 
 set -euo pipefail
 
+# The Dockerfile uses `COPY --parents` (BuildKit-only). Force BuildKit on so the
+# build doesn't fall back to the classic builder on Docker <23 or with an
+# inherited DOCKER_BUILDKIT=0.
+export DOCKER_BUILDKIT=1
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m'

@@ -1,4 +1,7 @@
 # syntax=docker/dockerfile:1.20
+# Requires BuildKit (Docker 23+, or DOCKER_BUILDKIT=1). The `COPY --parents`
+# directives below are BuildKit-only — the classic builder (DOCKER_BUILDKIT=0)
+# cannot build this image.
 # ── Stage 1: Install dependencies ──────────────────────────────────
 FROM oven/bun:1.3.14-alpine AS deps
 
@@ -54,7 +57,12 @@ FROM oven/bun:1.3.14-alpine
 
 WORKDIR /app
 
-# Runtime dependencies (root hoisted + workspace-specific)
+# Runtime dependencies (root hoisted + workspace-specific).
+# ⚠️ MANUAL allowlist — NOT graph-derived (unlike the src/manifest COPYs below).
+# Any new package the runtime imports whose deps DON'T hoist to the root
+# node_modules (e.g. bun isolated installs, like afps-shared's `semver`) must be
+# added here explicitly — its `src` ships automatically via the glob below, but
+# its node_modules will be SILENTLY missing and crash-loop at runtime.
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=deps /app/packages/afps-runtime/node_modules ./packages/afps-runtime/node_modules
