@@ -41,7 +41,7 @@ const PRM_PATH = "/.well-known/oauth-protected-resource";
 const SERVER_INSTRUCTIONS = `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you discover and call any operation of the Appstrate REST API — their own descriptions tell you how. Never guess an operationId or body shape; the describe step is the source of truth, and the surface is not fixed — if a capability might exist, search for it.
 
 ## Core model
-Organization → Applications (id \`app_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. An agent is a package keyed by a scope/name pair where the scope starts with \`@\`; keep the \`@\` when you pass it (e.g. scope \`@appstrate\`, name \`my-agent\`).
+Organization → Applications (id \`app_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe_operation shows which; always keep the \`@\`, and the \`/\` when it's a single param.
 
 ## Beyond the per-operation schemas
 - Runs are asynchronous: triggering one returns a runId, then it moves pending→running→success|failed|timeout|cancelled — poll a run get/list operation for status.
