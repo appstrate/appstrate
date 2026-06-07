@@ -18,6 +18,8 @@ import {
   getConnectToolNames,
   getDeclaredToolNames,
   getApiCallConfigs,
+  getTlsClientRoutes,
+  TLS_CLIENT_META_KEY,
   getAvailableScopes,
   connectableAuthKeysForAgent,
   requiredScopesForAgent,
@@ -1421,5 +1423,110 @@ describe("_meta namespace key validation (delegated to upstream 0.1 schema)", ()
   it("accepts a vendor reverse-DNS _meta key (`dev.appstrate/foo`)", () => {
     const r = metaSchema.safeParse({ "dev.appstrate/foo": {} });
     expect(r.success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// `_meta["dev.appstrate/tls-client"]` — per-URL TLS-client routing (#403)
+// ─────────────────────────────────────────────
+
+describe("tls-client routing — getTlsClientRoutes", () => {
+  function withRoutes(routes: unknown): Record<string, unknown> {
+    return baseManifest({ _meta: { [TLS_CLIENT_META_KEY]: { routes } } });
+  }
+
+  it("returns [] when the extension is absent", () => {
+    expect(getTlsClientRoutes(parse(baseManifest()))).toEqual([]);
+  });
+
+  it("resolves a curl route with impersonation (snake → camel)", () => {
+    const m = parse(
+      withRoutes([
+        { url_pattern: "https://api.exotic.com/**", client: "curl", impersonate: "chrome" },
+      ]),
+    );
+    expect(getTlsClientRoutes(m)).toEqual([
+      { urlPattern: "https://api.exotic.com/**", client: "curl", impersonate: "chrome" },
+    ]);
+  });
+
+  it("resolves a plain curl route (no impersonate) and an undici override, in order", () => {
+    const m = parse(
+      withRoutes([
+        { url_pattern: "https://api.exotic.com/open/**", client: "undici" },
+        { url_pattern: "https://api.exotic.com/**", client: "curl" },
+      ]),
+    );
+    expect(getTlsClientRoutes(m)).toEqual([
+      { urlPattern: "https://api.exotic.com/open/**", client: "undici" },
+      { urlPattern: "https://api.exotic.com/**", client: "curl" },
+    ]);
+  });
+
+  it("drops impersonate carried on a non-curl route at resolve time", () => {
+    // superRefine rejects this shape; getTlsClientRoutes is defence-in-depth for
+    // already-stored manifests, so it must not surface impersonate for undici.
+    const raw = withRoutes([
+      { url_pattern: "https://x/**", client: "undici", impersonate: "chrome" },
+    ]);
+    // Bypass schema (simulate a stored manifest) by casting.
+    const routes = getTlsClientRoutes(raw as unknown as IntegrationManifest);
+    expect(routes).toEqual([{ urlPattern: "https://x/**", client: "undici" }]);
+  });
+
+  it("skips malformed entries (missing pattern, unknown client)", () => {
+    const raw = withRoutes([
+      { client: "curl" },
+      { url_pattern: "", client: "curl" },
+      { url_pattern: "https://ok/**", client: "wget" },
+      { url_pattern: "https://ok/**", client: "curl" },
+    ]);
+    expect(getTlsClientRoutes(raw as unknown as IntegrationManifest)).toEqual([
+      { urlPattern: "https://ok/**", client: "curl" },
+    ]);
+  });
+});
+
+describe("tls-client routing — schema validation", () => {
+  function withRoutes(routes: unknown): Record<string, unknown> {
+    return baseManifest({ _meta: { [TLS_CLIENT_META_KEY]: { routes } } });
+  }
+
+  it("accepts a well-formed routes array", () => {
+    const r = integrationManifestSchema.safeParse(
+      withRoutes([
+        { url_pattern: "https://api.exotic.com/**", client: "curl", impersonate: "chrome" },
+        { url_pattern: "https://other.com/**", client: "undici" },
+      ]),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects routes that are not an array", () => {
+    expect(errorPaths(withRoutes({ "https://x": "curl" }))).toContain(
+      `_meta.${TLS_CLIENT_META_KEY}.routes`,
+    );
+  });
+
+  it("rejects a missing url_pattern and an unknown client", () => {
+    const paths = errorPaths(
+      withRoutes([{ client: "curl" }, { url_pattern: "https://x/**", client: "wget" }]),
+    );
+    expect(paths).toContain(`_meta.${TLS_CLIENT_META_KEY}.routes.0.url_pattern`);
+    expect(paths).toContain(`_meta.${TLS_CLIENT_META_KEY}.routes.1.client`);
+  });
+
+  it("rejects impersonate on a non-curl route", () => {
+    expect(
+      errorPaths(
+        withRoutes([{ url_pattern: "https://x/**", client: "undici", impersonate: "chrome" }]),
+      ),
+    ).toContain(`_meta.${TLS_CLIENT_META_KEY}.routes.0.impersonate`);
+  });
+
+  it("rejects an empty-string impersonate on a curl route", () => {
+    expect(
+      errorPaths(withRoutes([{ url_pattern: "https://x/**", client: "curl", impersonate: "" }])),
+    ).toContain(`_meta.${TLS_CLIENT_META_KEY}.routes.0.impersonate`);
   });
 });

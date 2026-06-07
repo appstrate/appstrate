@@ -46,6 +46,53 @@ import { isToolsWildcard, type ManifestIntegrationEntry } from "./dependencies.t
  */
 export const API_META_KEY = "dev.appstrate/api";
 
+// ─────────────────────────────────────────────
+// Appstrate vendor extension: tls-client routing (`_meta["dev.appstrate/tls-client"]`)
+// ─────────────────────────────────────────────
+
+/**
+ * `_meta` key carrying the Appstrate-specific per-URL TLS-client routing
+ * policy (issue #403). Vendor extension (AFPS §10) — orthogonal to
+ * `source.kind` and to credential delivery.
+ *
+ * Some upstreams (behind Cloudflare / Akamai Bot Manager, or with JA3/JA4 TLS
+ * fingerprinting) reject the ClientHello emitted by Node-native / undici / Bun
+ * `fetch`. Routing the matching requests through `curl` — or, for SOTA browser
+ * mimicry, `curl-impersonate` — presents a TLS fingerprint the upstream
+ * accepts. This extension declares, per integration, which upstream URLs to
+ * route through which client. Everything not matched keeps the default
+ * (undici/Bun `fetch`) path.
+ *
+ * Shape: `{ routes: [{ url_pattern, client, impersonate? }] }`. `url_pattern`
+ * uses the same glob format as `auths.{key}.authorized_uris`. `client` is
+ * `"undici"` (the default client, explicit so a narrow route can override a
+ * broader one) or `"curl"`. `impersonate` (curl only) names a
+ * `curl-impersonate` target (e.g. `"chrome"`, `"firefox"`, `"safari"`,
+ * `"edge"`); absent → plain `curl`. First matching route wins.
+ */
+export const TLS_CLIENT_META_KEY = "dev.appstrate/tls-client";
+
+/** Which HTTP client the sidecar uses for a matched upstream URL. */
+export type TlsClient = "undici" | "curl";
+
+/**
+ * One resolved TLS-client route — a single `url_pattern → client` mapping from
+ * the `_meta["dev.appstrate/tls-client"].routes` vendor extension. Wire format
+ * is snake_case (`url_pattern`); this resolved shape is camelCase per the
+ * casing policy (TS-internal / spawn-spec).
+ */
+export interface TlsClientRoute {
+  /** URL glob (AFPS `authorized_uris` format) this route matches. */
+  urlPattern: string;
+  /** Client to route matching requests through. */
+  client: TlsClient;
+  /**
+   * `curl-impersonate` target browser profile (e.g. `"chrome"`). Only
+   * meaningful when `client === "curl"`; absent → plain `curl`.
+   */
+  impersonate?: string;
+}
+
 /**
  * Resumable-upload protocols an api_call auth MAY advertise under
  * `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`. This is an open
@@ -334,6 +381,69 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       }
     }
   }
+
+  // (6) `_meta["dev.appstrate/tls-client"]` (per-URL TLS-client routing, #403):
+  // `routes` MUST be an array; each route MUST carry a non-empty `url_pattern`
+  // string and a `client` of `"undici" | "curl"`; `impersonate` (when present)
+  // MUST be a non-empty string and is only valid for `client: "curl"`.
+  const tlsMeta = (manifest as { _meta?: Record<string, unknown> })._meta?.[TLS_CLIENT_META_KEY] as
+    | { routes?: unknown }
+    | undefined;
+  if (tlsMeta !== undefined) {
+    const routes = tlsMeta.routes;
+    if (!Array.isArray(routes)) {
+      ctx.addIssue({
+        code: "custom",
+        message: `_meta["${TLS_CLIENT_META_KEY}"].routes must be an array`,
+        path: ["_meta", TLS_CLIENT_META_KEY, "routes"],
+      });
+    } else {
+      routes.forEach((entry, i) => {
+        const e = entry as {
+          url_pattern?: unknown;
+          client?: unknown;
+          impersonate?: unknown;
+        } | null;
+        if (!e || typeof e !== "object") {
+          ctx.addIssue({
+            code: "custom",
+            message: `_meta["${TLS_CLIENT_META_KEY}"].routes[${i}] must be an object`,
+            path: ["_meta", TLS_CLIENT_META_KEY, "routes", i],
+          });
+          return;
+        }
+        if (typeof e.url_pattern !== "string" || e.url_pattern.length === 0) {
+          ctx.addIssue({
+            code: "custom",
+            message: `_meta["${TLS_CLIENT_META_KEY}"].routes[${i}].url_pattern must be a non-empty string`,
+            path: ["_meta", TLS_CLIENT_META_KEY, "routes", i, "url_pattern"],
+          });
+        }
+        if (e.client !== "undici" && e.client !== "curl") {
+          ctx.addIssue({
+            code: "custom",
+            message: `_meta["${TLS_CLIENT_META_KEY}"].routes[${i}].client must be "undici" or "curl"`,
+            path: ["_meta", TLS_CLIENT_META_KEY, "routes", i, "client"],
+          });
+        }
+        if (e.impersonate !== undefined) {
+          if (typeof e.impersonate !== "string" || e.impersonate.length === 0) {
+            ctx.addIssue({
+              code: "custom",
+              message: `_meta["${TLS_CLIENT_META_KEY}"].routes[${i}].impersonate must be a non-empty string`,
+              path: ["_meta", TLS_CLIENT_META_KEY, "routes", i, "impersonate"],
+            });
+          } else if (e.client !== "curl") {
+            ctx.addIssue({
+              code: "custom",
+              message: `_meta["${TLS_CLIENT_META_KEY}"].routes[${i}].impersonate is only valid when client is "curl"`,
+              path: ["_meta", TLS_CLIENT_META_KEY, "routes", i, "impersonate"],
+            });
+          }
+        }
+      });
+    }
+  }
 });
 
 /**
@@ -589,6 +699,43 @@ export function getApiCallConfigs(manifest: IntegrationManifest): ApiCallConfig[
       uploadProtocols,
     };
   });
+}
+
+/** Read `_meta["dev.appstrate/tls-client"].routes` as a raw array (or undefined). */
+function readTlsClientRoutesRaw(manifest: IntegrationManifest): unknown[] | undefined {
+  const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
+  const ext = meta?.[TLS_CLIENT_META_KEY] as { routes?: unknown } | undefined;
+  const routes = ext?.routes;
+  if (!Array.isArray(routes)) return undefined;
+  return routes;
+}
+
+/**
+ * Resolve the per-URL TLS-client routes an integration declares via the
+ * `_meta["dev.appstrate/tls-client"]` vendor extension (issue #403). Returns
+ * `[]` when none are declared. First-match-wins order is preserved verbatim.
+ *
+ * Malformed entries are skipped (defence in depth — the install-time
+ * superRefine rejects them, so already-stored manifests can't surface a route
+ * with a missing pattern or an unknown client). `impersonate` is carried only
+ * for `client: "curl"`.
+ */
+export function getTlsClientRoutes(manifest: IntegrationManifest): TlsClientRoute[] {
+  const raw = readTlsClientRoutesRaw(manifest);
+  if (!raw) return [];
+  const out: TlsClientRoute[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as { url_pattern?: unknown; client?: unknown; impersonate?: unknown };
+    if (typeof e.url_pattern !== "string" || e.url_pattern.length === 0) continue;
+    if (e.client !== "undici" && e.client !== "curl") continue;
+    const route: TlsClientRoute = { urlPattern: e.url_pattern, client: e.client };
+    if (e.client === "curl" && typeof e.impersonate === "string" && e.impersonate.length > 0) {
+      route.impersonate = e.impersonate;
+    }
+    out.push(route);
+  }
+  return out;
 }
 
 /**

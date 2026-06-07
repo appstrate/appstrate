@@ -9,7 +9,7 @@
  * via environment variables at container start.
  */
 
-import type { IntegrationManifest } from "./integration.ts";
+import type { IntegrationManifest, TlsClientRoute } from "./integration.ts";
 
 /**
  * Manifest `auths.{key}.delivery.http` block — the header-render config the
@@ -368,6 +368,20 @@ export interface IntegrationSpawnSpec {
    * egress — the sidecar picks ONE listener per integration, MITM-first.
    */
   needsEgress?: boolean;
+  /**
+   * Issue #403 — per-URL TLS-client routing from the
+   * `_meta["dev.appstrate/tls-client"]` vendor extension. When a route matches
+   * an upstream URL, the sidecar's MITM listener routes that request through the
+   * declared client (`curl` / `curl-impersonate`) instead of the default
+   * undici/Bun `fetch`, to satisfy upstreams that fingerprint the TLS
+   * ClientHello (JA3/JA4) and reject Node-native clients. First match wins;
+   * unmatched URLs keep the default `fetch` path.
+   *
+   * Only emitted for integrations whose requests flow through the MITM listener
+   * (the per-integration credential-injecting / egress proxy). Dropped for
+   * remote HTTP MCP (no listener). Omitted when the manifest declares no routes.
+   */
+  tlsClientRoutes?: readonly TlsClientRoute[];
   /**
    * R8a defensive filter — names from `manifest.hidden_tools` (AFPS
    * §3.4 / `integration.schema.json`). Install-time validation already

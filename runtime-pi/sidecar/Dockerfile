@@ -116,8 +116,16 @@ LABEL org.opencontainers.image.title="Appstrate Sidecar" \
 #                        transparently on `delivery.http` auths. Without
 #                        openssl, sidecar falls back to env-delivery only and
 #                        in-run OAuth refresh is unavailable for those auths.
+#   - curl               Issue #403 — per-URL TLS-client routing
+#                        (`_meta["dev.appstrate/tls-client"]`). The MITM
+#                        listener routes matching upstream requests through curl
+#                        (its own TLS stack) for upstreams that fingerprint the
+#                        Bun/undici ClientHello (JA3/JA4). For SOTA browser
+#                        mimicry, vendor a `curl-impersonate` build into the
+#                        image and point `TLS_CLIENT_CURL_IMPERSONATE_BIN` at
+#                        it — not bundled here (no maintained Alpine package).
 # `wget` ships with busybox in Alpine → HEALTHCHECK adds no install cost.
-RUN apk add --no-cache libstdc++ libgcc ca-certificates docker-cli openssl
+RUN apk add --no-cache libstdc++ libgcc ca-certificates docker-cli openssl curl
 
 COPY --from=builder --chmod=0555 /build/runtime-pi/sidecar/sidecar /usr/local/bin/sidecar
 

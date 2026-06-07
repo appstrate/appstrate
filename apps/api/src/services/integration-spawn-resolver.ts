@@ -32,7 +32,7 @@ import {
   resolveAfpsHttpDelivery,
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
-import { getApiCallConfigs } from "@appstrate/core/integration";
+import { getApiCallConfigs, getTlsClientRoutes } from "@appstrate/core/integration";
 import type {
   IntegrationManifest,
   ResolvedConnection,
@@ -442,6 +442,15 @@ async function resolveOne(
     // The sidecar mounts a plain CONNECT egress listener when this is set and
     // no injection plan exists. Dropped for remote HTTP (no runner to route).
     ...(deliveries.needsEgress && !isRemoteHttp ? { needsEgress: true } : {}),
+    // Issue #403 — per-URL TLS-client routing (`_meta["dev.appstrate/tls-client"]`).
+    // The sidecar's MITM listener routes matching upstream requests through
+    // curl / curl-impersonate to defeat JA3/JA4 fingerprinting. Dropped for
+    // remote HTTP MCP — those requests don't traverse the MITM listener.
+    ...(() => {
+      if (isRemoteHttp) return {};
+      const tlsClientRoutes = getTlsClientRoutes(manifest);
+      return tlsClientRoutes.length > 0 ? { tlsClientRoutes } : {};
+    })(),
     // Opt-in shared workspace mount declared on the referenced
     // mcp-server. Only emitted for local sources — remote and
     // serverless integrations have no runner container/process to

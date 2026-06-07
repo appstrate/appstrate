@@ -59,6 +59,7 @@ import {
   type MitmListenerHandle,
 } from "./integration-mitm-listener.ts";
 import { createIntegrationEgressListener } from "./integration-egress-listener.ts";
+import { makeTlsClientFetch } from "./tls-client-router.ts";
 import {
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
@@ -704,10 +705,26 @@ async function spawnAndConnectLocalIntegration(params: {
   let mitmMounted = false;
   if (params.wantsMitm && ca !== null && params.source !== null) {
     const source = params.source;
+    // Issue #403 — per-URL TLS-client routing. When the integration declares
+    // `_meta["dev.appstrate/tls-client"].routes`, wrap the listener's upstream
+    // `fetch` so matching URLs go through curl / curl-impersonate (defeating
+    // JA3/JA4 fingerprinting). No routes → `makeTlsClientFetch` returns the
+    // default `fetch` unchanged (zero overhead).
+    const tlsRoutes = spec.tlsClientRoutes ?? [];
+    const routedFetch = makeTlsClientFetch(tlsRoutes, {
+      onRoute: (info) =>
+        logger.info(`${logLabel} tls-client route`, {
+          integrationId: spec.integrationId,
+          url: safeUrlForLog(info.url),
+          client: info.client,
+          impersonate: info.impersonate,
+        }),
+    });
     const listener = createIntegrationMitmListener({
       caBundle: ca.bundle,
       minter: ca.minter,
       credentials: source,
+      ...(tlsRoutes.length > 0 ? { fetch: routedFetch } : {}),
       // Adapter decides where the listener binds so the runner can reach it
       // (0.0.0.0 for bridged networks, 127.0.0.1 when it shares the parent NS).
       host: adapterCtx.listenerBindHost,
