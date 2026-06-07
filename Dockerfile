@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.20
 # ── Stage 1: Install dependencies ──────────────────────────────────
 FROM oven/bun:1.3.14-alpine AS deps
 
@@ -11,26 +12,16 @@ WORKDIR /app
 # Every workspace member referenced by the lockfile must have its
 # manifest on disk — `bun install --frozen-lockfile` walks the full
 # graph even when only a subset is needed at runtime.
+#
+# `COPY --parents` (stable since dockerfile 1.20) copies each match while
+# preserving its directory structure, so the member manifests are derived
+# from the monorepo graph instead of a hand-maintained list:
+#   */package.json    → runtime-pi, e2e            (depth-1 members)
+#   */*/package.json  → apps/*, packages/*, runtime-pi/sidecar  (depth-2)
+# Adding a new workspace package requires ZERO edits here — the glob picks
+# it up. The deps layer still caches on manifest/lockfile changes only.
 COPY package.json bun.lock turbo.json ./
-COPY apps/api/package.json apps/api/
-COPY apps/cli/package.json apps/cli/
-COPY apps/web/package.json apps/web/
-COPY packages/afps-runtime/package.json packages/afps-runtime/
-COPY packages/afps-shared/package.json packages/afps-shared/
-COPY packages/connect/package.json packages/connect/
-COPY packages/core/package.json packages/core/
-COPY packages/db/package.json packages/db/
-COPY packages/emails/package.json packages/emails/
-COPY packages/env/package.json packages/env/
-COPY packages/mcp-transport/package.json packages/mcp-transport/
-COPY packages/module-claude-code/package.json packages/module-claude-code/
-COPY packages/module-codex/package.json packages/module-codex/
-COPY packages/runner-pi/package.json packages/runner-pi/
-COPY packages/shared-types/package.json packages/shared-types/
-COPY packages/ui/package.json packages/ui/
-COPY runtime-pi/package.json runtime-pi/
-COPY runtime-pi/sidecar/package.json runtime-pi/sidecar/
-COPY e2e/package.json e2e/
+COPY --parents */package.json */*/package.json ./
 COPY patches/ patches/
 
 RUN bun install --frozen-lockfile
@@ -40,18 +31,14 @@ FROM oven/bun:1.3.14-alpine AS build
 
 WORKDIR /app
 
-# Copy all node_modules (root + workspace-specific)
+# Copy all node_modules (root + every workspace member) from the deps stage,
+# preserving structure. The build stage is ephemeral, so a broad graph-derived
+# copy is fine — the subsequent `bun install` relinks workspace symlinks and
+# `bun run build` only emits apps/web/dist + bundled outputs. `--parents` needs
+# the `/app/./` pivot to strip the source prefix so trees land at their member
+# path (apps/api/node_modules, packages/*/node_modules, …) rather than under app/.
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
-COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
-COPY --from=deps /app/packages/afps-runtime/node_modules ./packages/afps-runtime/node_modules
-COPY --from=deps /app/packages/connect/node_modules ./packages/connect/node_modules
-COPY --from=deps /app/packages/core/node_modules ./packages/core/node_modules
-COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
-COPY --from=deps /app/packages/env/node_modules ./packages/env/node_modules
-COPY --from=deps /app/packages/runner-pi/node_modules ./packages/runner-pi/node_modules
-COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types/node_modules
-COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
+COPY --from=deps --parents /app/./*/node_modules /app/./*/*/node_modules ./
 
 COPY . .
 
@@ -78,64 +65,30 @@ COPY --from=deps /app/packages/env/node_modules ./packages/env/node_modules
 COPY --from=deps /app/packages/runner-pi/node_modules ./packages/runner-pi/node_modules
 COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types/node_modules
 
-# API source (Bun runs TypeScript directly)
-COPY --from=build /app/apps/api/src ./apps/api/src
-COPY --from=build /app/apps/api/package.json ./apps/api/
+# ── Workspace package sources (Bun runs TypeScript directly — no build step) ──
+# Graph-derived via `COPY --parents`: apps/api source + every packages/*/src
+# and manifest ship, so adding a workspace package needs no edit here. apps/api
+# is the only app shipped as source (web ships as built dist below; cli/e2e are
+# not shipped). The `/app/./` pivot strips the source prefix so each tree lands
+# at its member path (e.g. /app/packages/core/src → packages/core/src).
+#
+# This now also includes packages/ui + packages/mcp-transport sources (~150 KB
+# of TS) which the API path does not import — inert weight, not a runtime dep.
+# The matching @appstrate/{core,db,…} runtime packages are exercised by the API
+# (validation, schema, db client, auth, modules, env, connect, runner-pi).
+COPY --from=build --parents /app/./apps/api/src /app/./apps/api/package.json ./
+COPY --from=build --parents /app/./packages/*/src /app/./packages/*/package.json ./
 
-# Core package (validation, storage, utilities — used by API + all packages at runtime)
-COPY --from=build /app/packages/core/src ./packages/core/src
+# Non-`src` package assets that must ship alongside their package source:
+#   core/schema — JSON schemas resolved at runtime
+#   db/drizzle  — SQL migrations applied at boot
 COPY --from=build /app/packages/core/schema ./packages/core/schema
-COPY --from=build /app/packages/core/package.json ./packages/core/
-
-# AFPS runtime (renderPlatformPrompt, bundle assembly, event sinks — used by API at runtime)
-COPY --from=build /app/packages/afps-runtime/src ./packages/afps-runtime/src
-COPY --from=build /app/packages/afps-runtime/package.json ./packages/afps-runtime/
-
-# AFPS shared (companion-files, semver, integrity, credential-template, …)
-# Required by @appstrate/core, @appstrate/afps-runtime, @appstrate/connect at runtime.
-# NOT a zero-dep leaf: it declares `semver`. Bun installs isolated per-package
-# node_modules, so afps-shared's `semver` lives in ITS OWN node_modules — which MUST
-# ship, or the runtime crash-loops with
-# `Cannot find package 'semver' from .../packages/afps-shared/src/semver-resolve.ts`.
-COPY --from=deps /app/packages/afps-shared/node_modules ./packages/afps-shared/node_modules
-COPY --from=build /app/packages/afps-shared/src ./packages/afps-shared/src
-COPY --from=build /app/packages/afps-shared/package.json ./packages/afps-shared/
-
-# Runner-pi adapter (buildRuntimePiEnv — used by API's Pi orchestrator at runtime)
-COPY --from=build /app/packages/runner-pi/src ./packages/runner-pi/src
-COPY --from=build /app/packages/runner-pi/package.json ./packages/runner-pi/
-
-# Shared types (used by API at runtime)
-COPY --from=build /app/packages/shared-types/src ./packages/shared-types/src
-COPY --from=build /app/packages/shared-types/package.json ./packages/shared-types/
-
-# Connect package (used by API at runtime)
-COPY --from=build /app/packages/connect/src ./packages/connect/src
-COPY --from=build /app/packages/connect/package.json ./packages/connect/
-
-# DB package (schema, client, auth, storage, notify, migrate — used by API at runtime)
-COPY --from=build /app/packages/db/src ./packages/db/src
-COPY --from=build /app/packages/db/package.json ./packages/db/
 COPY --from=build /app/packages/db/drizzle ./packages/db/drizzle
 
-# Emails package (templates + rendering — used by API and DB/auth at runtime)
-COPY --from=build /app/packages/emails/src ./packages/emails/src
-COPY --from=build /app/packages/emails/package.json ./packages/emails/
-
-# Env package (Zod-validated env vars — used by API, DB, connect at runtime)
-COPY --from=build /app/packages/env/src ./packages/env/src
-COPY --from=build /app/packages/env/package.json ./packages/env/
-
-# Modules: Codex (default) + Claude Code (opt-in) OAuth model providers.
-# Module-loader dynamic-imports them at boot via MODULES env; src +
-# package.json must both be present so the workspace symlink in
-# node_modules resolves. module-claude-code source is shipped so
-# operators can enable it by appending `@appstrate/module-claude-code`
-# to MODULES without a custom image build.
-COPY --from=build /app/packages/module-codex/src ./packages/module-codex/src
-COPY --from=build /app/packages/module-codex/package.json ./packages/module-codex/
-COPY --from=build /app/packages/module-claude-code/src ./packages/module-claude-code/src
-COPY --from=build /app/packages/module-claude-code/package.json ./packages/module-claude-code/
+# AFPS shared declares `semver` in its OWN isolated node_modules (bun isolated
+# install), so it MUST ship — otherwise the runtime crash-loops with
+# `Cannot find package 'semver' from .../packages/afps-shared/src/semver-resolve.ts`.
+COPY --from=deps /app/packages/afps-shared/node_modules ./packages/afps-shared/node_modules
 
 # Built frontend
 COPY --from=build /app/apps/web/dist ./apps/web/dist
