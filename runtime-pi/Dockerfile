@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1.20
+# Requires BuildKit (Docker 23+, or DOCKER_BUILDKIT=1) — the `COPY --parents` directives below are BuildKit-only.
 #
 # Appstrate Pi — AI agent runtime for ephemeral agent runs.
 #

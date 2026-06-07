@@ -6,7 +6,12 @@
 #   1. .dockerignore doesn't exclude files needed by Dockerfile COPY
 #   2. All workspace node_modules are created in deps stage
 #   3. Full image builds (deps → build → runtime)
-#   4. Runtime can resolve all workspace imports
+#   4. Runtime resolves every shipped workspace package + their external deps
+#
+# The workspace list (step 2) and the runtime-resolution set (step 4) are
+# DERIVED from the workspace graph (root package.json `workspaces` globs +
+# per-package manifests + the Dockerfile's node_modules allowlist) rather than
+# hand-maintained here — so a newly added package is auto-exercised.
 #
 # Usage: bash scripts/docker-check.sh
 # ============================================================================
@@ -54,7 +59,23 @@ echo "==> [2/4] Building deps stage + checking workspace node_modules..."
 
 docker build --no-cache --target deps -t appstrate-docker-check-deps . -q > /dev/null 2>&1
 
-WORKSPACES="packages/core packages/connect packages/db packages/emails packages/env packages/shared-types apps/api apps/web runtime-pi runtime-pi/sidecar"
+# Enumerate workspace members from the root package.json `workspaces` globs
+# (Bun built-ins only — no node_modules needed to run this). Deriving the list
+# instead of hardcoding it means a newly added package is checked automatically.
+WORKSPACES=$(bun -e '
+  import { readFileSync, existsSync } from "fs";
+  import { Glob } from "bun";
+  const root = JSON.parse(readFileSync("package.json", "utf8"));
+  const out = new Set();
+  for (const g of root.workspaces) {
+    if (g.includes("*")) {
+      for (const m of new Glob(g + "/package.json").scanSync(".")) out.add(m.replace(/\/package\.json$/, ""));
+    } else if (existsSync(g + "/package.json")) {
+      out.add(g);
+    }
+  }
+  process.stdout.write([...out].sort().join(" "));
+')
 
 for ws in $WORKSPACES; do
   # Skip workspaces with no dependencies (no node_modules expected)
@@ -84,14 +105,70 @@ fi
 echo ""
 echo "==> [4/4] Runtime import resolution check..."
 
-# Check that all workspace packages can be resolved at runtime
-RUNTIME_IMPORTS="@appstrate/core/validation @appstrate/core/logger @appstrate/db/schema @appstrate/db/client @appstrate/env @appstrate/connect @appstrate/emails @appstrate/shared-types"
+# Graph-derived — replaces the old hand-maintained RUNTIME_IMPORTS list with two
+# complementary, auto-extending assertions:
+#
+#  (a) SELF: every @appstrate workspace package whose `src` + manifest ship via
+#      the Dockerfile `packages/*/src` glob (+ apps/api). Asserts the package
+#      itself resolves, so a NEW package dropped under packages/ is exercised
+#      with zero edits here.
+#
+#  (b) EXTDEP: every package whose node_modules is COPYed into the runtime image
+#      (parsed from the Dockerfile's allowlist) that declares a non-@appstrate
+#      dependency. Resolves the package AND one real external dep scoped to the
+#      package directory — proving its node_modules actually shipped, not just
+#      its src. The old check only resolved @appstrate subpaths and never touched
+#      the external deps that motivate the allowlist, so a silently-omitted
+#      node_modules slipped through GREEN.
+#
+# Limitation: a brand-new package picked up by the `packages/*` glob whose
+# node_modules entry is FORGOTTEN in the Dockerfile allowlist is covered for
+# src-resolution by (a), but its missing external deps are only caught here when
+# they don't hoist to the root node_modules. Keep the glob + node_modules
+# allowlist in sync (see the note above the allowlist in the Dockerfile).
+RUNTIME_SELF=$(bun -e '
+  import { readFileSync } from "fs";
+  import { Glob } from "bun";
+  const names = new Set();
+  for (const m of new Glob("packages/*/package.json").scanSync(".")) {
+    const pj = JSON.parse(readFileSync(m, "utf8"));
+    if (pj.name && pj.name.startsWith("@appstrate/")) names.add(pj.name);
+  }
+  names.add(JSON.parse(readFileSync("apps/api/package.json", "utf8")).name);
+  process.stdout.write([...names].sort().join(" "));
+')
 
-for imp in $RUNTIME_IMPORTS; do
-  if docker run --rm appstrate-docker-check bun -e "require.resolve('$imp')" > /dev/null 2>&1; then
-    pass "import '$imp' resolves"
+RUNTIME_EXTDEP=$(bun -e '
+  import { readFileSync } from "fs";
+  const df = readFileSync("Dockerfile", "utf8");
+  const dirs = [...df.matchAll(/^COPY --from=\S+ \/app\/(\S+?)\/node_modules\b/gm)].map((m) => m[1]);
+  const out = [];
+  for (const d of [...new Set(dirs)]) {
+    let pj;
+    try { pj = JSON.parse(readFileSync(d + "/package.json", "utf8")); } catch { continue; }
+    const ext = Object.keys(pj.dependencies || {}).filter((x) => !x.startsWith("@appstrate/"));
+    if (ext.length) out.push(pj.name + "|" + d + "|" + ext[0]);
+  }
+  process.stdout.write(out.join(" "));
+')
+
+for name in $RUNTIME_SELF; do
+  if docker run --rm appstrate-docker-check bun -e "require.resolve('$name/package.json')" > /dev/null 2>&1; then
+    pass "package '$name' resolves"
   else
-    fail "import '$imp' CANNOT be resolved at runtime"
+    fail "package '$name' CANNOT be resolved at runtime"
+  fi
+done
+
+for entry in $RUNTIME_EXTDEP; do
+  name="${entry%%|*}"
+  rest="${entry#*|}"
+  dir="${rest%%|*}"
+  dep="${rest##*|}"
+  if docker run --rm appstrate-docker-check bun -e "const p=require('path');const base=p.dirname(require.resolve('$name/package.json'));require.resolve('$dep',{paths:[base]})" > /dev/null 2>&1; then
+    pass "external dep '$dep' resolves for '$name' ($dir)"
+  else
+    fail "external dep '$dep' for '$name' MISSING — node_modules likely omitted from runtime image"
   fi
 done
 
