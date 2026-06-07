@@ -464,6 +464,17 @@ export function createApp(deps: AppDeps): Hono {
 
     let upstream: Response;
     try {
+      // `AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS)` is the ONLY deadline on
+      // an LLM stream — an absolute 30 min cap, not an inactivity timer.
+      // There is deliberately no inter-chunk (body) timeout: undici's
+      // hardcoded 300 s `bodyTimeout` (which once motivated a global
+      // `globalThis.fetch` → undici swap, reverted in #366, see issue #369)
+      // does not exist here — the sidecar runs under Bun and `fetch` is
+      // Bun's native implementation, not undici. A long inter-chunk gap on a
+      // streamed completion therefore cannot trip a body timeout; it is only
+      // bounded by the 30 min absolute deadline. Inter-chunk silence is still
+      // observed (`maxIdleMs` in `llm.stream.observed`, #426) so any real
+      // stall surfaces in logs without re-introducing undici.
       upstream = await fetchFn(targetUrl, {
         method,
         headers: forwardedHeaders,
