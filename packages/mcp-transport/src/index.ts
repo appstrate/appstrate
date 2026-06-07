@@ -323,8 +323,6 @@ export {
 export {
   API_CALL_TOOL_META_KEY,
   API_UPLOAD_TOOL_META_KEY,
-  readApiCallToolMeta,
-  readApiUploadToolMeta,
-  type ApiCallToolMeta,
-  type ApiUploadToolMeta,
+  isApiCallTool,
+  isApiUploadTool,
 } from "./tool-meta.ts";

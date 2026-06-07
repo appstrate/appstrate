@@ -26,11 +26,7 @@
  */
 
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
-import {
-  readApiCallToolMeta,
-  readApiUploadToolMeta,
-  type AppstrateMcpClient,
-} from "@appstrate/mcp-transport";
+import { isApiCallTool, isApiUploadTool, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { Type } from "@mariozechner/pi-ai";
 import {
   buildRuntimeToolFactories,
@@ -42,11 +38,7 @@ import {
 import { reEmitRuntimeToolEvents } from "@appstrate/core/runtime-tool-defs";
 import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
 import { buildApiUploadToolFactory } from "./api-upload-extension.ts";
-import {
-  resolveApiCallBody,
-  augmentApiCallInputSchema,
-  ApiCallBodyResolveError,
-} from "./api-call-body-resolver.ts";
+import { resolveApiCallBody, ApiCallBodyResolveError } from "./api-call-body-resolver.ts";
 
 /**
  * 3-line capability prompt (D5.1). Spliceable into a bundle's system
@@ -147,7 +139,7 @@ function buildIntegrationToolFactories(
     // resolver instead of forwarding verbatim (a verbatim forward would hit
     // the sidecar's advertise-only error handler). Detected by the
     // `dev.appstrate/api-upload` `_meta` marker, not the tool name.
-    if (readApiUploadToolMeta(tool)) {
+    if (isApiUploadTool(tool)) {
       factories.push(
         ...buildApiUploadToolFactory({
           tool,
@@ -159,26 +151,21 @@ function buildIntegrationToolFactories(
       );
       continue;
     }
-    // api_call tools accept a `body` that may reference a workspace file
-    // (`{ fromFile }`, multipart `{ name, fromFile }`). The sidecar has no
-    // workspace mount, so we (a) advertise the richer schema to the LLM and
-    // (b) resolve the file bytes to the canonical wire form (`{ fromBytes }`
-    // / inline byte-parts) agent-side before forwarding — keeping large
-    // request bodies out of the model context. Detected by the
-    // `dev.appstrate/api-call` `_meta` marker, not the tool name.
-    const apiCall = readApiCallToolMeta(tool) !== null;
+    // api_call tools accept `body: { fromFile }` — a workspace-relative
+    // path the sidecar can't read (no workspace mount). Resolve the bytes
+    // to the canonical `{ fromBytes }` wire form agent-side before
+    // forwarding, keeping the large body out of the model context. The
+    // `fromFile` variant is advertised by the sidecar's own schema; here we
+    // only resolve it. Detected by the `dev.appstrate/api-call` `_meta`
+    // marker, not the tool name.
+    const apiCall = isApiCallTool(tool);
     factories.push((pi) => {
       pi.registerTool({
         name: tool.name,
         label: tool.name,
         description: tool.description ?? `Integration tool: ${tool.name}`,
         parameters: Type.Unsafe<Record<string, unknown>>(
-          apiCall
-            ? augmentApiCallInputSchema(tool.inputSchema)
-            : ((tool.inputSchema as Record<string, unknown>) ?? {
-                type: "object",
-                properties: {},
-              }),
+          (tool.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
         ),
         async execute(toolCallId, params, signal) {
           const startedAt = Date.now();

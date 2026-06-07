@@ -522,8 +522,10 @@ describe("POST /mcp — api_call multipart/form-data", () => {
       }>;
     };
     const proxy = result.tools.find((t) => t.name === "test__api_call")!;
-    expect(proxy.inputSchema.properties.body?.oneOf?.length).toBe(3);
+    // string | { fromFile } | { fromBytes } | { multipart }
+    expect(proxy.inputSchema.properties.body?.oneOf?.length).toBe(4);
     expect(proxy.inputSchema.properties.body?.description).toContain("multipart");
+    expect(proxy.inputSchema.properties.body?.description).toContain("fromFile");
   });
 
   it("dispatches a multipart JSON-RPC call without crashing the MCP transport", async () => {
