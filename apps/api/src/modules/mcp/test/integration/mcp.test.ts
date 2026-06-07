@@ -87,16 +87,26 @@ describe("mcp discovery + auth gate", () => {
     }
   });
 
-  it("rejects unauthenticated /api/mcp with 401", async () => {
+  it("rejects unauthenticated /api/mcp with 401 + RFC 9728 WWW-Authenticate challenge", async () => {
     const res = await app.request("/api/mcp", {
       method: "POST",
       headers: { "content-type": "application/json", Accept: MCP_ACCEPT },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
     });
     expect(res.status).toBe(401);
+    const challenge = res.headers.get("WWW-Authenticate");
+    expect(challenge).not.toBeNull();
+    expect(challenge!).toContain("Bearer");
+    // Points at the path-insertion PRM variant so the client can discover the AS.
+    expect(challenge!).toContain(
+      'resource_metadata="http://localhost/.well-known/oauth-protected-resource/api/mcp"',
+    );
+    expect(challenge!).toContain('scope="mcp:read mcp:invoke"');
+    // No token presented → not a step-up, so no insufficient_scope error.
+    expect(challenge!).not.toContain("insufficient_scope");
   });
 
-  it("403s an authenticated caller lacking mcp:read", async () => {
+  it("403s an authenticated caller lacking mcp:read with an insufficient_scope step-up challenge", async () => {
     const headers = await apiKeyHeaders(["agents:read"]);
     const res = await app.request("/api/mcp", {
       method: "POST",
@@ -104,6 +114,11 @@ describe("mcp discovery + auth gate", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
     });
     expect(res.status).toBe(403);
+    const challenge = res.headers.get("WWW-Authenticate");
+    expect(challenge).not.toBeNull();
+    expect(challenge!).toContain('error="insufficient_scope"');
+    expect(challenge!).toContain('scope="mcp:read mcp:invoke"');
+    expect(challenge!).toContain("resource_metadata=");
   });
 
   it("rejects GET on /api/mcp with 405 for an authenticated caller", async () => {

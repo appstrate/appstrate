@@ -28,6 +28,7 @@ import { requirePlatformRealm } from "../middleware/realm-guard.ts";
 import { isEndUserInApp } from "../services/end-users.ts";
 import { ApiError, unauthorized } from "./errors.ts";
 import { clearStaleAuthCookies } from "./auth-cookies.ts";
+import { authChallengeResponder } from "./auth-challenges.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "./permissions.ts";
 import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
 import { logger } from "./logger.ts";
@@ -61,6 +62,12 @@ export interface AuthPipelineOptions {
  */
 export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions): void {
   const { publicPaths, authStrategies } = opts;
+
+  // Resource-server auth-challenge responder: attaches a registered
+  // `WWW-Authenticate` to a 401/403 on a matching path (RFC 9728 §5.1 / MCP
+  // spec). Mounted first so it wraps both the auth 401 and route 403 below.
+  // Generic + no-op when nothing is registered.
+  app.use("*", authChallengeResponder());
 
   // Mount Better Auth handler — handles signup, signin, session, etc.
   //

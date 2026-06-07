@@ -11,9 +11,11 @@
  * caller's auth forwarded — see ./tools.ts.
  *
  * Also serves RFC 9728 Protected Resource Metadata so spec-compliant MCP
- * clients can discover this instance's authorization server. (Emitting the
- * `WWW-Authenticate: ... resource_metadata=` challenge on the 401 — RFC 9728
- * §5.1 — is a follow-up: the platform auth pipeline owns the 401 response.)
+ * clients can discover this instance's authorization server, and registers a
+ * `WWW-Authenticate: Bearer resource_metadata="…", scope="…"` challenge
+ * (RFC 9728 §5.1) emitted on the 401 (no/invalid token) and the 403
+ * (insufficient scope) via the generic auth-challenge registry — the trigger
+ * that lets a tokenless client start the OAuth flow.
  */
 
 import { Hono } from "hono";
@@ -24,6 +26,7 @@ import { requireModulePermission } from "@appstrate/core/permissions";
 import { methodNotAllowed } from "../../lib/errors.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
 import { logger } from "../../lib/logger.ts";
+import { registerAuthChallenge } from "../../lib/auth-challenges.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { getPlatformApp } from "../../lib/platform-app.ts";
@@ -32,6 +35,8 @@ import { buildMcpTools, type Dispatch, type McpObserver } from "./tools.ts";
 const MCP_SERVER_VERSION = "1.0.0";
 const MCP_PATH = "/api/mcp";
 const PRM_PATH = "/.well-known/oauth-protected-resource";
+/** Scopes this resource accepts — advertised in PRM + the 401/403 challenge. */
+const MCP_SCOPES = ["mcp:read", "mcp:invoke"] as const;
 // JSON-RPC envelope-granularity limit per caller per minute. Sized for
 // interactive agent loops (search → describe → invoke, repeated) while still
 // bounding cheap abuse of search/describe, which touch no rate-limited route.
@@ -91,13 +96,25 @@ export function createMcpRouter(): Hono<AppEnv> {
     return c.json({
       resource: `${origin}${MCP_PATH}`,
       authorization_servers: [origin],
-      scopes_supported: ["mcp:read", "mcp:invoke"],
+      scopes_supported: [...MCP_SCOPES],
       bearer_methods_supported: ["header"],
       resource_documentation: `${origin}/api/docs`,
     });
   };
   app.get(PRM_PATH, protectedResourceMetadata);
   app.get(`${PRM_PATH}${MCP_PATH}`, protectedResourceMetadata);
+
+  // RFC 9728 §5.1 challenge: on a 401 (no/invalid token) or 403 (insufficient
+  // scope) the generic responder attaches this so a spec-compliant client
+  // (Claude Code, …) discovers the PRM URL and starts/steps-up an OAuth flow.
+  // Point at the path-insertion PRM variant (the form a strict client probes).
+  registerAuthChallenge(MCP_PATH, ({ origin, status }) => {
+    const resourceMetadata = `${origin}${PRM_PATH}${MCP_PATH}`;
+    const base = `Bearer resource_metadata="${resourceMetadata}", scope="${MCP_SCOPES.join(" ")}"`;
+    // 403 here means the caller authenticated but lacks an mcp scope — signal
+    // step-up per RFC 6750 §3.1 so the client requests the missing scope.
+    return status === 403 ? `${base}, error="insufficient_scope"` : base;
+  });
 
   // Rate-limit before the permission check so repeated probing (including by a
   // caller that will 403) is bounded too. Auth runs earlier in the global
