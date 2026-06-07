@@ -104,7 +104,7 @@ The integration `api_call` tool exposes `body.fromFile` so agents can send a wor
 
 The MCP `api_call.body` schema advertises `{ fromFile }` alongside `string`, `{ fromBytes, encoding: "base64" }`, and `{ multipart }`, but `{ fromFile }` is a runtime-side convenience resolved client-side before MCP — the sidecar only ever decodes the canonical `{ fromBytes }` / inline-`multipart` wire forms.
 
-The download counterpart differs by runtime too: the CLI resolver supports an explicit `responseMode.toFile` (writes the response to a workspace path, returns a `{ kind: "file", path, size, sha256 }` summary). The platform has no `responseMode` — it **auto-spills** any response above the inline threshold to the blob store and materialises it to `resources/<file>` via `spillResourcesToWorkspace`, handing the agent a `resource_link → resources/read` path pointer.
+The download counterpart, `responseMode.toFile`, is supported on **both** runtimes — also resolved agent-side on the platform (`runtime-pi/mcp/api-call-response-resolver.ts`, wired by `direct.ts`): the response body (inline text, or a spilled `resource_link` → `resources/read`) is written to the agent-chosen workspace path and the tool returns a `{ kind: "file", path, size, status, sha256 }` descriptor. Without `responseMode.toFile`, responses above the inline threshold still **auto-spill** to `resources/<file>` (via `spillResourcesToWorkspace`); either way the upstream HTTP status — otherwise dropped with `_meta` by `callToolResultToPi` — is surfaced to the agent (in the descriptor, or as a prepended `[api_call status=N]` line) so it can branch on 200/404/409/….
 
 ## Upstream response-header propagation
 

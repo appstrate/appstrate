@@ -39,6 +39,7 @@ import { reEmitRuntimeToolEvents } from "@appstrate/core/runtime-tool-defs";
 import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
 import { buildApiUploadToolFactory } from "./api-upload-extension.ts";
 import { resolveApiCallBody, ApiCallBodyResolveError } from "./api-call-body-resolver.ts";
+import { shapeApiCallResponse } from "./api-call-response-resolver.ts";
 
 /**
  * 3-line capability prompt (D5.1). Spliceable into a bundle's system
@@ -177,6 +178,16 @@ function buildIntegrationToolFactories(
             timestamp: startedAt,
           });
           let args = (params as Record<string, unknown>) ?? {};
+          // `responseMode` is an agent-side convenience (the sidecar has no
+          // workspace): capture `toFile` and strip the field before
+          // forwarding, so the response shaper writes the body to that path.
+          let responseToFile: string | undefined;
+          if (apiCall && args.responseMode !== undefined) {
+            const rm = args.responseMode as { toFile?: unknown };
+            if (rm && typeof rm.toFile === "string") responseToFile = rm.toFile;
+            const { responseMode: _responseMode, ...rest } = args;
+            args = rest;
+          }
           if (apiCall && args.body !== undefined) {
             // Resolve `{ fromFile }` references to base64 wire form. A
             // resolution failure (missing file, symlink, oversize) is a
@@ -229,13 +240,41 @@ function buildIntegrationToolFactories(
           if (isSelectableRuntimeTool(tool.name)) {
             reEmitRuntimeToolEvents(result._meta, opts.emit);
           }
+          // api_call: surface the upstream HTTP status (otherwise dropped
+          // with `_meta`) and honour `responseMode.toFile` — writing the body
+          // to the agent-chosen workspace path and returning a file
+          // descriptor. With no `toFile`, large bodies still auto-spill to
+          // `resources/<file>` and the status line is prepended.
+          if (apiCall) {
+            try {
+              const shaped = await shapeApiCallResponse(result, {
+                workspace: opts.workspace,
+                ...(responseToFile !== undefined ? { toFile: responseToFile } : {}),
+                toolCallId,
+                runId: opts.runId,
+                emit: opts.emit,
+                readResource: (uri) => opts.mcp.readResource({ uri }),
+              });
+              return callToolResultToPi(shaped as Parameters<typeof callToolResultToPi>[0]);
+            } catch (err) {
+              // A bad responseMode.toFile path (escape/symlink) or a resource
+              // read failure is a tool-level error, not a run abort.
+              return callToolResultToPi({
+                content: [
+                  {
+                    type: "text" as const,
+                    text: `api_call: could not write response to ${JSON.stringify(responseToFile)}: ${err instanceof Error ? err.message : String(err)}`,
+                  },
+                ],
+                isError: true,
+              });
+            }
+          }
           // Materialise MCP resources to workspace files before the adapter
           // flattens them, keeping file bytes out of the LLM context:
           //  - embedded `resource` blocks (GitHub MCP `get_file_contents`, …),
-          //  - `resource_link` blocks (e.g. `{ns}__api_call` spilling a
-          //    response > 32 KB to the sidecar blob store) — fetched via
-          //    `readResource` so the agent grep/head/tail/reads the file
-          //    instead of receiving an unreadable `appstrate://` URI.
+          //  - `resource_link` blocks fetched via `readResource` so the agent
+          //    reads the file instead of an unreadable `appstrate://` URI.
           const spilled = await spillResourcesToWorkspace(result, {
             workspace: opts.workspace,
             toolCallId,
