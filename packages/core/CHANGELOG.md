@@ -5,6 +5,34 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.25.0] — 2026-06-07
+
+Storage streaming + integration spawn/egress contract additions. All additive — no removals, no breaking changes.
+
+### Added
+
+- **`Storage.uploadStream(bucket, path, stream, opts?)`** — pipe binary data to a
+  backend without buffering the whole payload in memory (S3 multipart via
+  `@aws-sdk/lib-storage`; filesystem pipes the web stream straight to disk).
+  `opts.exclusive` is unsupported on this path and throws. Implemented in both
+  `storage-s3` and `storage-fs` backends.
+- **`IntegrationSpawnSpec.mcpServer.version`** — the concrete published version
+  the run resolved at kickoff, forwarded to the mcp-server-bundle byte route so
+  runnable bytes match the manifest version (eliminates manifest/bytes skew,
+  issue #588). Omitted for system mcp-servers and remote/serverless integrations.
+- **`IntegrationSpawnSpec.needsEgress`** — explicit egress signal for a
+  local-source runner that needs a controlled outbound route but no header
+  injection (e.g. a `delivery.env` integration that authenticates itself); the
+  sidecar mounts a plain CONNECT egress listener (issue #543).
+
+### Changed
+
+- **`connectableAuthKeysForAgent`** — an integration exposing `api_call` is now
+  its own selection signal: it returns the declared auth keys even when the agent
+  picked zero tools and zero scopes, since `api_call` is consumed with an explicit
+  `auth_key` pin and still needs a connection. Returns `[]` only when there are no
+  tools, no scopes, AND no `api_call` configs.
+
 ## [2.24.0] — 2026-06-05
 
 Module-contract cleanup + table-centralization (PR #586, supersedes #577/#583).
