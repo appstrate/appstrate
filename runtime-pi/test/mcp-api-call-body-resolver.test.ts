@@ -142,20 +142,27 @@ describe("resolveApiCallBody", () => {
 
   it("refuses a symlinked fromFile (path-safety via resolveSafeFile)", async () => {
     const ws = freshWorkspace();
-    const outside = freshWorkspace();
-    writeFile(outside, "secret.txt", "secret");
-    symlinkSync(join(outside, "secret.txt"), join(ws, "link.txt"));
+    // Dangling symlink: resolveSafePath leaves it unresolved (target ENOENT),
+    // so resolveSafeFile's `lstat().isSymbolicLink()` gate refuses it before
+    // any read — deterministic across platforms (a symlink to an EXISTING
+    // target would be realpath-followed and judged purely by containment).
+    symlinkSync("/appstrate-test-nonexistent-target", join(ws, "link.txt"));
     await expect(
       resolveApiCallBody({ fromFile: "link.txt" }, { workspace: ws }),
     ).rejects.toBeInstanceOf(ApiCallBodyResolveError);
   });
 
-  it("refuses a workspace-escaping fromFile path", async () => {
+  it("refuses a fromFile that escapes the allowed roots", async () => {
     const ws = freshWorkspace();
-    const outside = freshWorkspace();
-    writeFile(outside, "escape.txt", "nope");
+    // Absolute path under neither the workspace nor `/tmp` (the only extra
+    // allowed root) — rejected by containment regardless of whether it
+    // exists, so it is stable on both Linux (`/tmp` tmpdir) and macOS
+    // (`/var/folders` tmpdir).
     await expect(
-      resolveApiCallBody({ fromFile: "../escape.txt" }, { workspace: ws }),
+      resolveApiCallBody(
+        { fromFile: "/appstrate-test-nonexistent-root/secret.txt" },
+        { workspace: ws },
+      ),
     ).rejects.toBeInstanceOf(ApiCallBodyResolveError);
   });
 });
