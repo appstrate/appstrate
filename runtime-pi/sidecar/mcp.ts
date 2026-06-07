@@ -603,6 +603,22 @@ function buildSidecarTools(options: MountMcpOptions): {
           "When true, the sidecar substitutes `{{credential}}` placeholders in the " +
           "request body. Off by default to avoid accidental token leaks into payloads.",
       },
+      responseMode: {
+        type: "object",
+        additionalProperties: false,
+        description:
+          "Control where the response body lands. Resolved agent-side (the sidecar has no " +
+          "workspace) — keeps large responses out of the model context.",
+        properties: {
+          toFile: {
+            type: "string",
+            description:
+              "Workspace-relative path to write the response body to. The tool then returns a " +
+              "`{ kind: 'file', path, size, status }` descriptor instead of the bytes. " +
+              "Without it, responses larger than the inline threshold auto-spill to `resources/<file>`.",
+          },
+        },
+      },
     },
   } as const;
 
