@@ -50,8 +50,11 @@ export function observability() {
     const pathname = new URL(c.req.url).pathname;
 
     return runWithSpan(
-      // Provisional name — overwritten with the matched template after next().
-      `${method} ${pathname}`,
+      // Provisional, low-cardinality name — overwritten with `<METHOD> <template>`
+      // after next() resolves the matched route. Never embeds the raw path (the
+      // raw path lives only in the `url.path` attribute) so scanners spraying
+      // distinct paths can't explode the span-name cardinality.
+      method,
       {
         kind: SpanKind.SERVER,
         traceparent: trustInbound ? c.req.header("traceparent") : undefined,
@@ -67,13 +70,14 @@ export function observability() {
         if (!span) return;
 
         // A resolved template is a low-cardinality string (`/x/:id`); the
-        // wildcard or an empty result means no route matched (404) — fall back
-        // to the raw pathname for the span NAME, but never tag `http.route`
-        // with the high-cardinality raw path.
+        // wildcard or an empty result means no route matched (404). Per OTel
+        // HTTP semconv, when there is no low-cardinality route the SERVER span
+        // name is just `{method}` — never the raw path (that would let scanners
+        // spray unbounded distinct span names). The raw path stays in `url.path`.
         const matched = resolveRouteTemplate(c);
         const isTemplate = matched !== "" && matched !== "*" && matched !== "/*";
 
-        span.updateName(`${method} ${isTemplate ? matched : pathname}`);
+        span.updateName(isTemplate ? `${method} ${matched}` : method);
         if (isTemplate) span.setAttribute("http.route", matched);
         span.setAttribute("http.response.status_code", c.res.status);
 

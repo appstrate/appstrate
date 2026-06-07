@@ -222,13 +222,22 @@ function createInstruments(m: Meter): void {
   runTerminal = m.createCounter("appstrate.run.terminal", {
     description: "Count of runs reaching a terminal status, tagged by status + error_code.",
   });
+  // container_spawn + llm.latency live in the sub-second to low-seconds range,
+  // where the SDK's DEFAULT explicit buckets [0,5,10,25,…,10000] collapse every
+  // value <5s into the single (0,5]s bucket — destroying p50/p95/p99 resolution.
+  // Give each its own sub-second-aware boundaries via the OTel `advice` hint
+  // (read by the default histogram aggregation; @opentelemetry/api ≥1.7).
+  // run.duration stays on the default buckets — its seconds-to-minutes range
+  // already lands across them.
   containerSpawn = m.createHistogram("appstrate.run.container_spawn", {
     unit: "s",
     description: "Time to provision the isolation boundary + sidecar/agent workloads.",
+    advice: { explicitBucketBoundaries: [0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30] },
   });
   llmLatency = m.createHistogram("appstrate.llm.latency", {
     unit: "s",
     description: "Upstream LLM call latency observed at the platform proxy seam.",
+    advice: { explicitBucketBoundaries: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60] },
   });
   m.createObservableGauge("appstrate.scheduler.queue_depth", {
     description: "Pending jobs in the run-scheduler queue (BullMQ).",

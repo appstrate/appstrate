@@ -91,10 +91,12 @@ export interface RunPipelineParams {
    */
   scheduleConnectionOverrides?: ConnectionOverrides | null;
   /**
-   * W3C `traceparent` header value of the spawning request. Forwarded
-   * into the runtime so its outbound traffic becomes child spans of
-   * the platform's trace. Routes pull this from `c.get("traceparent")`;
-   * background runners (scheduler) leave it unset.
+   * W3C `traceparent` to seed the run-execution trace tree with. Forwarded
+   * into the runtime so its outbound traffic becomes child spans of the
+   * platform's trace. Routes resolve this via `runTraceparent(c)`, which
+   * honors `OTEL_TRUST_INCOMING_TRACE`: the inbound header only when trusted,
+   * otherwise the in-process SERVER span. Background runners (scheduler) leave
+   * it unset.
    */
   traceparent?: string;
   /** Resolved by `lib/runner-context.ts` from request headers + auth context. */

@@ -3,6 +3,15 @@
 import { z } from "zod";
 import { createEnvGetter } from "@appstrate/core/env";
 
+// Boolean-from-string env transform: `"true"`/`"1"` (case-insensitive) → true,
+// anything else → false. Shared by every on/off flag so the parse semantics
+// stay identical across the schema.
+const boolEnv = (defaultValue: "true" | "false") =>
+  z
+    .string()
+    .default(defaultValue)
+    .transform((s) => s.toLowerCase() === "true" || s === "1");
+
 // ─── Schema ──────────────────────────────────────────────────
 //
 // MAINTAINER NOTE: this Zod schema is the single source of truth for env
@@ -263,10 +272,7 @@ const envSchema = z
     // long dormant windows and (b) shifting refresh latency off the hot path
     // can opt in. Disabling drops 280+ lines of BullMQ scan/refresh worker
     // wiring from a running instance.
-    OAUTH_REFRESH_WORKER_ENABLED: z
-      .string()
-      .default("false")
-      .transform((s) => s.toLowerCase() === "true" || s === "1"),
+    OAUTH_REFRESH_WORKER_ENABLED: boolEnv("false"),
 
     // Integration connection refresh-failure escalation. When an OAuth token
     // refresh fails *transiently* (not `invalid_grant`) this many times in a
@@ -351,10 +357,7 @@ const envSchema = z
     // OTEL_EXPORTER_OTLP_ENDPOINT. Setting only the endpoint is the common
     // case; OTEL_ENABLED=true with no endpoint falls back to the OTLP default
     // collector address (http://localhost:4318).
-    OTEL_ENABLED: z
-      .string()
-      .default("false")
-      .transform((s) => s.toLowerCase() === "true" || s === "1"),
+    OTEL_ENABLED: boolEnv("false"),
     // Base OTLP collector endpoint (e.g. http://otel-collector:4318). The
     // signal path (/v1/traces, /v1/metrics) is appended by the exporter per
     // the OTLP spec. Empty string → undefined so compose's `${VAR:-}` pattern
@@ -373,10 +376,7 @@ const envSchema = z
     // SERVER span is still emitted, just not parented from the header. Enable
     // only when the platform sits behind a trusted gateway that strips/sets
     // `traceparent` for external callers.
-    OTEL_TRUST_INCOMING_TRACE: z
-      .string()
-      .default("false")
-      .transform((s) => s.toLowerCase() === "true" || s === "1"),
+    OTEL_TRUST_INCOMING_TRACE: boolEnv("false"),
 
     // Run — execution backend: "docker" (isolated containers) or "process" (default, Bun subprocesses, no isolation)
     RUN_ADAPTER: z.enum(["docker", "process"]).default("process"),

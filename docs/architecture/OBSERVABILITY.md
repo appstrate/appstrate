@@ -52,9 +52,13 @@ OTEL_SERVICE_NAME=appstrate-api
   parsed with the same `parseTraceparent` the request-id middleware and the
   runtime event sink already use. The container is handed the active span as its
   parent (`apps/api/src/services/run-launcher/pi.ts`), so the whole
-  **API → run → container** path is one trace. **Inbound** parenting from the
-  request header is gated by `OTEL_TRUST_INCOMING_TRACE` (default off — §C3);
-  the in-process API → run → container linkage is unaffected.
+  **API → run → container** path is one trace. The trust gate
+  (`OTEL_TRUST_INCOMING_TRACE`, default off — §C3) is applied at **both** the
+  SERVER span **and** the run-execution tree: routes seed the run trace via
+  `runTraceparent(c)`, which adopts the inbound header only when trusted and
+  otherwise falls back to the in-process SERVER span (`currentTraceparent()`).
+  So with trust off the run spans stay in **this** process's trace rather than an
+  unverified caller-supplied one.
 - **Shutdown**: spans + metrics are force-flushed during graceful shutdown
   (`apps/api/src/lib/shutdown.ts`).
 
@@ -69,20 +73,33 @@ OTEL_SERVICE_NAME=appstrate-api
 | `appstrate.run.container` | `run-launcher/pi.ts`                         | Container boundary/sidecar/agent/wait lifecycle. Forwards itself as the container's parent.                                                                                 |
 | `appstrate.run.finalize`  | `run-event-ingestion.ts` (`finalizeRun`)     | CAS-guarded terminal convergence.                                                                                                                                           |
 
-For unmatched requests (404) no template resolves: the span name falls back to
-the raw `url.path` and the `http.route` attribute is **omitted** (it would be
-high-cardinality). SSE / streaming responses carry
+For unmatched requests (404) no low-cardinality template resolves: per OTel HTTP
+semconv the span name is the **method alone** (`GET`) — never the raw path,
+which would let a scanner spraying distinct paths explode the span-name
+cardinality. The raw path is still preserved in the `url.path` attribute, and
+`http.route` is **omitted**. SSE / streaming responses carry
 `appstrate.response.streaming=true` — their span duration is **time-to-first-byte**
 (the span ends when the handler returns its streaming `Response`), not the
 stream lifetime (§C2).
 
 ### Metrics (SLIs)
 
-Durations are recorded in **seconds** (`unit: "s"`, OTel semconv) so typical
-1s–minutes runs land inside the SDK's default histogram buckets (recording raw
-ms overflowed every value into the `(10000, +inf)` bucket, breaking p50/p95/p99).
-The unit is not embedded in the metric name (OTel naming guidance). Counters omit
-a `_total` suffix — the Prometheus exporter appends it on export.
+Durations are recorded in **seconds** (`unit: "s"`, OTel semconv); the unit is
+not embedded in the metric name (OTel naming guidance). Counters omit a `_total`
+suffix — the Prometheus exporter appends it on export.
+
+**Histogram buckets are per-instrument.** The SDK's DEFAULT explicit buckets
+(`[0, 5, 10, 25, …, 10000]`) suit `appstrate.run.duration` (seconds-to-minutes)
+but would collapse every sub-5s value into the single `(0, 5]` bucket — useless
+for the fast instruments. So `container_spawn` and `llm.latency` set their own
+sub-second-aware boundaries via the OTel `advice.explicitBucketBoundaries` hint
+(read by the default histogram aggregation; `@opentelemetry/api ≥ 1.7`):
+
+| Histogram                       | Boundaries (s)                                   | Range targeted    |
+| ------------------------------- | ------------------------------------------------ | ----------------- |
+| `appstrate.run.duration`        | SDK default `[0, 5, 10, 25, …, 10000]`           | seconds → minutes |
+| `appstrate.run.container_spawn` | `[0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30]` | ~0.1–2s provision |
+| `appstrate.llm.latency`         | `[0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60]`    | ~0.3–5s upstream  |
 
 | Metric                            | Type             | Tags                                  | Source                                     |
 | --------------------------------- | ---------------- | ------------------------------------- | ------------------------------------------ |
@@ -142,3 +159,14 @@ allowlist so a runner-controlled string can never explode metric cardinality:
   controls `traceparent` for external callers. (The request-id middleware's
   pre-existing echo of a _validated_ inbound header to the response is
   observability cosmetics, not propagation, and is unchanged.)
+
+  The gate covers the **run-execution trace tree too**, not just the SERVER
+  span. Previously the run path (`runs.ts` → pipeline → `executeAgentInBackground`
+  → container) seeded itself from the raw inbound header (`c.get("traceparent")`)
+  — a **cross-process** link that bypassed the trust check, so an attacker could
+  still splice the run + container spans into a chosen `trace_id`. The run routes
+  now resolve the seed via `runTraceparent(c)`: inbound header when trusted,
+  otherwise the in-process SERVER span via `currentTraceparent()` (or a fresh
+  root when telemetry is off). With trust off the run trace is genuinely
+  in-process, eliminating both the spoof vector and the SERVER-vs-run trace
+  fragmentation.
