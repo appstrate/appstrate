@@ -51,6 +51,29 @@ export function buildPackageId(scope: string, name: string): string {
 }
 
 /**
+ * Encode a packageId ("@scope/name") into a URL path segment, keeping the
+ * `@` and `/` separators literal so it matches BOTH route shapes:
+ *   - `/:scope{@[^/]+}/:name`            (single top-level package)
+ *   - `/:packageId{@[^/]+/[^/]+}`        (routes that reference ≥2 packages)
+ *
+ * Naive `encodeURIComponent(packageId)` 404s both shapes because it
+ * percent-encodes `@`→%40 and `/`→%2F, neither of which the route regexes
+ * accept. Use this canonical encoder instead of hand-rolling — it is the
+ * one contract every consumer (frontend, SDK, github-action, MCP) should
+ * import rather than re-discovering the footgun.
+ *
+ * Each segment is `encodeURIComponent`-encoded individually (defensive even
+ * if `SLUG_PATTERN` ever loosens); the `@`/`/` separators stay literal.
+ *
+ * @throws Error if packageId is not a valid "@scope/name".
+ */
+export function encodePackageIdPath(packageId: string): string {
+  const parsed = parseScopedName(packageId);
+  if (!parsed) throw new Error(`Invalid packageId: ${packageId}`);
+  return `@${encodeURIComponent(parsed.scope)}/${encodeURIComponent(parsed.name)}`;
+}
+
+/**
  * Convert an arbitrary human string into a URL-safe slug.
  * Lower-cases, strips diacritics, collapses non-[a-z0-9] runs into `-`
  * and trims leading/trailing dashes. Optional `maxLen` caps the result

@@ -21,6 +21,7 @@ import type {
   IntegrationPin,
   IntegrationSummary,
 } from "@appstrate/shared-types";
+import { encodePackageIdPath } from "@appstrate/core/naming";
 import { api, apiList, type ListEnvelope } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
@@ -82,7 +83,7 @@ export function buildUpdateConnectionRequest(args: {
 }): [string, RequestInit] {
   const { packageId, connectionId, label, sharedWithOrg, extraHeaders } = args;
   return [
-    `/integrations/${encodeURI(packageId)}/connections/${connectionId}`,
+    `/integrations/${encodePackageIdPath(packageId)}/connections/${connectionId}`,
     {
       method: "PATCH",
       body: JSON.stringify({
@@ -113,7 +114,7 @@ export function useIntegrationDetail(packageId: string | undefined) {
   return useQuery({
     queryKey: [...KEY(orgId, applicationId), "detail", packageId] as const,
     enabled: Boolean(orgId && applicationId && packageId),
-    queryFn: () => api<IntegrationDetail>(`/integrations/${encodeURI(packageId!)}`),
+    queryFn: () => api<IntegrationDetail>(`/integrations/${encodePackageIdPath(packageId!)}`),
   });
 }
 
@@ -125,7 +126,7 @@ export function useIntegrationConnections(packageId: string | undefined) {
     enabled: Boolean(orgId && applicationId && packageId),
     queryFn: async () => {
       const envelope = await api<ListEnvelope<IntegrationConnection>>(
-        `/integrations/${encodeURI(packageId!)}/connections`,
+        `/integrations/${encodePackageIdPath(packageId!)}/connections`,
       );
       return envelope.data;
     },
@@ -149,7 +150,7 @@ export function useIntegrationAgentResolution(
     enabled: Boolean(orgId && applicationId && integrationId && agentPackageId),
     queryFn: () =>
       api<IntegrationAgentResolution>(
-        `/integrations/${encodeURI(integrationId!)}/agent-resolution/${encodeURI(agentPackageId!)}`,
+        `/integrations/${encodePackageIdPath(integrationId!)}/agent-resolution/${encodePackageIdPath(agentPackageId!)}`,
       ),
   });
 }
@@ -162,7 +163,7 @@ export function useActivateIntegration() {
   return useMutation({
     mutationFn: (packageId: string) =>
       api<{ active: boolean; activated_at: string }>(
-        `/integrations/${encodeURI(packageId)}/activate`,
+        `/integrations/${encodePackageIdPath(packageId)}/activate`,
         { method: "POST", body: "{}" },
       ),
     onSuccess: () => {
@@ -180,7 +181,7 @@ export function useDeactivateIntegration() {
   const applicationId = useCurrentApplicationId();
   return useMutation({
     mutationFn: (packageId: string) =>
-      api<{ active: boolean }>(`/integrations/${encodeURI(packageId)}/deactivate`, {
+      api<{ active: boolean }>(`/integrations/${encodePackageIdPath(packageId)}/deactivate`, {
         method: "DELETE",
       }),
     onSuccess: () => {
@@ -209,7 +210,7 @@ export function useConnectIntegrationFields() {
       connectionId?: string;
     }) =>
       api<IntegrationConnection>(
-        `/integrations/${encodeURI(packageId)}/auths/${encodeURI(authKey)}/connect/fields`,
+        `/integrations/${encodePackageIdPath(packageId)}/auths/${encodeURI(authKey)}/connect/fields`,
         {
           method: "POST",
           body: JSON.stringify({
@@ -249,7 +250,7 @@ export function useInitiateIntegrationOAuth() {
       connectionId?: string;
     }) =>
       api<{ auth_url: string; state: string }>(
-        `/integrations/${encodeURI(packageId)}/auths/${encodeURI(authKey)}/connect/oauth2`,
+        `/integrations/${encodePackageIdPath(packageId)}/auths/${encodeURI(authKey)}/connect/oauth2`,
         {
           method: "POST",
           body: JSON.stringify({
@@ -275,7 +276,7 @@ export function useIntegrationOAuthClient(
     queryFn: async (): Promise<IntegrationOAuthClient | null> => {
       try {
         return await api<IntegrationOAuthClient>(
-          `/integrations/${encodeURI(packageId!)}/oauth-clients/${encodeURI(authKey!)}`,
+          `/integrations/${encodePackageIdPath(packageId!)}/oauth-clients/${encodeURI(authKey!)}`,
         );
       } catch (err: unknown) {
         // 404 = not configured yet; treat as null so the UI can render
@@ -314,7 +315,7 @@ export function useUpsertIntegrationOAuthClient() {
       redirectUri?: string;
     }) =>
       api<IntegrationOAuthClient>(
-        `/integrations/${encodeURI(packageId)}/oauth-clients/${encodeURI(authKey)}`,
+        `/integrations/${encodePackageIdPath(packageId)}/oauth-clients/${encodeURI(authKey)}`,
         {
           method: "PUT",
           body: JSON.stringify({
@@ -345,7 +346,7 @@ export function useIntegrationPins(packageId: string | undefined) {
   const applicationId = useCurrentApplicationId();
   return useQuery({
     queryKey: [...KEY(orgId, applicationId), "pins", packageId] as const,
-    queryFn: () => apiList<IntegrationPin>(`/integrations/${encodeURI(packageId!)}/pins`),
+    queryFn: () => apiList<IntegrationPin>(`/integrations/${encodePackageIdPath(packageId!)}/pins`),
     enabled: !!packageId && !!orgId && !!applicationId,
   });
 }
@@ -361,7 +362,9 @@ export function useAgentsConsumingIntegration(packageId: string | undefined) {
   return useQuery({
     queryKey: [...KEY(orgId, applicationId), "consuming-agents", packageId] as const,
     queryFn: () =>
-      apiList<ConsumingAgentSummary>(`/integrations/${encodeURI(packageId!)}/consuming-agents`),
+      apiList<ConsumingAgentSummary>(
+        `/integrations/${encodePackageIdPath(packageId!)}/consuming-agents`,
+      ),
     enabled: !!packageId && !!orgId && !!applicationId,
   });
 }
@@ -379,7 +382,7 @@ export function useUpdateIntegrationSettings() {
       packageId: string;
       blockUserConnections: boolean;
     }) =>
-      api<{ blocked: boolean }>(`/integrations/${encodeURI(packageId)}/settings`, {
+      api<{ blocked: boolean }>(`/integrations/${encodePackageIdPath(packageId)}/settings`, {
         method: "PATCH",
         body: JSON.stringify({ block_user_connections: blockUserConnections }),
         headers: { "Content-Type": "application/json" },
@@ -409,7 +412,7 @@ export function useUpsertIntegrationPin() {
       connectionId: string;
     }) =>
       api<IntegrationPin>(
-        `/integrations/${encodeURI(packageId)}/pins/${encodeURI(agentPackageId)}`,
+        `/integrations/${encodePackageIdPath(packageId)}/pins/${encodePackageIdPath(agentPackageId)}`,
         {
           method: "PUT",
           body: JSON.stringify({ connection_id: connectionId }),
@@ -433,7 +436,7 @@ export function useDeleteIntegrationPin() {
   return useMutation({
     mutationFn: ({ packageId, agentPackageId }: { packageId: string; agentPackageId: string }) =>
       api<{ deleted: boolean }>(
-        `/integrations/${encodeURI(packageId)}/pins/${encodeURI(agentPackageId)}`,
+        `/integrations/${encodePackageIdPath(packageId)}/pins/${encodePackageIdPath(agentPackageId)}`,
         { method: "DELETE" },
       ),
     onSuccess: (_data, vars) => {
@@ -454,7 +457,7 @@ export function useIntegrationOrgDefault(packageId: string | undefined) {
     queryKey: [...KEY(orgId, applicationId), "org-default", packageId] as const,
     queryFn: () =>
       api<{ default: IntegrationOrgDefault | null }>(
-        `/integrations/${encodeURI(packageId!)}/default`,
+        `/integrations/${encodePackageIdPath(packageId!)}/default`,
       ).then((r) => r.default),
     enabled: !!packageId && !!orgId && !!applicationId,
   });
@@ -475,7 +478,7 @@ export function useUpsertIntegrationOrgDefault() {
       connectionId: string;
       enforce: boolean;
     }) =>
-      api<IntegrationOrgDefault>(`/integrations/${encodeURI(packageId)}/default`, {
+      api<IntegrationOrgDefault>(`/integrations/${encodePackageIdPath(packageId)}/default`, {
         method: "PUT",
         body: JSON.stringify({ connection_id: connectionId, enforce }),
         headers: { "Content-Type": "application/json" },
@@ -498,7 +501,7 @@ export function useDeleteIntegrationOrgDefault() {
   const applicationId = useCurrentApplicationId();
   return useMutation({
     mutationFn: ({ packageId }: { packageId: string }) =>
-      api<{ deleted: boolean }>(`/integrations/${encodeURI(packageId)}/default`, {
+      api<{ deleted: boolean }>(`/integrations/${encodePackageIdPath(packageId)}/default`, {
         method: "DELETE",
       }),
     onSuccess: (_data, vars) => {
@@ -551,7 +554,7 @@ export function useDeleteIntegrationOAuthClient() {
   return useMutation({
     mutationFn: ({ packageId, authKey }: { packageId: string; authKey: string }) =>
       api<{ deleted: boolean }>(
-        `/integrations/${encodeURI(packageId)}/oauth-clients/${encodeURI(authKey)}`,
+        `/integrations/${encodePackageIdPath(packageId)}/oauth-clients/${encodeURI(authKey)}`,
         { method: "DELETE" },
       ),
     onSuccess: (_data, vars) => {
