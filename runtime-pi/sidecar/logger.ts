@@ -19,10 +19,11 @@ function envLevel(): Level {
   return "info";
 }
 
-const minLevel = LEVEL_VALUES[envLevel()];
-
 function emit(level: Level, msg: string, data?: Record<string, unknown>): void {
-  if (LEVEL_VALUES[level] < minLevel) return;
+  // Evaluated per-call (not captured at import) so `LOG_LEVEL` can be raised
+  // to `debug` for diagnostics without a process restart, and so tests can
+  // toggle the threshold around a single call.
+  if (LEVEL_VALUES[level] < LEVEL_VALUES[envLevel()]) return;
   const line = JSON.stringify({
     level,
     time: new Date().toISOString(),

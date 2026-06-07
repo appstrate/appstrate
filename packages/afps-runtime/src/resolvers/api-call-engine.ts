@@ -258,14 +258,17 @@ export interface RedirectFollowOptions {
  * Caller-supplied cookies are preserved across hops (the jar wins on name
  * conflict so server-rotated values replace stale caller-supplied ones).
  *
- * Returns the terminal `Response` plus the URL it was served from so
- * callers driving redirect-chain flows (OAuth code, CAS ticket,
- * magic-link) can extract callback query params without parsing bodies
- * (see #471).
+ * Returns the terminal `Response`, the URL it was served from (so
+ * callers driving redirect-chain flows — OAuth code, CAS ticket,
+ * magic-link — can extract callback query params without parsing
+ * bodies, see #471), and `hops`: the number of redirects followed
+ * (`0` when the first response was terminal). The hop count is surfaced
+ * for operator diagnostics (see #404) so a debug log can distinguish a
+ * clean call from one that bounced through a redirect chain.
  */
 export async function fetchFollowingRedirectsCapturingCookies(
   opts: RedirectFollowOptions,
-): Promise<{ response: Response; finalUrl: string }> {
+): Promise<{ response: Response; finalUrl: string; hops: number }> {
   const {
     url,
     init,
@@ -290,10 +293,10 @@ export async function fetchFollowingRedirectsCapturingCookies(
     mergeSetCookieIntoJar(response.headers.getSetCookie(), cookieJar, integrationId);
 
     if (response.status < 300 || response.status >= 400) {
-      return { response, finalUrl: currentUrl };
+      return { response, finalUrl: currentUrl, hops: hop };
     }
     const location = response.headers.get("location");
-    if (!location) return { response, finalUrl: currentUrl };
+    if (!location) return { response, finalUrl: currentUrl, hops: hop };
 
     // Per WHATWG fetch (HTTP-redirect fetch step 11) + RFC 9110 §15.4:
     //   - 301/302 downgrade POST → GET (other methods preserved)
@@ -417,7 +420,7 @@ export class PreflightError extends Error {
 
 export async function guardedFetch(
   opts: GuardedFetchOptions,
-): Promise<{ response: Response; finalUrl: string }> {
+): Promise<{ response: Response; finalUrl: string; hops: number }> {
   const fetchFn = opts.fetchFn ?? fetch;
   const pre = preflightUrl(opts.url, {
     authorizedUris: opts.authorizedUris,
@@ -436,7 +439,8 @@ export async function guardedFetch(
     initAny.duplex = "half";
     initAny.redirect = "manual";
     const response = await fetchFn(opts.url, init);
-    return { response, finalUrl: response.url || opts.url };
+    // Streaming path issues a single unfollowed request — no manual hops.
+    return { response, finalUrl: response.url || opts.url, hops: 0 };
   }
 
   return fetchFollowingRedirectsCapturingCookies({

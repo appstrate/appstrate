@@ -48,6 +48,7 @@ import {
 } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./logger.ts";
+import { filterSensitiveHeaders } from "./redact.ts";
 
 /**
  * Body modes the proxy core accepts. The HTTP handler can produce
@@ -278,7 +279,18 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
    */
   const doUpstreamRequest = async (
     activeCreds: CredentialsResponse,
-  ): Promise<{ response: Response; finalUrl: string }> => {
+  ): Promise<{
+    response: Response;
+    finalUrl: string;
+    hops: number;
+    /**
+     * Names (never values) of the headers sent on the wire after
+     * credential injection — surfaced for the debug diagnostic envelope
+     * so an operator can see *which* headers were injected without ever
+     * logging the secret itself.
+     */
+    requestHeaderNames: string[];
+  }> => {
     const resolvedHeaders: Record<string, string> = {};
     for (const [key, value] of Object.entries(callerHeaders)) {
       resolvedHeaders[key] = substituteVars(value, activeCreds.credentials);
@@ -331,9 +343,15 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       init.duplex = "half";
       init.redirect = "manual";
       const response = await fetchFn(resolvedUrl, init);
-      return { response, finalUrl: response.url || resolvedUrl };
+      // Streaming path issues a single unfollowed request — no manual hops.
+      return {
+        response,
+        finalUrl: response.url || resolvedUrl,
+        hops: 0,
+        requestHeaderNames: Object.keys(resolvedHeaders),
+      };
     }
-    return fetchFollowingRedirectsCapturingCookies({
+    const followed = await fetchFollowingRedirectsCapturingCookies({
       url: resolvedUrl,
       init,
       fetchFn,
@@ -345,16 +363,22 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       // Preserve the sidecar's structured per-hop refusal logging.
       logger,
     });
+    return { ...followed, requestHeaderNames: Object.keys(resolvedHeaders) };
   };
 
   // 7. First outbound request. Network/timeout errors surface as a
   //    structured failure rather than a raw exception.
+  const requestStartedAt = performance.now();
   let upstream: Response;
   let upstreamFinalUrl: string = resolvedUrl;
+  let upstreamHops = 0;
+  let requestHeaderNames: string[] = [];
   try {
     const r = await doUpstreamRequest(creds);
     upstream = r.response;
     upstreamFinalUrl = r.finalUrl;
+    upstreamHops = r.hops;
+    requestHeaderNames = r.requestHeaderNames;
   } catch (err) {
     return wrapRequestError(err, resolvedUrl);
   }
@@ -381,6 +405,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
           const r = await doUpstreamRequest(fresh);
           upstream = r.response;
           upstreamFinalUrl = r.finalUrl;
+          upstreamHops = r.hops;
+          requestHeaderNames = r.requestHeaderNames;
         } catch (err) {
           return wrapRequestError(err, resolvedUrl);
         }
@@ -405,6 +431,37 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     reportedAuthFailures.add(integrationId);
     logger.warn("Upstream returned 401 after refresh attempt", { integrationId });
   }
+
+  // 10. Success-path diagnostic envelope (#404). One structured line per
+  //     completed call — resolved auth mode, hop count, status, duration,
+  //     and the request/response header *names* (values redacted). Only
+  //     emitted at LOG_LEVEL=debug, so it is silent in default production
+  //     output yet available when an operator is debugging a provider call
+  //     (401/403/redirect loop) without leaking the injected secret.
+  logger.debug("integration api_call completed", {
+    integrationId,
+    method,
+    host: redactHost(upstreamFinalUrl),
+    status: upstream.status,
+    durationMs: Math.round(performance.now() - requestStartedAt),
+    hops: upstreamHops,
+    redirected: upstreamFinalUrl !== resolvedUrl,
+    // How the credential was applied: a server-injected header (named, never
+    // valued) or no injection at all (URL/query-embedded or anonymous).
+    authMode: creds.credentialHeaderName ? "header" : "none",
+    injectedHeader: creds.credentialHeaderName?.toLowerCase() ?? null,
+    // Which URL-trust policy gated the call.
+    urlPolicy: creds.allowAllUris
+      ? "allow_all"
+      : creds.authorizedUris && creds.authorizedUris.length
+        ? "allowlist"
+        : "ssrf_guard",
+    authRefreshed,
+    requestHeaderNames,
+    // Drops Set-Cookie / WWW-Authenticate / Authorization etc.; keeps
+    // operator-useful headers like Location for redirect-loop diagnosis.
+    responseHeaders: filterSensitiveHeaders(upstream.headers),
+  });
 
   return { ok: true, response: upstream, finalUrl: upstreamFinalUrl, authRefreshed };
 }
