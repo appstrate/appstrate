@@ -338,6 +338,38 @@ const envSchema = z
       .transform((v) => (v === "" ? undefined : v)),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 
+    // ─── Observability (OpenTelemetry) ──────────────────────────
+    // Production telemetry export via OTLP/HTTP. Disabled by default — when
+    // no endpoint is configured AND OTEL_ENABLED is false, the OTel bootstrap
+    // is a COMPLETE no-op (zero spans, zero meters, zero overhead), so OSS
+    // deployments running without a collector pay nothing. The exporters read
+    // the standard OTLP env vars directly (`OTEL_EXPORTER_OTLP_ENDPOINT`,
+    // `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_PROTOCOL`, …), so the
+    // collector-agnostic OTel conventions apply unchanged.
+    //
+    // Enabled-state derivation: OTEL_ENABLED=true OR a non-empty
+    // OTEL_EXPORTER_OTLP_ENDPOINT. Setting only the endpoint is the common
+    // case; OTEL_ENABLED=true with no endpoint falls back to the OTLP default
+    // collector address (http://localhost:4318).
+    OTEL_ENABLED: z
+      .string()
+      .default("false")
+      .transform((s) => s.toLowerCase() === "true" || s === "1"),
+    // Base OTLP collector endpoint (e.g. http://otel-collector:4318). The
+    // signal path (/v1/traces, /v1/metrics) is appended by the exporter per
+    // the OTLP spec. Empty string → undefined so compose's `${VAR:-}` pattern
+    // reads as "unset".
+    OTEL_EXPORTER_OTLP_ENDPOINT: z
+      .string()
+      .optional()
+      .transform((v) => (v === "" ? undefined : v)),
+    // `service.name` resource attribute on every span/metric — the dimension
+    // collectors group by. Defaults to the platform API service identity.
+    OTEL_SERVICE_NAME: z.string().default("appstrate-api"),
+    // PeriodicExportingMetricReader flush interval (ms). Lower = fresher
+    // dashboards at the cost of more export traffic. Ignored when disabled.
+    OTEL_METRIC_EXPORT_INTERVAL_MS: z.coerce.number().int().positive().default(60000),
+
     // Run — execution backend: "docker" (isolated containers) or "process" (default, Bun subprocesses, no isolation)
     RUN_ADAPTER: z.enum(["docker", "process"]).default("process"),
 

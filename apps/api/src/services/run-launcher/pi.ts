@@ -36,6 +36,11 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 import { uploadRunBundle, deleteRunWorkspace } from "../run-workspace-storage.ts";
+import {
+  runWithSpan,
+  currentTraceparent,
+  recordContainerSpawn,
+} from "../../observability/index.ts";
 
 import { getEnv } from "@appstrate/env";
 import { isOAuthModelProvider, getModelProvider } from "../model-providers/registry.ts";
@@ -94,228 +99,246 @@ export async function runPlatformContainer(
   const uploadBundle = input.uploadBundle ?? uploadRunBundle;
   const deleteWorkspace = input.deleteWorkspace ?? deleteRunWorkspace;
 
-  const prompt = await buildPlatformSystemPrompt(context, plan);
-  const { llmConfig } = plan;
-  const modelId = llmConfig.modelId;
+  // Container-lifecycle span — a child of the run-pipeline span (or root when
+  // disabled). `currentTraceparent()` below forwards THIS span as the parent
+  // of the agent container's outbound events, so the container nests under it.
+  return runWithSpan(
+    "appstrate.run.container",
+    { attributes: { "appstrate.run.id": runId } },
+    async () => {
+      const prompt = await buildPlatformSystemPrompt(context, plan);
+      const { llmConfig } = plan;
+      const modelId = llmConfig.modelId;
 
-  let boundary: IsolationBoundary | undefined;
-  let sidecarHandle: WorkloadHandle | undefined;
-  let agentHandle: WorkloadHandle | undefined;
+      let boundary: IsolationBoundary | undefined;
+      let sidecarHandle: WorkloadHandle | undefined;
+      let agentHandle: WorkloadHandle | undefined;
 
-  try {
-    boundary = await orch.createIsolationBoundary(runId);
+      const spawnStart = Date.now();
+      try {
+        boundary = await orch.createIsolationBoundary(runId);
 
-    const llmApiKey = llmConfig.apiKey;
+        const llmApiKey = llmConfig.apiKey;
 
-    // OAuth credentials must take the sidecar's OAuth branch — the API-key
-    // path can't refresh tokens or inject the provider's identity routing
-    // headers at request time.
-    const isOauthCredential =
-      !!llmConfig.credentialId && isOAuthModelProvider(llmConfig.providerId);
+        // OAuth credentials must take the sidecar's OAuth branch — the API-key
+        // path can't refresh tokens or inject the provider's identity routing
+        // headers at request time.
+        const isOauthCredential =
+          !!llmConfig.credentialId && isOAuthModelProvider(llmConfig.providerId);
 
-    // The placeholder is what actually lands in MODEL_API_KEY inside the
-    // agent container. Provider-specific shape (e.g. a structured JWT) is
-    // built by the module's `buildApiKeyPlaceholder` hook — see
-    // `deriveOauthPlaceholder` below.
-    const llmPlaceholder = isOauthCredential
-      ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId)
-      : deriveKeyPlaceholder(llmApiKey);
+        // The placeholder is what actually lands in MODEL_API_KEY inside the
+        // agent container. Provider-specific shape (e.g. a structured JWT) is
+        // built by the module's `buildApiKeyPlaceholder` hook — see
+        // `deriveOauthPlaceholder` below.
+        const llmPlaceholder = isOauthCredential
+          ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId)
+          : deriveKeyPlaceholder(llmApiKey);
 
-    // Skip the sidecar entirely when the run declares no integrations AND
-    // uses a static API key AND has no egress proxy. The sidecar's purposes
-    // are integration MCP multiplexing (Phase 1.4), LLM passthrough for
-    // OAuth, AND hosting the forward proxy that masks the agent's outbound
-    // IP. An API-key model with no integrations and no proxy needs none of
-    // these. When a proxy IS configured, the sidecar's forward-proxy bind
-    // is the ONLY path that routes agent egress through it — skipping the
-    // sidecar would silently drop the proxy and leak the host IP.
-    const hasIntegrations = (plan.integrations?.length ?? 0) > 0;
-    const skipSidecar =
-      !hasIntegrations && !!llmConfig.apiKey && !isOauthCredential && !plan.proxyUrl;
+        // Skip the sidecar entirely when the run declares no integrations AND
+        // uses a static API key AND has no egress proxy. The sidecar's purposes
+        // are integration MCP multiplexing (Phase 1.4), LLM passthrough for
+        // OAuth, AND hosting the forward proxy that masks the agent's outbound
+        // IP. An API-key model with no integrations and no proxy needs none of
+        // these. When a proxy IS configured, the sidecar's forward-proxy bind
+        // is the ONLY path that routes agent egress through it — skipping the
+        // sidecar would silently drop the proxy and leak the host IP.
+        const hasIntegrations = (plan.integrations?.length ?? 0) > 0;
+        const skipSidecar =
+          !hasIntegrations && !!llmConfig.apiKey && !isOauthCredential && !plan.proxyUrl;
 
-    let sidecarLlm: LlmProxyConfig | undefined;
-    if (isOauthCredential) {
-      // Read `oauthWireFormat` straight from the registry at the sidecar-
-      // config boundary — the provider definition is the source of truth.
-      const providerCfg = getModelProvider(llmConfig.providerId);
-      const oauthCfg: LlmProxyOauthConfig = {
-        authMode: "oauth",
-        baseUrl: llmConfig.baseUrl,
-        credentialId: llmConfig.credentialId!,
-        ...(providerCfg?.oauthWireFormat ? { wireFormat: providerCfg.oauthWireFormat } : {}),
-      };
-      sidecarLlm = oauthCfg;
-    } else if (llmApiKey) {
-      // API-key flow: the sidecar forwards directly to the upstream
-      // provider. The Pi SDK's native retry (Retry-After honoring +
-      // exponential backoff, `maxRetries: 2`) covers transient 429/5xx —
-      // see `packages/runner-pi/src/pi-runner.ts`.
-      sidecarLlm = {
-        authMode: "api_key",
-        baseUrl: llmConfig.baseUrl,
-        apiKey: llmApiKey,
-        placeholder: llmPlaceholder,
-      };
-    }
+        let sidecarLlm: LlmProxyConfig | undefined;
+        if (isOauthCredential) {
+          // Read `oauthWireFormat` straight from the registry at the sidecar-
+          // config boundary — the provider definition is the source of truth.
+          const providerCfg = getModelProvider(llmConfig.providerId);
+          const oauthCfg: LlmProxyOauthConfig = {
+            authMode: "oauth",
+            baseUrl: llmConfig.baseUrl,
+            credentialId: llmConfig.credentialId!,
+            ...(providerCfg?.oauthWireFormat ? { wireFormat: providerCfg.oauthWireFormat } : {}),
+          };
+          sidecarLlm = oauthCfg;
+        } else if (llmApiKey) {
+          // API-key flow: the sidecar forwards directly to the upstream
+          // provider. The Pi SDK's native retry (Retry-After honoring +
+          // exponential backoff, `maxRetries: 2`) covers transient 429/5xx —
+          // see `packages/runner-pi/src/pi-runner.ts`.
+          sidecarLlm = {
+            authMode: "api_key",
+            baseUrl: llmConfig.baseUrl,
+            apiKey: llmApiKey,
+            placeholder: llmPlaceholder,
+          };
+        }
 
-    const sidecarSpec: SidecarLaunchSpec = {
-      runToken: plan.runToken ?? "",
-      proxyUrl: plan.proxyUrl ?? undefined,
-      llm: sidecarLlm,
-      // Propagate the resolved model's context window so the sidecar's
-      // TokenBudget can spill `api_call` outputs that would push the
-      // cumulative tool-output token count past the upstream model's
-      // hard limit (#464). Both values are nullable on `org_models`
-      // rows; we forward whatever survives the catalog cascade — the
-      // sidecar applies a conservative fallback when either is unset.
-      ...(llmConfig.contextWindow != null ? { modelContextWindow: llmConfig.contextWindow } : {}),
-      ...(llmConfig.maxTokens != null ? { modelMaxTokens: llmConfig.maxTokens } : {}),
-      // Phase 1.4 — integrations the sidecar will spawn + multiplex onto
-      // the agent-facing `/mcp` surface. Resolved upstream by
-      // `resolveIntegrationSpawns` (run-context-builder).
-      ...(plan.integrations && plan.integrations.length > 0
-        ? { integrations: plan.integrations }
-        : {}),
-      // Platform runtime tools (output/log/note/pin/report) the sidecar
-      // hosts as in-process MCP tools — unified with the integration tool
-      // surface. The no-sidecar path reads the same selection from the
-      // bundle manifest instead.
-      ...(plan.runtimeTools && plan.runtimeTools.length > 0
-        ? { runtimeTools: plan.runtimeTools }
-        : {}),
-    };
+        const sidecarSpec: SidecarLaunchSpec = {
+          runToken: plan.runToken ?? "",
+          proxyUrl: plan.proxyUrl ?? undefined,
+          llm: sidecarLlm,
+          // Propagate the resolved model's context window so the sidecar's
+          // TokenBudget can spill `api_call` outputs that would push the
+          // cumulative tool-output token count past the upstream model's
+          // hard limit (#464). Both values are nullable on `org_models`
+          // rows; we forward whatever survives the catalog cascade — the
+          // sidecar applies a conservative fallback when either is unset.
+          ...(llmConfig.contextWindow != null
+            ? { modelContextWindow: llmConfig.contextWindow }
+            : {}),
+          ...(llmConfig.maxTokens != null ? { modelMaxTokens: llmConfig.maxTokens } : {}),
+          // Phase 1.4 — integrations the sidecar will spawn + multiplex onto
+          // the agent-facing `/mcp` surface. Resolved upstream by
+          // `resolveIntegrationSpawns` (run-context-builder).
+          ...(plan.integrations && plan.integrations.length > 0
+            ? { integrations: plan.integrations }
+            : {}),
+          // Platform runtime tools (output/log/note/pin/report) the sidecar
+          // hosts as in-process MCP tools — unified with the integration tool
+          // surface. The no-sidecar path reads the same selection from the
+          // bundle manifest instead.
+          ...(plan.runtimeTools && plan.runtimeTools.length > 0
+            ? { runtimeTools: plan.runtimeTools }
+            : {}),
+        };
 
-    const hasOutputSchema =
-      plan.outputSchema?.properties && Object.keys(plan.outputSchema.properties).length > 0;
-    // Forward the output schema to the sidecar so its `output` runtime tool
-    // can constrain + validate the `data` argument (mirrors the agent
-    // container's OUTPUT_SCHEMA env for the no-sidecar path).
-    if (hasOutputSchema && plan.outputSchema) {
-      sidecarSpec.outputSchema = plan.outputSchema as unknown as Record<string, unknown>;
-    }
-    // The agent container only ever receives the placeholder
-    // (apiKeyPlaceholder); the real access token never leaves the
-    // platform/sidecar boundary. The sidecar overwrites Authorization with
-    // a fresh upstream token at request time — see `runtime-pi/sidecar/`.
-    const containerEnv = buildRuntimePiEnv({
-      model: {
-        api: llmConfig.apiShape,
-        modelId,
-        baseUrl: llmConfig.baseUrl,
-        apiKey: llmApiKey,
-        // When the sidecar is skipped, the agent talks to the upstream
-        // provider directly — we must hand it the real API key, not the
-        // placeholder the sidecar would normally substitute.
-        apiKeyPlaceholder: skipSidecar ? llmApiKey : llmPlaceholder,
-        input: llmConfig.input,
-        contextWindow: llmConfig.contextWindow,
-        maxTokens: llmConfig.maxTokens,
-        reasoning: llmConfig.reasoning,
-        cost: llmConfig.cost,
-      },
-      agentPrompt: prompt,
-      runId,
-      noSidecar: skipSidecar,
-      // Without a sidecar, MODEL_BASE_URL is omitted — the Pi SDK falls
-      // back to the api-shape's native default (e.g. api.openai.com).
-      // The model definition's baseUrl is already wired on the Model
-      // object via PiRunner; runtime-pi doesn't need MODEL_BASE_URL when
-      // talking directly to the upstream.
-      sidecarProxyLlmUrl: skipSidecar
-        ? undefined
-        : llmApiKey
-          ? "http://sidecar:8080/llm"
-          : undefined,
-      outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
-      forwardProxyUrl: skipSidecar ? undefined : "http://sidecar:8081",
-      sink: {
-        url: sinkCredentials.url,
-        finalizeUrl: sinkCredentials.finalize_url,
-        secret: sinkCredentials.secret,
-      },
-      // Forward the W3C trace from the spawning request — when set, the
-      // container's outbound HTTP traffic (events, finalize, sidecar
-      // proxy) becomes child spans of that trace. The runtime validates
-      // the wire format and falls back to a fresh trace on malformed
-      // values, so no defensive parsing is needed here.
-      traceparent: context.traceparent,
-    });
-
-    await orch.ensureImages(
-      skipSidecar ? [getEnv().PI_IMAGE] : [getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE],
-    );
-
-    // Sidecar + agent + bundle upload in parallel. The AFPS bundle is uploaded
-    // to run-scoped storage; the agent container fetches and extracts it itself
-    // at startup (`GET /api/runs/:runId/workspace`). Input documents were
-    // already streamed into the same run-workspace namespace during
-    // upload-consume — the agent fetches each one (`GET
-    // /api/runs/:runId/documents/:name`) and streams it to disk, never buffering
-    // the whole payload. This replaces the old seed-into-the-run-volume
-    // delivery, whose correctness depended on the volume driver — a tmpfs-backed
-    // `local` volume is NOT shared between the short-lived seed helper and the
-    // agent container, so the bundle silently vanished and skills never
-    // materialised (issue #549). With the agent self-provisioning, the run
-    // volume is pure agent-local scratch again, so its backing (disk or tmpfs)
-    // is a free performance choice. The upload must finish before
-    // `startWorkload` (inside waitForWorkload) so the object exists when the
-    // agent boots; racing it alongside the create calls here satisfies that
-    // ordering. When `skipSidecar`, only the agent is created (it reaches the
-    // platform directly over its egress network).
-    const [sidecar, agent] = await Promise.all([
-      skipSidecar ? Promise.resolve(undefined) : orch.createSidecar(runId, boundary, sidecarSpec),
-      orch.createWorkload(
-        {
+        const hasOutputSchema =
+          plan.outputSchema?.properties && Object.keys(plan.outputSchema.properties).length > 0;
+        // Forward the output schema to the sidecar so its `output` runtime tool
+        // can constrain + validate the `data` argument (mirrors the agent
+        // container's OUTPUT_SCHEMA env for the no-sidecar path).
+        if (hasOutputSchema && plan.outputSchema) {
+          sidecarSpec.outputSchema = plan.outputSchema as unknown as Record<string, unknown>;
+        }
+        // The agent container only ever receives the placeholder
+        // (apiKeyPlaceholder); the real access token never leaves the
+        // platform/sidecar boundary. The sidecar overwrites Authorization with
+        // a fresh upstream token at request time — see `runtime-pi/sidecar/`.
+        const containerEnv = buildRuntimePiEnv({
+          model: {
+            api: llmConfig.apiShape,
+            modelId,
+            baseUrl: llmConfig.baseUrl,
+            apiKey: llmApiKey,
+            // When the sidecar is skipped, the agent talks to the upstream
+            // provider directly — we must hand it the real API key, not the
+            // placeholder the sidecar would normally substitute.
+            apiKeyPlaceholder: skipSidecar ? llmApiKey : llmPlaceholder,
+            input: llmConfig.input,
+            contextWindow: llmConfig.contextWindow,
+            maxTokens: llmConfig.maxTokens,
+            reasoning: llmConfig.reasoning,
+            cost: llmConfig.cost,
+          },
+          agentPrompt: prompt,
           runId,
-          role: "agent",
-          image: getEnv().PI_IMAGE,
-          env: containerEnv,
-          resources: { memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 },
-          // Without a sidecar there is no egress proxy — the agent must
-          // reach the upstream LLM and the platform sink directly, so it
-          // goes on the egress network instead of the internal boundary.
-          egress: skipSidecar,
-        },
-        boundary,
-      ),
-      uploadBundle(runId, plan.agentPackage ?? undefined),
-    ]);
-    sidecarHandle = sidecar;
-    agentHandle = agent;
-
-    return await waitForWorkload(orch, agent, sidecar, plan.timeout, signal);
-  } finally {
-    // Cleanup order: sidecar → agent → network boundary.
-    // Removing the network boundary before its members are gone is an
-    // error on Docker's side, so the finally chain must be strict.
-    if (sidecarHandle) {
-      await orch.removeWorkload(sidecarHandle).catch((err) => {
-        logger.error("Failed to remove sidecar", {
-          runId,
-          error: getErrorMessage(err),
+          noSidecar: skipSidecar,
+          // Without a sidecar, MODEL_BASE_URL is omitted — the Pi SDK falls
+          // back to the api-shape's native default (e.g. api.openai.com).
+          // The model definition's baseUrl is already wired on the Model
+          // object via PiRunner; runtime-pi doesn't need MODEL_BASE_URL when
+          // talking directly to the upstream.
+          sidecarProxyLlmUrl: skipSidecar
+            ? undefined
+            : llmApiKey
+              ? "http://sidecar:8080/llm"
+              : undefined,
+          outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
+          forwardProxyUrl: skipSidecar ? undefined : "http://sidecar:8081",
+          sink: {
+            url: sinkCredentials.url,
+            finalizeUrl: sinkCredentials.finalize_url,
+            secret: sinkCredentials.secret,
+          },
+          // Forward the W3C trace from the spawning request — when set, the
+          // container's outbound HTTP traffic (events, finalize, sidecar
+          // proxy) becomes child spans of that trace. The runtime validates
+          // the wire format and falls back to a fresh trace on malformed
+          // values, so no defensive parsing is needed here. When OTel is on,
+          // `currentTraceparent()` hands the container THIS container span as
+          // its parent; otherwise it returns undefined and we keep forwarding
+          // the original request trace unchanged.
+          traceparent: currentTraceparent() ?? context.traceparent,
         });
-      });
-    }
-    if (agentHandle) {
-      await orch.removeWorkload(agentHandle).catch((err) => {
-        logger.error("Failed to remove agent workload", {
-          runId,
-          error: getErrorMessage(err),
-        });
-      });
-    }
-    if (boundary) {
-      await orch.removeIsolationBoundary(boundary).catch((err) => {
-        logger.error("Failed to remove isolation boundary", {
-          runId,
-          error: getErrorMessage(err),
-        });
-      });
-    }
-    // Drop the provisioning archive — the agent has long since fetched it.
-    // Best-effort: deleteRunWorkspace never throws.
-    await deleteWorkspace(runId);
-  }
+
+        await orch.ensureImages(
+          skipSidecar ? [getEnv().PI_IMAGE] : [getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE],
+        );
+
+        // Sidecar + agent + bundle upload in parallel. The AFPS bundle is uploaded
+        // to run-scoped storage; the agent container fetches and extracts it itself
+        // at startup (`GET /api/runs/:runId/workspace`). Input documents were
+        // already streamed into the same run-workspace namespace during
+        // upload-consume — the agent fetches each one (`GET
+        // /api/runs/:runId/documents/:name`) and streams it to disk, never buffering
+        // the whole payload. This replaces the old seed-into-the-run-volume
+        // delivery, whose correctness depended on the volume driver — a tmpfs-backed
+        // `local` volume is NOT shared between the short-lived seed helper and the
+        // agent container, so the bundle silently vanished and skills never
+        // materialised (issue #549). With the agent self-provisioning, the run
+        // volume is pure agent-local scratch again, so its backing (disk or tmpfs)
+        // is a free performance choice. The upload must finish before
+        // `startWorkload` (inside waitForWorkload) so the object exists when the
+        // agent boots; racing it alongside the create calls here satisfies that
+        // ordering. When `skipSidecar`, only the agent is created (it reaches the
+        // platform directly over its egress network).
+        const [sidecar, agent] = await Promise.all([
+          skipSidecar
+            ? Promise.resolve(undefined)
+            : orch.createSidecar(runId, boundary, sidecarSpec),
+          orch.createWorkload(
+            {
+              runId,
+              role: "agent",
+              image: getEnv().PI_IMAGE,
+              env: containerEnv,
+              resources: { memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 },
+              // Without a sidecar there is no egress proxy — the agent must
+              // reach the upstream LLM and the platform sink directly, so it
+              // goes on the egress network instead of the internal boundary.
+              egress: skipSidecar,
+            },
+            boundary,
+          ),
+          uploadBundle(runId, plan.agentPackage ?? undefined),
+        ]);
+        sidecarHandle = sidecar;
+        agentHandle = agent;
+        recordContainerSpawn(Date.now() - spawnStart, { sidecar: !skipSidecar });
+
+        return await waitForWorkload(orch, agent, sidecar, plan.timeout, signal);
+      } finally {
+        // Cleanup order: sidecar → agent → network boundary.
+        // Removing the network boundary before its members are gone is an
+        // error on Docker's side, so the finally chain must be strict.
+        if (sidecarHandle) {
+          await orch.removeWorkload(sidecarHandle).catch((err) => {
+            logger.error("Failed to remove sidecar", {
+              runId,
+              error: getErrorMessage(err),
+            });
+          });
+        }
+        if (agentHandle) {
+          await orch.removeWorkload(agentHandle).catch((err) => {
+            logger.error("Failed to remove agent workload", {
+              runId,
+              error: getErrorMessage(err),
+            });
+          });
+        }
+        if (boundary) {
+          await orch.removeIsolationBoundary(boundary).catch((err) => {
+            logger.error("Failed to remove isolation boundary", {
+              runId,
+              error: getErrorMessage(err),
+            });
+          });
+        }
+        // Drop the provisioning archive — the agent has long since fetched it.
+        // Best-effort: deleteRunWorkspace never throws.
+        await deleteWorkspace(runId);
+      }
+    },
+  );
 }
 
 /**

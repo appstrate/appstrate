@@ -42,6 +42,7 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest } from "../lib/errors.ts";
 import { assertBearerOnly } from "../lib/bearer-only.ts";
+import { recordLlmLatency } from "../observability/index.ts";
 import {
   proxyLlmCall,
   LlmProxyModelApiMismatchError,
@@ -141,6 +142,7 @@ async function handleProxy(
       maxRequestBytes: limits.max_request_bytes,
     });
 
+    const durationMs = Date.now() - started;
     logger.info("llm-proxy call", {
       requestId: c.get("requestId"),
       authMethod,
@@ -150,11 +152,21 @@ async function handleProxy(
       apiShape: adapter.apiShape,
       runId,
       status: response.status,
-      durationMs: Date.now() - started,
+      durationMs,
+    });
+
+    recordLlmLatency(durationMs, {
+      api_shape: adapter.apiShape,
+      status: response.status,
+      outcome: response.ok ? "success" : "error",
     });
 
     return response;
   } catch (err) {
+    recordLlmLatency(Date.now() - started, {
+      api_shape: adapter.apiShape,
+      outcome: "error",
+    });
     if (err instanceof LlmProxyUnsupportedModelError) {
       throw invalidRequest(err.message);
     }

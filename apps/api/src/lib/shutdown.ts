@@ -17,6 +17,7 @@ import { shutdownPairingCleanupWorker } from "../services/model-providers/pairin
 import { stopRunWatchdog } from "../services/run-watchdog.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { stopUploadGc } from "../services/uploads.ts";
+import { shutdownObservability } from "../observability/index.ts";
 
 const SHUTDOWN_TIMEOUT_MS = 30_000;
 
@@ -67,6 +68,9 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
 
     logger.info("Shutting down modules...");
     await shutdownModules();
+
+    // Flush any buffered spans/metrics before the process exits.
+    await shutdownObservability();
 
     logger.info("Closing database and infrastructure connections...");
     await shutdownInfra();

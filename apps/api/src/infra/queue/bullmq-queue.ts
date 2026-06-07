@@ -122,6 +122,11 @@ export class BullMQQueue<T> implements JobQueue<T> {
     });
   }
 
+  async count(): Promise<number> {
+    const counts = await this.queue.getJobCounts("waiting", "delayed", "active");
+    return (counts.waiting ?? 0) + (counts.delayed ?? 0) + (counts.active ?? 0);
+  }
+
   async shutdown(): Promise<void> {
     // Wait for the blocking client's init sequence (CLIENT SETNAME, INFO, …)
     // to complete BEFORE close. BullMQ's `RedisConnection.close()` calls

@@ -14,6 +14,7 @@ import { emitEvent } from "../../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "../inline-run.ts";
 import { synthesiseFinalize } from "../run-event-ingestion.ts";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
+import { runWithSpan } from "../../observability/index.ts";
 
 // --- Background run (decoupled from client) ---
 
@@ -68,104 +69,121 @@ export async function executeAgentInBackground(
   const { signal } = controller;
   const packageEphemeral = isInlineShadowPackageId(agent.id);
 
-  try {
-    // Status flip — pending → running — is the ONE lifecycle transition
-    // the platform still owns (the container can't authoritatively
-    // announce itself running because it doesn't know when the server
-    // actually accepted its first event). Everything terminal flows
-    // through finalizeRun.
-    await updateRun(scope, runId, { status: "running" });
-    void emitEvent("onRunStatusChange", {
-      orgId,
-      runId,
-      packageId: agent.id,
-      applicationId,
-      status: "started",
-      packageEphemeral,
-      ...(modelSource ? { modelSource } : {}),
-    });
+  // Run-pipeline span — parented from the launching request's trace so the
+  // whole API→run→container path shares one trace_id. The container's own
+  // outbound events are linked via the forwarded traceparent (pi.ts).
+  await runWithSpan(
+    "appstrate.run.execute",
+    {
+      traceparent: context.traceparent,
+      attributes: {
+        "appstrate.run.id": runId,
+        "appstrate.org.id": orgId,
+        "appstrate.application.id": applicationId,
+        "appstrate.package.id": agent.id,
+      },
+    },
+    async () => {
+      try {
+        // Status flip — pending → running — is the ONE lifecycle transition
+        // the platform still owns (the container can't authoritatively
+        // announce itself running because it doesn't know when the server
+        // actually accepted its first event). Everything terminal flows
+        // through finalizeRun.
+        await updateRun(scope, runId, { status: "running" });
+        void emitEvent("onRunStatusChange", {
+          orgId,
+          runId,
+          packageId: agent.id,
+          applicationId,
+          status: "started",
+          packageEphemeral,
+          ...(modelSource ? { modelSource } : {}),
+        });
 
-    const runPlan: AppstrateRunPlan = {
-      ...plan,
-      agentPackage: agentPackage ?? undefined,
-    };
+        const runPlan: AppstrateRunPlan = {
+          ...plan,
+          agentPackage: agentPackage ?? undefined,
+        };
 
-    let lifecycle: PlatformContainerResult;
-    try {
-      lifecycle = await runPlatformContainer({
-        runId,
-        context,
-        plan: runPlan,
-        sinkCredentials,
-        signal,
-        ...(input.orchestrator ? { orchestrator: input.orchestrator } : {}),
-      });
-    } catch (err) {
-      // Orchestrator-level failure (Docker unreachable, image missing, ...)
-      // before the container even exited. Cancel case is handled below in
-      // the `finally` — we only synthesise a terminal failure here for
-      // genuine infrastructure errors.
-      if (signal.aborted) return;
-      const message = getErrorMessage(err);
-      logger.error("runPlatformContainer threw — synthesising failed terminal", {
-        runId,
-        error: message,
-      });
-      await synthesiseFinalize(runId, {
-        status: "failed",
-        error: { message, stack: err instanceof Error ? err.stack : undefined },
-        durationMs: Date.now() - startTime,
-      });
-      return;
-    }
+        let lifecycle: PlatformContainerResult;
+        try {
+          lifecycle = await runPlatformContainer({
+            runId,
+            context,
+            plan: runPlan,
+            sinkCredentials,
+            signal,
+            ...(input.orchestrator ? { orchestrator: input.orchestrator } : {}),
+          });
+        } catch (err) {
+          // Orchestrator-level failure (Docker unreachable, image missing, ...)
+          // before the container even exited. Cancel case is handled below in
+          // the `finally` — we only synthesise a terminal failure here for
+          // genuine infrastructure errors.
+          if (signal.aborted) return;
+          const message = getErrorMessage(err);
+          logger.error("runPlatformContainer threw — synthesising failed terminal", {
+            runId,
+            error: message,
+          });
+          await synthesiseFinalize(runId, {
+            status: "failed",
+            error: { message, stack: err instanceof Error ? err.stack : undefined },
+            durationMs: Date.now() - startTime,
+          });
+          return;
+        }
 
-    // Container exited normally. If it finalised itself over HTTP, our
-    // synthesis is a CAS no-op. If it didn't (crash, timeout, cancel),
-    // we fill in the terminal state the platform observed.
-    if (lifecycle.cancelled) {
-      // Cancel route already routed the run through `synthesiseFinalize`,
-      // which CAS'd the sink closed and ran `afterRun`. Nothing to do here.
-      return;
-    }
+        // Container exited normally. If it finalised itself over HTTP, our
+        // synthesis is a CAS no-op. If it didn't (crash, timeout, cancel),
+        // we fill in the terminal state the platform observed.
+        if (lifecycle.cancelled) {
+          // Cancel route already routed the run through `synthesiseFinalize`,
+          // which CAS'd the sink closed and ran `afterRun`. Nothing to do here.
+          return;
+        }
 
-    if (lifecycle.timedOut) {
-      await synthesiseFinalize(runId, {
-        status: "timeout",
-        error: { message: `Run timed out after ${plan.timeout}s` },
-        durationMs: Date.now() - startTime,
-      });
-      return;
-    }
+        if (lifecycle.timedOut) {
+          await synthesiseFinalize(runId, {
+            status: "timeout",
+            error: { message: `Run timed out after ${plan.timeout}s` },
+            durationMs: Date.now() - startTime,
+          });
+          return;
+        }
 
-    if (lifecycle.exitCode !== 0) {
-      await synthesiseFinalize(runId, {
-        status: "failed",
-        error: {
-          message: `Agent container exited with code ${lifecycle.exitCode}`,
-        },
-        durationMs: Date.now() - startTime,
-      });
-      return;
-    }
+        if (lifecycle.exitCode !== 0) {
+          await synthesiseFinalize(runId, {
+            status: "failed",
+            error: {
+              message: `Agent container exited with code ${lifecycle.exitCode}`,
+            },
+            durationMs: Date.now() - startTime,
+          });
+          return;
+        }
 
-    // Exit code 0 — the container ran to completion and should have
-    // called finalize itself. Defensively synthesise success so a
-    // container that forgot to finalise still reaches a terminal state;
-    // the CAS makes this a no-op when the container did call finalize.
-    await synthesiseFinalize(runId, {
-      status: "success",
-      durationMs: Date.now() - startTime,
-    });
-  } catch (err) {
-    if (signal.aborted) return;
-    const message = err instanceof Error ? err.message : "Unknown error";
-    logger.error("Unhandled error in executeAgentInBackground", { runId, error: message });
-    await synthesiseFinalize(runId, {
-      status: "failed",
-      error: { message, stack: err instanceof Error ? err.stack : undefined },
-      durationMs: Date.now() - startTime,
-    });
-  } finally {
-    untrackRun(runId);
-  }
+        // Exit code 0 — the container ran to completion and should have
+        // called finalize itself. Defensively synthesise success so a
+        // container that forgot to finalise still reaches a terminal state;
+        // the CAS makes this a no-op when the container did call finalize.
+        await synthesiseFinalize(runId, {
+          status: "success",
+          durationMs: Date.now() - startTime,
+        });
+      } catch (err) {
+        if (signal.aborted) return;
+        const message = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Unhandled error in executeAgentInBackground", { runId, error: message });
+        await synthesiseFinalize(runId, {
+          status: "failed",
+          error: { message, stack: err instanceof Error ? err.stack : undefined },
+          durationMs: Date.now() - startTime,
+        });
+      } finally {
+        untrackRun(runId);
+      }
+    },
+  );
 }

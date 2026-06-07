@@ -27,6 +27,12 @@ export interface JobQueue<T> {
 
   /** Graceful shutdown: drain active jobs, close connections. */
   shutdown(): Promise<void>;
+
+  /**
+   * Current queue depth — jobs waiting/delayed/active, i.e. not yet
+   * terminally processed. Used to feed the observability queue-depth gauge.
+   */
+  count(): Promise<number>;
 }
 
 export type JobHandler<T> = (job: QueueJob<T>) => Promise<void>;
