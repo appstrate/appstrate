@@ -12,8 +12,7 @@
  * The unified `api_call` surface exposes one tool per integration — the
  * integration is implied by the tool name, not a parameter.
  */
-import { Type } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import { Type, type ExtensionAPI, type ExtensionFactory } from "./pi-sdk.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import type { RuntimeEventEmitter } from "./runtime-tools/mcp-forward.ts";
 import {

@@ -25,9 +25,8 @@
  * orchestration-only.
  */
 
-import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import { isApiCallTool, isApiUploadTool, type AppstrateMcpClient } from "@appstrate/mcp-transport";
-import { Type } from "@mariozechner/pi-ai";
+import { Type, type ExtensionFactory } from "../pi-sdk.ts";
 import {
   buildRuntimeToolFactories,
   callToolResultToPi,

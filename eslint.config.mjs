@@ -58,6 +58,47 @@ export default tseslint.config(
     },
   },
   {
+    // Supply-chain guard: the single-vendor Pi SDK
+    // (@mariozechner/pi-ai, @mariozechner/pi-coding-agent) may only be
+    // imported through each package's `pi-sdk.ts` barrel, so swapping or
+    // forking it is a one-file change. Barrels are exempt via `ignores`.
+    // Rationale: docs/architecture/SUPPLY_CHAIN.md
+    files: [
+      "packages/runner-pi/src/**/*.ts",
+      "apps/cli/src/**/*.ts",
+      "runtime-pi/**/*.ts",
+    ],
+    ignores: [
+      "packages/runner-pi/src/pi-sdk.ts",
+      "apps/cli/src/lib/pi-sdk.ts",
+      "runtime-pi/pi-sdk.ts",
+      "runtime-pi/sidecar/**",
+      "runtime-pi/runners/**",
+    ],
+    languageOptions: {
+      parser: tseslint.parser,
+    },
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@mariozechner/pi-ai", "@mariozechner/pi-ai/*"],
+              message:
+                "Import the Pi SDK only through the package-local pi-sdk barrel (pi-sdk.ts) — see docs/architecture/SUPPLY_CHAIN.md",
+            },
+            {
+              group: ["@mariozechner/pi-coding-agent", "@mariozechner/pi-coding-agent/*"],
+              message:
+                "Import the Pi SDK only through the package-local pi-sdk barrel (pi-sdk.ts) — see docs/architecture/SUPPLY_CHAIN.md",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["apps/web/src/**/*.{ts,tsx}", "packages/ui/src/**/*.{ts,tsx}"],
     languageOptions: {
       globals: globals.browser,
