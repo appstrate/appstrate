@@ -80,6 +80,12 @@ that way (a future direct import there fails `bun run check`). This keeps the
 property true going forward — a new file that imports the SDK directly fails
 `bun run check`.
 
+`packages/core/src` is guarded the same way through core's own
+`no-restricted-imports` block (it already bans cross-package workspace imports):
+core imports the Pi SDK zero times and has no barrel, so the ban there is absolute.
+It lives in core's block rather than the shared guard block because flat-config
+last-match-wins would otherwise clobber core's workspace-independence rule.
+
 A barrel-completeness test (`test/supply-chain-barrels.test.ts`) asserts each
 barrel actually re-exports the value symbols its consumers import — a missing
 re-export is a runtime crash the lint guard cannot catch. Type-only re-exports are

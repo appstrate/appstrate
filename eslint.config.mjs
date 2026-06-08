@@ -52,6 +52,14 @@ export default tseslint.config(
               message:
                 "core must remain independent — no imports from other workspace packages",
             },
+            {
+              // Supply-chain guard: core imports the Pi SDK zero times and must
+              // stay that way. core has no pi-sdk barrel (nothing to route
+              // through), so the ban is absolute here. See docs/architecture/SUPPLY_CHAIN.md
+              group: ["@mariozechner/pi-*", "@mariozechner/pi-*/**"],
+              message:
+                "core must not import the Pi SDK — the agent runner owns that dependency. See docs/architecture/SUPPLY_CHAIN.md",
+            },
           ],
         },
       ],
