@@ -1,4 +1,5 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.20
+# Requires BuildKit (Docker 23+, or DOCKER_BUILDKIT=1) — the `COPY --parents` directives below are BuildKit-only.
 #
 # Appstrate Pi — AI agent runtime for ephemeral agent runs.
 #
@@ -25,27 +26,16 @@ WORKDIR /build
 # Root manifest + lockfile. Every workspace member referenced by the
 # lockfile must have its manifest on disk — `bun install --frozen-lockfile`
 # walks the full graph even when only a subset is needed at runtime.
+#
+# `COPY --parents` (stable since dockerfile 1.20) preserves each match's
+# directory structure, so the member manifests are derived from the monorepo
+# graph instead of a hand-maintained list:
+#   */package.json    → runtime-pi, e2e            (depth-1 members)
+#   */*/package.json  → apps/*, packages/*, runtime-pi/sidecar  (depth-2)
+# Adding a new workspace package requires ZERO edits here.
 COPY package.json bun.lock ./
+COPY --parents */package.json */*/package.json ./
 COPY patches/ patches/
-COPY packages/afps-runtime/package.json  packages/afps-runtime/
-COPY packages/afps-shared/package.json   packages/afps-shared/
-COPY packages/connect/package.json       packages/connect/
-COPY packages/core/package.json          packages/core/
-COPY packages/db/package.json            packages/db/
-COPY packages/emails/package.json        packages/emails/
-COPY packages/env/package.json           packages/env/
-COPY packages/mcp-transport/package.json     packages/mcp-transport/
-COPY packages/module-claude-code/package.json packages/module-claude-code/
-COPY packages/module-codex/package.json      packages/module-codex/
-COPY packages/runner-pi/package.json     packages/runner-pi/
-COPY packages/shared-types/package.json  packages/shared-types/
-COPY packages/ui/package.json            packages/ui/
-COPY apps/api/package.json               apps/api/
-COPY apps/cli/package.json               apps/cli/
-COPY apps/web/package.json               apps/web/
-COPY runtime-pi/package.json             runtime-pi/
-COPY runtime-pi/sidecar/package.json     runtime-pi/sidecar/
-COPY e2e/package.json                    e2e/
 
 # `--filter=appstrate-pi-runtime` restricts the install to runtime-pi's
 # subgraph (Pi SDK pair + @appstrate/afps-runtime + @appstrate/runner-pi
