@@ -1,0 +1,13 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index fed8ce01a0570c647db71d1149c9453d50dd46e6..7c28053d733a20c10ba91b6d8b51d93fb7cc308c 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -4162,7 +4162,7 @@ function findRegisteredRedirectUri(registered, requested) {
+ 		if (!req) return false;
+ 		try {
+ 			const reg = new URL(url);
+-			return isLoopbackIP(reg.hostname) && reg.hostname === req.hostname && reg.pathname === req.pathname && reg.protocol === req.protocol && reg.search === req.search;
++			return isLoopbackHost(reg.hostname) && reg.hostname === req.hostname && reg.pathname === req.pathname && reg.protocol === req.protocol && reg.search === req.search;
+ 		} catch {
+ 			return false;
+ 		}
