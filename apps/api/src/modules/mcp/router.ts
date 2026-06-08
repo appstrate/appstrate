@@ -45,12 +45,7 @@ import { recordAuditFromContext } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { getPlatformApp } from "../../lib/platform-app.ts";
 import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "./audiences.ts";
-import {
-  buildMcpTools,
-  FORWARDED_AUTH_HEADERS,
-  type Dispatch,
-  type McpObserver,
-} from "./tools.ts";
+import { buildMcpTools, FORWARDED_AUTH_HEADERS, type Dispatch, type McpObserver } from "./tools.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 /** Path prefix owning the per-org sub-tree. `:org` is the organization id. */
