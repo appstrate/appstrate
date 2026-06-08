@@ -55,8 +55,6 @@ export interface ConsentPageProps {
    * `X-Org-Id`). One → bound silently. Many → a `<select>` is shown.
    */
   orgs?: ConsentOrgOption[];
-  /** Pre-selected org id in the picker (defaults to the first). */
-  selectedOrgId?: string;
   /** Optional error message displayed above the form. */
   error?: string;
 }
@@ -65,7 +63,7 @@ export function renderConsentPage(props: ConsentPageProps): RawHtml {
   const scopeItems = props.scopes.map((s) => html`<li>${describeScope(s)}</li>`);
   const title = `Autorisation — ${props.branding.name}`;
   const errorBlock = props.error ? html`<div class="error" role="alert">${props.error}</div>` : "";
-  const orgField = renderOrgField(props.orgs ?? [], props.selectedOrgId);
+  const orgField = renderOrgField(props.orgs ?? []);
   const bodyHtml = html`
     <h1>Autorisation</h1>
     ${errorBlock}

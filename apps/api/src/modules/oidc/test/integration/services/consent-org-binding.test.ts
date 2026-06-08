@@ -75,6 +75,7 @@ interface ConsentResult {
   tokenStatus: number;
   payload: Record<string, unknown> | null;
   accessToken: string | null;
+  refreshToken: string | null;
 }
 
 /**
@@ -134,7 +135,13 @@ async function driveConsent(
     redirect: "manual",
   });
   if (consentRes.status >= 400) {
-    return { consentStatus: consentRes.status, tokenStatus: 0, payload: null, accessToken: null };
+    return {
+      consentStatus: consentRes.status,
+      tokenStatus: 0,
+      payload: null,
+      accessToken: null,
+      refreshToken: null,
+    };
   }
 
   const loc = consentRes.headers.get("location");
@@ -169,14 +176,34 @@ async function driveConsent(
       tokenStatus: tokenRes.status,
       payload: null,
       accessToken: null,
+      refreshToken: null,
     };
   }
-  const accessToken = ((await tokenRes.json()) as { access_token: string }).access_token;
+  const tokens = (await tokenRes.json()) as { access_token: string; refresh_token?: string };
   return {
     consentStatus: consentRes.status,
     tokenStatus: tokenRes.status,
-    payload: decodeJwt(accessToken) as Record<string, unknown>,
-    accessToken,
+    payload: decodeJwt(tokens.access_token) as Record<string, unknown>,
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token ?? null,
+  };
+}
+
+/** Exchange a refresh token for a fresh pair, bound to the MCP resource. */
+async function refreshMcpToken(clientId: string, refreshToken: string) {
+  const res = await app.request("/api/auth/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: clientId,
+      resource: getMcpResourceUri(),
+    }).toString(),
+  });
+  return {
+    status: res.status,
+    body: (await res.json().catch(() => ({}))) as Record<string, unknown>,
   };
 }
 
@@ -243,5 +270,51 @@ describe("consent-time org binding (self-service clients)", () => {
       headers: { Authorization: `Bearer ${accessToken}`, "X-Org-Id": crypto.randomUUID() },
     });
     expect(spoofed.status).toBe(403);
+  });
+});
+
+describe("MCP OAuth refresh hygiene (RFC 9700 §4.14)", () => {
+  // The MCP path uses Better Auth's `/oauth2/token`, which natively rotates
+  // refresh tokens and detects reuse: presenting an already-rotated token tears
+  // down the whole family. This locks in the guarantee the MCP onboarding
+  // depends on (no need to reimplement reuse detection for `oauth_refresh_tokens`).
+  let ctx: TestContext;
+
+  beforeAll(() => {
+    overrideJwksResolver(null);
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    overrideJwksResolver(null);
+    resetOidcGuardsLimiters();
+    resetProtectedResources();
+    registerProtectedResource("/api/mcp", getMcpResourceUri);
+    ctx = await createTestContext({ orgSlug: "mcprefresh" });
+  });
+
+  it("rotates the refresh token and revokes the family on reuse", async () => {
+    const clientId = await registerSelfServiceClient();
+    const { refreshToken } = await driveConsent(clientId, ctx.cookie, ctx.orgId);
+    expect(refreshToken).toBeTruthy();
+
+    // First rotation succeeds and returns a new refresh token.
+    const rotated = await refreshMcpToken(clientId, refreshToken!);
+    expect(rotated.status).toBe(200);
+    const next = rotated.body.refresh_token as string;
+    expect(typeof next).toBe("string");
+    expect(next).not.toBe(refreshToken);
+
+    // Reusing the ALREADY-ROTATED token is rejected...
+    const reuse = await refreshMcpToken(clientId, refreshToken!);
+    expect(reuse.status).toBe(400);
+    expect(reuse.body.error).toBe("invalid_grant");
+
+    // ...and the reuse tore down the whole family, so the legitimately-rotated
+    // token is now dead too.
+    const afterReuse = await refreshMcpToken(clientId, next);
+    expect(afterReuse.status).toBe(400);
+    expect(afterReuse.body.error).toBe("invalid_grant");
   });
 });
