@@ -11,23 +11,39 @@
  * caller's auth forwarded — see ./tools.ts.
  *
  * Also serves RFC 9728 Protected Resource Metadata so spec-compliant MCP
- * clients can discover this instance's authorization server. (Emitting the
- * `WWW-Authenticate: ... resource_metadata=` challenge on the 401 — RFC 9728
- * §5.1 — is a follow-up: the platform auth pipeline owns the 401 response.)
+ * clients can discover this instance's authorization server, and registers a
+ * `WWW-Authenticate: Bearer resource_metadata="…", scope="…"` challenge
+ * (RFC 9728 §5.1) emitted on the 401 (no/invalid token) and the 403
+ * (insufficient scope) via the generic auth-challenge registry — the trigger
+ * that lets a tokenless client start the OAuth flow.
  */
 
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "@appstrate/mcp-transport";
+import { getEnv } from "@appstrate/env";
 import { requireModulePermission } from "@appstrate/core/permissions";
+import { methodNotAllowed } from "../../lib/errors.ts";
+import { rateLimitMcp } from "../../middleware/rate-limit.ts";
+import { logger } from "../../lib/logger.ts";
+import { registerAuthChallenge } from "../../lib/auth-challenges.ts";
+import { registerProtectedResource } from "../../lib/protected-resources.ts";
+import { recordAuditFromContext } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { getPlatformApp } from "../../lib/platform-app.ts";
-import { buildMcpTools, type Dispatch } from "./tools.ts";
+import { getMcpResourceUri } from "./resource.ts";
+import { buildMcpTools, type Dispatch, type McpObserver } from "./tools.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 const MCP_PATH = "/api/mcp";
 const PRM_PATH = "/.well-known/oauth-protected-resource";
+/** Scopes this resource accepts — advertised in PRM + the 401/403 challenge. */
+const MCP_SCOPES = ["mcp:read", "mcp:invoke"] as const;
+// JSON-RPC envelope-granularity limit per caller per minute. Sized for
+// interactive agent loops (search → describe → invoke, repeated) while still
+// bounding cheap abuse of search/describe, which touch no rate-limited route.
+const MCP_RATE_LIMIT_PER_MIN = 120;
 
 /**
  * Server `instructions` injected into the client's system prompt at
@@ -78,28 +94,107 @@ export function createMcpRouter(): Hono<AppEnv> {
   // (`/.well-known/oauth-protected-resource/api/mcp`): RFC 9728 §3.1 has a
   // client derive the metadata URL by inserting the well-known segment before
   // the resource's path, so a strict client probes the suffixed form.
+  //
+  // The advertised `resource` MUST be the canonical APP_URL-derived URI
+  // (`getMcpResourceUri()`), NOT the request origin: it is the exact string the
+  // client echoes back as the RFC 8707 `resource` at the token endpoint, where
+  // it must match the AS `validAudiences` (also APP_URL-derived) and the
+  // resource-server audience check. Behind a reverse proxy where the public
+  // origin differs from an internal request host, an origin-derived value would
+  // silently break audience binding. `authorization_servers` / doc URLs derive
+  // from the same APP_URL base so discovery stays consistent.
   const protectedResourceMetadata = (c: Context<AppEnv>) => {
-    const origin = new URL(c.req.url).origin;
+    const appBase = getEnv().APP_URL.replace(/\/+$/, "");
     return c.json({
-      resource: `${origin}${MCP_PATH}`,
-      authorization_servers: [origin],
-      scopes_supported: ["mcp:read", "mcp:invoke"],
+      resource: getMcpResourceUri(),
+      authorization_servers: [appBase],
+      scopes_supported: [...MCP_SCOPES],
       bearer_methods_supported: ["header"],
-      resource_documentation: `${origin}/api/docs`,
+      resource_documentation: `${appBase}/api/docs`,
     });
   };
   app.get(PRM_PATH, protectedResourceMetadata);
   app.get(`${PRM_PATH}${MCP_PATH}`, protectedResourceMetadata);
 
+  // RFC 8707 audience binding: `/api/mcp` is a protected resource. A bearer
+  // token must be issued for it (its `aud` must include the canonical URI) to
+  // be accepted here, and a token issued for it may not be replayed on other
+  // routes — both halves enforced generically by `enforceResourceAudience` in
+  // the auth pipeline. Registered with the same canonical URI the PRM/AS use.
+  registerProtectedResource(MCP_PATH, getMcpResourceUri);
+
+  // RFC 9728 §5.1 challenge: on a 401 (no/invalid token) or 403 (insufficient
+  // scope) the generic responder attaches this so a spec-compliant client
+  // (Claude Code, …) discovers the PRM URL and starts/steps-up an OAuth flow.
+  // Point at the path-insertion PRM variant (the form a strict client probes),
+  // anchored on the canonical APP_URL base for the same proxy-safety reason as
+  // the PRM `resource` above.
+  registerAuthChallenge(MCP_PATH, ({ status }) => {
+    const appBase = getEnv().APP_URL.replace(/\/+$/, "");
+    const resourceMetadata = `${appBase}${PRM_PATH}${MCP_PATH}`;
+    const base = `Bearer resource_metadata="${resourceMetadata}", scope="${MCP_SCOPES.join(" ")}"`;
+    // 403 here means the caller authenticated but lacks an mcp scope — signal
+    // step-up per RFC 6750 §3.1 so the client requests the missing scope.
+    return status === 403 ? `${base}, error="insufficient_scope"` : base;
+  });
+
+  // Rate-limit before the permission check so repeated probing (including by a
+  // caller that will 403) is bounded too. Auth + audience binding run earlier
+  // in the global pipeline, so the identity is already resolved here and an
+  // audience-mismatched token was already rejected.
+  app.use(MCP_PATH, rateLimitMcp(MCP_RATE_LIMIT_PER_MIN));
   app.use(MCP_PATH, requireModulePermission("mcp", "read"));
 
-  app.all(MCP_PATH, async (c) => {
+  app.post(MCP_PATH, async (c) => {
     const origin = new URL(c.req.url).origin;
     const permissions = c.get("permissions") ?? new Set<string>();
     const authHeaders = forwardAuthHeaders(c.req.raw.headers);
     const dispatch: Dispatch = async (req) => getPlatformApp().fetch(req);
 
-    const tools = buildMcpTools({ origin, permissions, authHeaders, dispatch });
+    // Audit + telemetry sink. The tool layer emits plain data; here we decide
+    // what to do with it: structured telemetry for every tool call, and a
+    // durable audit row for invoke_operation outcomes (the underlying route
+    // self-audits its own mutation, but the MCP indirection is recorded
+    // separately so the trail shows the call arrived via MCP). Reads
+    // (search/describe) are metadata browsing and are not audited.
+    //
+    // Audit inserts are collected and awaited before the response returns, so
+    // the trail is not lost if the process is recycled between requests (the
+    // insert is itself best-effort and never throws — recordAudit swallows).
+    const pendingAudits: Promise<unknown>[] = [];
+    const observe: McpObserver = (event) => {
+      logger.info("mcp.tool_call", {
+        requestId: c.get("requestId"),
+        tool: event.tool,
+        durationMs: Math.round(event.durationMs),
+        operationId: event.operationId,
+        method: event.method,
+        path: event.path,
+        status: event.status,
+        outcome: event.outcome,
+        resultCount: event.resultCount,
+      });
+      if (
+        event.tool === "invoke_operation" &&
+        (event.outcome === "invoked" || event.outcome === "denied")
+      ) {
+        pendingAudits.push(
+          recordAuditFromContext(c, {
+            action: event.outcome === "denied" ? "mcp.operation.denied" : "mcp.operation.invoked",
+            resourceType: "mcp_operation",
+            resourceId: event.operationId ?? null,
+            after: {
+              method: event.method ?? null,
+              path: event.path ?? null,
+              status: event.status ?? null,
+              outcome: event.outcome,
+            },
+          }),
+        );
+      }
+    };
+
+    const tools = buildMcpTools({ origin, permissions, authHeaders, dispatch, observe });
     const server = createMcpServer(
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
@@ -118,22 +213,33 @@ export function createMcpRouter(): Hono<AppEnv> {
 
     // Reconstruct the request so the SDK transport can read the body once.
     const raw = c.req.raw;
-    let forwarded = raw;
-    if (raw.method === "POST" || raw.method === "PUT" || raw.method === "PATCH") {
-      forwarded = new Request(raw.url, {
-        method: raw.method,
-        headers: raw.headers,
-        body: await raw.arrayBuffer(),
-      });
-    }
+    const forwarded = new Request(raw.url, {
+      method: raw.method,
+      headers: raw.headers,
+      body: await raw.arrayBuffer(),
+    });
 
     try {
       await server.connect(transport);
-      return await transport.handleRequest(forwarded);
+      const response = await transport.handleRequest(forwarded);
+      // Flush audit inserts before responding so the trail survives a process
+      // recycle. allSettled — a failed insert is already swallowed upstream.
+      if (pendingAudits.length > 0) await Promise.allSettled(pendingAudits);
+      return response;
     } finally {
       await transport.close();
       await server.close();
     }
+  });
+
+  // Stateless JSON-response transport serves no standalone server→client SSE
+  // stream (GET) and has no session to terminate (DELETE), so POST is the only
+  // meaningful verb. Reject everything else with 405 + `Allow: POST` rather
+  // than letting the SDK open a dangling GET SSE stream that never receives a
+  // message. Auth still runs first (global pipeline), so an unauthenticated
+  // request of any verb is rejected with 401 before reaching here.
+  app.all(MCP_PATH, () => {
+    throw methodNotAllowed(["POST"]);
   });
 
   return app;

@@ -11,6 +11,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { getCatalog, resetCatalog, type CatalogOperation } from "../../catalog.ts";
 import { buildMcpTools, type Dispatch } from "../../tools.ts";
+import { internalDispatchHeader } from "../../../../lib/internal-dispatch.ts";
 
 // The handlers ignore `extra`; supply a typed placeholder.
 const noExtra = {} as unknown as AppstrateRequestExtra;
@@ -183,6 +184,61 @@ describe("invoke_operation", () => {
     expect(req.headers.get("X-Integration-Id")).toBe("int_1");
     // Promoted out of the query string, not duplicated there.
     expect(new URL(req.url).searchParams.has("X-Integration-Id")).toBe(false);
+  });
+
+  it("stamps the internal-dispatch marker so re-entry bypasses outbound audience confinement", async () => {
+    const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    await byName.get("invoke_operation")!.handler({ operation_id: op.operationId }, noExtra);
+    // The exact header name/value is owned by lib/internal-dispatch; assert the
+    // dispatched request carries it (its presence is what the resource-audience
+    // guard checks to exempt in-process re-entry).
+    const [name, value] = internalDispatchHeader();
+    expect(calls[0]!.headers.get(name)).toBe(value);
+  });
+
+  it("drops a client-supplied internal-dispatch marker (forgery defence)", async () => {
+    const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
+    const [name] = internalDispatchHeader();
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: op.operationId, headers: { [name]: "forged-by-client" } }, noExtra);
+    // The forged value is stripped (protected header) and replaced with the
+    // authoritative per-process secret — never the client's string.
+    const [, real] = internalDispatchHeader();
+    expect(calls[0]!.headers.get(name)).toBe(real);
+  });
+
+  it("rejects a path param containing traversal segments (route-binding integrity)", async () => {
+    // `..` would let path_params smuggle structure and re-route to a different
+    // operation than the audited operationId. Must be refused before dispatch.
+    const op = firstOp((o) => o.pathParams.length === 1 && o.pathParams[0] !== "scope");
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    const res = await byName
+      .get("invoke_operation")!
+      .handler(
+        { operation_id: op.operationId, path_params: { [op.pathParams[0]!]: "../api-keys" } },
+        noExtra,
+      );
+    expect(res.isError).toBe(true);
+    expect(calls.length).toBe(0);
+  });
+
+  it("rejects a path param injecting an extra slash on a non-scoped param", async () => {
+    const op = firstOp(
+      (o) =>
+        o.pathParams.length === 1 && o.pathParams[0] !== "scope" && o.pathParams[0] !== "packageId",
+    );
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    const res = await byName
+      .get("invoke_operation")!
+      .handler(
+        { operation_id: op.operationId, path_params: { [op.pathParams[0]!]: "x/runs" } },
+        noExtra,
+      );
+    expect(res.isError).toBe(true);
+    expect(calls.length).toBe(0);
   });
 
   it("forwards extra headers but never overrides forwarded auth headers", async () => {

@@ -8,8 +8,11 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { and, eq } from "drizzle-orm";
+import { getEnv } from "@appstrate/env";
+import { auditEvents } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
-import { truncateAll } from "../../../../../test/helpers/db.ts";
+import { truncateAll, db } from "../../../../../test/helpers/db.ts";
 import { createTestContext, orgOnlyHeaders } from "../../../../../test/helpers/auth.ts";
 import { seedApiKey } from "../../../../../test/helpers/seed.ts";
 import { setPlatformApp } from "../../../../lib/platform-app.ts";
@@ -85,16 +88,30 @@ describe("mcp discovery + auth gate", () => {
     }
   });
 
-  it("rejects unauthenticated /api/mcp with 401", async () => {
+  it("rejects unauthenticated /api/mcp with 401 + RFC 9728 WWW-Authenticate challenge", async () => {
     const res = await app.request("/api/mcp", {
       method: "POST",
       headers: { "content-type": "application/json", Accept: MCP_ACCEPT },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
     });
     expect(res.status).toBe(401);
+    const challenge = res.headers.get("WWW-Authenticate");
+    expect(challenge).not.toBeNull();
+    expect(challenge!).toContain("Bearer");
+    // Points at the path-insertion PRM variant so the client can discover the
+    // AS. Anchored on the canonical APP_URL base (NOT the request origin) so
+    // audience binding stays correct behind a reverse proxy — see
+    // `mcp/router.ts` / `mcp/resource.ts`.
+    const appBase = getEnv().APP_URL.replace(/\/+$/, "");
+    expect(challenge!).toContain(
+      `resource_metadata="${appBase}/.well-known/oauth-protected-resource/api/mcp"`,
+    );
+    expect(challenge!).toContain('scope="mcp:read mcp:invoke"');
+    // No token presented → not a step-up, so no insufficient_scope error.
+    expect(challenge!).not.toContain("insufficient_scope");
   });
 
-  it("403s an authenticated caller lacking mcp:read", async () => {
+  it("403s an authenticated caller lacking mcp:read with an insufficient_scope step-up challenge", async () => {
     const headers = await apiKeyHeaders(["agents:read"]);
     const res = await app.request("/api/mcp", {
       method: "POST",
@@ -102,6 +119,36 @@ describe("mcp discovery + auth gate", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
     });
     expect(res.status).toBe(403);
+    const challenge = res.headers.get("WWW-Authenticate");
+    expect(challenge).not.toBeNull();
+    expect(challenge!).toContain('error="insufficient_scope"');
+    expect(challenge!).toContain('scope="mcp:read mcp:invoke"');
+    expect(challenge!).toContain("resource_metadata=");
+  });
+
+  it("rejects GET on /api/mcp with 405 for an authenticated caller", async () => {
+    // Stateless transport (no session id, JSON response mode) does not serve a
+    // standalone SSE stream, so GET is Method Not Allowed. This is the
+    // behaviour the OpenAPI spec documents; assert it rather than trust it.
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const res = await app.request("/api/mcp", {
+      method: "GET",
+      headers: { ...headers, Accept: MCP_ACCEPT },
+    });
+    expect(res.status).toBe(405);
+    expect(res.headers.get("Allow")).toBe("POST");
+  });
+
+  it("rejects DELETE on /api/mcp with 405 (no session to terminate in stateless mode)", async () => {
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const res = await app.request("/api/mcp", { method: "DELETE", headers });
+    expect(res.status).toBe(405);
+    expect(res.headers.get("Allow")).toBe("POST");
+  });
+
+  it("rejects an unauthenticated GET on /api/mcp with 401 (auth runs before the transport)", async () => {
+    const res = await app.request("/api/mcp", { method: "GET", headers: { Accept: MCP_ACCEPT } });
+    expect(res.status).toBe(401);
   });
 });
 
@@ -176,6 +223,62 @@ describe("mcp tool round-trip", () => {
     expect(toolPayload(envelope).isError).toBe(true);
   });
 
+  it("cannot escalate past the caller's REST permissions (defence in depth)", async () => {
+    // THE central security promise: an `mcp:invoke` token can call
+    // invoke_operation, but the DISPATCHED operation still enforces its OWN
+    // permission. A key scoped to mcp:* ONLY (effective perms = the intersection
+    // of requested scopes ∩ role, so it carries no api-keys:read) must NOT be
+    // able to read api keys through MCP — the underlying route returns 403, and
+    // the MCP layer does not bypass it. Without this, MCP would be a privilege-
+    // escalation hole; with it, MCP can never exceed what the credential could
+    // do over REST.
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      // listApiKeys (GET /api/api-keys) requires api-keys:read — a permission
+      // this mcp-only key does not hold.
+      params: { name: "invoke_operation", arguments: { operation_id: "listApiKeys" } },
+    });
+    const payload = toolPayload(envelope);
+    // The dispatch HAPPENED (mcp:invoke present) but the op denied it: the tool
+    // result carries the route's own 403, not a bypass and not a 200.
+    expect(payload.data.status).toBe(403);
+    expect(payload.isError).toBe(true);
+  });
+
+  it("handles concurrent in-flight invoke_operation calls without cross-contamination", async () => {
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    // Distinct read-only GET operations with no path params: each request gets
+    // its own server+transport+tool context (router is stateless), so firing
+    // them concurrently must not bleed state between requests.
+    const ops = [...getCatalog().operations.values()]
+      .filter((o) => o.method === "GET" && o.pathParams.length === 0)
+      .slice(0, 8);
+    expect(ops.length).toBeGreaterThan(1);
+
+    const results = await Promise.all(
+      ops.map((op, i) =>
+        rpc(headers, {
+          jsonrpc: "2.0",
+          id: 100 + i,
+          method: "tools/call",
+          params: { name: "invoke_operation", arguments: { operation_id: op.operationId } },
+        }),
+      ),
+    );
+
+    // Every call resolved to a well-formed tool result with a numeric status,
+    // and each JSON-RPC response id matches its request id (no swapped envelopes).
+    results.forEach((res, i) => {
+      expect(res.status).toBe(200);
+      expect((res.envelope as { id?: number }).id ?? 100 + i).toBe(100 + i);
+      const payload = toolPayload(res.envelope);
+      expect(typeof payload.data.status).toBe("number");
+    });
+  });
+
   it("completes the initialize handshake for a session caller", async () => {
     const ctx = await createTestContext();
     const { status, envelope } = await rpc(orgOnlyHeaders(ctx), {
@@ -196,5 +299,109 @@ describe("mcp tool round-trip", () => {
     expect(typeof instructions).toBe("string");
     expect(instructions).toContain("Appstrate");
     expect(instructions).toContain("@appstrate");
+  });
+});
+
+describe("mcp audit + rate limiting", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    resetCatalog();
+  });
+
+  it("records an mcp.operation.invoked audit row for a successful invoke", async () => {
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const op = [...getCatalog().operations.values()].find(
+      (o) => o.method === "GET" && o.pathParams.length === 0,
+    )!;
+    await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "invoke_operation", arguments: { operation_id: op.operationId } },
+    });
+    // Audit inserts are flushed before the response returns, so the row exists.
+    const rows = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "mcp.operation.invoked"),
+          eq(auditEvents.resourceId, op.operationId),
+        ),
+      );
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.resourceType).toBe("mcp_operation");
+    expect(rows[0]!.actorType).toBe("api_key");
+    expect((rows[0]!.after as Record<string, unknown>).outcome).toBe("invoked");
+  });
+
+  it("records an mcp.operation.denied audit row when the caller lacks mcp:invoke", async () => {
+    const headers = await apiKeyHeaders(["mcp:read"]);
+    const op = [...getCatalog().operations.values()][0]!;
+    await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "invoke_operation", arguments: { operation_id: op.operationId } },
+    });
+    const rows = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "mcp.operation.denied"));
+    expect(rows.length).toBe(1);
+    expect((rows[0]!.after as Record<string, unknown>).outcome).toBe("denied");
+  });
+
+  it("does NOT audit read-only search/describe calls", async () => {
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "search_operations", arguments: { query: "agent" } },
+    });
+    const rows = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceType, "mcp_operation"));
+    expect(rows.length).toBe(0);
+  });
+
+  it("emits IETF RateLimit headers and rejects bursts beyond the limit with 429", async () => {
+    // One fixed identity (same API key) so every request keys to the same
+    // rate-limit bucket. The limit is 120/min; fire enough to trip it.
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const init = {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "t", version: "1" },
+      },
+    } as const;
+
+    const first = await app.request("/api/mcp", {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      body: JSON.stringify(init),
+    });
+    expect(first.status).toBe(200);
+    expect(first.headers.get("RateLimit")).toContain("limit=120");
+
+    let sawRateLimit = false;
+    for (let i = 0; i < 125 && !sawRateLimit; i++) {
+      const res = await app.request("/api/mcp", {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+        body: JSON.stringify(init),
+      });
+      if (res.status === 429) {
+        sawRateLimit = true;
+        expect(res.headers.get("Retry-After")).not.toBeNull();
+      }
+    }
+    expect(sawRateLimit).toBe(true);
   });
 });

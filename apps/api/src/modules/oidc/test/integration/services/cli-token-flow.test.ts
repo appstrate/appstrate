@@ -91,6 +91,13 @@ async function runDeviceFlow(
     device_code: string;
     user_code: string;
   };
+  // BA 1.7 split claim from approve: GET /device (with the session cookie)
+  // associates the code with the user before /device/approve will accept it.
+  const verifyRes = await app.request(
+    `/api/auth/device?user_code=${encodeURIComponent(code.user_code)}`,
+    { headers: { Cookie: cookie } },
+  );
+  expect(verifyRes.status).toBe(200);
   const approveRes = await app.request("/api/auth/device/approve", {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: cookie },

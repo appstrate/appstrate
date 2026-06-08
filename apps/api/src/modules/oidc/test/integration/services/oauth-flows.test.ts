@@ -589,6 +589,20 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     expect(body.error).toBe("invalid_request");
   });
 
+  it("mints a token audience-bound to the MCP resource when resource=<…>/api/mcp", async () => {
+    // RFC 8707: a client targeting the inbound MCP server requests its
+    // canonical resource URI; the AS (with /api/mcp in validAudiences) accepts
+    // it and stamps it as the token `aud`. The /api/mcp resource server then
+    // enforces that audience (covered by the mcp module's audience suite).
+    const { cookie } = await signUpEndUser(ctx.defaultAppId, "mcp-aud@satellite.example.com");
+    const { code, verifier } = await runHappyPathToCode({ cookie });
+    const mcpResource = "http://localhost:3000/api/mcp";
+    const tokens = await exchangeCodeForTokens(code, verifier, { resource: mcpResource });
+    const payload = decodeJwt(tokens.access_token) as { aud?: string | string[] };
+    const auds = Array.isArray(payload.aud) ? payload.aud : payload.aud ? [payload.aud] : [];
+    expect(auds).toContain(mcpResource);
+  });
+
   it("rate-limits /oauth2/token to 30 req/min per IP", async () => {
     // The guard limiter is keyed on x-forwarded-for; app.request() sets no
     // such header, so all spam shares the `unknown` bucket. Fire 31 posts;

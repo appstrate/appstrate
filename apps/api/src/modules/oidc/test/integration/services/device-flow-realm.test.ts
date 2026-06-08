@@ -116,6 +116,13 @@ describe("device-flow realm enforcement on /device/approve", () => {
     const { cookie, userId } = await signUpUserWithRealm("platform@example.com", "platform");
     const { userCode } = await requestDeviceCode();
 
+    // BA 1.7: claim the code (GET /device) before approving. The rejection
+    // cases above intentionally do NOT claim — their realm-guard 403 fires at
+    // the before-hook, ahead of the handler's claim check, leaving the row
+    // pending + userId null as asserted.
+    await app.request(`/api/auth/device?user_code=${encodeURIComponent(userCode)}`, {
+      headers: { Cookie: cookie },
+    });
     const approveRes = await app.request("/api/auth/device/approve", {
       method: "POST",
       headers: {

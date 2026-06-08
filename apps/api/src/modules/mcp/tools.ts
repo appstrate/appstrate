@@ -22,9 +22,44 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
+import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
+
+/** The three tools, named for telemetry/audit. */
+export type McpToolName = "search_operations" | "describe_operation" | "invoke_operation";
+
+/** Outcome of an `invoke_operation` call, for audit + telemetry. */
+export type McpInvokeOutcome =
+  /** Caller lacks `mcp:invoke` — no dispatch happened (security-relevant). */
+  | "denied"
+  /** Client error before dispatch (unknown operationId, missing path params). */
+  | "rejected"
+  /** Dispatched in-process; `status` carries the operation's HTTP status. */
+  | "invoked";
+
+/**
+ * A structured observation emitted by a tool handler. The tool layer stays
+ * transport-agnostic: it emits plain data and lets the caller (the HTTP
+ * router) decide what to do with it (audit log, telemetry). This keeps the
+ * tools reusable by a future code-execution surface that has no Hono context.
+ */
+export interface McpToolEvent {
+  tool: McpToolName;
+  /** Wall-clock duration of the handler, milliseconds. */
+  durationMs: number;
+  /** `search_operations`: number of matches returned. */
+  resultCount?: number;
+  /** `invoke_operation`: which operation, its method/path, and the outcome. */
+  operationId?: string;
+  method?: string;
+  path?: string;
+  status?: number;
+  outcome?: McpInvokeOutcome;
+}
+
+export type McpObserver = (event: McpToolEvent) => void;
 
 export interface McpToolContext {
   /** Origin of the inbound `/mcp` request, e.g. `https://instance.example`. */
@@ -35,6 +70,20 @@ export interface McpToolContext {
   permissions: ReadonlySet<string>;
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
+  /**
+   * Optional sink for audit + telemetry events. Defaults to a no-op so unit
+   * tests and any non-HTTP caller need not provide one.
+   */
+  observe?: McpObserver;
+}
+
+/** Never let an observer error affect the tool result. */
+function emit(ctx: McpToolContext, event: McpToolEvent): void {
+  try {
+    ctx.observe?.(event);
+  } catch {
+    // Telemetry/audit is best-effort; swallow.
+  }
 }
 
 const DEFAULT_SEARCH_LIMIT = 25;
@@ -54,6 +103,13 @@ const PROTECTED_HEADERS = new Set([
   "x-application-id",
   "appstrate-user",
   "appstrate-version",
+  // The internal self-dispatch marker is set by THIS layer (see the dispatch
+  // request build below) and exempts the request from outbound resource-
+  // audience confinement. A client-supplied value would be a forgery attempt —
+  // drop it here so only our authoritative, nonce-valued header survives. (Even
+  // without this, the value must equal an unguessable per-process secret, so a
+  // forgery cannot succeed; this is defence in depth.)
+  internalDispatchHeader()[0],
 ]);
 // Cap the buffered response body so a large list endpoint can't dump
 // unbounded text into the model context. Truncation is flagged in the result.
@@ -82,7 +138,7 @@ function scoreOperation(op: CatalogOperation, tokens: string[]): number {
   return score;
 }
 
-function buildSearchTool(): AppstrateToolDefinition {
+function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "search_operations",
     description:
@@ -114,6 +170,7 @@ function buildSearchTool(): AppstrateToolDefinition {
   };
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+    const start = performance.now();
     const { operations } = getCatalog();
     const query = asString(args.query)?.trim().toLowerCase() ?? "";
     const tag = asString(args.tag)?.toLowerCase();
@@ -129,6 +186,12 @@ function buildSearchTool(): AppstrateToolDefinition {
       .filter(({ score }) => tokens.length === 0 || score > 0)
       .sort((a, b) => b.score - a.score || a.op.operationId.localeCompare(b.op.operationId))
       .slice(0, limit);
+
+    emit(ctx, {
+      tool: "search_operations",
+      durationMs: performance.now() - start,
+      resultCount: scored.length,
+    });
 
     return textResult({
       count: scored.length,
@@ -146,7 +209,7 @@ function buildSearchTool(): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-function buildDescribeTool(): AppstrateToolDefinition {
+function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "describe_operation",
     description:
@@ -169,12 +232,19 @@ function buildDescribeTool(): AppstrateToolDefinition {
   };
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+    const start = performance.now();
     const operationId = asString(args.operation_id);
     if (!operationId) return textResult({ error: "operation_id is required." }, true);
 
     const { operations, componentSchemas } = getCatalog();
     const op = operations.get(operationId);
     if (!op) return textResult({ error: `Unknown operationId: ${operationId}` }, true);
+
+    emit(ctx, {
+      tool: "describe_operation",
+      durationMs: performance.now() - start,
+      operationId,
+    });
 
     return textResult({
       operation_id: op.operationId,
@@ -209,12 +279,43 @@ function encodePathSegment(value: string): string {
   return encodeURIComponent(value).replace(/%40/g, "@").replace(/%2F/g, "/");
 }
 
+/**
+ * Whether a caller-supplied path-param value is safe to interpolate without
+ * altering the route the `operationId` binds to.
+ *
+ * `encodePathSegment` deliberately restores `/` (for scoped ids), so an
+ * unchecked value could smuggle extra path structure: `name="../api-keys"`
+ * would normalise `/api/agents/../api-keys` → `/api/agents/api-keys`, and
+ * `name="x/runs"` would re-route to `/api/agents/x/runs` — both dispatching a
+ * DIFFERENT operation than the audited `operationId` (and mis-recording the
+ * audit trail). `path_params` is `additionalProperties: true`, so the value is
+ * fully client-controlled.
+ *
+ * Rules: no control chars or backslashes; no empty / `.` / `..` segments
+ * (traversal, leading/trailing/double slash); and slashes are allowed ONLY for
+ * a scoped package id — leading `@` with exactly one internal slash
+ * (`@scope/name`). Every other value must be a single path segment.
+ */
+function isSafePathParamValue(value: string): boolean {
+  if (value === "") return false;
+  // eslint-disable-next-line no-control-regex -- intentionally matching control chars
+  if (/[\u0000-\u001f\u007f\\]/.test(value)) return false;
+  const segments = value.split("/");
+  for (const seg of segments) {
+    if (seg === "" || seg === "." || seg === "..") return false;
+  }
+  if (segments.length > 1 && !(value.startsWith("@") && segments.length === 2)) return false;
+  return true;
+}
+
 function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknown>): string | null {
   let path = op.pathTemplate;
   for (const name of op.pathParams) {
     const value = pathParams[name];
     if (value === undefined || value === null) return null;
-    path = path.replace(`{${name}}`, encodePathSegment(String(value)));
+    const raw = String(value);
+    if (!isSafePathParamValue(raw)) return null;
+    path = path.replace(`{${name}}`, encodePathSegment(raw));
   }
   return path;
 }
@@ -227,7 +328,7 @@ function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknow
  *  - Non-text bodies (downloads, tarballs) are summarised, not decoded.
  *  - Text bodies are capped to bound context size.
  */
-async function readResponse(response: Response): Promise<CallToolResult> {
+export async function readResponse(response: Response): Promise<CallToolResult> {
   const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
   const isError = response.status >= 400;
 
@@ -341,23 +442,53 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
   };
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+    const start = performance.now();
+    const operationId = asString(args.operation_id);
+
     if (!ctx.permissions.has("mcp:invoke")) {
+      emit(ctx, {
+        tool: "invoke_operation",
+        durationMs: performance.now() - start,
+        operationId,
+        outcome: "denied",
+      });
       return textResult(
         { error: "Permission 'mcp:invoke' is required to invoke operations." },
         true,
       );
     }
 
-    const operationId = asString(args.operation_id);
-    if (!operationId) return textResult({ error: "operation_id is required." }, true);
+    if (!operationId) {
+      emit(ctx, {
+        tool: "invoke_operation",
+        durationMs: performance.now() - start,
+        outcome: "rejected",
+      });
+      return textResult({ error: "operation_id is required." }, true);
+    }
 
     const { operations } = getCatalog();
     const op = operations.get(operationId);
-    if (!op) return textResult({ error: `Unknown operationId: ${operationId}` }, true);
+    if (!op) {
+      emit(ctx, {
+        tool: "invoke_operation",
+        durationMs: performance.now() - start,
+        operationId,
+        outcome: "rejected",
+      });
+      return textResult({ error: `Unknown operationId: ${operationId}` }, true);
+    }
 
     const pathParams = asRecord(args.path_params) ?? {};
     const path = interpolatePath(op, pathParams);
     if (path === null) {
+      emit(ctx, {
+        tool: "invoke_operation",
+        durationMs: performance.now() - start,
+        operationId,
+        method: op.method,
+        outcome: "rejected",
+      });
       return textResult(
         { error: `Missing path_params. Required: ${op.pathParams.join(", ")}` },
         true,
@@ -398,6 +529,15 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     const sendBody = body !== undefined && METHODS_WITH_BODY.has(op.method);
     if (sendBody) headers.set("content-type", "application/json");
 
+    // Mark this as a trusted in-process self-dispatch. The inbound MCP request
+    // already cleared the `/api/mcp` resource boundary's audience check; this
+    // re-entry targets a non-resource route (`/api/agents`, …) carrying the
+    // same audience-bound token, which the outbound half of
+    // `enforceResourceAudience` would otherwise reject. The marker value is an
+    // unguessable per-process secret, so it cannot be forged from outside (and
+    // any client-supplied copy was dropped by PROTECTED_HEADERS above).
+    headers.set(...internalDispatchHeader());
+
     const request = new Request(url.toString(), {
       method: op.method,
       headers,
@@ -405,6 +545,15 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     });
 
     const response = await ctx.dispatch(request);
+    emit(ctx, {
+      tool: "invoke_operation",
+      durationMs: performance.now() - start,
+      operationId,
+      method: op.method,
+      path,
+      status: response.status,
+      outcome: "invoked",
+    });
     return readResponse(response);
   };
 
@@ -413,5 +562,5 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
 /** Build the per-request tool set. Handlers close over the caller's auth context. */
 export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
-  return [buildSearchTool(), buildDescribeTool(), buildInvokeTool(ctx)];
+  return [buildSearchTool(ctx), buildDescribeTool(ctx), buildInvokeTool(ctx)];
 }
