@@ -16,6 +16,13 @@
 export interface AccessTokenIdentity {
   userId: string;
   email: string;
+  /**
+   * Org the session is bound to, chosen in the browser during the device-flow
+   * approval and stamped on the token by the server. When present it is
+   * authoritative — the server pins it, so the CLI must use exactly this org
+   * (a mismatched `X-Org-Id` is rejected). Absent on legacy/unbound tokens.
+   */
+  orgId?: string;
 }
 
 export function decodeAccessTokenIdentity(accessToken: string): AccessTokenIdentity {
@@ -28,7 +35,8 @@ export function decodeAccessTokenIdentity(accessToken: string): AccessTokenIdent
   if (typeof email !== "string" || !email) {
     throw new Error("Access token is missing the `email` claim.");
   }
-  return { userId: sub, email };
+  const orgId = typeof claims.org_id === "string" && claims.org_id ? claims.org_id : undefined;
+  return { userId: sub, email, ...(orgId ? { orgId } : {}) };
 }
 
 /**

@@ -196,6 +196,7 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
     request: APIRequestContext,
     cookie: string,
     clientId: string,
+    bindOrgId?: string,
   ): Promise<{ code: string; verifier: string }> {
     const verifier = randomVerifier();
     const challenge = await sha256Base64Url(verifier);
@@ -236,7 +237,9 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
         accept: "application/json",
         origin: BASE,
       },
-      form: { _csrf: csrfToken, accept: "true" },
+      form: bindOrgId
+        ? { _csrf: csrfToken, accept: "true", org_id: bindOrgId }
+        : { _csrf: csrfToken, accept: "true" },
       maxRedirects: 0,
     });
     expect([200, 302]).toContain(consentRes.status());
@@ -401,6 +404,50 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
         headers: { ...headers, "X-Application-Id": orgContext.org.defaultAppId },
       });
       expect(lifted.status()).toBe(401);
+    } finally {
+      await anon.dispose();
+    }
+  });
+
+  test("an org bound at consent drives /api/mcp with NO X-Org-Id header", async ({
+    playwright,
+    orgContext,
+  }) => {
+    // The headline of the org-binding work: the user picks an org on the
+    // consent screen, it rides the grant as the token's `org_id` claim, and the
+    // MCP client calls /api/mcp with ONLY a Bearer token — no `X-Org-Id`. The
+    // strategy pins the org from the claim; an invoke then dispatches in-process
+    // against that org.
+    const anon = await playwright.request.newContext();
+    try {
+      const clientId = await registerDcrClient(anon);
+      const { code, verifier } = await authorizeToCode(
+        anon,
+        orgContext.auth.cookie,
+        clientId,
+        orgContext.org.orgId,
+      );
+      const minted = await exchange(anon, clientId, code, verifier, MCP_URL);
+      expect(minted.status).toBe(200);
+      const accessToken = minted.body.access_token as string;
+      expect(typeof accessToken).toBe("string");
+
+      // NO X-Org-Id — org context comes entirely from the bound token.
+      const headers = { Authorization: `Bearer ${accessToken}` };
+
+      const init = await mcpRpc(anon, headers, INIT);
+      expect(init.status).toBe(200);
+      expect(init.envelope.result?.serverInfo).toBeTruthy();
+
+      const invoke = await mcpRpc(anon, headers, {
+        jsonrpc: "2.0",
+        id: 7,
+        method: "tools/call",
+        params: { name: "invoke_operation", arguments: { operation_id: "listApplications" } },
+      });
+      const payload = toolPayload(invoke.envelope);
+      expect(payload.isError).toBe(false);
+      expect(payload.data.status).toBe(200);
     } finally {
       await anon.dispose();
     }

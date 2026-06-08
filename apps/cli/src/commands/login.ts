@@ -246,11 +246,21 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
     ...(preservedAppId ? { applicationId: preservedAppId } : {}),
   });
 
-  // Step 7 — pin an organization. Issue #209. Credentials are already
-  // persisted so `listOrgs` / `createOrg` (both authenticated) work.
-  // Any failure here leaves the login valid but unpinned — surfaced as
-  // a hint to the user, never as a hard failure.
-  const pinned = await pinOrgOnProfile(profileName, opts);
+  // Step 7 — pin an organization. When the token is org-bound (the user
+  // chose an org in the browser during approval), that org is authoritative —
+  // the server pins it from the `org_id` claim, so the CLI must use exactly it
+  // (a mismatched `X-Org-Id` would be rejected). Persist it and skip the
+  // terminal picker. Otherwise (legacy/unbound token) fall back to the picker.
+  // Issue #209. Credentials are already persisted so `listOrgs` / `createOrg`
+  // (both authenticated) work. Any failure here leaves the login valid but
+  // unpinned — surfaced as a hint to the user, never as a hard failure.
+  let pinned: Org | null;
+  if (identity.orgId) {
+    await updateProfile(profileName, { orgId: identity.orgId });
+    pinned = await resolveBoundOrg(profileName, identity.orgId);
+  } else {
+    pinned = await pinOrgOnProfile(profileName, opts);
+  }
 
   // Step 8 — cascade into application pinning. Issue #217. Requires an
   // `orgId` in context (listApplications is org-scoped), so we gate on
@@ -280,6 +290,21 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
  * Writes the pinned `orgId` back onto `config.toml` in place. The caller
  * has already persisted the rest of the profile via `setProfile()`.
  */
+/**
+ * Resolve display info for a token-bound org. The org id is already persisted
+ * (authoritative); we look up its name for the login summary, falling back to
+ * the id if the list call flakes — name is cosmetic here.
+ */
+async function resolveBoundOrg(profileName: string, orgId: string): Promise<Org> {
+  try {
+    const match = (await listOrgs(profileName)).find((o) => o.id === orgId);
+    if (match) return match;
+  } catch {
+    // best-effort: the org is already pinned; only the display name is missing
+  }
+  return { id: orgId, name: orgId, slug: orgId, role: "", createdAt: "" };
+}
+
 async function pinOrgOnProfile(profileName: string, opts: LoginOptions): Promise<Org | null> {
   const deps = { ...defaultDeps, ...(opts.deps ?? {}) };
 

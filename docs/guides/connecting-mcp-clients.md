@@ -62,16 +62,19 @@ What happens under the hood:
    - **DCR** (RFC 7591 Dynamic Client Registration) — the fallback for clients
      that can't host a metadata document. Self-service registration is bounded
      to identity + MCP scopes and rate-limited.
-4. The user logs in and consents in the browser; the client receives an access
-   token **audience-bound** to `https://YOUR_INSTANCE/api/mcp` (RFC 8707). The
-   MCP server rejects any token not issued for it, and the token is rejected on
-   every OTHER platform route — it can only ever drive `/api/mcp`.
+4. The user logs in and consents in the browser. If they belong to more than one
+   organization, the consent screen shows an **organization picker**; the chosen
+   org is bound to the grant. The client receives an access token
+   **audience-bound** to `https://YOUR_INSTANCE/api/mcp` (RFC 8707) and carrying
+   the chosen org. The MCP server rejects any token not issued for it, and the
+   token is rejected on every OTHER platform route — it can only ever drive
+   `/api/mcp`.
 
-> **Organization context.** An OAuth-onboarded client acts as the connecting
-> user, who may belong to several organizations. Send the target org with an
-> `X-Org-Id: org_xxx` header (same as the API-key path); without it the request
-> has no organization to resolve permissions against. A client that supports
-> custom headers (Claude Code: `--header`) can set it once at connect time.
+> **Organization context.** No `X-Org-Id` header is needed on the OAuth path:
+> the organization is chosen on the consent screen and bound to the token (the
+> server pins it). To target a different org, re-run the connection and pick it
+> again in the browser. (The header is still honoured if sent, but it must match
+> the token's bound org.)
 
 ### Self-hosting requirements for Path B
 

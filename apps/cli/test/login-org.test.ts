@@ -84,9 +84,11 @@ function captureIo(): void {
  * Build a JWT with `sub` + `email` claims so `decodeAccessTokenIdentity`
  * succeeds. We don't sign — the CLI doesn't verify locally.
  */
-function makeJwt(sub = "u_test", email = "alice@example.com"): string {
+function makeJwt(sub = "u_test", email = "alice@example.com", orgId?: string): string {
   const header = Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })).toString("base64url");
-  const payload = Buffer.from(JSON.stringify({ sub, email })).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({ sub, email, ...(orgId ? { org_id: orgId } : {}) }),
+  ).toString("base64url");
   return `${header}.${payload}.sig`;
 }
 
@@ -230,6 +232,53 @@ async function readPinnedAppId(profile = "default"): Promise<string | undefined>
 }
 
 describe("login org-pin branch", () => {
+  it("binds the token's org_id claim and skips the terminal picker", async () => {
+    // The org was chosen in the browser at /activate and stamped on the token.
+    // With ≥2 orgs an unbound token would invoke the picker; the bound token
+    // must NOT — the claim is authoritative.
+    let pickerCalled = false;
+    installDefaultResponders({
+      cliToken: () =>
+        new Response(
+          JSON.stringify({
+            access_token: makeJwt("u_test", "alice@example.com", "org_bound"),
+            refresh_token: "rt-xyz",
+            token_type: "Bearer",
+            expires_in: 900,
+            refresh_expires_in: 30 * 24 * 60 * 60,
+            scope: "cli",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      listOrgs: () =>
+        new Response(
+          JSON.stringify({
+            object: "list",
+            hasMore: false,
+            data: [
+              { id: "org_bound", name: "Bound", slug: "bound", role: "owner", createdAt: "t" },
+              { id: "org_other", name: "Other", slug: "other", role: "member", createdAt: "t" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    });
+
+    await loginCommand({
+      profile: "default",
+      instance: "https://app.example.com",
+      deps: {
+        pickOrg: async () => {
+          pickerCalled = true;
+          return null;
+        },
+      },
+    });
+
+    expect(await readPinnedOrgId()).toBe("org_bound");
+    expect(pickerCalled).toBe(false);
+  });
+
   it("auto-pins the single org when the user belongs to exactly one", async () => {
     installDefaultResponders({
       listOrgs: () =>

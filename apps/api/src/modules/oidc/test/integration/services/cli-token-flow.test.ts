@@ -37,7 +37,7 @@ import { db } from "@appstrate/db/client";
 import { user as userTable, session as sessionTable } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
-import { createTestContext } from "../../../../../../test/helpers/auth.ts";
+import { createTestContext, createTestOrg } from "../../../../../../test/helpers/auth.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import oidcModule from "../../../index.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
@@ -203,6 +203,59 @@ describe("POST /api/auth/cli/token — grant_type=device_code (issue #165)", () 
       .where(eq(deviceCode.deviceCode, deviceCodeValue))
       .limit(1);
     expect(deviceRow).toBeUndefined();
+  });
+
+  it("binds the consent-chosen org onto the token and preserves it across refresh", async () => {
+    const { cookie, userId } = await signUpPlatformUser();
+    const { org } = await createTestOrg(userId, { slug: "clibind" });
+    const { deviceCodeValue } = await runDeviceFlow(cookie);
+    // Simulate the /activate consent binding: the approve handler stamps the
+    // chosen org onto the device_code row before the CLI exchanges it.
+    await db
+      .update(deviceCode)
+      .set({ orgId: org.id })
+      .where(eq(deviceCode.deviceCode, deviceCodeValue));
+
+    const res = await app.request("/api/auth/cli/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code: deviceCodeValue,
+        client_id: "appstrate-cli",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { access_token: string; refresh_token: string };
+
+    // The minted access token carries the bound org as `org_id`.
+    const claims = await verifyToken(body.access_token);
+    expect(claims?.orgId).toBe(org.id);
+
+    // The bound org is stored on the refresh head row...
+    const hash = _hashRefreshTokenForTesting(body.refresh_token);
+    const [row] = await db
+      .select({ orgId: cliRefreshToken.orgId })
+      .from(cliRefreshToken)
+      .where(eq(cliRefreshToken.tokenHash, hash))
+      .limit(1);
+    expect(row?.orgId).toBe(org.id);
+
+    // ...and survives rotation: the refreshed access token keeps the claim.
+    const rotateRes = await app.request("/api/auth/cli/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "refresh_token",
+        refresh_token: body.refresh_token,
+        client_id: "appstrate-cli",
+      }),
+    });
+    expect(rotateRes.status).toBe(200);
+    const rotated = (await rotateRes.json()) as { access_token: string };
+    const rotatedClaims = await verifyToken(rotated.access_token);
+    expect(rotatedClaims?.orgId).toBe(org.id);
+    expect(claims?.authUserId).toBe(userId);
   });
 
   it("returns authorization_pending when the user hasn't approved yet", async () => {

@@ -27,7 +27,9 @@
 
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
+import { renderOrgField } from "./org-field.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
+import type { ConsentOrgOption } from "../services/consent-org.ts";
 
 /** Common props across the three renders — all of them need branding. */
 interface ActivateBaseProps {
@@ -87,6 +89,12 @@ export interface ActivateConsentPageProps extends ActivateBaseProps {
   scopes: string[];
   /** CSRF token pairing the approve/deny buttons with a signed cookie. */
   csrfToken: string;
+  /**
+   * Organizations the user may bind this CLI session to. One → bound silently;
+   * many → a picker. Submitted as `org_id` with the approval and stamped onto
+   * the issued token's `org_id` claim (so the CLI needs no `X-Org-Id`).
+   */
+  orgs?: ConsentOrgOption[];
 }
 
 const SCOPE_DESCRIPTIONS_FR: Record<string, string> = {
@@ -128,6 +136,7 @@ export function renderActivateConsentPage(props: ActivateConsentPageProps): RawH
       <form method="POST" action="/activate/approve">
         <input type="hidden" name="_csrf" value="${props.csrfToken}" />
         <input type="hidden" name="user_code" value="${props.userCodeRaw}" />
+        ${renderOrgField(props.orgs ?? [])}
         <button type="submit" class="allow">Autoriser</button>
       </form>
     </div>
