@@ -84,7 +84,7 @@
     "@appstrate/afps-shared": "^0.1.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
-    "fflate": "^0.8.0",
+    "fflate": "^0.8.3",
     "pino": "^10.3.1",
     "semver": "^7.7.1",
     "zod": "^4.4.3"
