@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/gmail",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Gmail (API)",
@@ -24,6 +24,10 @@
         "https://www.googleapis.com/auth/gmail.send"
       ],
       "token_endpoint_auth_method": "client_secret_post",
+      "authorization_params": {
+        "access_type": "offline",
+        "prompt": "consent"
+      },
       "identity_claims": {
         "accountId": "$.email",
         "sub": "$.sub",
