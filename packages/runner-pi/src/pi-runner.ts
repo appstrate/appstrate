@@ -293,6 +293,20 @@ export class PiRunner implements Runner {
       // `model.provider` is the Pi SDK's AuthStorage key the SDK resolves
       // credentials against; register the key under the same value.
       authStorage.setRuntimeApiKey(model.provider, apiKey);
+    } else if (!this.opts.authStorage && !apiKey) {
+      // No injected AuthStorage AND no runtime key — the SDK will call the
+      // provider unauthenticated and 401/retry silently (the platform's
+      // kickoff fail-fast should prevent this, so reaching here means a
+      // run bypassed that guard). Surface a line on the surprising path.
+      // runner-pi intentionally avoids a logger dep — same console.error
+      // JSON convention as the compaction-wait + sink-heartbeat paths.
+      console.error(
+        JSON.stringify({
+          level: "warn",
+          msg: "[pi-runner] no API key for model — provider calls will be unauthenticated",
+          provider: model.provider,
+        }),
+      );
     }
 
     const modelRegistry = ModelRegistry.create(authStorage);
