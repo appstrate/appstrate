@@ -248,9 +248,9 @@
       "reasoning"
     ],
     "cost": {
-      "input": 0.45,
-      "output": 2.7,
-      "cacheRead": 0.045
+      "input": 0.25,
+      "output": 1.5,
+      "cacheRead": 0.025
     }
   },
   "gemini-3.1-flash-lite-preview": {
