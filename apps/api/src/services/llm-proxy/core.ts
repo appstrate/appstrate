@@ -22,6 +22,7 @@ import { db } from "@appstrate/db/client";
 import { llmUsage } from "@appstrate/db/schema";
 import { loadModel, type ResolvedModel } from "../org-models.ts";
 import { getModelProvider } from "../model-providers/registry.ts";
+import type { OAuthWireFormat } from "@appstrate/core/sidecar-types";
 import { logger } from "../../lib/logger.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
@@ -84,7 +85,15 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     inputs.adapter.apiShape,
   );
 
-  const rewrittenBody = request.rewriteModel(resolved.modelId);
+  // OAuth subscription providers (codex, claude-code) declare their wire-format
+  // quirks on the provider definition; the proxy applies them generically — the
+  // same `oauthWireFormat` contract the run sidecar applies — so a subscription
+  // works over the proxy without a runtime. Plain API-key providers have none.
+  const provider = getModelProvider(resolved.providerId);
+  const rewrittenBody = applyOauthBody(
+    request.rewriteModel(resolved.modelId),
+    provider?.oauthWireFormat,
+  );
 
   // Response-cache lookup. The cache is keyed on `(orgId, presetId,
   // apiShape, modelId, requestBody)` so cross-org / cross-preset
@@ -118,11 +127,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     inputs.incomingHeaders,
     resolved.apiKey,
   );
-  // OAuth subscription providers (codex, claude-code) declare their wire-format
-  // quirks on the provider definition; apply them generically here — the same
-  // `oauthWireFormat` block the run sidecar applies, so a subscription works
-  // over the proxy without a runtime. Plain API-key providers have no block.
-  applyOauthWireFormat(upstreamHeaders, resolved);
+  applyOauthWireFormat(upstreamHeaders, provider, resolved);
 
   const started = Date.now();
   let upstream: Response;
@@ -254,19 +259,72 @@ function joinUpstreamUrl(base: string, path: string): string {
 }
 
 /**
- * Apply a provider's declarative `oauthWireFormat` to the upstream headers,
- * mirroring what the run sidecar does (`run-launcher/pi.ts`). Reads the block
- * from the registry by `providerId`; a no-op for plain API-key providers
- * (no block) and for OAuth tokens that carry no `accountId`.
+ * Apply a provider's declarative OAuth wire-format to the upstream headers,
+ * mirroring the run sidecar (`runtime-pi/sidecar/oauth-identity.ts`). For an
+ * OAuth provider the platform's stored token is a Bearer credential, so we
+ * drop any adapter-set `x-api-key` and authenticate as `Authorization: Bearer`,
+ * then add the declarative identity headers (+ accountId echo). No-op for
+ * plain API-key providers.
  */
-function applyOauthWireFormat(headers: Record<string, string>, resolved: ResolvedModel): void {
-  const wf = getModelProvider(resolved.providerId)?.oauthWireFormat;
+function applyOauthWireFormat(
+  headers: Record<string, string>,
+  provider: ReturnType<typeof getModelProvider>,
+  resolved: ResolvedModel,
+): void {
+  if (provider?.authMode !== "oauth2") return;
+  for (const k of Object.keys(headers)) {
+    if (k.toLowerCase() === "x-api-key") delete headers[k];
+  }
+  headers["Authorization"] = `Bearer ${resolved.apiKey}`;
+
+  const wf = provider.oauthWireFormat;
   if (!wf) return;
   if (wf.identityHeaders) {
     for (const [k, v] of Object.entries(wf.identityHeaders)) headers[k] = v;
   }
   if (wf.accountIdHeader && resolved.accountId) {
     headers[wf.accountIdHeader] = resolved.accountId;
+  }
+}
+
+/**
+ * Apply the body-level wire-format transforms (system prelude + stream/store
+ * coercion) — same contract as the sidecar's `transformBody`. Parses once,
+ * mutates, re-serializes; a no-op when the block carries no body transform.
+ */
+function applyOauthBody(body: Uint8Array, wf: OAuthWireFormat | undefined): Uint8Array {
+  const wants =
+    !!wf?.systemPrepend || wf?.forceStream !== undefined || wf?.forceStore !== undefined;
+  if (!wf || !wants) return body;
+  let json: unknown;
+  try {
+    json = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    return body;
+  }
+  if (typeof json !== "object" || json === null || Array.isArray(json)) return body;
+  const obj = json as Record<string, unknown>;
+  if (wf.systemPrepend) applySystemPrepend(obj, wf.systemPrepend);
+  if (wf.forceStream !== undefined) obj.stream = wf.forceStream;
+  if (wf.forceStore !== undefined) obj.store = wf.forceStore;
+  return new TextEncoder().encode(JSON.stringify(obj));
+}
+
+/** Prepend an Anthropic-style system text block (idempotent). Mirrors the sidecar. */
+function applySystemPrepend(
+  json: Record<string, unknown>,
+  prepend: { type: "text"; text: string },
+): void {
+  const block = { type: "text" as const, text: prepend.text };
+  const system = json.system;
+  if (Array.isArray(system)) {
+    const first = system[0] as { type?: string; text?: string } | undefined;
+    json.system =
+      first?.type === "text" && first.text === prepend.text ? system : [block, ...system];
+  } else if (typeof system === "string") {
+    json.system = system === prepend.text ? [block] : [block, { type: "text", text: system }];
+  } else {
+    json.system = [block];
   }
 }
 
