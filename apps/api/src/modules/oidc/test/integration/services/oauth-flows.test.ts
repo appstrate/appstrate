@@ -45,6 +45,16 @@ import oidcModule from "../../../index.ts";
 import { overrideJwksResolver } from "../../../services/enduser-token.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
+import {
+  registerProtectedResourceFamily,
+  resetProtectedResources,
+} from "../../../../../lib/protected-resources.ts";
+import {
+  getMcpOrgResourceUri,
+  orgIdFromMcpAudience,
+  addMcpOrgAudience,
+  _resetMcpOrgAudiencesForTesting,
+} from "../../../../mcp/audiences.ts";
 import { decodeJwt } from "jose";
 
 const app = getTestApp({ modules: [oidcModule] });
@@ -589,18 +599,38 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     expect(body.error).toBe("invalid_request");
   });
 
-  it("mints a token audience-bound to the MCP resource when resource=<…>/api/mcp", async () => {
-    // RFC 8707: a client targeting the inbound MCP server requests its
-    // canonical resource URI; the AS (with /api/mcp in validAudiences) accepts
-    // it and stamps it as the token `aud`. The /api/mcp resource server then
-    // enforces that audience (covered by the mcp module's audience suite).
-    const { cookie } = await signUpEndUser(ctx.defaultAppId, "mcp-aud@satellite.example.com");
-    const { code, verifier } = await runHappyPathToCode({ cookie });
-    const mcpResource = "http://localhost:3000/api/mcp";
-    const tokens = await exchangeCodeForTokens(code, verifier, { resource: mcpResource });
-    const payload = decodeJwt(tokens.access_token) as { aud?: string | string[] };
-    const auds = Array.isArray(payload.aud) ? payload.aud : payload.aud ? [payload.aud] : [];
-    expect(auds).toContain(mcpResource);
+  it("mints a token audience-bound to a per-org MCP resource when resource=<…>/api/mcp/o/<orgId>", async () => {
+    // RFC 8707: a client targeting an org's inbound MCP endpoint requests that
+    // org's canonical per-org resource URI; the AS (with the org in
+    // validAudiences) accepts it and stamps it as the token `aud`. The
+    // `/api/mcp/o/:org` resource server then enforces that audience (covered by
+    // the mcp module's audience suite). The MCP server registers the per-org
+    // family + audience at boot in production — do it inline here so this
+    // single test does not perturb the shared beforeEach.
+    registerProtectedResourceFamily({
+      prefix: "/api/mcp/o",
+      deriveUri: (path) => {
+        const prefix = "/api/mcp/o/";
+        if (!path.startsWith(prefix)) return undefined;
+        const orgId = path.slice(prefix.length).split("/")[0] ?? "";
+        return orgId.length === 0 ? undefined : getMcpOrgResourceUri(orgId);
+      },
+      ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
+    });
+    addMcpOrgAudience(ctx.orgId);
+    try {
+      const { cookie } = await signUpEndUser(ctx.defaultAppId, "mcp-aud@satellite.example.com");
+      const { code, verifier } = await runHappyPathToCode({ cookie });
+      const mcpResource = getMcpOrgResourceUri(ctx.orgId);
+      const tokens = await exchangeCodeForTokens(code, verifier, { resource: mcpResource });
+      const payload = decodeJwt(tokens.access_token) as { aud?: string | string[] };
+      const auds = Array.isArray(payload.aud) ? payload.aud : payload.aud ? [payload.aud] : [];
+      expect(auds).toContain(mcpResource);
+    } finally {
+      // Restore the mutable audience allowlist + registry for sibling tests.
+      _resetMcpOrgAudiencesForTesting();
+      resetProtectedResources();
+    }
   });
 
   it("rate-limits /oauth2/token to 30 req/min per IP", async () => {

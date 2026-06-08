@@ -26,19 +26,32 @@ const jsonRpcRequestBody = {
   },
 } as const;
 
+const orgPathParameter = {
+  name: "org",
+  in: "path",
+  required: true,
+  description: "Organization id (uuid). Identifies the organization this MCP endpoint is bound to.",
+  schema: { type: "string" },
+} as const;
+
 export const mcpPaths = {
-  "/api/mcp": {
+  "/api/mcp/o/{org}": {
     post: {
       operationId: "mcpStreamableHttpPost",
       tags: ["MCP"],
-      summary: "MCP Streamable HTTP endpoint",
+      summary: "Per-organization MCP Streamable HTTP endpoint",
       description:
-        "Model Context Protocol server (Streamable HTTP, stateless). Accepts JSON-RPC 2.0 " +
-        "messages (`initialize`, `tools/list`, `tools/call`). Exposes three tools — " +
-        "`search_operations`, `describe_operation`, `invoke_operation` — that let an MCP " +
-        "client discover and call any platform API operation with the caller's own " +
-        "credentials. Requires the `mcp:read` permission (and `mcp:invoke` to call operations).",
+        "Model Context Protocol server (Streamable HTTP, stateless) for a single organization. " +
+        "Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). Exposes three " +
+        "tools — `search_operations`, `describe_operation`, `invoke_operation` — that let an MCP " +
+        "client discover and call any platform API operation with the caller's own credentials, " +
+        "confined to the organization in the path. Each organization has its own endpoint: a " +
+        "token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource " +
+        "URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several " +
+        "organizations, configure one MCP server entry per organization. Requires the `mcp:read` " +
+        "permission (and `mcp:invoke` to call operations).",
       security: [{ bearerJwt: [] }, { bearerApiKey: [] }, { cookieAuth: [] }],
+      parameters: [orgPathParameter],
       requestBody: jsonRpcRequestBody,
       responses: {
         "200": {
@@ -54,12 +67,13 @@ export const mcpPaths = {
     get: {
       operationId: "mcpStreamableHttpGet",
       tags: ["MCP"],
-      summary: "MCP Streamable HTTP (GET)",
+      summary: "Per-organization MCP Streamable HTTP (GET)",
       description:
-        "The GET channel of the MCP Streamable HTTP transport. This server runs in stateless " +
-        "mode (no standalone server-initiated SSE stream), so GET returns 405; clients POST " +
-        "JSON-RPC messages instead. Requires the `mcp:read` permission.",
+        "The GET channel of the per-organization MCP Streamable HTTP transport. This server runs " +
+        "in stateless mode (no standalone server-initiated SSE stream), so GET returns 405; " +
+        "clients POST JSON-RPC messages instead. Requires the `mcp:read` permission.",
       security: [{ bearerJwt: [] }, { bearerApiKey: [] }, { cookieAuth: [] }],
+      parameters: [orgPathParameter],
       responses: {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -67,15 +81,17 @@ export const mcpPaths = {
       },
     },
   },
-  "/.well-known/oauth-protected-resource": {
+  "/.well-known/oauth-protected-resource/api/mcp/o/{org}": {
     get: {
       operationId: "mcpProtectedResourceMetadata",
       tags: ["MCP"],
       summary: "OAuth 2.0 Protected Resource Metadata (RFC 9728)",
       description:
-        "Public discovery document advertising the authorization server that protects the MCP " +
-        "endpoint, so spec-compliant MCP clients can complete an OAuth flow without manual " +
-        "configuration.",
+        "Public discovery document advertising the authorization server that protects the " +
+        "per-organization MCP endpoint, so spec-compliant MCP clients can complete an OAuth flow " +
+        "without manual configuration. The advertised `resource` is the per-org URI " +
+        "`<APP_URL>/api/mcp/o/{org}`, which tokens are audience-bound to (RFC 8707).",
+      parameters: [orgPathParameter],
       responses: {
         "200": {
           description: "Protected resource metadata.",

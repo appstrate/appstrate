@@ -4,10 +4,12 @@
  * Generic protected-resource registry + RFC 8707 audience confinement.
  *
  * A "protected resource" is an OAuth resource server mounted inside the
- * platform that issues audience-bound access tokens (RFC 8707) — currently
- * only the inbound MCP server at `/api/mcp`. A spec-compliant client obtains a
- * token whose `aud` is that resource's canonical URI, and the resource MUST
- * reject tokens not issued for it (MCP authorization spec, 2025-11-25).
+ * platform that issues audience-bound access tokens (RFC 8707) — currently the
+ * inbound MCP server's per-org endpoints (`/api/mcp/o/:org`, registered as a
+ * dynamic family since there is one resource URI per org). A spec-compliant
+ * client obtains a token whose `aud` is that resource's canonical URI, and the
+ * resource MUST reject tokens not issued for it (MCP authorization spec,
+ * 2025-11-25).
  *
  * This registry generalises that contract so the audience rule lives in ONE
  * place instead of being special-cased per path inside the shared auth
@@ -45,7 +47,29 @@ interface Entry {
   uri: () => string;
 }
 
+/**
+ * A FAMILY of protected resources sharing a path prefix but with a per-request
+ * resource URI — used when the concrete resources are dynamic and cannot be
+ * enumerated at registration time (e.g. the inbound MCP server's per-org
+ * endpoints `/api/mcp/o/:org`, one URI per organization, orgs created at
+ * runtime). The family owns the whole `prefix` sub-tree:
+ *
+ * - `deriveUri(path)` maps a concrete request path under the family to its
+ *   canonical resource URI, or `undefined` when the path is under the prefix but
+ *   is NOT a real resource (e.g. a malformed/incomplete sub-path) — in which
+ *   case the family does not match and the request is treated as non-resource.
+ * - `ownsUri(uri)` is the inverse direction: whether a given audience URI
+ *   belongs to this family (for outbound confinement / mint-time checks), without
+ *   needing a request path. It must accept exactly the URIs `deriveUri` can emit.
+ */
+export interface ProtectedResourceFamily {
+  prefix: string;
+  deriveUri(path: string): string | undefined;
+  ownsUri(uri: string): boolean;
+}
+
 const entries: Entry[] = [];
+const families: ProtectedResourceFamily[] = [];
 
 /**
  * Register a protected resource. Idempotent per prefix (re-registering
@@ -59,22 +83,57 @@ export function registerProtectedResource(prefix: string, uri: () => string): vo
   entries.sort((a, b) => b.prefix.length - a.prefix.length);
 }
 
+/**
+ * Register a protected-resource FAMILY (see `ProtectedResourceFamily`).
+ * Idempotent per prefix with the same replace-on-re-register semantics as
+ * `registerProtectedResource` — safe across test-harness module reloads.
+ */
+export function registerProtectedResourceFamily(family: ProtectedResourceFamily): void {
+  const existing = families.findIndex((f) => f.prefix === family.prefix);
+  if (existing >= 0) families[existing] = family;
+  else families.push(family);
+  families.sort((a, b) => b.prefix.length - a.prefix.length);
+}
+
 /** Test-only: clear the registry between cases. */
 export function resetProtectedResources(): void {
   entries.length = 0;
+  families.length = 0;
 }
 
-/** The resource whose prefix matches `path`, if any (longest-prefix-first). */
+/**
+ * The resource whose prefix matches `path`, if any. Static entries are matched
+ * first (longest-prefix-first) so a fixed resource always wins over a family;
+ * then families (also longest-prefix-first). A family matches only when `path`
+ * is under its prefix AND `deriveUri(path)` returns a URI — a family that owns
+ * the path space but cannot derive a URI for this particular path (malformed
+ * sub-path) does NOT match, so the path is treated as non-resource.
+ */
 export function resolveProtectedResource(
   path: string,
 ): { prefix: string; uri: string } | undefined {
   const entry = entries.find((e) => path === e.prefix || path.startsWith(`${e.prefix}/`));
-  return entry ? { prefix: entry.prefix, uri: entry.uri() } : undefined;
+  if (entry) return { prefix: entry.prefix, uri: entry.uri() };
+
+  for (const family of families) {
+    if (path !== family.prefix && !path.startsWith(`${family.prefix}/`)) continue;
+    const uri = family.deriveUri(path);
+    if (uri) return { prefix: family.prefix, uri };
+  }
+  return undefined;
 }
 
-/** Canonical URIs of every registered resource (for outbound confinement). */
-export function listProtectedResourceUris(): string[] {
-  return entries.map((e) => e.uri());
+/**
+ * Whether `uri` is a protected-resource URI — true if it equals any static
+ * entry's canonical URI OR is owned by any registered family (`ownsUri`). This
+ * is the audience-side counterpart of `resolveProtectedResource` (which works
+ * from a request path): it answers "is this token audience bound to ANY
+ * protected resource?" without enumerating the (dynamic) family URIs — the
+ * per-org MCP resources cannot be listed at mint time. Backs the
+ * outbound-confinement and mint-time gates.
+ */
+export function isProtectedResourceUri(uri: string): boolean {
+  return entries.some((e) => e.uri() === uri) || families.some((f) => f.ownsUri(uri));
 }
 
 /**
@@ -111,9 +170,10 @@ export function enforceResourceAudience(): MiddlewareHandler<AppEnv> {
     // may not be used here, so an audience-scoped token cannot be lifted and
     // replayed against the rest of the API. Exempt the in-process self-dispatch
     // that already cleared a resource boundary inbound (invoke_operation).
-    const resourceUris = listProtectedResourceUris();
+    // `isProtectedResourceUri` covers both static entries and dynamic families
+    // (e.g. the per-org MCP resource URIs) without enumerating them.
     const boundToResource = audiences.some(
-      (a) => typeof a === "string" && resourceUris.includes(a),
+      (a) => typeof a === "string" && isProtectedResourceUri(a),
     );
     if (boundToResource && !isInternalDispatch(c.req.raw.headers)) {
       throw unauthorized(

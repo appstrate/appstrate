@@ -92,12 +92,6 @@ import { renderVerifyEmailSentPage } from "./pages/verify-email-sent.ts";
 import { renderForgotPasswordPage } from "./pages/forgot-password.ts";
 import { renderResetPasswordPage, renderInvalidTokenPage } from "./pages/reset-password.ts";
 import { renderConsentPage } from "./pages/consent.ts";
-import {
-  listUserOrgs,
-  isUserOrgMember,
-  withPendingConsentOrg,
-  type ConsentOrgOption,
-} from "./services/consent-org.ts";
 import { renderErrorPage } from "./pages/error.ts";
 import {
   renderActivateEntryPage,
@@ -384,48 +378,6 @@ function isInstanceSmtpEnabled(): boolean {
  */
 function allowSignupForClient(client: { allowSignup: boolean }): boolean {
   return client.allowSignup;
-}
-
-/**
- * Whether a client supports consent-time org binding. Only **self-service**
- * (instance-level, non-first-party) clients — i.e. MCP clients — let the user
- * pick a target org. Org-level/application-level clients have a fixed org; the
- * first-party dashboard skips the consent screen entirely.
- */
-function bindsOrgAtConsent(client: { level: string; isFirstParty: boolean }): boolean {
-  return client.level === "instance" && !client.isFirstParty;
-}
-
-/** Orgs offered in the consent picker (empty unless the client binds org). */
-async function consentOrgOptions(
-  c: Context<AppEnv>,
-  client: { level: string; isFirstParty: boolean },
-): Promise<ConsentOrgOption[]> {
-  if (!bindsOrgAtConsent(client)) return [];
-  const session = await getAuth().api.getSession({ headers: c.req.raw.headers });
-  if (!session?.user?.id) return [];
-  return listUserOrgs(session.user.id);
-}
-
-/**
- * The org to bind to a just-approved grant. Returns `undefined` for clients
- * that don't bind org, or when the user has no org / submitted none. Rejects a
- * submitted org the user is not a member of (defence in depth — the strategy
- * re-checks membership on every request, but never mint a token for an org the
- * caller can't access).
- */
-async function resolveBoundConsentOrg(
-  c: Context<AppEnv>,
-  client: { level: string; isFirstParty: boolean },
-  submittedOrgId: string | undefined,
-): Promise<string | undefined> {
-  if (!bindsOrgAtConsent(client) || !submittedOrgId) return undefined;
-  const session = await getAuth().api.getSession({ headers: c.req.raw.headers });
-  if (!session?.user?.id) return undefined;
-  if (!(await isUserOrgMember(session.user.id, submittedOrgId))) {
-    throw forbidden("You are not a member of the selected organization");
-  }
-  return submittedOrgId;
 }
 
 /**
@@ -1908,14 +1860,12 @@ export function createOidcRouter() {
     }
 
     const scopes = scope.split(/\s+/).filter(Boolean);
-    const orgs = await consentOrgOptions(c, ctx.client);
     const body = renderConsentPage({
       clientName: ctx.client.name ?? ctx.client.clientId,
       scopes,
       action: `/api/oauth/consent${url.search}`,
       branding: ctx.branding,
       csrfToken: ctx.csrfToken,
-      orgs,
     });
     return c.html(body.value);
   });
@@ -1936,19 +1886,12 @@ export function createOidcRouter() {
         action: `/api/oauth/consent${url.search}`,
         branding: ctx.branding,
         csrfToken: ctx.csrfToken,
-        orgs: await consentOrgOptions(c, ctx.client),
         error: "Votre session a expiré. Veuillez réessayer.",
       });
       return c.html(body.value, 403);
     }
 
     const accept = readFormString(form, "accept") === "true";
-    // Self-service clients may bind a chosen org to the grant (so the issued
-    // token carries it and no `X-Org-Id` is needed). Validate membership on
-    // accept; ignored for clients that don't bind org or on deny.
-    const boundOrg = accept
-      ? await resolveBoundConsentOrg(c, ctx.client, readFormString(form, "org_id"))
-      : undefined;
     const oauthQuery = url.search.startsWith("?") ? url.search.slice(1) : url.search;
     if (!oauthQuery) {
       throw invalidRequest(
@@ -1972,17 +1915,12 @@ export function createOidcRouter() {
     const authApi = getOidcAuthApi();
     let consentResponse: Response;
     try {
-      // `withPendingConsentOrg` exposes `boundOrg` to the oauth-provider's
-      // `consentReferenceId` hook for the duration of this call, so the grant
-      // (and its refresh token) is stamped with the org.
-      consentResponse = (await withPendingConsentOrg(boundOrg, () =>
-        authApi.oauth2Consent({
-          body: { accept, oauth_query: oauthQuery },
-          request: c.req.raw,
-          headers: c.req.raw.headers,
-          asResponse: true,
-        }),
-      )) as Response;
+      consentResponse = (await authApi.oauth2Consent({
+        body: { accept, oauth_query: oauthQuery },
+        request: c.req.raw,
+        headers: c.req.raw.headers,
+        asResponse: true,
+      })) as Response;
     } catch (err) {
       if (err instanceof UnverifiedEmailConflictError) {
         const loginPage = renderLoginPage({
@@ -2134,8 +2072,6 @@ export function createOidcRouter() {
       .filter(Boolean);
     const userCodeDisplay = `${cleanUserCode.slice(0, 4)}-${cleanUserCode.slice(4)}`;
 
-    const orgs = await listUserOrgs(session.user.id);
-
     const page = renderActivateConsentPage({
       branding: PLATFORM_DEFAULT_BRANDING,
       clientName: client?.name ?? record.clientId,
@@ -2143,7 +2079,6 @@ export function createOidcRouter() {
       userCodeRaw: cleanUserCode,
       scopes,
       csrfToken,
-      orgs,
     });
     return c.html(page.value);
   });
@@ -2199,24 +2134,6 @@ export function createOidcRouter() {
       .where(eq(deviceCode.userCode, userCode))
       .limit(1);
 
-    // Org the user picked on the consent screen. Validate membership BEFORE
-    // approving so we never bind (nor approve into) an org the user can't
-    // access. Absent → unbound grant (legacy header path). The device-code
-    // exchange stamps this as the token's `org_id` claim.
-    const pickedOrgId = readFormString(form, "org_id");
-    if (pickedOrgId && session?.user?.id) {
-      if (!(await isUserOrgMember(session.user.id, pickedOrgId))) {
-        return c.html(
-          renderActivateResultPage({
-            branding: PLATFORM_DEFAULT_BRANDING,
-            outcome: "denied",
-            error: "Vous n'êtes pas membre de l'organisation sélectionnée.",
-          }).value,
-          403,
-        );
-      }
-    }
-
     try {
       // BA 1.7 split claim from approve: associate the device code with the
       // signed-in user (GET /device) before approving it, else /device/approve
@@ -2245,16 +2162,6 @@ export function createOidcRouter() {
         }).value,
         400,
       );
-    }
-
-    // Persist the bound org onto the (now approved) device-code row so the
-    // CLI's token exchange picks it up as the `org_id` claim. Membership was
-    // validated above.
-    if (pickedOrgId && session?.user?.id) {
-      await db
-        .update(deviceCode)
-        .set({ orgId: pickedOrgId })
-        .where(eq(deviceCode.userCode, userCode));
     }
 
     logger.info("cli.device.approved", {

@@ -44,7 +44,8 @@ import { applications } from "@appstrate/db/schema";
 import { oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
-import { getAppstrateScopeSet } from "../auth/scopes.ts";
+import { getAppstrateScopeSet, OIDC_IDENTITY_SCOPES } from "../auth/scopes.ts";
+import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
 import { isValidRedirectUri } from "./redirect-uri.ts";
 
 // ─── SECURITY: Trust boundary ─────────────────────────────────────────────────
@@ -420,7 +421,7 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
  */
 export async function markClientSelfService(clientId: string): Promise<void> {
   const [row] = await db
-    .select({ metadata: oauthClient.metadata })
+    .select({ metadata: oauthClient.metadata, scopes: oauthClient.scopes })
     .from(oauthClient)
     .where(eq(oauthClient.clientId, clientId))
     .limit(1);
@@ -440,10 +441,26 @@ export async function markClientSelfService(clientId: string): Promise<void> {
   metadata.clientId = clientId;
   metadata.selfService = true;
 
-  await db
-    .update(oauthClient)
-    .set({ level: "instance", metadata: JSON.stringify(metadata), updatedAt: new Date() })
-    .where(eq(oauthClient.clientId, clientId));
+  // Backfill the self-service scope ceiling when the client registered with
+  // none. A CIMD client whose metadata document declares no `scope` (e.g.
+  // Claude Code) is written with `scopes: []` — and `[]` is not nullish, so
+  // the authorize-time check `client.scopes ?? opts.scopes` keeps the empty
+  // set and rejects EVERY requested scope (`invalid_scope`). The DCR register
+  // path dodges this via `clientRegistrationDefaultScopes`, but the CIMD path
+  // bypasses it. Stamp the same ceiling a self-service DCR client gets
+  // (identity + module end-user-grantable scopes, e.g. mcp:read/mcp:invoke) so
+  // the client may request them. Only fill when empty — never widen a client
+  // that deliberately declared a narrower scope set.
+  const update: Record<string, unknown> = {
+    level: "instance",
+    metadata: JSON.stringify(metadata),
+    updatedAt: new Date(),
+  };
+  if (!row.scopes || row.scopes.length === 0) {
+    update.scopes = [...OIDC_IDENTITY_SCOPES, ...getModuleEndUserAllowedScopes()];
+  }
+
+  await db.update(oauthClient).set(update).where(eq(oauthClient.clientId, clientId));
   cacheInvalidate(clientId);
 }
 

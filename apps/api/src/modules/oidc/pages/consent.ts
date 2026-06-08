@@ -16,9 +16,7 @@
 
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
-import { renderOrgField } from "./org-field.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
-import type { ConsentOrgOption } from "../services/consent-org.ts";
 
 const SCOPE_DESCRIPTIONS_FR: Record<string, string> = {
   openid: "Votre identité",
@@ -49,12 +47,6 @@ export interface ConsentPageProps {
   csrfToken: string;
   /** Resolved branding for the owning application. */
   branding: ResolvedAppBranding;
-  /**
-   * Organizations the user may bind this grant to (self-service clients only).
-   * Empty/absent → no org picker (token resolves org per-request via
-   * `X-Org-Id`). One → bound silently. Many → a `<select>` is shown.
-   */
-  orgs?: ConsentOrgOption[];
   /** Optional error message displayed above the form. */
   error?: string;
 }
@@ -63,7 +55,6 @@ export function renderConsentPage(props: ConsentPageProps): RawHtml {
   const scopeItems = props.scopes.map((s) => html`<li>${describeScope(s)}</li>`);
   const title = `Autorisation — ${props.branding.name}`;
   const errorBlock = props.error ? html`<div class="error" role="alert">${props.error}</div>` : "";
-  const orgField = renderOrgField(props.orgs ?? []);
   const bodyHtml = html`
     <h1>Autorisation</h1>
     ${errorBlock}
@@ -84,7 +75,6 @@ export function renderConsentPage(props: ConsentPageProps): RawHtml {
       <form method="POST" action="${props.action}">
         <input type="hidden" name="_csrf" value="${props.csrfToken}" />
         <input type="hidden" name="accept" value="true" />
-        ${orgField}
         <button type="submit" class="allow">Autoriser</button>
       </form>
     </div>

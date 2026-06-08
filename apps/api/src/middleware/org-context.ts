@@ -9,14 +9,19 @@ import { invalidRequest, forbidden } from "../lib/errors.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 
 /**
- * Middleware: extract X-Org-Id header, verify membership, inject orgId + orgRole + orgSlug.
- * Returns 400 if header is missing, 403 if user is not a member of the org.
+ * Middleware: resolve the organization for the request, verify membership, and
+ * inject orgId + orgRole + orgSlug.
  *
- * If an auth strategy already pinned an org (e.g. an OIDC dashboard token
- * scoped to a specific org), the X-Org-Id header MUST match the pinned
- * value. Otherwise a holder of a token scoped to org A — who is also a
- * member of org B by session — could spoof `X-Org-Id: B` and bypass the
- * token's consent scope. Symmetric with `requireAppContext`.
+ * Precedence: a strategy-pinned org, then the `X-Org-Id` header. If an auth
+ * strategy already pinned an org (e.g. a per-org MCP Bearer token or an OIDC
+ * dashboard token scoped to a specific org), the `X-Org-Id` header MUST match
+ * the pinned value — otherwise a holder of a token scoped to org A who is also
+ * a member of org B by session could spoof `X-Org-Id: B` and bypass the token's
+ * consent scope. Symmetric with `requireAppContext`.
+ *
+ * A caller that neither pins an org nor sends the header gets a 400. A token
+ * that pins an org reaches this middleware with `pinned` set, so it is only
+ * membership-checked here.
  */
 export function requireOrgContext() {
   return async (c: Context<AppEnv>, next: Next) => {
@@ -27,12 +32,13 @@ export function requireOrgContext() {
       throw forbidden("X-Org-Id does not match authenticated organization");
     }
 
+    const user = c.get("user");
     const orgId = pinned ?? headerOrg;
+
     if (!orgId) {
       throw invalidRequest("X-Org-Id header is required", "X-Org-Id");
     }
 
-    const user = c.get("user");
     const rows = await db
       .select({ role: organizationMembers.role, slug: organizations.slug })
       .from(organizationMembers)

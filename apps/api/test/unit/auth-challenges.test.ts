@@ -39,14 +39,20 @@ describe("auth-challenge registry", () => {
   it("prefers the longest matching prefix", () => {
     registerAuthChallenge("/api", () => "broad");
     registerAuthChallenge("/api/mcp", () => "specific");
-    expect(resolveAuthChallenge("/api/mcp")!({ origin: "http://x", status: 401 })).toBe("specific");
-    expect(resolveAuthChallenge("/api/other")!({ origin: "http://x", status: 401 })).toBe("broad");
+    expect(
+      resolveAuthChallenge("/api/mcp")!({ origin: "http://x", path: "/api/mcp", status: 401 }),
+    ).toBe("specific");
+    expect(
+      resolveAuthChallenge("/api/other")!({ origin: "http://x", path: "/api/other", status: 401 }),
+    ).toBe("broad");
   });
 
   it("re-registering a prefix replaces the builder (idempotent)", () => {
     registerAuthChallenge("/api/mcp", () => "v1");
     registerAuthChallenge("/api/mcp", () => "v2");
-    expect(resolveAuthChallenge("/api/mcp")!({ origin: "http://x", status: 401 })).toBe("v2");
+    expect(
+      resolveAuthChallenge("/api/mcp")!({ origin: "http://x", path: "/api/mcp", status: 401 }),
+    ).toBe("v2");
   });
 });
 
@@ -58,6 +64,14 @@ describe("auth-challenge responder", () => {
     const res = await appWith(401).request("http://inst.test/api/mcp");
     expect(res.status).toBe(401);
     expect(res.headers.get("WWW-Authenticate")).toBe("Bearer o=http://inst.test s=401");
+  });
+
+  it("forwards the request path to the builder (per-resource challenge under a prefix)", async () => {
+    // A prefix-registered builder derives a per-resource value (e.g. the
+    // per-org MCP PRM URL) from the concrete request path, not just the prefix.
+    registerAuthChallenge("/api/mcp/o", ({ path }) => `Bearer p=${path}`);
+    const res = await appWith(401).request("http://inst.test/api/mcp/o/org-123");
+    expect(res.headers.get("WWW-Authenticate")).toBe("Bearer p=/api/mcp/o/org-123");
   });
 
   it("attaches the challenge to a 403 with the 403 status passed through", async () => {

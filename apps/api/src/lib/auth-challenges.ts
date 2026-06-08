@@ -26,6 +26,12 @@ import type { AppEnv } from "../types/index.ts";
 export interface AuthChallengeArgs {
   /** Origin of the inbound request, e.g. `https://instance.example`. */
   origin: string;
+  /**
+   * Path of the inbound request, e.g. `/api/mcp/o/<orgId>`. A prefix-registered
+   * builder uses this to derive a per-resource challenge (e.g. the per-org MCP
+   * PRM URL) for the concrete resource that was requested, not just the prefix.
+   */
+  path: string;
   /** The status the pipeline produced: 401 (no/invalid token) or 403 (insufficient scope). */
   status: 401 | 403;
 }
@@ -79,7 +85,10 @@ export function authChallengeResponder(): MiddlewareHandler<AppEnv> {
     if (!build) return;
 
     const headers = new Headers(c.res.headers);
-    headers.set("WWW-Authenticate", build({ origin: new URL(c.req.url).origin, status }));
+    headers.set(
+      "WWW-Authenticate",
+      build({ origin: new URL(c.req.url).origin, path: c.req.path, status }),
+    );
     c.res = new Response(c.res.body, {
       status: c.res.status,
       statusText: c.res.statusText,

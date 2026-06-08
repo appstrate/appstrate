@@ -35,7 +35,7 @@ import type { OrgRole } from "@appstrate/core/permissions";
 import { logger } from "../../../lib/logger.ts";
 import { getOidcAuthApi } from "../auth/api.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { getMcpResourceUri } from "../../mcp/resource.ts";
+import { listMcpOrgAudiences } from "../../mcp/audiences.ts";
 
 /** Normalize a JWT `aud` (string | string[] | undefined) to a string array. */
 function normalizeAudiences(aud: unknown): string[] {
@@ -175,13 +175,18 @@ export async function verifyEndUserAccessToken(
   // `oidcGuardsPlugin`, but the local verifier adds defense-in-depth so
   // a future plugin update that mints tokens with an unexpected `aud`
   // cannot slip through unchecked.
-  // Includes the MCP resource URI so an RFC 8707 audience-bound token
-  // (`resource=<…>/api/mcp` → `aud: <…>/api/mcp`) verifies here. jose passes
-  // when the token's `aud` intersects this list; the `/api/mcp` resource server
-  // then additionally requires its own URI in `aud` (RFC 8707 MUST), and an
-  // MCP-scoped token reaching other routes is contained by RBAC (it carries
-  // only mcp:* permissions). Mirrors `validAudiences` in `auth/plugins.ts`.
-  const audience = [env.APP_URL, `${env.APP_URL}/api/auth`, getMcpResourceUri()];
+  //
+  // The platform + AS base audiences plus one per-org MCP resource URI each
+  // (`…/api/mcp/o/:org`, the same set the AS mints against), so an RFC 8707
+  // audience-bound MCP token (`resource=<…>/api/mcp/o/<id>` → `aud:
+  // <…>/api/mcp/o/<id>`) verifies here. The base is computed locally (not read
+  // from `mcpValidAudiences`) so verification never depends on the AS plugin
+  // having run `initMcpValidAudiences` first. jose passes when the token's `aud`
+  // intersects this list; the per-org MCP resource server then additionally
+  // requires ITS exact URI in `aud` (RFC 8707 MUST), confining the token to that
+  // one org, and an MCP-scoped token reaching other routes is contained by the
+  // outbound audience guard + RBAC.
+  const audience = [env.APP_URL, `${env.APP_URL}/api/auth`, ...listMcpOrgAudiences()];
 
   const tryVerify = async (jwks: JwksResolver) =>
     jose.jwtVerify(token, jwks, { issuer, audience, algorithms: ["ES256"] });

@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration tests for the `/api/mcp` HTTP surface through the real platform
- * middleware chain: public RFC 9728 discovery, the unauthenticated 401, the
- * authenticated Streamable-HTTP handshake, a full tools/list → tools/call →
- * invoke_operation round-trip (proving in-process dispatch), and RBAC denial.
+ * Integration tests for the per-org `/api/mcp/o/:org` HTTP surface through the
+ * real platform middleware chain: public RFC 9728 discovery, the
+ * unauthenticated 401, the authenticated Streamable-HTTP handshake, a full
+ * tools/list → tools/call → invoke_operation round-trip (proving in-process
+ * dispatch), and RBAC denial.
+ *
+ * Every caller carries an org (API key → its org; session → X-Org-Id), so each
+ * request is routed to THAT org's endpoint `/api/mcp/o/<orgId>` — the path the
+ * org guard requires to match the resolved org.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -25,17 +30,22 @@ setPlatformApp(app);
 
 const MCP_ACCEPT = "application/json, text/event-stream";
 
+/** The per-org MCP endpoint for an org id (`X-Org-Id` header carries the same). */
+function mcpPath(headers: Record<string, string>): string {
+  return `/api/mcp/o/${headers["X-Org-Id"]}`;
+}
+
 interface JsonRpcEnvelope {
   result?: Record<string, unknown>;
   error?: { code: number; message: string };
 }
 
-/** POST a JSON-RPC message to /api/mcp and return the parsed envelope. */
+/** POST a JSON-RPC message to the caller's per-org endpoint, parse the envelope. */
 async function rpc(
   headers: Record<string, string>,
   message: Record<string, unknown>,
 ): Promise<{ status: number; envelope: JsonRpcEnvelope }> {
-  const res = await app.request("/api/mcp", {
+  const res = await app.request(mcpPath(headers), {
     method: "POST",
     headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
     body: JSON.stringify(message),
@@ -74,22 +84,22 @@ describe("mcp discovery + auth gate", () => {
     resetCatalog();
   });
 
-  it("serves RFC 9728 metadata at the bare and path-inserted well-known URLs", async () => {
-    for (const path of [
-      "/.well-known/oauth-protected-resource",
-      "/.well-known/oauth-protected-resource/api/mcp",
-    ]) {
-      const res = await app.request(path);
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as Record<string, unknown>;
-      expect((body.resource as string).endsWith("/api/mcp")).toBe(true);
-      expect(Array.isArray(body.authorization_servers)).toBe(true);
-      expect(body.scopes_supported).toEqual(["mcp:read", "mcp:invoke"]);
-    }
+  it("serves per-org RFC 9728 metadata at the path-inserted well-known URL", async () => {
+    // A fixed org id — the well-known is public, so no auth is needed and the
+    // org need not exist for the metadata document to be served (the `resource`
+    // is derived purely from the path).
+    const orgId = "00000000-0000-0000-0000-0000000000ab";
+    const res = await app.request(`/.well-known/oauth-protected-resource/api/mcp/o/${orgId}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect((body.resource as string).endsWith(`/api/mcp/o/${orgId}`)).toBe(true);
+    expect(Array.isArray(body.authorization_servers)).toBe(true);
+    expect(body.scopes_supported).toEqual(["mcp:read", "mcp:invoke"]);
   });
 
-  it("rejects unauthenticated /api/mcp with 401 + RFC 9728 WWW-Authenticate challenge", async () => {
-    const res = await app.request("/api/mcp", {
+  it("rejects an unauthenticated per-org endpoint with 401 + RFC 9728 WWW-Authenticate challenge", async () => {
+    const orgId = "00000000-0000-0000-0000-0000000000ac";
+    const res = await app.request(`/api/mcp/o/${orgId}`, {
       method: "POST",
       headers: { "content-type": "application/json", Accept: MCP_ACCEPT },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
@@ -98,13 +108,13 @@ describe("mcp discovery + auth gate", () => {
     const challenge = res.headers.get("WWW-Authenticate");
     expect(challenge).not.toBeNull();
     expect(challenge!).toContain("Bearer");
-    // Points at the path-insertion PRM variant so the client can discover the
-    // AS. Anchored on the canonical APP_URL base (NOT the request origin) so
-    // audience binding stays correct behind a reverse proxy — see
-    // `mcp/router.ts` / `mcp/resource.ts`.
+    // Points at the per-org path-insertion PRM variant for the REQUESTED org so
+    // the client discovers the AS and requests a token bound to THIS org.
+    // Anchored on the canonical APP_URL base (NOT the request origin) so audience
+    // binding stays correct behind a reverse proxy — see `mcp/router.ts`.
     const appBase = getEnv().APP_URL.replace(/\/+$/, "");
     expect(challenge!).toContain(
-      `resource_metadata="${appBase}/.well-known/oauth-protected-resource/api/mcp"`,
+      `resource_metadata="${appBase}/.well-known/oauth-protected-resource/api/mcp/o/${orgId}"`,
     );
     expect(challenge!).toContain('scope="mcp:read mcp:invoke"');
     // No token presented → not a step-up, so no insufficient_scope error.
@@ -113,7 +123,7 @@ describe("mcp discovery + auth gate", () => {
 
   it("403s an authenticated caller lacking mcp:read with an insufficient_scope step-up challenge", async () => {
     const headers = await apiKeyHeaders(["agents:read"]);
-    const res = await app.request("/api/mcp", {
+    const res = await app.request(mcpPath(headers), {
       method: "POST",
       headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
@@ -126,12 +136,12 @@ describe("mcp discovery + auth gate", () => {
     expect(challenge!).toContain("resource_metadata=");
   });
 
-  it("rejects GET on /api/mcp with 405 for an authenticated caller", async () => {
+  it("rejects GET on the per-org endpoint with 405 for an authenticated caller", async () => {
     // Stateless transport (no session id, JSON response mode) does not serve a
     // standalone SSE stream, so GET is Method Not Allowed. This is the
     // behaviour the OpenAPI spec documents; assert it rather than trust it.
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
-    const res = await app.request("/api/mcp", {
+    const res = await app.request(mcpPath(headers), {
       method: "GET",
       headers: { ...headers, Accept: MCP_ACCEPT },
     });
@@ -139,16 +149,35 @@ describe("mcp discovery + auth gate", () => {
     expect(res.headers.get("Allow")).toBe("POST");
   });
 
-  it("rejects DELETE on /api/mcp with 405 (no session to terminate in stateless mode)", async () => {
+  it("rejects DELETE on the per-org endpoint with 405 (no session to terminate in stateless mode)", async () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
-    const res = await app.request("/api/mcp", { method: "DELETE", headers });
+    const res = await app.request(mcpPath(headers), { method: "DELETE", headers });
     expect(res.status).toBe(405);
     expect(res.headers.get("Allow")).toBe("POST");
   });
 
-  it("rejects an unauthenticated GET on /api/mcp with 401 (auth runs before the transport)", async () => {
-    const res = await app.request("/api/mcp", { method: "GET", headers: { Accept: MCP_ACCEPT } });
+  it("rejects an unauthenticated GET on a per-org endpoint with 401 (auth runs before the transport)", async () => {
+    const orgId = "00000000-0000-0000-0000-0000000000ad";
+    const res = await app.request(`/api/mcp/o/${orgId}`, {
+      method: "GET",
+      headers: { Accept: MCP_ACCEPT },
+    });
     expect(res.status).toBe(401);
+  });
+
+  it("403s a caller whose resolved org does not match the URL's org (url-vs-org guard)", async () => {
+    // An API key is bound to its own org; pointing it at a DIFFERENT org's
+    // endpoint must not silently act on the key's org — the router rejects the
+    // URL/identity mismatch. (For Bearer callers the audience check rejects
+    // earlier; this guard is the authoritative one for key/session callers.)
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const otherOrgId = "00000000-0000-0000-0000-0000000000ae";
+    const res = await app.request(`/api/mcp/o/${otherOrgId}`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
+    });
+    expect(res.status).toBe(403);
   });
 });
 
@@ -158,7 +187,7 @@ describe("mcp tool round-trip", () => {
     resetCatalog();
   });
 
-  it("lists the three tools with annotations after initialize", async () => {
+  it("lists the available tools with annotations after initialize", async () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     await rpc(headers, {
       jsonrpc: "2.0",
@@ -382,7 +411,7 @@ describe("mcp audit + rate limiting", () => {
       },
     } as const;
 
-    const first = await app.request("/api/mcp", {
+    const first = await app.request(mcpPath(headers), {
       method: "POST",
       headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
       body: JSON.stringify(init),
@@ -392,7 +421,7 @@ describe("mcp audit + rate limiting", () => {
 
     let sawRateLimit = false;
     for (let i = 0; i < 125 && !sawRateLimit; i++) {
-      const res = await app.request("/api/mcp", {
+      const res = await app.request(mcpPath(headers), {
         method: "POST",
         headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
         body: JSON.stringify(init),

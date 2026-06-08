@@ -16,7 +16,7 @@
  * upstream; here we assert our wiring advertises it.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { oauthClient } from "@appstrate/db/schema";
@@ -25,10 +25,15 @@ import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import {
-  registerProtectedResource,
+  registerProtectedResourceFamily,
   resetProtectedResources,
 } from "../../../../../lib/protected-resources.ts";
-import { getMcpResourceUri } from "../../../../mcp/resource.ts";
+import {
+  getMcpOrgResourceUri,
+  orgIdFromMcpAudience,
+  addMcpOrgAudience,
+  _resetMcpOrgAudiencesForTesting,
+} from "../../../../mcp/audiences.ts";
 import { getEnv } from "@appstrate/env";
 import oidcModule from "../../../index.ts";
 
@@ -138,15 +143,39 @@ describe("Dynamic Client Registration (RFC 7591)", () => {
 });
 
 describe("self-service token audience restriction (RFC 8707 / RFC 9728)", () => {
+  // A fixed org whose per-org MCP resource the self-service client may target.
+  const ORG_ID = "00000000-0000-0000-0000-0000000000c1";
+
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
     resetOidcGuardsLimiters();
-    // The MCP server registers this in production at module init; register it
-    // directly so the token-endpoint guard has a protected resource to compare
-    // against without loading the full mcp dispatch surface.
+    // The MCP server registers the per-org family in production at module init;
+    // register it directly so the token-endpoint guard
+    // (`enforceSelfServiceResourceRestriction` → `isProtectedResourceUri`) has a
+    // protected resource to compare against without loading the full mcp
+    // dispatch surface. ALSO add this org to the AS `validAudiences` allowlist
+    // so the library's own `checkResource` accepts the per-org URI — both gates
+    // must pass for a mint.
     resetProtectedResources();
-    registerProtectedResource("/api/mcp", getMcpResourceUri);
+    registerProtectedResourceFamily({
+      prefix: "/api/mcp/o",
+      deriveUri: (path) => {
+        const prefix = "/api/mcp/o/";
+        if (!path.startsWith(prefix)) return undefined;
+        const orgId = path.slice(prefix.length).split("/")[0] ?? "";
+        return orgId.length === 0 ? undefined : getMcpOrgResourceUri(orgId);
+      },
+      ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
+    });
+    _resetMcpOrgAudiencesForTesting();
+    addMcpOrgAudience(ORG_ID);
+  });
+
+  afterEach(() => {
+    // Drop the org audience so the mutable allowlist does not leak into other
+    // suites sharing the process.
+    _resetMcpOrgAudiencesForTesting();
   });
 
   async function registerSelfServiceClient(): Promise<string> {
@@ -198,11 +227,12 @@ describe("self-service token audience restriction (RFC 8707 / RFC 9728)", () => 
     expect(String(json.error)).toBe("invalid_target");
   });
 
-  it("allows a self-service client to request the MCP protected-resource audience", async () => {
+  it("allows a self-service client to request a per-org MCP protected-resource audience", async () => {
     const clientId = await registerSelfServiceClient();
-    const { status, json } = await tokenWithResource(clientId, getMcpResourceUri());
-    // The resource gate passes for the MCP audience; the request still fails
-    // downstream on the bogus code — but NOT with our `invalid_target`.
+    const { status, json } = await tokenWithResource(clientId, getMcpOrgResourceUri(ORG_ID));
+    // The resource gate passes for the per-org MCP audience (registered family +
+    // added to validAudiences); the request still fails downstream on the bogus
+    // code — but NOT with our `invalid_target`.
     expect(String(json.error ?? "")).not.toBe("invalid_target");
     if (status === 400) expect(String(json.error)).not.toBe("invalid_target");
   });

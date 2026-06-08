@@ -94,10 +94,17 @@ function extractHeaderParams(node: OperationNode): string[] {
   return names;
 }
 
-/** The MCP server's own endpoints, excluded from the operation catalog. */
+/**
+ * The MCP server's own endpoints, excluded from the operation catalog so it
+ * never offers them as invokable operations (no recursive self-invocation, no
+ * exposing the JSON-RPC envelope as a "tool"). Covers the per-org transport
+ * endpoints (`/api/mcp/o/:org`) and the RFC 9728 discovery well-known.
+ */
 function isExcludedPath(pathTemplate: string): boolean {
   return (
-    pathTemplate === "/api/mcp" || pathTemplate.startsWith("/.well-known/oauth-protected-resource")
+    pathTemplate === "/api/mcp" ||
+    pathTemplate.startsWith("/api/mcp/o") ||
+    pathTemplate.startsWith("/.well-known/oauth-protected-resource")
   );
 }
 

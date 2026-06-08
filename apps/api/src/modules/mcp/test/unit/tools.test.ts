@@ -57,7 +57,9 @@ describe("mcp catalog", () => {
 
   it("excludes the MCP server's own transport + discovery paths", () => {
     for (const op of getCatalog().operations.values()) {
-      expect(op.pathTemplate).not.toBe("/api/mcp");
+      // The per-org transport endpoint (`/api/mcp/o/:org`) must never be
+      // surfaced as an invokable operation — recursive self-invocation.
+      expect(op.pathTemplate.startsWith("/api/mcp")).toBe(false);
       expect(op.pathTemplate.startsWith("/.well-known/oauth-protected-resource")).toBe(false);
     }
   });

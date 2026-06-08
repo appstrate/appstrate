@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The three progressive-disclosure MCP tools.
+ * The MCP tool surface: three progressive-disclosure tools.
  *
  * The platform exposes ~250 operations. Surfacing them as 250 individual
  * MCP tools would blow past every client's tool-definition budget (50 tools
@@ -17,6 +17,11 @@
  * caller's auth context is forwarded verbatim, so an MCP call can never
  * exceed what the same credential could do over REST. `mcp:invoke` gates the
  * tool; the underlying operation still enforces its own permission.
+ *
+ * The caller's tenant is fixed by the endpoint, not chosen at runtime: the MCP
+ * server is exposed per organization (`/api/mcp/o/:org`) and the bearer token
+ * is RFC 8707 audience-bound to that one org, so there is no org-switching tool
+ * — the org comes from the URL/token, and the org-context middleware pins it.
  */
 
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -27,7 +32,7 @@ import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
 
-/** The three tools, named for telemetry/audit. */
+/** The tools, named for telemetry/audit. */
 export type McpToolName = "search_operations" | "describe_operation" | "invoke_operation";
 
 /** Outcome of an `invoke_operation` call, for audit + telemetry. */

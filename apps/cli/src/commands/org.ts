@@ -22,29 +22,7 @@
 import { resolveActiveProfile, requireLoggedIn, updateProfile } from "../lib/config.ts";
 import { listOrgs, createOrg, resolveOrgRef, type Org } from "../lib/orgs.ts";
 import { listApplications, findDefaultApplication, type Application } from "../lib/applications.ts";
-import { resolveAuthContext } from "../lib/api.ts";
-import { decodeAccessTokenIdentity } from "../lib/jwt-identity.ts";
 import { askText, select, exitWithError } from "../lib/ui.ts";
-
-/**
- * The org a session is bound to (chosen in the browser at login and stamped on
- * the token), if any. A bound session cannot switch org by re-pinning a header
- * — the server pins the token's org and rejects a mismatched `X-Org-Id` — so
- * the org commands must route the user back through `appstrate login`. Returns
- * `undefined` for legacy/unbound tokens, which still re-pin locally.
- */
-async function sessionBoundOrgId(profileName: string): Promise<string | undefined> {
-  try {
-    const auth = await resolveAuthContext(profileName);
-    return decodeAccessTokenIdentity(auth.accessToken).orgId;
-  } catch {
-    return undefined;
-  }
-}
-
-const BOUND_SWITCH_HINT =
-  "This session is bound to an organization (chosen at login). " +
-  "Run `appstrate login` to switch — you'll pick the organization in the browser.\n";
 
 export interface OrgBaseOptions {
   profile?: string;
@@ -132,11 +110,6 @@ export async function orgSwitchCommand(
   requireLoggedIn(profileName, profile);
   const picker = { ...defaultDeps, ...deps };
 
-  if (await sessionBoundOrgId(profileName)) {
-    process.stderr.write(BOUND_SWITCH_HINT);
-    process.exit(1);
-  }
-
   try {
     const orgs = await listOrgs(profileName);
     if (orgs.length === 0) {
@@ -196,15 +169,6 @@ export async function orgCreateCommand(
       input = prompted;
     }
     const created = await createOrg(profileName, input);
-    // A bound session can't re-pin via header (the token's org is authoritative),
-    // so create the org but route the user through `login` to start using it.
-    if (await sessionBoundOrgId(profileName)) {
-      process.stdout.write(
-        `Created "${created.name}" (${created.id}). ` +
-          "Run `appstrate login` to switch to it (pick it in the browser).\n",
-      );
-      return;
-    }
     // Server auto-provisions a default application on org creation — clear
     // any stale app pin from the previous org and re-pin the new default.
     await updateProfile(profileName, { orgId: created.id, applicationId: undefined });

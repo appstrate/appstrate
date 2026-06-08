@@ -62,8 +62,7 @@ import { getAppstrateScopes, OIDC_IDENTITY_SCOPES } from "./scopes.ts";
 import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
 import { isBlockedUrlWithDns } from "../../../lib/ssrf-dns.ts";
 import { markClientSelfService } from "../services/oauth-admin.ts";
-import { getPendingConsentOrg } from "../services/consent-org.ts";
-import { getMcpResourceUri } from "../../mcp/resource.ts";
+import { mcpValidAudiences, initMcpValidAudiences } from "../../mcp/audiences.ts";
 
 export type ActorType = "dashboard_user" | "end_user" | "user";
 export type { OrgRole as OrgRoleClaim } from "@appstrate/core/permissions";
@@ -146,12 +145,21 @@ export interface OidcBetterAuthPluginsOptions {
 export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): unknown[] {
   const env = getEnv();
   // The AS accepts these as RFC 8707 `resource` values and stamps the matching
-  // one as the token `aud`. The inbound MCP server (`/api/mcp`) is a protected
-  // resource with its own audience, so its canonical URI is allowed here — a
-  // CIMD/DCR client that requests `resource=<…>/api/mcp` gets an audience-bound
-  // token the MCP server then validates. Harmless when the mcp module is
-  // disabled (no resource server issues for it).
-  const validAudiences = [env.APP_URL, `${env.APP_URL}/api/auth`, getMcpResourceUri()];
+  // one as the token `aud`. The inbound MCP server is exposed per organization
+  // (`/api/mcp/o/:org`), so its protected resources are NOT static URIs — there
+  // is one canonical URI per org, layered onto this allowlist at runtime.
+  //
+  // Org-aware, mutable allowlist: the static platform + AS audiences plus one
+  // per-org MCP resource URI each, kept in sync via `mcp/audiences.ts` (seeded
+  // from the `organizations` table at boot, updated on `onOrgCreate` /
+  // `onOrgDelete`). Passed BY REFERENCE to both plugins below; both read it live
+  // per request (the library's `checkResource` reads `opts.validAudiences` on
+  // every mint, the guard reads it per request), so a freshly-created org's
+  // resource becomes mintable without a restart. Never reassign — mutate in
+  // place through the audiences module. The generic `/api/mcp` URI is gone: with
+  // no bare endpoint there is no single resource for it to bind.
+  initMcpValidAudiences([env.APP_URL, `${env.APP_URL}/api/auth`]);
+  const validAudiences = mcpValidAudiences;
 
   // Scopes a self-service (DCR / CIMD) client may request: identity scopes +
   // module-contributed end-user-grantable scopes (currently mcp:read/invoke).
@@ -258,40 +266,12 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       },
 
       /**
-       * Org binding for self-service (instance-level) clients. The user picks
-       * a target org on the consent screen; the consent POST handler validates
-       * membership and exposes it via `getPendingConsentOrg()`. Returning it as
-       * the `referenceId` stamps it onto the `oauthConsent` row + authorization
-       * code, and it persists on the refresh-token row — so every (re)mint of
-       * this grant carries the same org. Surfaces below in
-       * `customAccessTokenClaims` as the `org_id` claim. Org-level and
-       * application-level clients never set a pending org (their org is fixed
-       * in client metadata), so this returns `undefined` and is a no-op for
-       * them.
-       */
-      postLogin: {
-        // `shouldRedirect: false` → we never divert to BA's separate
-        // account-selection page; the org picker is embedded in our own
-        // consent screen (`pages/consent.ts`). `page` is required by the type
-        // but unreachable while `shouldRedirect` always returns false.
-        page: "/api/oauth/consent",
-        shouldRedirect: async () => false,
-        consentReferenceId: async () => getPendingConsentOrg(),
-      },
-
-      /**
        * Polymorphic claim builder. Branches on `metadata.level` (set at
        * client registration via `services/oauth-admin.ts`) and returns a
-       * snake_case claim payload compatible with RFC 9068 + OIDC Core. For
-       * instance-level (self-service) tokens, `referenceId` carries the
-       * consent-chosen org and becomes the `org_id` claim.
+       * snake_case claim payload compatible with RFC 9068 + OIDC Core.
        */
-      customAccessTokenClaims: async ({ user, metadata, referenceId }) =>
-        buildClaimsForClient(
-          user ?? null,
-          metadata as ClientMetadata | undefined,
-          typeof referenceId === "string" ? referenceId : undefined,
-        ),
+      customAccessTokenClaims: async ({ user, metadata }) =>
+        buildClaimsForClient(user ?? null, metadata as ClientMetadata | undefined),
 
       /**
        * Surface the same polymorphic claims on /userinfo so satellites can
@@ -429,12 +409,11 @@ function strOrNull(value: unknown): string | null {
 async function buildClaimsForClient(
   user: { id: string; email: string; name?: string | null; emailVerified?: boolean } | null,
   metadata: ClientMetadata | undefined,
-  referenceId?: string,
 ): Promise<Record<string, unknown>> {
   if (!user) return {};
   const level = metadata?.level;
   if (level === "instance") {
-    return buildInstanceLevelClaims(user, referenceId);
+    return buildInstanceLevelClaims(user);
   }
   if (level === "org") {
     return buildOrgLevelClaims(user, metadata!);
@@ -451,31 +430,24 @@ async function buildClaimsForClient(
   });
 }
 
-async function buildInstanceLevelClaims(
-  user: {
-    id: string;
-    email: string;
-    name?: string | null;
-    emailVerified?: boolean;
-  },
-  referenceId?: string,
-): Promise<Record<string, unknown>> {
+async function buildInstanceLevelClaims(user: {
+  id: string;
+  email: string;
+  name?: string | null;
+  emailVerified?: boolean;
+}): Promise<Record<string, unknown>> {
   // Instance clients serve platform audiences — dashboard SPA + satellite
   // admin tools. Reject end-user realm sessions so an OIDC token minted
   // under app A's scope cannot be replayed to mint an instance token.
   await assertUserRealm(user.id, "platform", { clientLevel: "instance" });
-  // Org context is optional for instance tokens. A self-service client (MCP /
-  // CLI) binds an org at consent → it arrives here as `referenceId` and
-  // becomes the `org_id` claim, which the auth strategy pins (no `X-Org-Id`
-  // needed). A token with no bound org omits the claim and resolves org
-  // per-request via `X-Org-Id`, as before. The strategy re-verifies membership
-  // on every request, so a stale/forged claim cannot grant access.
+  // Instance tokens carry NO org or application context. The user is a
+  // Better Auth user who may belong to multiple organizations — org is
+  // resolved per-request via X-Org-Id after authentication.
   return {
     actor_type: "user",
     email: user.email,
     email_verified: user.emailVerified === true,
     name: user.name ?? user.email,
-    ...(referenceId ? { org_id: referenceId } : {}),
   };
 }
 

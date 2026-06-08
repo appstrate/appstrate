@@ -39,6 +39,7 @@ import { getClientCached } from "../services/oauth-admin.ts";
 import { checkFamilyAndTouch } from "../services/cli-tokens.ts";
 import { scopesToPermissions } from "./claims.ts";
 import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
+import { extractOrgIdFromAudiences } from "../../mcp/audiences.ts";
 
 export const oidcAuthStrategy: AuthStrategy = {
   id: "oidc-jwt",
@@ -137,8 +138,9 @@ export const oidcAuthStrategy: AuthStrategy = {
       return null;
     }
 
-    // Surface the token's RFC 8707 audiences so a resource server (e.g. the
-    // MCP server at `/api/mcp`) can enforce that the token was issued for it.
+    // Surface the token's RFC 8707 audiences so a resource server (e.g. a
+    // per-org MCP endpoint `/api/mcp/o/:org`) can enforce that the token was
+    // issued for it.
     if (resolution) {
       resolution = {
         ...resolution,
@@ -162,22 +164,27 @@ async function resolveInstanceUser(claims: AccessTokenClaims): Promise<AuthResol
     });
     return null;
   }
-  // Instance tokens defer org resolution to the X-Org-Id middleware (same
-  // path as session auth) — UNLESS the token was bound to an org at consent
-  // (a self-service MCP/CLI token carrying an `org_id` claim). In that case we
-  // pin it here: `requireOrgContext` reads it as the `pinned` org, re-verifies
-  // membership, and derives `orgRole` + permissions — so the caller never has
-  // to send `X-Org-Id`. We still set `deferOrgResolution` so the rest of the
-  // pipeline (membership re-check + `resolvePermissions(orgRole)`) runs
-  // exactly as for the header path; only the org *source* changes. An org-less
-  // token (no claim) keeps the legacy header behaviour — full back-compat.
+  // Pin the org from the token's RFC 8707 audience. An MCP instance token is
+  // audience-bound to EXACTLY one org's per-org resource (`/api/mcp/o/:org`),
+  // so the bound org id lives in the token's audiences — not the URL. Pinning
+  // it here makes the downstream org-context middleware run its membership
+  // re-check (and derive role/permissions) against that org, even on the
+  // in-process self-dispatch path where no `X-Org-Id` header is present.
+  //
+  // We KEEP `deferOrgResolution: true`: the org is only a candidate at this
+  // point. Org-context still re-verifies membership and derives the current
+  // role/permissions (orgRole is left undefined here, permissions deferred —
+  // same as before). A token with NO per-org audience (header-path instance
+  // tokens, the dashboard SPA / CLI) leaves `orgId` undefined, preserving the
+  // original "defer entirely to X-Org-Id" behavior.
+  const boundOrgId = extractOrgIdFromAudiences(claims.audiences ?? []);
   return {
     user: {
       id: authUserRow.id,
       email: authUserRow.email,
       name: authUserRow.name ?? "",
     },
-    orgId: claims.orgId,
+    orgId: boundOrgId,
     authMethod: "oauth2-instance",
     permissions: [],
     deferOrgResolution: true,

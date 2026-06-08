@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * End-to-end coverage for the inbound MCP server (`/api/mcp`) against a REAL
- * booted server (Playwright `api` project) — exercising the parts that only
- * exist at full boot and cannot be reached by the in-process `bun:test`
+ * End-to-end coverage for the inbound MCP server (`/api/mcp/o/:org`) against a
+ * REAL booted server (Playwright `api` project) — exercising the parts that
+ * only exist at full boot and cannot be reached by the in-process `bun:test`
  * harness:
  *
  *  - Module permissions (`mcp:read`/`mcp:invoke`) aggregated into the AS scope
@@ -13,8 +13,14 @@
  *    (rate-limit) + real Postgres (audit).
  *  - The two onboarding paths end-to-end: an API key, and a self-service
  *    OAuth client (RFC 7591 DCR) running the PKCE + consent dance and minting
- *    an audience-bound token that the server accepts — and that is confined to
- *    `/api/mcp` (rejected on every other route).
+ *    a token audience-bound to ONE org's MCP resource (`…/api/mcp/o/<orgId>`)
+ *    that the server accepts — and that is confined to that org's endpoint
+ *    (rejected on every other route).
+ *
+ * The MCP server is exposed PER ORGANIZATION: a client targets
+ * `…/api/mcp/o/<orgId>` and obtains a token whose RFC 8707 `aud` is that exact
+ * URI, so it can only ever drive that one org. There is no `X-Org-Id` header —
+ * the org is in the URL (API-key callers) / the token audience (Bearer).
  *
  * Two facts make this an `api`-project test (no browser): the MCP transport is
  * plain JSON-RPC over POST, and the OAuth flow's only HTML step (the consent
@@ -27,21 +33,26 @@ import { createApiKey } from "../../helpers/seed.ts";
 import type { APIRequestContext } from "@playwright/test";
 
 const BASE = "http://localhost:3000";
-const MCP_URL = `${BASE}/api/mcp`;
 const MCP_ACCEPT = "application/json, text/event-stream";
+
+/** The per-org MCP endpoint + its canonical RFC 8707 resource URI (identical). */
+function mcpUrlForOrg(orgId: string): string {
+  return `${BASE}/api/mcp/o/${orgId}`;
+}
 
 interface JsonRpcEnvelope {
   result?: Record<string, unknown>;
   error?: { code: number; message: string };
 }
 
-/** POST a JSON-RPC message to /api/mcp with the given auth headers. */
+/** POST a JSON-RPC message to a per-org MCP endpoint with the given auth headers. */
 async function mcpRpc(
   request: APIRequestContext,
+  url: string,
   headers: Record<string, string>,
   message: Record<string, unknown>,
 ): Promise<{ status: number; envelope: JsonRpcEnvelope }> {
-  const res = await request.post(MCP_URL, {
+  const res = await request.post(url, {
     headers: { ...headers, "Content-Type": "application/json", Accept: MCP_ACCEPT },
     data: message,
   });
@@ -99,21 +110,28 @@ test.describe("MCP over an API key (full stack)", () => {
     orgContext,
   }) => {
     // A no-scope key inherits the creator's role scopes; the owner role grants
-    // mcp:read + mcp:invoke (module RBAC, aggregated at boot).
+    // mcp:read + mcp:invoke (module RBAC, aggregated at boot). The key is bound
+    // to the org, so the URL must name that same org (the router's url-vs-org
+    // guard) — no X-Org-Id header.
     const { key } = await createApiKey(apiClient, "mcp-e2e");
-    const headers = { Authorization: `Bearer ${key}`, "X-Org-Id": orgContext.org.orgId };
+    const url = mcpUrlForOrg(orgContext.org.orgId);
+    const headers = { Authorization: `Bearer ${key}` };
 
-    const init = await mcpRpc(request, headers, INIT);
+    const init = await mcpRpc(request, url, headers, INIT);
     expect(init.status).toBe(200);
     expect(init.envelope.result?.serverInfo).toBeTruthy();
 
-    const list = await mcpRpc(request, headers, { jsonrpc: "2.0", id: 2, method: "tools/list" });
+    const list = await mcpRpc(request, url, headers, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/list",
+    });
     const names = ((list.envelope.result?.tools as Array<{ name: string }>) ?? [])
       .map((t) => t.name)
       .sort();
     expect(names).toEqual(["describe_operation", "invoke_operation", "search_operations"]);
 
-    const search = await mcpRpc(request, headers, {
+    const search = await mcpRpc(request, url, headers, {
       jsonrpc: "2.0",
       id: 3,
       method: "tools/call",
@@ -124,7 +142,7 @@ test.describe("MCP over an API key (full stack)", () => {
     expect((searchPayload.data.count as number) ?? 0).toBeGreaterThan(0);
 
     // invoke a stable, side-effect-free GET (lists the org's applications).
-    const invoke = await mcpRpc(request, headers, {
+    const invoke = await mcpRpc(request, url, headers, {
       jsonrpc: "2.0",
       id: 4,
       method: "tools/call",
@@ -135,25 +153,24 @@ test.describe("MCP over an API key (full stack)", () => {
     expect(payload.data.status).toBe(200);
   });
 
-  test("rejects GET /api/mcp with 405 (POST-only transport)", async ({
+  test("rejects GET on the per-org endpoint with 405 (POST-only transport)", async ({
     request,
     apiClient,
     orgContext,
   }) => {
     const { key } = await createApiKey(apiClient, "mcp-e2e-405");
-    const res = await request.get(MCP_URL, {
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "X-Org-Id": orgContext.org.orgId,
-        Accept: MCP_ACCEPT,
-      },
+    const res = await request.get(mcpUrlForOrg(orgContext.org.orgId), {
+      headers: { Authorization: `Bearer ${key}`, Accept: MCP_ACCEPT },
     });
     expect(res.status()).toBe(405);
     expect(res.headers()["allow"]).toContain("POST");
   });
 
-  test("rejects an unauthenticated call with 401 + RFC 9728 challenge", async ({ request }) => {
-    const res = await request.post(MCP_URL, {
+  test("rejects an unauthenticated call with 401 + RFC 9728 challenge", async ({
+    request,
+    orgContext,
+  }) => {
+    const res = await request.post(mcpUrlForOrg(orgContext.org.orgId), {
       headers: { "Content-Type": "application/json", Accept: MCP_ACCEPT },
       data: INIT,
     });
@@ -196,7 +213,6 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
     request: APIRequestContext,
     cookie: string,
     clientId: string,
-    bindOrgId?: string,
   ): Promise<{ code: string; verifier: string }> {
     const verifier = randomVerifier();
     const challenge = await sha256Base64Url(verifier);
@@ -237,9 +253,7 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
         accept: "application/json",
         origin: BASE,
       },
-      form: bindOrgId
-        ? { _csrf: csrfToken, accept: "true", org_id: bindOrgId }
-        : { _csrf: csrfToken, accept: "true" },
+      form: { _csrf: csrfToken, accept: "true" },
       maxRedirects: 0,
     });
     expect([200, 302]).toContain(consentRes.status());
@@ -316,7 +330,7 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
     expect((await res.json()).error).toBe("invalid_target");
   });
 
-  test("mints an MCP-audience token, drives /api/mcp, and is confined off it", async ({
+  test("mints a per-org MCP token, drives that org's endpoint, and is confined off it", async ({
     playwright,
     orgContext,
   }) => {
@@ -328,26 +342,28 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
     // hit Better Auth's Origin/CSRF gate — not the path a real client takes.)
     const anon = await playwright.request.newContext();
     try {
+      const mcpUrl = mcpUrlForOrg(orgContext.org.orgId);
       const clientId = await registerDcrClient(anon);
       const { code, verifier } = await authorizeToCode(anon, orgContext.auth.cookie, clientId);
 
-      // Mint a token bound to the MCP resource (the only audience a self-service
-      // client may request).
-      const minted = await exchange(anon, clientId, code, verifier, MCP_URL);
+      // Mint a token bound to THIS org's MCP resource (the per-org URI is the
+      // only audience a self-service client may request for it).
+      const minted = await exchange(anon, clientId, code, verifier, mcpUrl);
       expect(minted.status).toBe(200);
       const accessToken = minted.body.access_token as string;
       expect(typeof accessToken).toBe("string");
 
-      const headers = { Authorization: `Bearer ${accessToken}`, "X-Org-Id": orgContext.org.orgId };
+      // The token's audience IS the org binding — no X-Org-Id header.
+      const headers = { Authorization: `Bearer ${accessToken}` };
 
-      // The token is accepted at /api/mcp (audience matches) and carries the
-      // user's authority (owner → mcp:read), so initialize succeeds.
-      const init = await mcpRpc(anon, headers, INIT);
+      // Accepted at the org's endpoint (audience matches) and carries the user's
+      // authority (owner → mcp:read), so initialize succeeds.
+      const init = await mcpRpc(anon, mcpUrl, headers, INIT);
       expect(init.status).toBe(200);
       expect(init.envelope.result?.serverInfo).toBeTruthy();
 
       // ...and an invoke dispatches in-process as the user (owner → applications:read).
-      const invoke = await mcpRpc(anon, headers, {
+      const invoke = await mcpRpc(anon, mcpUrl, headers, {
         jsonrpc: "2.0",
         id: 5,
         method: "tools/call",
@@ -374,28 +390,29 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
   }) => {
     // RFC 8707 resources persist on the refresh-token row (Better Auth 1.7) and
     // the token-endpoint guard runs on the refresh_token grant too, so a
-    // refreshed access token must keep the SAME confinement: usable at /api/mcp,
-    // rejected everywhere else. Without this, a client could launder a confined
-    // token into an unconfined one across a refresh.
+    // refreshed access token must keep the SAME confinement: usable at the org's
+    // endpoint, rejected everywhere else. Without this, a client could launder a
+    // confined token into an unconfined one across a refresh.
     const anon = await playwright.request.newContext();
     try {
+      const mcpUrl = mcpUrlForOrg(orgContext.org.orgId);
       const clientId = await registerDcrClient(anon);
       const { code, verifier } = await authorizeToCode(anon, orgContext.auth.cookie, clientId);
-      const minted = await exchange(anon, clientId, code, verifier, MCP_URL);
+      const minted = await exchange(anon, clientId, code, verifier, mcpUrl);
       expect(minted.status).toBe(200);
       const refreshToken = minted.body.refresh_token as string;
       expect(typeof refreshToken).toBe("string"); // offline_access was requested
 
-      const refreshed = await refresh(anon, clientId, refreshToken, MCP_URL);
+      const refreshed = await refresh(anon, clientId, refreshToken, mcpUrl);
       expect(refreshed.status).toBe(200);
       const newToken = refreshed.body.access_token as string;
       expect(typeof newToken).toBe("string");
       expect(newToken).not.toBe(minted.body.access_token);
 
-      const headers = { Authorization: `Bearer ${newToken}`, "X-Org-Id": orgContext.org.orgId };
+      const headers = { Authorization: `Bearer ${newToken}` };
 
-      // Refreshed token still drives /api/mcp.
-      const init = await mcpRpc(anon, headers, INIT);
+      // Refreshed token still drives the org's endpoint.
+      const init = await mcpRpc(anon, mcpUrl, headers, INIT);
       expect(init.status).toBe(200);
       expect(init.envelope.result?.serverInfo).toBeTruthy();
 
@@ -404,50 +421,6 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
         headers: { ...headers, "X-Application-Id": orgContext.org.defaultAppId },
       });
       expect(lifted.status()).toBe(401);
-    } finally {
-      await anon.dispose();
-    }
-  });
-
-  test("an org bound at consent drives /api/mcp with NO X-Org-Id header", async ({
-    playwright,
-    orgContext,
-  }) => {
-    // The headline of the org-binding work: the user picks an org on the
-    // consent screen, it rides the grant as the token's `org_id` claim, and the
-    // MCP client calls /api/mcp with ONLY a Bearer token — no `X-Org-Id`. The
-    // strategy pins the org from the claim; an invoke then dispatches in-process
-    // against that org.
-    const anon = await playwright.request.newContext();
-    try {
-      const clientId = await registerDcrClient(anon);
-      const { code, verifier } = await authorizeToCode(
-        anon,
-        orgContext.auth.cookie,
-        clientId,
-        orgContext.org.orgId,
-      );
-      const minted = await exchange(anon, clientId, code, verifier, MCP_URL);
-      expect(minted.status).toBe(200);
-      const accessToken = minted.body.access_token as string;
-      expect(typeof accessToken).toBe("string");
-
-      // NO X-Org-Id — org context comes entirely from the bound token.
-      const headers = { Authorization: `Bearer ${accessToken}` };
-
-      const init = await mcpRpc(anon, headers, INIT);
-      expect(init.status).toBe(200);
-      expect(init.envelope.result?.serverInfo).toBeTruthy();
-
-      const invoke = await mcpRpc(anon, headers, {
-        jsonrpc: "2.0",
-        id: 7,
-        method: "tools/call",
-        params: { name: "invoke_operation", arguments: { operation_id: "listApplications" } },
-      });
-      const payload = toolPayload(invoke.envelope);
-      expect(payload.isError).toBe(false);
-      expect(payload.data.status).toBe(200);
     } finally {
       await anon.dispose();
     }
