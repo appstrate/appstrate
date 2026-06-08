@@ -215,10 +215,27 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List available integrations",
       description:
-        "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current application.",
+        "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current application. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "limit",
+          in: "query",
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 100 },
+        },
+        {
+          name: "offset",
+          in: "query",
+          schema: { type: "integer", minimum: 0, default: 0 },
+        },
+        {
+          name: "fields",
+          in: "query",
+          description:
+            "Comma-separated allowlist of fields to return per item (`id` is always included). Allowed: id, manifest, orgId, source, active, block_user_connections. An unknown field is a 400.",
+          schema: { type: "string" },
+        },
       ],
       responses: {
         "200": {
