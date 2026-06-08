@@ -45,7 +45,12 @@ import { recordAuditFromContext } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { getPlatformApp } from "../../lib/platform-app.ts";
 import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "./audiences.ts";
-import { buildMcpTools, type Dispatch, type McpObserver } from "./tools.ts";
+import {
+  buildMcpTools,
+  FORWARDED_AUTH_HEADERS,
+  type Dispatch,
+  type McpObserver,
+} from "./tools.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 /** Path prefix owning the per-org sub-tree. `:org` is the organization id. */
@@ -129,16 +134,6 @@ This MCP server is scoped to ONE organization — the one this endpoint serves �
 - Runs are asynchronous: triggering one returns a runId, then it moves pending→running→success|failed|timeout|cancelled — poll a run get/list operation for status.
 - Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
 - Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.`;
-
-/** Auth-relevant headers forwarded onto in-process dispatched requests. */
-const FORWARDED_AUTH_HEADERS = [
-  "authorization",
-  "cookie",
-  "x-org-id",
-  "x-application-id",
-  "appstrate-user",
-  "appstrate-version",
-];
 
 function forwardAuthHeaders(src: Headers): Headers {
   const out = new Headers();

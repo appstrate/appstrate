@@ -1,1 +1,0 @@
-ALTER TABLE "oauth_clients" ALTER COLUMN "level" SET DEFAULT 'instance';

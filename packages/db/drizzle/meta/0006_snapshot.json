@@ -1,5 +1,5 @@
 {
-  "id": "730ff8db-0c3f-419f-adab-fe33e03d00e4",
+  "id": "a034ec32-4c1c-49e1-925d-3dd311bd6186",
   "prevId": "628d935b-d39a-4932-8c46-00c6b6664554",
   "version": "7",
   "dialect": "postgresql",
@@ -6807,7 +6807,8 @@
           "name": "level",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": "'instance'"
         },
         "referenced_org_id": {
           "name": "referenced_org_id",

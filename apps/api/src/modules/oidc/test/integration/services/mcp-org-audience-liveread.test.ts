@@ -22,11 +22,12 @@ import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import {
-  registerProtectedResource,
+  registerProtectedResourceFamily,
   resetProtectedResources,
 } from "../../../../../lib/protected-resources.ts";
 import {
   getMcpOrgResourceUri,
+  orgIdFromMcpAudience,
   addMcpOrgAudience,
   _resetMcpOrgAudiencesForTesting,
 } from "../../../../mcp/audiences.ts";
@@ -86,11 +87,19 @@ describe("per-org MCP audience honoured live on /oauth2/token (library contract)
     await flushRedis();
     resetOidcGuardsLimiters();
     _resetMcpOrgAudiencesForTesting();
-    // Register the per-org resource so the self-service resource-restriction
-    // guard (which checks the protected-resource registry, not validAudiences)
-    // passes — isolating the validAudiences live-read as the discriminator.
+    // Register the per-org resource FAMILY (mirrors the production registration
+    // in `mcp/router.ts`) so the self-service resource-restriction guard (which
+    // checks the protected-resource registry, not validAudiences) passes —
+    // isolating the validAudiences live-read as the discriminator.
     resetProtectedResources();
-    registerProtectedResource(`/api/mcp/o/${orgId}`, () => orgUri);
+    registerProtectedResourceFamily({
+      prefix: "/api/mcp/o",
+      deriveUri: (path) => {
+        const id = path.slice("/api/mcp/o/".length).split("/")[0];
+        return id ? getMcpOrgResourceUri(id) : undefined;
+      },
+      ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
+    });
   });
 
   it("rejects the per-org resource BEFORE it is added to validAudiences", async () => {

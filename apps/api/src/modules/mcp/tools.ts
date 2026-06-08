@@ -94,26 +94,38 @@ function emit(ctx: McpToolContext, event: McpToolEvent): void {
 const DEFAULT_SEARCH_LIMIT = 25;
 const MAX_SEARCH_LIMIT = 100;
 const METHODS_WITH_BODY = new Set(["POST", "PUT", "PATCH"]);
-// Headers the caller may NOT set via the `headers` arg: the auth context is
-// forwarded from the inbound MCP request and must not be reshaped by the
-// model (no swapping credentials, switching org/app, or forging end-user
-// impersonation). Everything else (e.g. Credential-Proxy target headers) is
-// allowed — still bounded by RBAC on the dispatched route.
-const PROTECTED_HEADERS = new Set([
+/**
+ * Auth-context headers the router forwards from the inbound MCP request onto
+ * every in-process dispatch (see `forwardAuthHeaders` in `router.ts`). They
+ * carry the caller's identity/tenant and are the SAME set the model may not
+ * override via the `headers` arg — `PROTECTED_HEADERS` is derived from this so
+ * the two can never drift (a new forwarded auth header is protected by
+ * construction).
+ */
+export const FORWARDED_AUTH_HEADERS = [
   "authorization",
   "cookie",
-  "host",
-  "content-length",
   "x-org-id",
   "x-application-id",
   "appstrate-user",
   "appstrate-version",
-  // The internal self-dispatch marker is set by THIS layer (see the dispatch
-  // request build below) and exempts the request from outbound resource-
-  // audience confinement. A client-supplied value would be a forgery attempt —
-  // drop it here so only our authoritative, nonce-valued header survives. (Even
-  // without this, the value must equal an unguessable per-process secret, so a
-  // forgery cannot succeed; this is defence in depth.)
+] as const;
+// Headers the caller may NOT set via the `headers` arg: the auth context is
+// forwarded from the inbound MCP request and must not be reshaped by the
+// model (no swapping credentials, switching org/app, or forging end-user
+// impersonation). Everything else (e.g. Credential-Proxy target headers) is
+// allowed — still bounded by RBAC on the dispatched route. The forwarded auth
+// set plus the hop-by-hop headers we set ourselves (`host`, `content-length`)
+// and the internal self-dispatch marker: that marker is set by THIS layer (see
+// the dispatch request build below) and exempts the request from outbound
+// resource-audience confinement — a client-supplied value would be a forgery
+// attempt, dropped here so only our authoritative, nonce-valued header survives.
+// (Even without this, the value must equal an unguessable per-process secret, so
+// a forgery cannot succeed; this is defence in depth.)
+const PROTECTED_HEADERS = new Set<string>([
+  ...FORWARDED_AUTH_HEADERS,
+  "host",
+  "content-length",
   internalDispatchHeader()[0],
 ]);
 // Cap the buffered response body so a large list endpoint can't dump
