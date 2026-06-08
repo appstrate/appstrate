@@ -252,7 +252,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
   });
 
   // RFC 8707 audience confinement for OAuth bearer tokens. A token bound to a
-  // protected resource (e.g. `/api/mcp`) must be presented to that resource and
+  // protected resource (e.g. `/api/mcp/o/:org`) must be presented to that resource and
   // may not be replayed elsewhere — see `protected-resources.ts`. Runs after
   // auth (needs `authExtra.tokenAudiences`) but before org-context/permission
   // resolution, so an audience-mismatched token is rejected before any

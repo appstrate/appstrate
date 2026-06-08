@@ -128,7 +128,7 @@ export const rateLimit = createRateLimitMiddleware({
 });
 
 /**
- * Rate limiter for the inbound MCP server (`/api/mcp`).
+ * Rate limiter for the inbound MCP server (`/api/mcp/o/:org`).
  *
  * Keys on the caller's identity at JSON-RPC *envelope* granularity (one POST =
  * one consumed point), independent of how many tools or batched calls the

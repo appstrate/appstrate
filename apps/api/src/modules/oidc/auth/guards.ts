@@ -728,7 +728,15 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
             if (clientId) await enforceClientRateLimit(clientId);
 
             const grantType = body.grant_type;
-            if (grantType === "authorization_code" || grantType === "refresh_token") {
+            // Every grant that reaches `createUserTokens` and can carry a
+            // `resource` is gated here — `client_credentials` included, so a
+            // future M2M client cannot mint an un-audience-bound (or
+            // multi-resource self-service) token by switching grant type.
+            if (
+              grantType === "authorization_code" ||
+              grantType === "refresh_token" ||
+              grantType === "client_credentials"
+            ) {
               // Validate EVERY requested resource, not just the first. The
               // oauth-provider's `checkResource` accepts `resource` as an array
               // and stamps the FULL list into `aud`, so validating only

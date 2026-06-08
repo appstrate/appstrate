@@ -163,6 +163,22 @@ export function enforceResourceAudience(): MiddlewareHandler<AppEnv> {
           `Access token is not audience-bound to this resource (${target.prefix}).`,
         );
       }
+      // A token may bind to at most ONE protected resource. Reject one that
+      // ALSO carries a different protected-resource URI (e.g. a second org's
+      // per-org MCP endpoint) so cross-resource confinement is enforced here, by
+      // the audience layer itself, rather than relying on a downstream per-
+      // resource guard (the per-org MCP router pins the first audience and
+      // 403s a mismatch, but that is a backstop, not the boundary). Self-service
+      // tokens are already capped at one resource at mint time; this closes the
+      // first-party multi-resource case too.
+      const foreignResource = audiences.find(
+        (a) => typeof a === "string" && a !== target.uri && isProtectedResourceUri(a),
+      );
+      if (foreignResource) {
+        throw unauthorized(
+          "Access token is bound to more than one protected resource; it may target only one.",
+        );
+      }
       return next();
     }
 

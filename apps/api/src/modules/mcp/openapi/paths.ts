@@ -105,6 +105,7 @@ export const mcpPaths = {
                     type: "array",
                     items: { type: "string", format: "uri" },
                   },
+                  scopes_supported: { type: "array", items: { type: "string" } },
                   bearer_methods_supported: { type: "array", items: { type: "string" } },
                   resource_documentation: { type: "string", format: "uri" },
                 },

@@ -156,8 +156,19 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
   // per request (the library's `checkResource` reads `opts.validAudiences` on
   // every mint, the guard reads it per request), so a freshly-created org's
   // resource becomes mintable without a restart. Never reassign — mutate in
-  // place through the audiences module. The generic `/api/mcp` URI is gone: with
-  // no bare endpoint there is no single resource for it to bind.
+  // place through the audiences module. The generic `/api/mcp/o/:org` URIs are
+  // per-org; there is no bare `/api/mcp` resource.
+  //
+  // LIBRARY CONTRACT (verified ≤ @better-auth/oauth-provider 1.7.0-beta.4):
+  // `oauth-provider` must read `opts.validAudiences` LIVE on every
+  // `/oauth2/token` call — its `checkResource` rebuilds a Set from
+  // `opts.validAudiences.filter(...)` per call, and `opts` holds this array by
+  // reference (a spread of the options object, not a clone). If a future version
+  // snapshots `validAudiences` into a Set at plugin construction, per-org minting
+  // silently breaks for orgs created after boot. The regression guard is
+  // `oidc/test/integration/services/mcp-org-audience-liveread.test.ts` (add an
+  // org audience at runtime → mint accepts it). Keep `mcpValidAudiences` a plain
+  // array — the library calls `.filter` on it.
   initMcpValidAudiences([env.APP_URL, `${env.APP_URL}/api/auth`]);
   const validAudiences = mcpValidAudiences;
 

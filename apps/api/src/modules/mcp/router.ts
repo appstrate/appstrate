@@ -31,6 +31,7 @@
 
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { z } from "zod";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "@appstrate/mcp-transport";
 import { getEnv } from "@appstrate/env";
@@ -61,6 +62,26 @@ const PRM_PATH_PREFIX = "/.well-known/oauth-protected-resource";
 const PRM_PATH = `${PRM_PATH_PREFIX}${MCP_PATH}`;
 /** Scopes this resource accepts — advertised in PRM + the 401/403 challenge. */
 const MCP_SCOPES = ["mcp:read", "mcp:invoke"] as const;
+
+// GUID-shaped (8-4-4-4-12 hex), NOT strict RFC version/variant — the security
+// property is "no character that re-encodes" (rejects `/`, `.`, `%2F`, …), not
+// which UUID version minted the id. `z.guid()` is the loose form; `z.uuid()`
+// would additionally pin version/variant bits, which this check does not need.
+const orgIdSchema = z.guid();
+
+/**
+ * Whether `:org` is a well-formed `organizations.id`. Validated before it reaches
+ * either confinement check: the inbound audience guard derives the resource URI
+ * from `c.req.path` (which preserves `%2F` / `%2E`), while the org-guard below
+ * compares `c.req.param("org")` (which decodes them) — two normalizations of the
+ * same segment. Rejecting anything that is not a bare GUID up front means a
+ * crafted segment (`%2F`, `.`, `..`, sub-paths) can never reach, and be
+ * normalized differently by, the two checks. Org ids never contain re-encodable
+ * chars, so this rejects nothing legitimate.
+ */
+function isCanonicalOrgId(org: string | undefined): org is string {
+  return org !== undefined && orgIdSchema.safeParse(org).success;
+}
 
 /**
  * Parse the org-id segment out of a path under the per-org family
@@ -171,8 +192,9 @@ export function createMcpRouter(): Hono<AppEnv> {
   app.get(PRM_PATH, (c: Context<AppEnv>) => {
     const org = c.req.param("org");
     // The route only matches with an `:org` segment present, but Hono types the
-    // param as optional — guard so the resource URI is never built from `undefined`.
-    if (!org) throw notFound("Organization not found");
+    // param as optional — guard so the resource URI is never built from a
+    // non-canonical id (and a malformed segment never resolves to a resource).
+    if (!isCanonicalOrgId(org)) throw notFound("Organization not found");
     const appBase = getEnv().APP_URL.replace(/\/+$/, "");
     return c.json({
       resource: getMcpOrgResourceUri(org),
@@ -223,7 +245,9 @@ export function createMcpRouter(): Hono<AppEnv> {
     // `:org` path param so an API-key caller cannot reach a DIFFERENT org's
     // endpoint than the one its key authorises, and as defence in depth for
     // Bearer. Org membership itself was already enforced by org-context.
-    if (c.get("orgId") !== c.req.param("org")) {
+    const org = c.req.param("org");
+    if (!isCanonicalOrgId(org)) throw notFound("Organization not found");
+    if (c.get("orgId") !== org) {
       throw forbidden("This MCP endpoint serves a different organization than your credentials.");
     }
 

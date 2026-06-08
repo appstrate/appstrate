@@ -535,7 +535,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     if (sendBody) headers.set("content-type", "application/json");
 
     // Mark this as a trusted in-process self-dispatch. The inbound MCP request
-    // already cleared the `/api/mcp` resource boundary's audience check; this
+    // already cleared the `/api/mcp/o/:org` resource boundary's audience check; this
     // re-entry targets a non-resource route (`/api/agents`, …) carrying the
     // same audience-bound token, which the outbound half of
     // `enforceResourceAudience` would otherwise reject. The marker value is an

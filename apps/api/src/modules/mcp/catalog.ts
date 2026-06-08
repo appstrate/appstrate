@@ -102,7 +102,6 @@ function extractHeaderParams(node: OperationNode): string[] {
  */
 function isExcludedPath(pathTemplate: string): boolean {
   return (
-    pathTemplate === "/api/mcp" ||
     pathTemplate.startsWith("/api/mcp/o") ||
     pathTemplate.startsWith("/.well-known/oauth-protected-resource")
   );

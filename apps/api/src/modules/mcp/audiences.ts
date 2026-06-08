@@ -29,6 +29,15 @@ export const mcpValidAudiences: string[] = [];
 let staticBase: readonly string[] = [];
 const orgIds = new Set<string>();
 
+/**
+ * Cached end-user-token verifier audience list, keyed on the `APP_URL` it was
+ * built from. Invalidated on every `rebuild()` (org set changed) AND whenever
+ * `APP_URL` changes (the base URIs derive from it — fixed per process in prod,
+ * but swapped by tests that re-init `getEnv`), so the cache can never serve a
+ * stale base.
+ */
+let verifyAudiencesCache: { appBase: string; audiences: string[] } | null = null;
+
 /** Canonical per-org MCP resource URI — byte-stable (org id, not slug). */
 export function getMcpOrgResourceUri(orgId: string): string {
   return `${getEnv().APP_URL.replace(/\/+$/, "")}/api/mcp/o/${orgId}`;
@@ -79,6 +88,10 @@ export function extractOrgIdFromAudiences(audiences: readonly unknown[]): string
 function rebuild(): void {
   mcpValidAudiences.length = 0;
   mcpValidAudiences.push(...staticBase, ...[...orgIds].map(getMcpOrgResourceUri));
+  // Drop the verifier cache so the next `getEndUserVerifyAudiences()` rebuilds
+  // it against the new org set — keeps the verifier in lockstep with the mint
+  // allowlist without recomputing on every verify.
+  verifyAudiencesCache = null;
 }
 
 /**
@@ -111,20 +124,28 @@ export function removeMcpOrgAudience(orgId: string): void {
   rebuild();
 }
 
-/** Whether `uri` is a currently-registered per-org MCP resource URI. */
-export function isMcpOrgAudience(uri: string): boolean {
-  return [...orgIds].some((id) => getMcpOrgResourceUri(id) === uri);
-}
-
 /**
- * The current per-org MCP resource URIs (no static base). Used by the token
- * VERIFIER (`enduser-token.ts`), which builds its own audience allowlist from
- * the platform/AS base + these — independent of `initMcpValidAudiences` having
- * run, so verification works in any context (the mint-side `mcpValidAudiences`
- * is only populated once the AS plugin is constructed at boot).
+ * Audience allowlist for the end-user token VERIFIER (`enduser-token.ts`): the
+ * platform + AS base URIs plus one per-org MCP resource URI each — exactly the
+ * set the AS mints against. The base is computed locally from `APP_URL` (NOT
+ * read from `mcpValidAudiences`), so verification works in any context,
+ * independent of the AS plugin having run `initMcpValidAudiences` at boot (e.g.
+ * unit tests that never construct the plugin).
+ *
+ * Cached and invalidated on every `rebuild()` (org create / delete / seed), so
+ * the hot auth path — every `Bearer ey…` verify, MCP-bound or not — pays O(1)
+ * array reuse instead of rebuilding O(orgs) strings per request. jose treats the
+ * `audience` argument as read-only, so returning the shared array is safe.
  */
-export function listMcpOrgAudiences(): string[] {
-  return [...orgIds].map(getMcpOrgResourceUri);
+export function getEndUserVerifyAudiences(): string[] {
+  const appBase = getEnv().APP_URL;
+  if (verifyAudiencesCache === null || verifyAudiencesCache.appBase !== appBase) {
+    verifyAudiencesCache = {
+      appBase,
+      audiences: [appBase, `${appBase}/api/auth`, ...[...orgIds].map(getMcpOrgResourceUri)],
+    };
+  }
+  return verifyAudiencesCache.audiences;
 }
 
 /** Test-only — drop org audiences between fixtures. */

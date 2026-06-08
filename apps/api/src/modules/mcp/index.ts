@@ -34,10 +34,14 @@ import { seedMcpOrgAudiences, addMcpOrgAudience, removeMcpOrgAudience } from "./
 // Cross-replica convergence interval for the org-aware audience allowlist. The
 // `onOrgCreate` / `onOrgDelete` events are in-process broadcasts, so a replica
 // that did not handle an org mutation would never learn it; a periodic re-seed
-// from the DB bounds that staleness (fail-closed in between — an unseeded org's
-// mint 400s until the next re-seed). Mirrors the per-process TTL the OAuth
-// client cache uses (`oauth-admin.ts`). 60s is well under any human "I created
-// an org, why can't my second replica mint?" threshold.
+// from the DB bounds that staleness. The window is fail-closed in BOTH
+// directions: on a lagging replica an unseeded org's mint 400s AND an
+// already-minted per-org token 401s at verify (its `aud` is not yet in that
+// replica's `getEndUserVerifyAudiences()` list) — never the reverse, so
+// staleness can only reject legitimate traffic, never accept illegitimate. Both
+// self-heal at the next re-seed. Mirrors the per-process TTL the OAuth client
+// cache uses (`oauth-admin.ts`). 60s is well under any human "I created an org,
+// why can't my second replica mint?" threshold.
 const MCP_AUDIENCE_RESEED_INTERVAL_MS = 60_000;
 let reseedTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -134,10 +138,14 @@ const mcpModule: AppstrateModule = {
   ],
 
   // Keep the org-aware RFC 8707 audience allowlist live without a restart. A
-  // new org's per-org MCP resource URI must be mintable by the AS the moment
-  // the org exists, and a deleted org's URI must stop being mintable. The boot
-  // seed in `init()` covers orgs that pre-date a restart; these events cover
-  // orgs created/deleted while running. Both calls are idempotent.
+  // new org's per-org MCP resource URI must be mintable by the AS the moment the
+  // org exists. `onOrgDelete` is hygiene, NOT the confinement boundary: it stops
+  // re-minting a deleted org's URI and trims the verifier list, but a still-live
+  // token for a deleted org is already inert — the live membership join in
+  // org-context (org delete cascades the member rows) 403s it with zero
+  // staleness, independent of this allowlist. The boot seed in `init()` covers
+  // orgs that pre-date a restart; these events cover orgs created/deleted while
+  // running. Both calls are idempotent.
   events: {
     onOrgCreate: (orgId: string) => {
       addMcpOrgAudience(orgId);

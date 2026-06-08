@@ -7,14 +7,15 @@
  * server's `invoke_operation` is the only caller today — see
  * `modules/mcp/tools.ts`), the synthetic request carries the SAME bearer token
  * the external caller presented. That token may be audience-bound to a single
- * protected resource (e.g. `/api/mcp`); the outbound half of
- * `enforceResourceAudience` (`auth-pipeline.ts`) rejects such a token on any
- * route OUTSIDE its resource so it cannot be lifted and replayed against the
+ * protected resource (e.g. `/api/mcp/o/:org`); the outbound half of
+ * `enforceResourceAudience` (`protected-resources.ts`) rejects such a token on
+ * any route OUTSIDE its resource so it cannot be lifted and replayed against the
  * rest of the API.
  *
  * The in-process dispatch is the one legitimate exception: it targets a
  * non-resource route (`/api/agents`, …) but has ALREADY cleared the resource
- * boundary's inbound audience check at `/api/mcp`. We mark it with a per-process
+ * boundary's inbound audience check at `/api/mcp/o/:org`. We mark it with a
+ * per-process
  * secret header so the confinement middleware can let it through without
  * opening a forgeable bypass.
  *

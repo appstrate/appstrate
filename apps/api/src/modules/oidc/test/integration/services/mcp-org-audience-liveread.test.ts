@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * SPIKE — validate that the AS honours a per-org MCP resource audience added to
- * `validAudiences` AT RUNTIME (B1 of the per-org-endpoints plan).
+ * Regression guard for a load-bearing library contract: the AS must honour a
+ * per-org MCP resource audience added to `validAudiences` AT RUNTIME.
  *
  * The org-aware allowlist (`mcp/audiences.ts`) mutates the array passed by
  * reference into the oauth-provider + oidc-guards plugins. This proves both read
  * it LIVE on `/oauth2/token`: a per-org resource is rejected before it is added
  * and accepted (past the resource gate) right after — no restart, no re-wire.
  *
- * If this fails, B1 is not viable (the plugins froze the array) and we fall back
- * to a library patch (B2) or consent-time binding.
+ * If this ever fails after a dependency bump, `@better-auth/oauth-provider` has
+ * started snapshotting `validAudiences` at plugin construction instead of
+ * reading it live (see the LIBRARY CONTRACT note in `auth/plugins.ts`). Per-org
+ * minting then silently breaks for every org created after boot; the fix is a
+ * library patch or consent-time binding, not a code change here.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -74,7 +77,7 @@ function isResourceRejection(error: string): boolean {
   return error === "invalid_request" || error === "invalid_target" || error === "invalid_resource";
 }
 
-describe("SPIKE — per-org MCP audience honoured live on /oauth2/token", () => {
+describe("per-org MCP audience honoured live on /oauth2/token (library contract)", () => {
   const orgId = "00000000-0000-0000-0000-0000000000aa";
   const orgUri = getMcpOrgResourceUri(orgId);
 
