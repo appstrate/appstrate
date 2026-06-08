@@ -279,4 +279,30 @@ describe("invoke_operation", () => {
     expect(res.isError).toBe(true);
     expect(calls.length).toBe(0);
   });
+
+  it("serializes the JSON body and sets content-type on a write operation", async () => {
+    // The entire mutation request-shaping branch (sendBody + JSON.stringify +
+    // content-type) is exercised only on POST/PUT/PATCH — assert it directly.
+    const op = firstOp((o) => o.method === "POST" && o.pathParams.length === 0);
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: op.operationId, body: { hello: "world" } }, noExtra);
+    const req = calls[0]!;
+    expect(req.method).toBe("POST");
+    expect(req.headers.get("content-type")).toBe("application/json");
+    expect(await req.text()).toBe(JSON.stringify({ hello: "world" }));
+  });
+
+  it("never sends a body on a GET operation even when one is supplied", async () => {
+    const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: op.operationId, body: { ignored: true } }, noExtra);
+    const req = calls[0]!;
+    expect(req.method).toBe("GET");
+    expect(req.headers.get("content-type")).toBeNull();
+    expect(await req.text()).toBe("");
+  });
 });

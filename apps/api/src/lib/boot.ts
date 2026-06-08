@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { db, isEmbeddedDb, reservePgConnection } from "@appstrate/db/client";
+import { db, isEmbeddedDb, reservePgConnection, toRows } from "@appstrate/db/client";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
@@ -64,6 +64,15 @@ export async function boot(): Promise<void> {
     });
     await applyCoreMigrations();
   }
+
+  // Self-heal RFC 8707 oauth `resources` columns (migration 0006) when the
+  // migration watermark is ahead of the real schema. Idempotent — a no-op on
+  // any healthy DB, runs the missing DDL only on a watermark-drifted prod DB.
+  await reconcileOAuthResourceColumns().catch((err) => {
+    logger.warn("Could not reconcile oauth resource columns", {
+      error: getErrorMessage(err),
+    });
+  });
 
   // Bootstrap-token reconciliation (#344). If the env still carries an
   // AUTH_BOOTSTRAP_TOKEN but at least one org exists, the token is dead —
@@ -318,6 +327,57 @@ export async function boot(): Promise<void> {
 async function loadAndSyncSystemPackages(): Promise<void> {
   await initSystemPackages();
   await syncSystemPackagesToDb();
+}
+
+/**
+ * Self-heal the RFC 8707 oauth `resources` columns when the migration
+ * watermark is ahead of the actual schema.
+ *
+ * Migration 0006 adds `resources text[]` to oauth_access_tokens /
+ * oauth_consents / oauth_refresh_tokens (audience binding) and re-defaults
+ * oauth_clients.level. drizzle-orm's postgres-js migrator applies migrations
+ * by timestamp watermark (`max(created_at)` in `__drizzle_migrations`), NOT by
+ * hash-set membership: a production DB whose watermark was corrupted to a
+ * future date (known prod incident) silently SKIPS 0006. The pinned
+ * better-auth 1.7 oauth-provider then expects columns that were never created,
+ * which breaks token mint on resource/MCP flows.
+ *
+ * This runs the same additive DDL as 0006 — idempotently (`IF NOT EXISTS`) —
+ * AFTER the migrator. On a healthy DB the columns already exist and it is a
+ * no-op. On a watermark-drifted DB it creates the missing columns and logs
+ * loudly so the operator realigns `__drizzle_migrations` before the *next*
+ * schema release (this guard only covers 0006).
+ */
+async function reconcileOAuthResourceColumns(): Promise<void> {
+  const { sql: rawSql } = await import("drizzle-orm");
+  const present = toRows(
+    await db.execute(rawSql`
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_name = 'oauth_access_tokens'
+        AND column_name = 'resources'
+      LIMIT 1
+    `),
+  );
+  if (present.length > 0) return;
+
+  logger.error(
+    "Schema drift: oauth `resources` columns (migration 0006) are absent even though " +
+      "the migration watermark is satisfied. The __drizzle_migrations watermark is ahead " +
+      "of the real schema, so 0006 was silently skipped. Self-healing the columns now — " +
+      "realign __drizzle_migrations so future migrations are not skipped too.",
+  );
+  await db.execute(
+    rawSql`ALTER TABLE "oauth_access_tokens" ADD COLUMN IF NOT EXISTS "resources" text[]`,
+  );
+  await db.execute(
+    rawSql`ALTER TABLE "oauth_consents" ADD COLUMN IF NOT EXISTS "resources" text[]`,
+  );
+  await db.execute(
+    rawSql`ALTER TABLE "oauth_refresh_tokens" ADD COLUMN IF NOT EXISTS "resources" text[]`,
+  );
+  await db.execute(rawSql`ALTER TABLE "oauth_clients" ALTER COLUMN "level" SET DEFAULT 'instance'`);
+  logger.warn("Self-healed oauth `resources` columns (migration 0006 watermark drift)");
 }
 
 /**
