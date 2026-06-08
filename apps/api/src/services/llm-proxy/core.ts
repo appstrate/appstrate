@@ -22,7 +22,7 @@ import { db } from "@appstrate/db/client";
 import { llmUsage } from "@appstrate/db/schema";
 import { loadModel, type ResolvedModel } from "../org-models.ts";
 import { getModelProvider } from "../model-providers/registry.ts";
-import type { OAuthWireFormat } from "@appstrate/core/sidecar-types";
+import type { OAuthWireFormat, OAuthAdaptiveRetryPolicy } from "@appstrate/core/sidecar-types";
 import { logger } from "../../lib/logger.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
@@ -149,11 +149,36 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   const contentType = upstream.headers.get("content-type") ?? "";
   const isSse = contentType.includes("text/event-stream");
 
-  // Upstream errors: surface verbatim but DON'T meter them as usage —
-  // the call never produced tokens. We read + rebuild the Response so
-  // `cloneResponseHeaders` can strip `content-length` / `content-encoding`
-  // — Bun already decompressed the body here, so forwarding the
-  // upstream's encoding header would trip the caller's decoder.
+  // Adaptive retry: some subscription betas (e.g. the 1M-context beta) aren't
+  // available on every account. The provider declares a policy to strip the
+  // offending token from a header and replay once — mirrors the sidecar's
+  // `adaptHeaderForRetry`. Applied before the verbatim error passthrough.
+  if (!upstream.ok) {
+    const firstErrorBody = await upstream.text();
+    const adapted = adaptHeaderForRetry(
+      provider?.oauthWireFormat?.adaptiveRetry,
+      upstream.status,
+      firstErrorBody,
+      upstreamHeaders,
+    );
+    if (!adapted) {
+      return new Response(firstErrorBody, {
+        status: upstream.status,
+        headers: cloneResponseHeaders(upstream.headers),
+      });
+    }
+    upstream = await fetchImpl(upstreamUrl, {
+      method: "POST",
+      headers: adapted.headers,
+      body: rewrittenBody,
+    });
+  }
+
+  // Upstream errors (including a failed retry): surface verbatim but DON'T meter
+  // them as usage — the call never produced tokens. We read + rebuild the
+  // Response so `cloneResponseHeaders` can strip `content-length` /
+  // `content-encoding` — Bun already decompressed the body here, so forwarding
+  // the upstream's encoding header would trip the caller's decoder.
   if (!upstream.ok) {
     const errorBody = await upstream.text();
     const headers = cloneResponseHeaders(upstream.headers);
@@ -326,6 +351,39 @@ function applySystemPrepend(
   } else {
     json.system = [block];
   }
+}
+
+/**
+ * Adaptive header retry. When the upstream returns the policy's `status` and a
+ * body matching any `bodyPatterns`, strip `removeToken` from the comma-separated
+ * header `headerName` and return the rewritten headers for a single replay.
+ * Returns `null` (no retry) for no policy / status mismatch / pattern mismatch /
+ * header or token absent. Pure — mirrors the sidecar's `adaptHeaderForRetry`.
+ */
+function adaptHeaderForRetry(
+  policy: OAuthAdaptiveRetryPolicy | undefined,
+  status: number,
+  responseBodyText: string,
+  currentHeaders: Record<string, string>,
+): { headers: Record<string, string> } | null {
+  if (!policy || status !== policy.status) return null;
+  if (!policy.bodyPatterns.some((p) => new RegExp(p, "i").test(responseBodyText))) return null;
+
+  const targetKey = policy.headerName.toLowerCase();
+  const originalKey = Object.keys(currentHeaders).find((k) => k.toLowerCase() === targetKey);
+  if (!originalKey) return null;
+
+  const tokens = (currentHeaders[originalKey] ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!tokens.includes(policy.removeToken)) return null;
+
+  const filtered = tokens.filter((t) => t !== policy.removeToken);
+  const next = { ...currentHeaders };
+  if (filtered.length === 0) delete next[originalKey];
+  else next[originalKey] = filtered.join(", ");
+  return { headers: next };
 }
 
 const HOP_BY_HOP = new Set([
