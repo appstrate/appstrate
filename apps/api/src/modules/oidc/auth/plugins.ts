@@ -62,6 +62,7 @@ import { getAppstrateScopes, OIDC_IDENTITY_SCOPES } from "./scopes.ts";
 import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
 import { isBlockedUrlWithDns } from "../../../lib/ssrf-dns.ts";
 import { markClientSelfService } from "../services/oauth-admin.ts";
+import { getPendingConsentOrg } from "../services/consent-org.ts";
 import { getMcpResourceUri } from "../../mcp/resource.ts";
 
 export type ActorType = "dashboard_user" | "end_user" | "user";
@@ -257,12 +258,40 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       },
 
       /**
+       * Org binding for self-service (instance-level) clients. The user picks
+       * a target org on the consent screen; the consent POST handler validates
+       * membership and exposes it via `getPendingConsentOrg()`. Returning it as
+       * the `referenceId` stamps it onto the `oauthConsent` row + authorization
+       * code, and it persists on the refresh-token row — so every (re)mint of
+       * this grant carries the same org. Surfaces below in
+       * `customAccessTokenClaims` as the `org_id` claim. Org-level and
+       * application-level clients never set a pending org (their org is fixed
+       * in client metadata), so this returns `undefined` and is a no-op for
+       * them.
+       */
+      postLogin: {
+        // `shouldRedirect: false` → we never divert to BA's separate
+        // account-selection page; the org picker is embedded in our own
+        // consent screen (`pages/consent.ts`). `page` is required by the type
+        // but unreachable while `shouldRedirect` always returns false.
+        page: "/api/oauth/consent",
+        shouldRedirect: async () => false,
+        consentReferenceId: async () => getPendingConsentOrg(),
+      },
+
+      /**
        * Polymorphic claim builder. Branches on `metadata.level` (set at
        * client registration via `services/oauth-admin.ts`) and returns a
-       * snake_case claim payload compatible with RFC 9068 + OIDC Core.
+       * snake_case claim payload compatible with RFC 9068 + OIDC Core. For
+       * instance-level (self-service) tokens, `referenceId` carries the
+       * consent-chosen org and becomes the `org_id` claim.
        */
-      customAccessTokenClaims: async ({ user, metadata }) =>
-        buildClaimsForClient(user ?? null, metadata as ClientMetadata | undefined),
+      customAccessTokenClaims: async ({ user, metadata, referenceId }) =>
+        buildClaimsForClient(
+          user ?? null,
+          metadata as ClientMetadata | undefined,
+          typeof referenceId === "string" ? referenceId : undefined,
+        ),
 
       /**
        * Surface the same polymorphic claims on /userinfo so satellites can
@@ -400,11 +429,12 @@ function strOrNull(value: unknown): string | null {
 async function buildClaimsForClient(
   user: { id: string; email: string; name?: string | null; emailVerified?: boolean } | null,
   metadata: ClientMetadata | undefined,
+  referenceId?: string,
 ): Promise<Record<string, unknown>> {
   if (!user) return {};
   const level = metadata?.level;
   if (level === "instance") {
-    return buildInstanceLevelClaims(user);
+    return buildInstanceLevelClaims(user, referenceId);
   }
   if (level === "org") {
     return buildOrgLevelClaims(user, metadata!);
@@ -421,24 +451,31 @@ async function buildClaimsForClient(
   });
 }
 
-async function buildInstanceLevelClaims(user: {
-  id: string;
-  email: string;
-  name?: string | null;
-  emailVerified?: boolean;
-}): Promise<Record<string, unknown>> {
+async function buildInstanceLevelClaims(
+  user: {
+    id: string;
+    email: string;
+    name?: string | null;
+    emailVerified?: boolean;
+  },
+  referenceId?: string,
+): Promise<Record<string, unknown>> {
   // Instance clients serve platform audiences — dashboard SPA + satellite
   // admin tools. Reject end-user realm sessions so an OIDC token minted
   // under app A's scope cannot be replayed to mint an instance token.
   await assertUserRealm(user.id, "platform", { clientLevel: "instance" });
-  // Instance tokens carry NO org or application context. The user is a
-  // Better Auth user who may belong to multiple organizations — org is
-  // resolved per-request via X-Org-Id after authentication.
+  // Org context is optional for instance tokens. A self-service client (MCP /
+  // CLI) binds an org at consent → it arrives here as `referenceId` and
+  // becomes the `org_id` claim, which the auth strategy pins (no `X-Org-Id`
+  // needed). A token with no bound org omits the claim and resolves org
+  // per-request via `X-Org-Id`, as before. The strategy re-verifies membership
+  // on every request, so a stale/forged claim cannot grant access.
   return {
     actor_type: "user",
     email: user.email,
     email_verified: user.emailVerified === true,
     name: user.name ?? user.email,
+    ...(referenceId ? { org_id: referenceId } : {}),
   };
 }
 

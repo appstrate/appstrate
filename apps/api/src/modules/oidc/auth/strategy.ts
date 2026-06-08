@@ -162,17 +162,22 @@ async function resolveInstanceUser(claims: AccessTokenClaims): Promise<AuthResol
     });
     return null;
   }
-  // Instance tokens carry no org context. Return a partial resolution —
-  // orgId and orgRole are left undefined. The auth pipeline defers org
-  // resolution to the X-Org-Id middleware (same path as session auth).
-  // Permissions are also deferred — the pipeline derives them from orgRole
-  // after org-context resolves, via resolvePermissions(orgRole).
+  // Instance tokens defer org resolution to the X-Org-Id middleware (same
+  // path as session auth) — UNLESS the token was bound to an org at consent
+  // (a self-service MCP/CLI token carrying an `org_id` claim). In that case we
+  // pin it here: `requireOrgContext` reads it as the `pinned` org, re-verifies
+  // membership, and derives `orgRole` + permissions — so the caller never has
+  // to send `X-Org-Id`. We still set `deferOrgResolution` so the rest of the
+  // pipeline (membership re-check + `resolvePermissions(orgRole)`) runs
+  // exactly as for the header path; only the org *source* changes. An org-less
+  // token (no claim) keeps the legacy header behaviour — full back-compat.
   return {
     user: {
       id: authUserRow.id,
       email: authUserRow.email,
       name: authUserRow.name ?? "",
     },
+    orgId: claims.orgId,
     authMethod: "oauth2-instance",
     permissions: [],
     deferOrgResolution: true,

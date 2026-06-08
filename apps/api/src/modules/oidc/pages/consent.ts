@@ -14,9 +14,10 @@
  * field does not match the cookie.
  */
 
-import { html, type RawHtml } from "./html.ts";
+import { html, raw, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
+import type { ConsentOrgOption } from "../services/consent-org.ts";
 
 const SCOPE_DESCRIPTIONS_FR: Record<string, string> = {
   openid: "Votre identité",
@@ -47,14 +48,51 @@ export interface ConsentPageProps {
   csrfToken: string;
   /** Resolved branding for the owning application. */
   branding: ResolvedAppBranding;
+  /**
+   * Organizations the user may bind this grant to (self-service clients only).
+   * Empty/absent → no org picker (token resolves org per-request via
+   * `X-Org-Id`). One → bound silently. Many → a `<select>` is shown.
+   */
+  orgs?: ConsentOrgOption[];
+  /** Pre-selected org id in the picker (defaults to the first). */
+  selectedOrgId?: string;
   /** Optional error message displayed above the form. */
   error?: string;
+}
+
+/**
+ * The org-binding form control, rendered INSIDE the accept form so `org_id`
+ * is submitted with the approval. Zero orgs → nothing. One → a hidden input
+ * plus a context line. Many → a labelled `<select>`.
+ */
+function renderOrgField(orgs: ConsentOrgOption[], selectedOrgId?: string): RawHtml | string {
+  if (orgs.length === 0) return "";
+  const selected =
+    selectedOrgId && orgs.some((o) => o.id === selectedOrgId) ? selectedOrgId : orgs[0]!.id;
+  if (orgs.length === 1) {
+    const only = orgs[0]!;
+    return html`
+      <input type="hidden" name="org_id" value="${only.id}" />
+      <p class="org-single">Organisation : <strong>${only.name}</strong></p>
+    `;
+  }
+  const options = orgs.map(
+    (o) =>
+      html`<option value="${o.id}" ${o.id === selected ? raw(" selected") : ""}>${o.name}</option>`,
+  );
+  return html`
+    <label class="org-label" for="org_id">Organisation</label>
+    <select id="org_id" name="org_id" class="org-select">
+      ${options}
+    </select>
+  `;
 }
 
 export function renderConsentPage(props: ConsentPageProps): RawHtml {
   const scopeItems = props.scopes.map((s) => html`<li>${describeScope(s)}</li>`);
   const title = `Autorisation — ${props.branding.name}`;
   const errorBlock = props.error ? html`<div class="error" role="alert">${props.error}</div>` : "";
+  const orgField = renderOrgField(props.orgs ?? [], props.selectedOrgId);
   const bodyHtml = html`
     <h1>Autorisation</h1>
     ${errorBlock}
@@ -75,6 +113,7 @@ export function renderConsentPage(props: ConsentPageProps): RawHtml {
       <form method="POST" action="${props.action}">
         <input type="hidden" name="_csrf" value="${props.csrfToken}" />
         <input type="hidden" name="accept" value="true" />
+        ${orgField}
         <button type="submit" class="allow">Autoriser</button>
       </form>
     </div>
