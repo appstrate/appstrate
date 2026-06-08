@@ -341,6 +341,7 @@ const expectedEndpoints = [
   "POST /api/llm-proxy/openai-completions/v1/chat/completions",
   "POST /api/llm-proxy/anthropic-messages/v1/messages",
   "POST /api/llm-proxy/mistral-conversations/v1/chat/completions",
+  "POST /api/llm-proxy/openai-codex-responses/codex/responses",
 
   // Library (consolidated package catalog across an org's applications)
   "GET /api/library",

@@ -21,6 +21,7 @@
 import { db } from "@appstrate/db/client";
 import { llmUsage } from "@appstrate/db/schema";
 import { loadModel, type ResolvedModel } from "../org-models.ts";
+import { getModelProvider } from "../model-providers/registry.ts";
 import { logger } from "../../lib/logger.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
@@ -117,6 +118,11 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     inputs.incomingHeaders,
     resolved.apiKey,
   );
+  // OAuth subscription providers (codex, claude-code) declare their wire-format
+  // quirks on the provider definition; apply them generically here — the same
+  // `oauthWireFormat` block the run sidecar applies, so a subscription works
+  // over the proxy without a runtime. Plain API-key providers have no block.
+  applyOauthWireFormat(upstreamHeaders, resolved);
 
   const started = Date.now();
   let upstream: Response;
@@ -245,6 +251,23 @@ function joinUpstreamUrl(base: string, path: string): string {
   const trimmedBase = base.replace(/\/+$/, "");
   const normalisedPath = path.startsWith("/") ? path : `/${path}`;
   return `${trimmedBase}${normalisedPath}`;
+}
+
+/**
+ * Apply a provider's declarative `oauthWireFormat` to the upstream headers,
+ * mirroring what the run sidecar does (`run-launcher/pi.ts`). Reads the block
+ * from the registry by `providerId`; a no-op for plain API-key providers
+ * (no block) and for OAuth tokens that carry no `accountId`.
+ */
+function applyOauthWireFormat(headers: Record<string, string>, resolved: ResolvedModel): void {
+  const wf = getModelProvider(resolved.providerId)?.oauthWireFormat;
+  if (!wf) return;
+  if (wf.identityHeaders) {
+    for (const [k, v] of Object.entries(wf.identityHeaders)) headers[k] = v;
+  }
+  if (wf.accountIdHeader && resolved.accountId) {
+    headers[wf.accountIdHeader] = resolved.accountId;
+  }
 }
 
 const HOP_BY_HOP = new Set([

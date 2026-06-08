@@ -245,4 +245,52 @@ export const llmProxyPaths = {
       responses: baseResponses,
     },
   },
+
+  "/api/llm-proxy/openai-codex-responses/codex/responses": {
+    post: {
+      operationId: "llmProxyOpenaiCodexResponses",
+      tags: ["LLM Proxy"],
+      summary: "Codex (ChatGPT subscription) Responses — with server-side OAuth injection",
+      description:
+        "Wire-compatible with the OpenAI Responses API as served by the " +
+        "chatgpt.com Codex backend (`/codex/responses`). Lets a runtime-less " +
+        "client (e.g. the first-party chat) reach a ChatGPT subscription through " +
+        "the proxy instead of a run sidecar. The caller supplies `body.model` as " +
+        "an Appstrate **model preset id**; the platform resolves the preset, " +
+        "substitutes the real upstream model id, injects the OAuth access token " +
+        "as `Authorization: Bearer`, and applies the provider's declarative " +
+        "`oauthWireFormat` identity headers (`chatgpt-account-id`, `originator`, " +
+        "`openai-beta`, `user-agent`). The backend only streams (SSE); usage is " +
+        "tapped from the terminal `response.completed` frame.\n\n" +
+        "Authentication: bearer only — API key with the `llm-proxy:call` scope or " +
+        "an OIDC-issued JWT. Cookie sessions are rejected.",
+      security: [{ bearerApiKey: [] }, { bearerJwt: [] }],
+      parameters: baseParameters,
+      requestBody: {
+        description:
+          "OpenAI Responses payload (`instructions`, `input`, `include`), with " +
+          "`model` replaced by an Appstrate model preset id. Other fields pass through.",
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["model", "input"],
+              properties: {
+                model: {
+                  type: "string",
+                  description: "Appstrate model preset id (NOT an upstream model id).",
+                },
+                input: { type: "array", items: { type: "object" } },
+                instructions: { type: "string" },
+                stream: { type: "boolean" },
+              },
+              additionalProperties: true,
+            },
+          },
+        },
+      },
+      responses: baseResponses,
+    },
+  },
 } as const;

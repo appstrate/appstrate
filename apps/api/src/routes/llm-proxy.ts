@@ -50,6 +50,7 @@ import {
 import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
+import { openaiCodexResponsesAdapter } from "../services/llm-proxy/openai-codex-responses.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -89,6 +90,14 @@ export function createLlmProxyRouter() {
       urlPath: "/mistral-conversations/v1/chat/completions",
       upstreamPath: "/v1/chat/completions",
       adapter: mistralConversationsAdapter,
+    },
+    // Codex (ChatGPT subscription) — the chatgpt.com backend serves the
+    // OpenAI Responses API at `/codex/responses`. Auth + identity headers
+    // come from the provider's `oauthWireFormat` (applied in the core).
+    {
+      urlPath: "/openai-codex-responses/codex/responses",
+      upstreamPath: "/codex/responses",
+      adapter: openaiCodexResponsesAdapter,
     },
   ];
 

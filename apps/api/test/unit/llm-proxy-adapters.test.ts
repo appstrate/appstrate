@@ -16,6 +16,7 @@ import { describe, it, expect } from "bun:test";
 import { openaiCompletionsAdapter } from "../../src/services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../../src/services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../../src/services/llm-proxy/mistral.ts";
+import { openaiCodexResponsesAdapter } from "../../src/services/llm-proxy/openai-codex-responses.ts";
 import { parseProxyRequest } from "../../src/services/llm-proxy/helpers.ts";
 
 function rewriteModel(rawBody: Uint8Array, upstreamModelId: string): Uint8Array {
@@ -298,6 +299,42 @@ describe("mistralConversationsAdapter", () => {
         `data: {"id":"x","choices":[{"delta":{"content":"hi"}}]}`,
         `data: [DONE]`,
       ]),
+    ).toBeNull();
+  });
+});
+
+describe("openaiCodexResponsesAdapter", () => {
+  it("apiShape discriminator matches the /api/llm-proxy/openai-codex-responses/ route", () => {
+    expect(openaiCodexResponsesAdapter.apiShape).toBe("openai-codex-responses");
+  });
+
+  it("builds a Bearer header (wire-format identity headers are applied by the core)", () => {
+    const headers = openaiCodexResponsesAdapter.buildUpstreamHeaders(new Headers(), "oauth-token");
+    expect(headers["Authorization"]).toBe("Bearer oauth-token");
+    expect(headers["Content-Type"]).toBe("application/json");
+  });
+
+  it("reads usage from a non-streaming Responses body", () => {
+    expect(
+      openaiCodexResponsesAdapter.parseJsonUsage({
+        usage: { input_tokens: 12, output_tokens: 7, input_tokens_details: { cached_tokens: 4 } },
+      }),
+    ).toEqual({ inputTokens: 12, outputTokens: 7, cacheReadTokens: 4 });
+  });
+
+  it("reads usage from the terminal response.completed SSE frame", () => {
+    expect(
+      openaiCodexResponsesAdapter.parseSseUsage([
+        `data: {"type":"response.created","response":{"usage":null}}`,
+        `data: {"type":"response.completed","response":{"usage":{"input_tokens":30,"output_tokens":5}}}`,
+      ]),
+    ).toEqual({ inputTokens: 30, outputTokens: 5 });
+  });
+
+  it("returns null when no usage is present", () => {
+    expect(openaiCodexResponsesAdapter.parseJsonUsage({ foo: 1 })).toBeNull();
+    expect(
+      openaiCodexResponsesAdapter.parseSseUsage([`data: {"type":"response.in_progress"}`]),
     ).toBeNull();
   });
 });
