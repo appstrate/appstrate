@@ -2134,6 +2134,8 @@ export function createOidcRouter() {
       .filter(Boolean);
     const userCodeDisplay = `${cleanUserCode.slice(0, 4)}-${cleanUserCode.slice(4)}`;
 
+    const orgs = await listUserOrgs(session.user.id);
+
     const page = renderActivateConsentPage({
       branding: PLATFORM_DEFAULT_BRANDING,
       clientName: client?.name ?? record.clientId,
@@ -2141,6 +2143,7 @@ export function createOidcRouter() {
       userCodeRaw: cleanUserCode,
       scopes,
       csrfToken,
+      orgs,
     });
     return c.html(page.value);
   });
@@ -2196,6 +2199,24 @@ export function createOidcRouter() {
       .where(eq(deviceCode.userCode, userCode))
       .limit(1);
 
+    // Org the user picked on the consent screen. Validate membership BEFORE
+    // approving so we never bind (nor approve into) an org the user can't
+    // access. Absent → unbound grant (legacy header path). The device-code
+    // exchange stamps this as the token's `org_id` claim.
+    const pickedOrgId = readFormString(form, "org_id");
+    if (pickedOrgId && session?.user?.id) {
+      if (!(await isUserOrgMember(session.user.id, pickedOrgId))) {
+        return c.html(
+          renderActivateResultPage({
+            branding: PLATFORM_DEFAULT_BRANDING,
+            outcome: "denied",
+            error: "Vous n'êtes pas membre de l'organisation sélectionnée.",
+          }).value,
+          403,
+        );
+      }
+    }
+
     try {
       // BA 1.7 split claim from approve: associate the device code with the
       // signed-in user (GET /device) before approving it, else /device/approve
@@ -2224,6 +2245,16 @@ export function createOidcRouter() {
         }).value,
         400,
       );
+    }
+
+    // Persist the bound org onto the (now approved) device-code row so the
+    // CLI's token exchange picks it up as the `org_id` claim. Membership was
+    // validated above.
+    if (pickedOrgId && session?.user?.id) {
+      await db
+        .update(deviceCode)
+        .set({ orgId: pickedOrgId })
+        .where(eq(deviceCode.userCode, userCode));
     }
 
     logger.info("cli.device.approved", {

@@ -65,6 +65,10 @@ export const deviceCode = pgTable("device_codes", {
     onDelete: "cascade",
   }),
   scope: text("scope"),
+  // Org the user bound to this grant on the /activate consent screen. Read at
+  // device-code exchange to stamp the access token's `org_id` claim, so the
+  // CLI needs no `X-Org-Id`. Null → unbound (legacy header path).
+  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   attempts: integer("attempts").notNull().default(0),
 });
 
@@ -207,6 +211,10 @@ export const cliRefreshToken = pgTable(
     // inside the callback). Matches `ON DELETE SET NULL` from 0005.
     parentId: text("parent_id"),
     scope: text("scope"),
+    // Org bound to this token family at login (carried from the device_code).
+    // Copied parent→child on every rotation so a refreshed access token keeps
+    // the same `org_id` claim. Null → unbound (legacy header path).
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
     expiresAt: timestamp("expires_at").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     usedAt: timestamp("used_at"),

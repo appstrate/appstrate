@@ -145,7 +145,11 @@ afterEach(async () => {
   await rm(tmpDir, { recursive: true, force: true });
 });
 
-async function seedLoggedIn(orgId?: string, profile = "default", applicationId?: string): Promise<void> {
+async function seedLoggedIn(
+  orgId?: string,
+  profile = "default",
+  applicationId?: string,
+): Promise<void> {
   await setProfile(profile, {
     instance: "https://app.example.com",
     userId: "u_1",
@@ -155,6 +159,21 @@ async function seedLoggedIn(orgId?: string, profile = "default", applicationId?:
   });
   await saveTokens(profile, {
     accessToken: "tok-abc",
+    expiresAt: Date.now() + 15 * 60 * 1000,
+    refreshToken: "rt-xyz",
+    refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+  });
+}
+
+/** Seed a logged-in profile whose access token is org-bound (carries `org_id`). */
+async function seedBoundSession(boundOrgId: string, profile = "default"): Promise<void> {
+  await seedLoggedIn(boundOrgId, profile);
+  const header = Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({ sub: "u_1", email: "alice@example.com", org_id: boundOrgId }),
+  ).toString("base64url");
+  await saveTokens(profile, {
+    accessToken: `${header}.${payload}.sig`,
     expiresAt: Date.now() + 15 * 60 * 1000,
     refreshToken: "rt-xyz",
     refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
@@ -265,6 +284,16 @@ describe("org switch", () => {
 
     expect(await pinnedOrgId()).toBe("org_2");
     expect(stdoutChunks.join("")).toContain('Pinned "Beta"');
+  });
+
+  it("refuses to switch an org-bound session, pointing to login, and leaves the pin", async () => {
+    await seedBoundSession("org_1");
+    await expect(orgSwitchCommand({ profile: "default", ref: "org_2" })).rejects.toBeInstanceOf(
+      ExitError,
+    );
+    expect(stderrChunks.join("")).toContain("appstrate login");
+    // The bound org is untouched — no broken pin/header mismatch.
+    expect(await pinnedOrgId()).toBe("org_1");
   });
 
   it("pins the org matching the positional arg (by slug)", async () => {

@@ -189,6 +189,7 @@ export async function exchangeDeviceCodeForTokens(params: {
         rowId: string;
         user: { id: string; email: string; name: string | null; emailVerified: boolean };
         scope: string;
+        orgId: string | null;
       }
     | { kind: "error"; code: CliTokenErrorCode; description: string };
 
@@ -286,13 +287,13 @@ export async function exchangeDeviceCodeForTokens(params: {
       clientId,
       userId: userRow.id,
     });
-    return { kind: "ok", rowId: row.id, user: userRow, scope };
+    return { kind: "ok", rowId: row.id, user: userRow, scope, orgId: row.orgId };
   });
 
   if (readOutcome.kind === "error") {
     throw new CliTokenError(readOutcome.code, readOutcome.description);
   }
-  const { rowId, user, scope } = readOutcome;
+  const { rowId, user, scope, orgId } = readOutcome;
 
   // Pre-compute the family id so we can stamp it on the JWT (for
   // server-side revocation enforcement on every Bearer call) AND on the
@@ -309,6 +310,7 @@ export async function exchangeDeviceCodeForTokens(params: {
     scope,
     clientId,
     cliFamilyId: familyId,
+    orgId,
   });
 
   // Second transaction: persist refresh token + consume device_code row
@@ -337,6 +339,7 @@ export async function exchangeDeviceCodeForTokens(params: {
       // on this head row only; rotation rows leave the columns NULL.
       parentId: null,
       familyId,
+      orgId,
       metadata,
     });
     // One-shot contract.
@@ -412,6 +415,7 @@ export async function rotateRefreshToken(params: {
         scope: string;
         parentId: string;
         familyId: string;
+        orgId: string | null;
       }
     | {
         kind: "error";
@@ -520,6 +524,7 @@ export async function rotateRefreshToken(params: {
       scope: narrowedScope,
       parentId: row.id,
       familyId: row.familyId,
+      orgId: row.orgId,
     };
   });
 
@@ -547,7 +552,7 @@ export async function rotateRefreshToken(params: {
   // Happy path: validateOutcome.kind === "ok". Mint JWT OUTSIDE any
   // transaction (signJWT goes through BA's adapter), then persist the
   // new child refresh token in a separate transaction.
-  const { user, scope, parentId, familyId } = validateOutcome;
+  const { user, scope, parentId, familyId, orgId } = validateOutcome;
   const accessToken = await mintAccessJwt({
     userId: user.id,
     email: user.email,
@@ -556,6 +561,7 @@ export async function rotateRefreshToken(params: {
     scope,
     clientId,
     cliFamilyId: familyId,
+    orgId,
   });
   const { refreshPlain, selfRevoked } = await db.transaction(async (tx) => {
     const persisted = await persistRefreshTokenInTx(tx, {
@@ -564,6 +570,7 @@ export async function rotateRefreshToken(params: {
       scope,
       parentId,
       familyId,
+      orgId,
     });
     // Concurrent-reuse defense: a racing rotation on the same parent
     // token may have revoked the family AFTER our validate-tx committed
@@ -1091,12 +1098,15 @@ async function persistRefreshTokenInTx(
     scope: string;
     parentId: string | null;
     familyId: string;
+    /** Org bound at login. Stored on every row (head + rotation children) so a
+     *  refreshed access token re-stamps the same `org_id` claim. */
+    orgId: string | null;
     /** Only honored on the head of family (`parentId === null`). Rotation
      *  children always store `null` for the metadata columns. */
     metadata?: DeviceMetadata;
   },
 ): Promise<{ refreshPlain: string }> {
-  const { userId, clientId, scope, parentId, familyId, metadata } = params;
+  const { userId, clientId, scope, parentId, familyId, orgId, metadata } = params;
   const refreshPlain = generateRefreshToken();
   const refreshHash = hashRefreshToken(refreshPlain);
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_SECONDS * 1000);
@@ -1109,6 +1119,7 @@ async function persistRefreshTokenInTx(
     familyId,
     parentId,
     scope,
+    orgId,
     expiresAt,
     createdAt: new Date(),
     usedAt: null,
@@ -1151,6 +1162,9 @@ async function mintAccessJwt(claims: {
    *  the JWT so the OIDC strategy can reject tokens whose family has been
    *  revoked, without waiting for the next refresh. */
   cliFamilyId: string;
+  /** Org bound at login. Stamped as the `org_id` claim, which the OIDC
+   *  strategy pins (so the CLI needs no `X-Org-Id`). Absent → header path. */
+  orgId?: string | null;
 }): Promise<string> {
   const env = getEnv();
   // Strip any trailing slash from APP_URL before composing iss/aud so
@@ -1192,6 +1206,9 @@ async function mintAccessJwt(claims: {
   };
   if (claims.scope.length > 0) {
     payload.scope = claims.scope;
+  }
+  if (claims.orgId) {
+    payload.org_id = claims.orgId;
   }
   const api = getOidcAuthApi();
   const result = (await api.signJWT({
