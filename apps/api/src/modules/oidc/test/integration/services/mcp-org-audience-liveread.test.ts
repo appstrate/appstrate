@@ -16,7 +16,7 @@
  * library patch or consent-time binding, not a code change here.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
@@ -24,6 +24,8 @@ import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import {
   registerProtectedResourceFamily,
   resetProtectedResources,
+  snapshotProtectedResources,
+  restoreProtectedResources,
 } from "../../../../../lib/protected-resources.ts";
 import {
   getMcpOrgResourceUri,
@@ -81,6 +83,17 @@ function isResourceRejection(error: string): boolean {
 describe("per-org MCP audience honoured live on /oauth2/token (library contract)", () => {
   const orgId = "00000000-0000-0000-0000-0000000000aa";
   const orgUri = getMcpOrgResourceUri(orgId);
+
+  // The protected-resource registry is a process-wide singleton shared with the
+  // live app. Snapshot before this file replaces the family and restore after,
+  // so a later test file's MCP registration is not clobbered (order-safe).
+  let resourceSnapshot: ReturnType<typeof snapshotProtectedResources>;
+  beforeAll(() => {
+    resourceSnapshot = snapshotProtectedResources();
+  });
+  afterAll(() => {
+    restoreProtectedResources(resourceSnapshot);
+  });
 
   beforeEach(async () => {
     await truncateAll();

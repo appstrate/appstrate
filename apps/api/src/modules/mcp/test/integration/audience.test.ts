@@ -15,7 +15,7 @@
  * half is covered in the oidc oauth-flows + dcr-cimd suites.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { Hono } from "hono";
 import type { AppEnv } from "../../../../types/index.ts";
 import { errorHandler } from "../../../../middleware/error-handler.ts";
@@ -23,9 +23,22 @@ import {
   enforceResourceAudience,
   registerProtectedResourceFamily,
   resetProtectedResources,
+  snapshotProtectedResources,
+  restoreProtectedResources,
 } from "../../../../lib/protected-resources.ts";
 import { internalDispatchHeader } from "../../../../lib/internal-dispatch.ts";
 import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../audiences.ts";
+
+// The protected-resource registry is a process-wide singleton shared with the
+// live app. Snapshot before this file mutates it and restore afterwards so a
+// later test file's MCP registration is not clobbered (cross-file order-safe).
+let protectedResourcesSnapshot: ReturnType<typeof snapshotProtectedResources>;
+beforeAll(() => {
+  protectedResourcesSnapshot = snapshotProtectedResources();
+});
+afterAll(() => {
+  restoreProtectedResources(protectedResourcesSnapshot);
+});
 
 // A fixed org id and its canonical per-org MCP resource URI. The MCP server is
 // exposed per organization, so the protected resource is a FAMILY under

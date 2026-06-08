@@ -6,13 +6,26 @@
  * `audience.test.ts`; here we test the registry resolution rules in isolation.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import {
   registerProtectedResourceFamily,
   resetProtectedResources,
+  snapshotProtectedResources,
+  restoreProtectedResources,
   resolveProtectedResource,
   isProtectedResourceUri,
 } from "../../src/lib/protected-resources.ts";
+
+// The registry is a process-wide singleton shared with the live app. Snapshot it
+// before this file mutates it and restore afterwards so we don't wipe the app's
+// registrations for later files in the same `bun test` process (order-safe).
+let resourceSnapshot: ReturnType<typeof snapshotProtectedResources>;
+beforeAll(() => {
+  resourceSnapshot = snapshotProtectedResources();
+});
+afterAll(() => {
+  restoreProtectedResources(resourceSnapshot);
+});
 
 const mcpFamily = {
   prefix: "/api/mcp/o",

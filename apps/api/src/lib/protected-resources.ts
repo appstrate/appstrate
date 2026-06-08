@@ -83,6 +83,22 @@ export function resetProtectedResources(): void {
 }
 
 /**
+ * Test-only: snapshot/restore the registry. Same rationale as
+ * `snapshotAuthChallenges` — the families registry is a process-wide singleton
+ * the live app populates once (when a module's router is built). A unit test
+ * that resets it must restore the prior contents (`beforeAll`/`afterAll`) so it
+ * does not wipe the app's registration for later test files in the same
+ * process, making cross-file order irrelevant.
+ */
+export function snapshotProtectedResources(): readonly ProtectedResourceFamily[] {
+  return families.slice();
+}
+export function restoreProtectedResources(snapshot: readonly ProtectedResourceFamily[]): void {
+  families.length = 0;
+  families.push(...snapshot);
+}
+
+/**
  * The resource whose prefix matches `path`, if any (longest-prefix-first). A
  * family matches only when `path` is under its prefix AND `deriveUri(path)`
  * returns a URI — a family that owns the path space but cannot derive a URI for

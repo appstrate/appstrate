@@ -63,6 +63,23 @@ export function resetAuthChallenges(): void {
   entries.length = 0;
 }
 
+/**
+ * Test-only: snapshot/restore the registry. The registry is a process-wide
+ * singleton shared with the live app (a module registers its challenge once,
+ * when its router is built). A unit test that mutates it via
+ * `resetAuthChallenges` would otherwise LEAK — wiping the app's registration
+ * for every test file that runs afterwards in the same `bun test` process. Wrap
+ * such a test with `beforeAll(snapshot)` / `afterAll(restore)` so it leaves the
+ * registry exactly as it found it, making cross-file order irrelevant.
+ */
+export function snapshotAuthChallenges(): readonly Entry[] {
+  return entries.slice();
+}
+export function restoreAuthChallenges(snapshot: readonly Entry[]): void {
+  entries.length = 0;
+  entries.push(...snapshot);
+}
+
 /** Resolve the challenge builder for a request path, if any prefix matches. */
 export function resolveAuthChallenge(path: string): AuthChallengeBuilder | undefined {
   return entries.find((e) => path === e.prefix || path.startsWith(`${e.prefix}/`))?.build;

@@ -30,7 +30,7 @@
  *    `routes/oauth-enduser-pages.test.ts`.
  */
 
-import { describe, it, expect, beforeAll, beforeEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { user as userTable } from "@appstrate/db/schema";
@@ -48,6 +48,8 @@ import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import {
   registerProtectedResourceFamily,
   resetProtectedResources,
+  snapshotProtectedResources,
+  restoreProtectedResources,
 } from "../../../../../lib/protected-resources.ts";
 import {
   getMcpOrgResourceUri,
@@ -56,6 +58,17 @@ import {
   _resetMcpOrgAudiencesForTesting,
 } from "../../../../mcp/audiences.ts";
 import { decodeJwt } from "jose";
+
+// The protected-resource registry is a process-wide singleton shared with the
+// live app. Snapshot before this file mutates it and restore afterwards so a
+// later test file's MCP registration is not clobbered (cross-file order-safe).
+let protectedResourcesSnapshot: ReturnType<typeof snapshotProtectedResources>;
+beforeAll(() => {
+  protectedResourcesSnapshot = snapshotProtectedResources();
+});
+afterAll(() => {
+  restoreProtectedResources(protectedResourcesSnapshot);
+});
 
 const app = getTestApp({ modules: [oidcModule] });
 

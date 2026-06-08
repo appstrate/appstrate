@@ -5,15 +5,28 @@
  * responder. Pure logic over a throwaway Hono app — no DB, no auth pipeline.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { Hono } from "hono";
 import type { AppEnv } from "../../src/types/index.ts";
 import {
   registerAuthChallenge,
   resolveAuthChallenge,
   resetAuthChallenges,
+  snapshotAuthChallenges,
+  restoreAuthChallenges,
   authChallengeResponder,
 } from "../../src/lib/auth-challenges.ts";
+
+// The registry is a process-wide singleton shared with the live app. Snapshot it
+// before this file mutates it and restore afterwards so we don't wipe the app's
+// registrations for later files in the same `bun test` process (order-safe).
+let challengeSnapshot: ReturnType<typeof snapshotAuthChallenges>;
+beforeAll(() => {
+  challengeSnapshot = snapshotAuthChallenges();
+});
+afterAll(() => {
+  restoreAuthChallenges(challengeSnapshot);
+});
 
 function appWith(status: number, preset?: string) {
   const app = new Hono<AppEnv>();

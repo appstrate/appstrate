@@ -16,7 +16,7 @@
  * upstream; here we assert our wiring advertises it.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { oauthClient } from "@appstrate/db/schema";
@@ -27,6 +27,8 @@ import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import {
   registerProtectedResourceFamily,
   resetProtectedResources,
+  snapshotProtectedResources,
+  restoreProtectedResources,
 } from "../../../../../lib/protected-resources.ts";
 import {
   getMcpOrgResourceUri,
@@ -38,6 +40,17 @@ import { getEnv } from "@appstrate/env";
 import oidcModule from "../../../index.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
+
+// The protected-resource registry is a process-wide singleton shared with the
+// live app. Snapshot before this file mutates it and restore afterwards so a
+// later test file's MCP registration is not clobbered (cross-file order-safe).
+let protectedResourcesSnapshot: ReturnType<typeof snapshotProtectedResources>;
+beforeAll(() => {
+  protectedResourcesSnapshot = snapshotProtectedResources();
+});
+afterAll(() => {
+  restoreProtectedResources(protectedResourcesSnapshot);
+});
 
 async function register(body: Record<string, unknown>) {
   const res = await app.request("/api/auth/oauth2/register", {
