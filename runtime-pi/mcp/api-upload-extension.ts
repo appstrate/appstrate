@@ -29,8 +29,7 @@
  *     the gating + schema live in one place).
  */
 
-import { Type } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import type { RuntimeEventEmitter } from "@appstrate/runner-pi";
 import { McpApiUploadResolver } from "./api-upload-resolver.ts";

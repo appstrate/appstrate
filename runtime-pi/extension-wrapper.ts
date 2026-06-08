@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { ExtensionFactory } from "./pi-sdk.ts";
 import type { AppstrateCtxProvider } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
 

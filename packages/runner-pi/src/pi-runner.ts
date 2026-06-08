@@ -34,8 +34,10 @@ import {
   SessionManager,
   SettingsManager,
   type ExtensionFactory,
-} from "@mariozechner/pi-coding-agent";
-import type { Api, KnownApi, Model } from "@mariozechner/pi-ai";
+  type Api,
+  type KnownApi,
+  type Model,
+} from "./pi-sdk.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {

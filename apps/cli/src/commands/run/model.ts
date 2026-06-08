@@ -21,7 +21,7 @@
  * the upstream.
  */
 
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { Api, Model } from "../../lib/pi-sdk.ts";
 import { deriveProviderFromApi, PROVIDER_BY_API } from "@appstrate/runner-pi";
 import { listModelPresets, PROXY_SUPPORTED_APIS, type ModelPreset } from "../../lib/models.ts";
 

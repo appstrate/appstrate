@@ -22,8 +22,7 @@
  * a sink can pass an explicit `emit` to route events directly.
  */
 
-import { Type } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
 import {
   buildRuntimeToolDefs,
   reEmitRuntimeToolEvents,

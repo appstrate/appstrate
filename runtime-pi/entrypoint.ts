@@ -34,8 +34,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
 import {
   PiRunner,
   prepareBundleForPi,
