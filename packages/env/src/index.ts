@@ -25,6 +25,12 @@ const envSchema = z
       .refine((v) => v === "false" || v === "true" || (/^\d+$/.test(v) && Number(v) >= 0), {
         message: "TRUST_PROXY must be 'false', 'true', or a non-negative integer",
       }),
+    // Redirect URI(s) (comma-separated) of the first-party Appstrate Chat
+    // satellite, registered on the seeded `appstrate-chat` OAuth client.
+    // Defaults to the local dev chat; operators set their deployed chat URL.
+    APPSTRATE_CHAT_REDIRECT_URIS: z
+      .string()
+      .default("http://localhost:5173/api/connections/callback"),
     // Database (optional — falls back to PGlite embedded Postgres when absent)
     DATABASE_URL: z.string().optional(),
     // PGlite data directory (used when DATABASE_URL is absent)

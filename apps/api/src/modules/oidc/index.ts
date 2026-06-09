@@ -64,7 +64,7 @@ import {
   getInstanceClientId,
   listFirstPartyClientIds,
 } from "./services/oauth-admin.ts";
-import { ensureCliClient } from "./services/ensure-cli-client.ts";
+import { ensureFirstPartyClients } from "./services/first-party-clients.ts";
 import { syncInstanceClientsFromEnv } from "./services/instance-client-sync.ts";
 import { oidcRealmResolver } from "./services/oidc-realm-resolver.ts";
 import { setRealmResolver } from "@appstrate/db/auth";
@@ -101,8 +101,8 @@ const oidcModule: AppstrateModule = {
     // (`appstrate-cli`) so the distributed binary is zero-config per
     // install. Idempotent. Runs before env-declared satellites for the
     // same `created_at`-ordering rationale as the platform client.
-    const cliClientId = await ensureCliClient();
-    logger.info("OIDC CLI client ready", { module: "oidc", clientId: cliClientId });
+    await ensureFirstPartyClients();
+    logger.info("OIDC first-party clients ready", { module: "oidc" });
     // Reconcile env-declared satellite instance clients (admin dashboards,
     // second-party web apps). Runs AFTER `ensureInstanceClient` so the
     // platform client always has the earliest `created_at` — see
