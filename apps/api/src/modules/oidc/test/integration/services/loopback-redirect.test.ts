@@ -115,4 +115,19 @@ describe("RFC 8252 loopback redirect port-flexibility", () => {
     );
     expect(location).toContain("invalid_redirect");
   });
+
+  it("does NOT relax the port for a NON-loopback host: exact-port match still required", async () => {
+    // Port-flexibility is an RFC 8252 loopback-ONLY concession (the patched
+    // `isLoopbackHost` gate). A non-loopback registration must still match the
+    // port exactly — otherwise a code could be redirected to attacker-controlled
+    // infrastructure on a different port of the same host. This is the negative
+    // axis that bounds the loopback patch.
+    const clientId = await registerLoopbackClient("https://app.example.com/callback");
+    const location = await authorizeRedirectLocation(
+      clientId,
+      ctx.cookie,
+      "https://app.example.com:8443/callback",
+    );
+    expect(location).toContain("invalid_redirect");
+  });
 });
