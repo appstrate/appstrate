@@ -512,7 +512,10 @@ export const runsPaths = {
                 orgId: "org_r3t5w8y1z6",
                 status: "success",
                 input: { folder: "inbox", maxEmails: 50 },
-                result: { processed: 42, labeled: 38 },
+                result: {
+                  output: { processed: 42, labeled: 38 },
+                  text: "## Inbox triage\nProcessed 42 emails, labeled 38.",
+                },
                 checkpoint: { lastProcessedId: "msg_99f2a" },
                 token_usage: {
                   input_tokens: 8200,
@@ -940,6 +943,11 @@ export const runsPaths = {
                   type: "number",
                   minimum: 0,
                   description: "Authoritative terminal run cost written to the `runs` row.",
+                },
+                report: {
+                  type: "string",
+                  description:
+                    "Aggregated markdown report — every `report.appended` event's content joined with `\\n` in call order. Persisted (capped at 256 KiB) as `runs.result.text` so getRun exposes the run's deliverable without log scraping.",
                 },
               },
             },
