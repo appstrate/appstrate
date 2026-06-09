@@ -447,6 +447,40 @@ describe("truncateToolResult", () => {
       reason: "non_serialisable",
     });
   });
+
+  it("honors the TOOL_RESULT_BYTE_LIMIT env override as the default cap", () => {
+    const original = process.env.TOOL_RESULT_BYTE_LIMIT;
+    process.env.TOOL_RESULT_BYTE_LIMIT = "8192";
+    try {
+      // 3000 bytes fits under the raised cap — returned verbatim where the
+      // compiled 2048 default would have truncated it.
+      const s = "a".repeat(3000);
+      expect(truncateToolResult(s)).toBe(s);
+      // …and a payload above the raised cap still truncates against it.
+      const big = { data: "x".repeat(10000) };
+      const out = truncateToolResult(big) as Record<string, unknown>;
+      expect(out.__truncated).toBe(true);
+      expect(out.limit).toBe(8192);
+    } finally {
+      if (original === undefined) delete process.env.TOOL_RESULT_BYTE_LIMIT;
+      else process.env.TOOL_RESULT_BYTE_LIMIT = original;
+    }
+  });
+
+  it("falls back to the compiled default on an invalid TOOL_RESULT_BYTE_LIMIT", () => {
+    const original = process.env.TOOL_RESULT_BYTE_LIMIT;
+    try {
+      for (const bad of ["not-a-number", "-1", "0", "12.5"]) {
+        process.env.TOOL_RESULT_BYTE_LIMIT = bad;
+        const out = truncateToolResult({ data: "x".repeat(3000) }) as Record<string, unknown>;
+        expect(out.__truncated).toBe(true);
+        expect(out.limit).toBe(2048);
+      }
+    } finally {
+      if (original === undefined) delete process.env.TOOL_RESULT_BYTE_LIMIT;
+      else process.env.TOOL_RESULT_BYTE_LIMIT = original;
+    }
+  });
 });
 
 describe("installSessionBridge — agent_end + usage accumulation", () => {

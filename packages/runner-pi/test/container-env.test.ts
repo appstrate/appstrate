@@ -163,6 +163,29 @@ describe("buildRuntimePiEnv", () => {
     }
   });
 
+  it("forwards TOOL_RESULT_BYTE_LIMIT to the agent container when set on the host", () => {
+    const original = process.env.TOOL_RESULT_BYTE_LIMIT;
+    process.env.TOOL_RESULT_BYTE_LIMIT = "16384";
+    try {
+      const env = buildRuntimePiEnv({ model, agentPrompt: "p" });
+      expect(env.TOOL_RESULT_BYTE_LIMIT).toBe("16384");
+    } finally {
+      if (original === undefined) delete process.env.TOOL_RESULT_BYTE_LIMIT;
+      else process.env.TOOL_RESULT_BYTE_LIMIT = original;
+    }
+  });
+
+  it("does not emit TOOL_RESULT_BYTE_LIMIT when unset on the host", () => {
+    const original = process.env.TOOL_RESULT_BYTE_LIMIT;
+    delete process.env.TOOL_RESULT_BYTE_LIMIT;
+    try {
+      const env = buildRuntimePiEnv({ model, agentPrompt: "p" });
+      expect(env.TOOL_RESULT_BYTE_LIMIT).toBeUndefined();
+    } finally {
+      if (original !== undefined) process.env.TOOL_RESULT_BYTE_LIMIT = original;
+    }
+  });
+
   it("does not emit SIDECAR_MAX_REQUEST_BODY_BYTES when unset on the host", () => {
     const original = process.env.SIDECAR_MAX_REQUEST_BODY_BYTES;
     delete process.env.SIDECAR_MAX_REQUEST_BODY_BYTES;
