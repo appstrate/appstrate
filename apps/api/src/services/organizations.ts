@@ -183,6 +183,32 @@ export async function getOrgMember(orgId: string, userId: string) {
   return row ?? null;
 }
 
+/**
+ * Single-member counterpart to {@link getOrgMembers}: returns one member row
+ * enriched with the same `displayName` + `email` fields the list endpoint
+ * exposes, so a mutation handler can echo the full member DTO without a
+ * follow-up GET. Returns null when the user is not a member of the org.
+ */
+export async function getOrgMemberWithProfile(orgId: string, userId: string) {
+  const member = await getOrgMember(orgId, userId);
+  if (!member) return null;
+
+  const [profileRow, userRow] = await Promise.all([
+    db
+      .select({ displayName: profiles.displayName })
+      .from(profiles)
+      .where(eq(profiles.id, userId))
+      .limit(1),
+    db.select({ email: user.email }).from(user).where(eq(user.id, userId)).limit(1),
+  ]);
+
+  return {
+    ...member,
+    displayName: profileRow[0]?.displayName ?? undefined,
+    email: userRow[0]?.email ?? undefined,
+  };
+}
+
 export async function findUserByEmail(email: string): Promise<{ id: string } | null> {
   const [row] = await db.select({ id: user.id }).from(user).where(eq(user.email, email)).limit(1);
 
