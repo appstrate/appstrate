@@ -84,6 +84,14 @@ export interface RunWireDto {
   token_usage: unknown;
   version_label: string | null;
   version_dirty: boolean | null;
+  /**
+   * Unambiguous reference to the agent definition the run executed (#636):
+   * `"draft"` when the mutable draft ran with unpublished changes (or no
+   * version was ever published), the concrete semver (e.g. `"2.1.0"`) when
+   * the run executed that published definition (or a draft identical to it).
+   * Derived server-side from `(version_label, version_dirty)`.
+   */
+  version_ref: string;
   proxy_label: string | null;
   model_label: string | null;
   model_source: string | null;

@@ -12,7 +12,7 @@ import {
   listPackageRuns,
   listRunLogs,
 } from "../services/state/runs.ts";
-import { getVersionDetail } from "../services/package-versions.ts";
+import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { deleteRunWorkspace } from "../services/run-workspace-storage.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
@@ -66,25 +66,15 @@ export function createRunsRouter() {
       const agent = c.get("package");
       const orgId = c.get("orgId");
       const actor = getActor(c);
-      // Version override from query param (e.g. ?version=1.2.0 or ?version=latest)
+      // Version selector from query param: `draft`, `published`, or a
+      // version spec (exact / dist-tag / semver range). Default for API and
+      // MCP callers: published when at least one version exists, draft
+      // otherwise (#636). The editor UI passes `version=draft` explicitly.
       const versionOverride = c.req.query("version");
-
-      // If a specific version is requested, resolve and override agent data
-      let effectiveAgent = agent;
-      let overrideVersionLabel: string | undefined;
-      if (versionOverride && agent.source !== "system") {
-        const versionDetail = await getVersionDetail(agent.id, versionOverride);
-        if (!versionDetail) {
-          throw notFound(`Version '${versionOverride}' not found`);
-        }
-        overrideVersionLabel = versionDetail.version;
-        // Override manifest and content — version manifest replaces draft entirely
-        effectiveAgent = {
-          ...agent,
-          manifest: versionDetail.manifest as typeof agent.manifest,
-          prompt: versionDetail.prompt ?? agent.prompt,
-        };
-      }
+      const { agent: effectiveAgent, overrideVersionLabel } = await resolveAgentRunVersion(
+        agent,
+        versionOverride,
+      );
 
       // Single canonical prefix — `run_` — shared with inline + remote origins.
       // Minted BEFORE input parsing so input documents can be streamed straight

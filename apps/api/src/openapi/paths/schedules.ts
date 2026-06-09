@@ -107,7 +107,7 @@ export const schedulesPaths = {
                 version_override: {
                   type: "string",
                   description:
-                    "Pin the agent version every run triggered by this schedule. Literal label or dist-tag.",
+                    "Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Default when omitted: the latest published version when one exists, the draft otherwise. The pinned definition (manifest + prompt) is resolved at each fire.",
                 },
                 connection_overrides: {
                   type: "object",
@@ -242,7 +242,11 @@ export const schedulesPaths = {
                 },
                 model_id_override: { type: ["string", "null"] },
                 proxy_id_override: { type: ["string", "null"] },
-                version_override: { type: ["string", "null"] },
+                version_override: {
+                  type: ["string", "null"],
+                  description:
+                    "Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default: latest published version when one exists, draft otherwise).",
+                },
                 connection_overrides: {
                   type: ["object", "null"],
                   description:

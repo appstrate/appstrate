@@ -370,7 +370,15 @@ export const schemas = {
   },
   Run: {
     type: "object",
-    required: ["id", "orgId", "applicationId", "status", "version_dirty", "started_at"],
+    required: [
+      "id",
+      "orgId",
+      "applicationId",
+      "status",
+      "version_dirty",
+      "version_ref",
+      "started_at",
+    ],
     properties: {
       id: { type: "string" },
       packageId: {
@@ -409,11 +417,18 @@ export const schemas = {
       scheduleId: { type: "string" },
       version_label: {
         type: ["string", "null"],
-        description: "Version label at run time (e.g. '1.0.0')",
+        description:
+          "Version label at run time (e.g. '1.0.0'). For draft runs this is the latest published version the draft sits on top of — read `version_ref` to know which definition actually executed.",
       },
       version_dirty: {
         type: "boolean",
-        description: "Whether the draft had unpublished changes at run time",
+        description:
+          "Whether the draft had unpublished changes at run time. Kept for backward compatibility — prefer `version_ref`, which states unambiguously what executed.",
+      },
+      version_ref: {
+        type: "string",
+        description:
+          "Unambiguous reference to the agent definition the run executed: 'draft' when the mutable draft ran with unpublished changes (or the agent has no published version), or the concrete semver (e.g. '2.1.0') when the run executed that published definition (or a draft identical to it).",
       },
       proxy_label: { type: ["string", "null"], description: "Proxy label used at run time" },
       model_label: { type: ["string", "null"], description: "Model label used at run time" },
