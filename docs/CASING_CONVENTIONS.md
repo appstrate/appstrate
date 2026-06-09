@@ -342,6 +342,8 @@ api(`/integrations/${encodePackageIdPath(packageId)}/connections`);
 
 This is the single canonical contract for frontend, SDK, github-action, and MCP consumers. (Filed as issue #609; the MCP server's prior client-side `encodePath` is superseded by this core helper.)
 
+**Scope sigil in responses (issue #629):** any `scope`-bearing response field (`AgentListItem.scope`, `AgentDetail.scope`, runs `agent_scope`) emits the scope **with** the leading `@` (e.g. `"@myorg"`) — the same format the `{scope}` path params accept, so one operation's output is directly usable as the next operation's input.
+
 ---
 
 ## Field-name catalog (canonical)

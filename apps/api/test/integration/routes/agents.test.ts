@@ -63,6 +63,30 @@ describe("Agents API", () => {
       expect(agent.source).toBe("local");
     });
 
+    it("returns scope WITH the @ sigil — directly usable as a {scope} path param (#629)", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/scoped-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        applicationId: ctx.defaultAppId,
+      });
+
+      const res = await app.request("/api/agents", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      const agent = body.data.find((f: { id: string }) => f.id === "@myorg/scoped-agent");
+      expect(agent.scope).toBe("@myorg");
+
+      // Round-trip: the listed scope must be accepted verbatim by the
+      // {scope}/{name} detail route — one op's output is the next op's input.
+      const detail = await app.request(`/api/packages/agents/${agent.scope}/scoped-agent`, {
+        headers: authHeaders(ctx),
+      });
+      expect(detail.status).toBe(200);
+      const detailBody = (await detail.json()) as any;
+      expect(detailBody.scope).toBe("@myorg");
+    });
+
     it("does not leak agents from other orgs", async () => {
       const otherCtx = await createTestContext({ orgSlug: "otherorg" });
       await seedAgent({ id: "@otherorg/secret-agent", orgId: otherCtx.orgId });
