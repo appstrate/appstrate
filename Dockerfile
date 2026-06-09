@@ -70,6 +70,7 @@ COPY --from=deps /app/packages/connect/node_modules ./packages/connect/node_modu
 COPY --from=deps /app/packages/core/node_modules ./packages/core/node_modules
 COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
 COPY --from=deps /app/packages/env/node_modules ./packages/env/node_modules
+COPY --from=deps /app/packages/mcp-transport/node_modules ./packages/mcp-transport/node_modules
 COPY --from=deps /app/packages/runner-pi/node_modules ./packages/runner-pi/node_modules
 COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types/node_modules
 
