@@ -188,8 +188,12 @@ export function RunDetailPage() {
           onClose={() => setInputOpen(false)}
           agent={agent}
           onSubmit={(input) => {
+            // Re-run the SAME definition the original run executed:
+            // `version_ref` is "draft" or a concrete semver. Pre-#636 this
+            // passed version_label, which silently re-ran the published
+            // version for runs that had executed a dirty draft.
             runAgent.mutate(
-              { input, version: run.version_label ?? undefined },
+              { input, version: run.version_ref },
               { onSuccess: () => setInputOpen(false) },
             );
           }}

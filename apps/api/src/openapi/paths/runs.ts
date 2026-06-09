@@ -36,7 +36,7 @@ export const runsPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Version query to execute (exact version, dist-tag, or semver range). When provided, the run uses the versioned manifest and prompt instead of the live agent.",
+            "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version — 404 `no_published_version` if nothing is published), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Default when omitted: the latest published version when one exists, the draft otherwise** — programmatic callers (API, MCP, CLI, CI) run what was published unless they explicitly ask for the draft. The editor UI passes `version=draft` for test-runs. The run object's `version_ref` states which definition executed. Ignored for system agents.",
         },
       ],
       requestBody: {
@@ -573,6 +573,7 @@ export const runsPaths = {
                 scheduleId: "sched_cm1abc456def789",
                 version_label: "1.2.0",
                 version_dirty: false,
+                version_ref: "1.2.0",
                 proxy_label: null,
                 model_label: "Claude Sonnet 4",
                 model_source: "system",

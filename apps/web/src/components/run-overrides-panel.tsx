@@ -248,6 +248,11 @@ export function RunOverridesPanel({
                     })
                   : t("run.overrides.versionInheritLatest", { ns: "agents" })}
               </SelectItem>
+              {/* Explicit draft pin (#636): without it, runs default to the
+                  latest published version once one exists. */}
+              <SelectItem value="draft">
+                {t("run.overrides.versionDraft", { ns: "agents" })}
+              </SelectItem>
               {versions
                 .filter((v) => !v.yanked)
                 .map((v) => (

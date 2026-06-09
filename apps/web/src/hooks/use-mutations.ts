@@ -37,6 +37,13 @@ export function useSaveConfig(packageId: string) {
 
 export interface RunAgentParams {
   input?: Record<string, unknown>;
+  /**
+   * Version selector forwarded as `?version=`: `"draft"`, `"published"`, or
+   * a version spec. When omitted, the editor default `"draft"` is sent
+   * explicitly — the API's own default is published-when-exists (#636), but
+   * dashboard test-runs must keep executing the working copy the user is
+   * looking at.
+   */
   version?: string;
   /**
    * Per-integration connection picks for THIS run (#199 mechanism #2).
@@ -54,7 +61,9 @@ export function useRunAgent(packageId: string) {
   return useMutation({
     mutationFn: async (params?: RunAgentParams) => {
       const { input, version, connectionOverrides } = params ?? {};
-      const qs = buildQs({ version });
+      // Editor default: run the draft the user is editing. Explicit so the
+      // server-side published-by-default (#636) never changes UI behavior.
+      const qs = buildQs({ version: version ?? "draft" });
       const body: Record<string, unknown> = {};
       if (input !== undefined) body.input = input;
       if (connectionOverrides !== undefined) body.connection_overrides = connectionOverrides;

@@ -383,6 +383,7 @@
   "run.overrides.versionLabel": "Version",
   "run.overrides.versionInheritLatest": "Latest",
   "run.overrides.versionInheritPinned": "Pinned (v{{version}})",
+  "run.overrides.versionDraft": "Brouillon (copie de travail)",
   "run.overrides.configLabel": "Configuration",
   "run.overrides.configHint": "Surcharge des champs sur les paramètres par défaut. Les valeurs identiques au défaut ne sont pas envoyées.",
   "schedule.overridesTitle": "Override des paramètres par défaut",

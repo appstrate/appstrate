@@ -383,6 +383,7 @@
   "run.overrides.versionLabel": "Version",
   "run.overrides.versionInheritLatest": "Latest",
   "run.overrides.versionInheritPinned": "Pinned (v{{version}})",
+  "run.overrides.versionDraft": "Draft (working copy)",
   "run.overrides.configLabel": "Configuration",
   "run.overrides.configHint": "Override fields on top of the default settings. Values identical to the default are not sent.",
   "schedule.overridesTitle": "Override default settings",
