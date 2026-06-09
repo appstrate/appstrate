@@ -549,8 +549,28 @@ type PiSubscribedEvent = { type: string } & Record<string, unknown>;
  * tool calls per run × 2KB = 200KB stays well below the platform's
  * `SIDECAR_MAX_MCP_ENVELOPE_BYTES` defaults and a single `run_logs`
  * row stays cheap.
+ *
+ * Operator-tunable via the `TOOL_RESULT_BYTE_LIMIT` env var (same
+ * runtime-env contract as `MODEL_RETRY_ENABLED`, forwarded into the
+ * agent container by `container-env.ts`). Tool results carrying the
+ * run's actual output are truncated at WRITE time — no read-side knob
+ * can recover them afterwards — so deployments whose consumers read
+ * `getRunLogs` for results raise this cap here. Keep it comfortably
+ * below the platform's 32 KB `run_logs.data` write-boundary cap
+ * (`runLogDataSchema`): a `data` payload exceeding that is dropped
+ * wholesale, which is strictly worse than truncation. Invalid or
+ * non-positive values fall back to the compiled default.
  */
 const TOOL_RESULT_BYTE_LIMIT = 2048;
+
+/** Resolve the effective tool-result cap: env override or compiled default. */
+export function toolResultByteLimit(): number {
+  const raw = process.env.TOOL_RESULT_BYTE_LIMIT;
+  if (raw === undefined || raw === "") return TOOL_RESULT_BYTE_LIMIT;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) return TOOL_RESULT_BYTE_LIMIT;
+  return parsed;
+}
 
 /**
  * Truncate an arbitrary tool result for safe transport on the event
@@ -567,7 +587,7 @@ const TOOL_RESULT_BYTE_LIMIT = 2048;
  */
 export function truncateToolResult(
   result: unknown,
-  limitBytes: number = TOOL_RESULT_BYTE_LIMIT,
+  limitBytes: number = toolResultByteLimit(),
 ): unknown {
   if (result === undefined || result === null) return result;
   if (typeof result === "string") {

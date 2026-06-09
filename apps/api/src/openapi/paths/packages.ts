@@ -1,5 +1,122 @@
 // SPDX-License-Identifier: Apache-2.0
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Mutation response schemas (issue #646)
+//
+// Mutating package endpoints return the affected resource — the same shape as
+// the corresponding GET detail — composed with `allOf` so the operation-result
+// envelope (`packageId` / `lock_version` / `message` / `warnings` /
+// `restored_version`) is preserved ADDITIVELY. The legacy stub fields are kept
+// as top-level aliases for backward compatibility. `detect-breaking-changes.ts`
+// flattens `allOf`, so these read as supersets of the previous shapes (0 removed
+// fields → additive).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** `POST /packages/{type}` → created package resource + create envelope. */
+function packageCreateResponseSchema(detailRef: string) {
+  return {
+    allOf: [
+      { $ref: detailRef },
+      {
+        type: "object",
+        properties: {
+          packageId: {
+            type: "string",
+            description:
+              "Legacy alias of the created package's `id`, kept for backward compatibility. Prefer `id`.",
+          },
+          lock_version: {
+            type: "integer",
+            description: "Optimistic-lock token to send with the next update.",
+          },
+          message: { type: "string", description: "Human-readable operation message." },
+          warnings: {
+            type: "array",
+            items: { type: "string" },
+            description: "Non-blocking validation warnings (present only when any).",
+          },
+        },
+      },
+    ],
+    description:
+      "The created package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, `message`, optional `warnings`). No follow-up GET needed.",
+  };
+}
+
+/** `PUT /packages/{type}/...` → updated package resource + update envelope. */
+function packageUpdateResponseSchema(detailRef: string) {
+  return {
+    allOf: [
+      { $ref: detailRef },
+      {
+        type: "object",
+        properties: {
+          packageId: {
+            type: "string",
+            description:
+              "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`.",
+          },
+          lock_version: {
+            type: "integer",
+            description:
+              "New optimistic-lock token after this update — read it back before the next edit.",
+          },
+          warnings: {
+            type: "array",
+            items: { type: "string" },
+            description: "Non-blocking validation warnings (present only when any).",
+          },
+        },
+      },
+    ],
+    description:
+      "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed.",
+  };
+}
+
+/** `POST /packages/{type}/.../versions` → created version resource + `message`. */
+function versionCreateResponseSchema() {
+  return {
+    allOf: [
+      { $ref: "#/components/schemas/PackageVersionDetail" },
+      {
+        type: "object",
+        properties: {
+          message: { type: "string", description: "Human-readable operation message." },
+        },
+      },
+    ],
+    description:
+      "The created version resource — same shape as the GET version detail (manifest, integrity, dist_tags, …) — plus a human-readable `message`. `id` (version row id) and `version` are part of the resource. No follow-up GET needed.",
+  };
+}
+
+/** `POST /packages/.../versions/{v}/restore` → restored version resource + envelope. */
+function versionRestoreResponseSchema() {
+  return {
+    allOf: [
+      { $ref: "#/components/schemas/PackageVersionDetail" },
+      {
+        type: "object",
+        properties: {
+          message: { type: "string", description: "Human-readable operation message." },
+          restored_version: {
+            type: "string",
+            description: "Legacy alias of the restored version's `version`.",
+          },
+          lock_version: {
+            type: "integer",
+            description:
+              "The package's NEW optimistic-lock token after the draft was overwritten — not part of the version resource; read it back before the next draft edit.",
+          },
+        },
+      },
+    ],
+    description:
+      "The restored version resource — same shape as the GET version detail — plus the operation-result envelope (`message`, `restored_version` legacy alias of `version`, and the package's new `lock_version`).",
+  };
+}
+
 export const packagesPaths = {
   "/api/packages/import-bundle": {
     post: {
@@ -437,19 +554,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lock_version: { type: "integer" },
-                  message: { type: "string" },
-                },
-              },
-              example: {
-                packageId: "@acme/summarize",
-                lock_version: 1,
-                message: "Skill created",
-              },
+              schema: packageCreateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },
@@ -571,14 +676,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
+              schema: versionCreateResponseSchema(),
             },
           },
         },
@@ -617,14 +715,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  message: { type: "string" },
-                  restored_version: { type: "string" },
-                  lock_version: { type: "integer" },
-                },
-              },
+              schema: versionRestoreResponseSchema(),
             },
           },
         },
@@ -785,13 +876,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lock_version: { type: "integer" },
-                },
-              },
+              schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },
@@ -906,14 +991,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lock_version: { type: "integer" },
-                  message: { type: "string" },
-                },
-              },
+              schema: packageCreateResponseSchema("#/components/schemas/AgentDetail"),
             },
           },
         },
@@ -988,13 +1066,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lock_version: { type: "integer" },
-                },
-              },
+              schema: packageUpdateResponseSchema("#/components/schemas/AgentDetail"),
             },
           },
         },
@@ -1154,14 +1226,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
+              schema: versionCreateResponseSchema(),
             },
           },
         },
@@ -1202,14 +1267,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  message: { type: "string" },
-                  restored_version: { type: "string" },
-                  lock_version: { type: "integer" },
-                },
-              },
+              schema: versionRestoreResponseSchema(),
             },
           },
         },
@@ -1348,16 +1406,36 @@ export const packagesPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "object",
-                required: ["packageId", "type", "forked_from"],
-                properties: {
-                  packageId: { type: "string", description: "New package ID under org scope" },
-                  type: {
-                    type: "string",
-                    enum: ["agent", "skill", "mcp-server", "integration"],
+                allOf: [
+                  {
+                    // The forked package resource — same shape as the new
+                    // package's GET detail, selected by `type` at runtime
+                    // (issue #646). Fields vary by type, so they are documented
+                    // as a `oneOf` rather than statically merged.
+                    oneOf: [
+                      { $ref: "#/components/schemas/AgentDetail" },
+                      { $ref: "#/components/schemas/OrgPackageItemDetail" },
+                    ],
                   },
-                  forked_from: { type: "string", description: "Source package ID" },
-                },
+                  {
+                    type: "object",
+                    required: ["packageId", "type", "forked_from"],
+                    properties: {
+                      packageId: {
+                        type: "string",
+                        description:
+                          "New package ID under org scope. Legacy alias of the forked resource's `id`.",
+                      },
+                      type: {
+                        type: "string",
+                        enum: ["agent", "skill", "mcp-server", "integration"],
+                      },
+                      forked_from: { type: "string", description: "Source package ID" },
+                    },
+                  },
+                ],
+                description:
+                  "The forked package resource — same shape as the new package's GET detail (`AgentDetail` when `type` is `agent`, otherwise `OrgPackageItemDetail`) — merged with the fork operation envelope (`packageId` legacy alias of `id`, `type`, `forked_from`). No follow-up GET needed.",
               },
             },
           },
@@ -1454,13 +1532,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lock_version: { type: "integer" },
-                },
-              },
+              schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },
@@ -1585,13 +1657,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lock_version: { type: "integer" },
-                },
-              },
+              schema: packageUpdateResponseSchema("#/components/schemas/AgentDetail"),
             },
           },
         },
@@ -1731,14 +1797,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lock_version: { type: "integer" },
-                  message: { type: "string" },
-                },
-              },
+              schema: packageCreateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },
@@ -1860,14 +1919,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
+              schema: versionCreateResponseSchema(),
             },
           },
         },
@@ -1906,14 +1958,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  message: { type: "string" },
-                  restored_version: { type: "string" },
-                  lock_version: { type: "integer" },
-                },
-              },
+              schema: versionRestoreResponseSchema(),
             },
           },
         },
@@ -2082,13 +2127,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lock_version: { type: "integer" },
-                },
-              },
+              schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },
@@ -2212,13 +2251,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lock_version: { type: "integer" },
-                },
-              },
+              schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },
@@ -2369,14 +2402,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lock_version: { type: "integer" },
-                  message: { type: "string" },
-                },
-              },
+              schema: packageCreateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },
@@ -2498,14 +2524,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
+              schema: versionCreateResponseSchema(),
             },
           },
         },
@@ -2544,14 +2563,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  message: { type: "string" },
-                  restored_version: { type: "string" },
-                  lock_version: { type: "integer" },
-                },
-              },
+              schema: versionRestoreResponseSchema(),
             },
           },
         },
@@ -2720,13 +2732,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lock_version: { type: "integer" },
-                },
-              },
+              schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },
@@ -2850,13 +2856,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lock_version: { type: "integer" },
-                },
-              },
+              schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },

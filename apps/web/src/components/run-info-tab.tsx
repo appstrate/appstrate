@@ -67,10 +67,15 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
           <InfoCard
             label="Version"
             value={
-              <span className={cn("font-mono", !run.version_label && "italic")}>
-                {run.version_label
-                  ? `v${run.version_label}${run.version_dirty ? ` ${t("exec.version_dirty")}` : ""}`
-                  : t("exec.draft")}
+              <span className={cn("font-mono", run.version_ref === "draft" && "italic")}>
+                {/* version_ref is unambiguous (#636): a concrete semver when the
+                    run executed a published definition, "draft" otherwise. For
+                    draft runs, surface the published base version when known. */}
+                {run.version_ref !== "draft"
+                  ? `v${run.version_ref}`
+                  : run.version_label && run.version_label !== "draft"
+                    ? `${t("exec.draft")} (v${run.version_label} ${t("exec.versionDirty")})`
+                    : t("exec.draft")}
               </span>
             }
           />

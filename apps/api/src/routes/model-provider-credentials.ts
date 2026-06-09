@@ -18,6 +18,7 @@ import {
   createApiKeyCredential,
   deleteModelProviderCredential,
   deriveCredentialLabel,
+  getOrgModelProviderCredential,
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
   updateModelProviderCredential,
@@ -216,7 +217,12 @@ export function createModelProviderCredentialsRouter() {
         resourceId: id,
         after: { label, providerId, baseUrlOverride: baseUrlOverride ?? null },
       });
-      return c.json({ id }, 201);
+      // Return the full created resource — the public, non-secret
+      // `ModelProviderCredentialInfo` shape (same as GET/list). The api key is
+      // NEVER echoed back. `id` is part of that shape, so legacy `{ id }`
+      // consumers keep working (#646).
+      const credential = await getOrgModelProviderCredential(orgId, id);
+      return c.json(credential ?? { id }, 201);
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Model provider credential create failed", {
@@ -314,7 +320,11 @@ export function createModelProviderCredentialsRouter() {
         resourceId: id,
         after: auditData as Record<string, unknown>,
       });
-      return c.json({ id });
+      // Return the full updated resource (non-secret `ModelProviderCredentialInfo`
+      // shape, same as GET/list). The api key is NEVER echoed back; `id` stays
+      // part of the shape so legacy `{ id }` consumers are unaffected (#646).
+      const credential = await getOrgModelProviderCredential(orgId, id);
+      return c.json(credential ?? { id });
     } catch (err) {
       logger.error("Model provider credential update failed", {
         id,

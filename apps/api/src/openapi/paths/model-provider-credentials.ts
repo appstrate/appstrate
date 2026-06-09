@@ -232,20 +232,15 @@ export const modelProviderCredentialsPaths = {
       },
       responses: {
         "201": {
-          description: "Model provider credential created",
+          description:
+            "Model provider credential created — the full created credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back. `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "string" },
-                },
-              },
-              example: { id: "cm7stu902" },
+              schema: { $ref: "#/components/schemas/ModelProviderCredential" },
             },
           },
         },
@@ -358,14 +353,15 @@ export const modelProviderCredentialsPaths = {
       },
       responses: {
         "200": {
-          description: "Model provider credential updated",
+          description:
+            "Model provider credential updated — the full updated credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back. `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: { type: "object", properties: { id: { type: "string" } } },
+              schema: { $ref: "#/components/schemas/ModelProviderCredential" },
             },
           },
         },

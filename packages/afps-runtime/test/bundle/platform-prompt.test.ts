@@ -22,6 +22,13 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("Ephemeral container");
   });
 
+  it("advertises the pre-installed Python data libraries (#628)", () => {
+    // Must stay in sync with the venv install line in runtime-pi/Dockerfile.
+    const out = renderPlatformPrompt({ template: "TEMPLATE", context: ctx() });
+    expect(out).toContain("`openpyxl`, `pandas`, `requests`, `PyPDF2`");
+    expect(out).toContain("no `pip install` needed");
+  });
+
   it("emits a Communication section forbidding free-text replies to the user", () => {
     const out = renderPlatformPrompt({ template: "TEMPLATE", context: ctx() });
     expect(out).toContain("### Communication");

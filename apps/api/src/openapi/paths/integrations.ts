@@ -347,17 +347,26 @@ export const integrationsPaths = {
       },
       responses: {
         "201": {
-          description: "Activated",
+          description: "Activated — returns the full integration detail",
           headers: baseResponseHeaders,
           content: {
             "application/json": {
+              // Returns the full integration DTO (same serializer as
+              // GET /integrations/:packageId) so callers see the resulting
+              // state in one round-trip and activate/deactivate are symmetric.
+              // Legacy `active` / `activated_at` kept additively (issue #646).
               schema: {
-                type: "object",
-                required: ["active", "activated_at"],
-                properties: {
-                  active: { type: "boolean" },
-                  activated_at: { type: "string", format: "date-time" },
-                },
+                allOf: [
+                  integrationDetailSchema,
+                  {
+                    type: "object",
+                    required: ["active", "activated_at"],
+                    properties: {
+                      active: { type: "boolean" },
+                      activated_at: { type: "string", format: "date-time" },
+                    },
+                  },
+                ],
               },
             },
           },
@@ -386,14 +395,22 @@ export const integrationsPaths = {
       ],
       responses: {
         "200": {
-          description: "Deactivated",
+          description: "Deactivated — returns the full integration detail",
           headers: baseResponseHeaders,
           content: {
             "application/json": {
+              // Returns the full integration DTO (same serializer as
+              // GET /integrations/:packageId), symmetric with activate.
+              // Legacy `active` kept additively (issue #646).
               schema: {
-                type: "object",
-                required: ["active"],
-                properties: { active: { type: "boolean" } },
+                allOf: [
+                  integrationDetailSchema,
+                  {
+                    type: "object",
+                    required: ["active"],
+                    properties: { active: { type: "boolean" } },
+                  },
+                ],
               },
             },
           },

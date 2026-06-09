@@ -5,6 +5,20 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`storage-s3` presigned upload URLs no longer bind a placeholder CRC32
+  checksum** (appstrate#630). AWS SDK ≥3.729 defaults
+  `requestChecksumCalculation` to `WHEN_SUPPORTED`, signing
+  `x-amz-checksum-crc32=AAAAAA==` (CRC32 of the empty presign body) into
+  `createUploadUrl`'s query string — S3 then rejected every plain PUT unless
+  the client sent the real base64 CRC32 as a header. The presign client now
+  uses `WHEN_REQUIRED`, so the returned descriptor's `headers` are the
+  complete client contract. Server-side uploads keep the SDK's default
+  checksum behaviour.
+
 ## [2.26.0] — 2026-06-07
 
 Canonical packageId path encoding. Additive — no removals, no breaking changes.

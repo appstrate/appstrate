@@ -118,6 +118,22 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
 }
 
 /**
+ * Fetch a single org model by id, projected through the exact same serializer
+ * as {@link listOrgModels} (so a mutation's return shape matches `GET`/list
+ * byte-for-byte). Returns `undefined` when the id is unknown or its backing
+ * credential is unreachable (the row is then absent from the list too).
+ *
+ * Used by the create/update handlers to return the full resource instead of an
+ * id-only stub (issue #646). Deliberately re-runs `listOrgModels` rather than
+ * duplicating the merge/credential-resolution logic — these lists are small
+ * (per-org models) and correctness/parity beats shaving one credential lookup.
+ */
+export async function getOrgModel(orgId: string, id: string): Promise<OrgModelInfo | undefined> {
+  const all = await listOrgModels(orgId);
+  return all.find((m) => m.id === id);
+}
+
+/**
  * Derive a model label when the caller doesn't supply one. Picks the catalog
  * label (`(catalogProviderId ?? providerId, modelId)`) and dedupes against
  * existing org rows by appending ` (2)`, ` (3)`, …  Unknown models fall back

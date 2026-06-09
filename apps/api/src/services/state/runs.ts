@@ -161,6 +161,28 @@ type EnrichedRunRow = {
 // if the mapper produces a field not on the wire DTO (the original bug leaked
 // `sinkSecretEncrypted` via a spread) or the wrong type for one. A new runs
 // column is only exposed if it is added here AND to `RunWireDto` deliberately.
+/**
+ * Derive the unambiguous `version_ref` of a run from the persisted
+ * `(version_label, version_dirty)` pair (#636):
+ *
+ *   - `"draft"`   — the run executed the mutable draft AND its content
+ *                   diverged from every published version (dirty heuristic),
+ *                   or the agent had no published version at all (label is
+ *                   NULL, or the literal `"draft"` label written by the
+ *                   remote-runs registry resolver).
+ *   - `"<semver>"`— the run executed that published definition (explicit
+ *                   selector / new published-by-default path), or a draft
+ *                   whose content had not changed since that version was
+ *                   published (clean draft ≡ published snapshot).
+ *
+ * Derived, not stored: every historical run row already carries the pair, so
+ * old runs get a correct ref without a migration.
+ */
+export function deriveVersionRef(versionLabel: string | null, versionDirty: boolean): string {
+  if (versionDirty) return "draft";
+  return versionLabel ?? "draft";
+}
+
 function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
   return {
     id: row.id,
@@ -189,6 +211,7 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     token_usage: row.tokenUsage,
     version_label: row.versionLabel,
     version_dirty: row.versionDirty,
+    version_ref: deriveVersionRef(row.versionLabel, row.versionDirty),
     proxy_label: row.proxyLabel,
     model_label: row.modelLabel,
     model_source: row.modelSource,
@@ -958,23 +981,36 @@ export async function getRunByOrg(args: { runId: string; orgId: string }) {
  * history. Not legal with `order: "desc"` — the call throws to surface
  * the misuse rather than silently fall back to a full scan.
  *
+ * `minLevel` filters by minimum severity using the fixed `run_logs.level`
+ * domain (`debug < info < warn < error`): `minLevel: "info"` returns
+ * info/warn/error rows and skips the debug breadcrumbs. Implemented as an
+ * `IN (...)` filter so the check constraint's domain stays the single
+ * source of truth — no numeric severity column needed.
+ *
  * Org-scoped by design — `run_logs` has no `applicationId` column, and
  * the object-args shape is the module-facing public contract. App-scoped
  * callers must verify run ownership via `getRun(scope, runId)` first.
  */
+export const RUN_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
+export type RunLogLevel = (typeof RUN_LOG_LEVELS)[number];
+
 export async function listRunLogs(args: {
   runId: string;
   orgId: string;
   limit?: number;
   order?: "asc" | "desc";
   sinceId?: number;
+  minLevel?: RunLogLevel;
 }) {
-  const { runId, orgId, limit, order = "asc", sinceId } = args;
+  const { runId, orgId, limit, order = "asc", sinceId, minLevel } = args;
   if (sinceId !== undefined && order === "desc") {
     throw new Error("listRunLogs: sinceId is not supported with order=desc");
   }
   const filters = [eq(runLogs.runId, runId), eq(runLogs.orgId, orgId)];
   if (sinceId !== undefined) filters.push(gt(runLogs.id, sinceId));
+  if (minLevel !== undefined && minLevel !== "debug") {
+    filters.push(inArray(runLogs.level, RUN_LOG_LEVELS.slice(RUN_LOG_LEVELS.indexOf(minLevel))));
+  }
   const q = db
     .select()
     .from(runLogs)

@@ -199,14 +199,29 @@ export const agentsPaths = {
       },
       responses: {
         "200": {
-          description: "Agent proxy updated",
+          description: "Agent proxy updated — returns the affected proxy setting",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: { type: "object", properties: { success: { type: "boolean" } } },
+              // Returns the affected proxy-setting resource (same shape as
+              // GET …/proxy), composed with the legacy `success` flag kept
+              // additively for backward compatibility (issue #646).
+              schema: {
+                allOf: [
+                  {
+                    type: "object",
+                    required: ["proxyId", "resolved"],
+                    properties: {
+                      proxyId: { type: ["string", "null"] },
+                      resolved: { type: "boolean" },
+                    },
+                  },
+                  { type: "object", properties: { success: { type: "boolean" } } },
+                ],
+              },
             },
           },
         },
@@ -501,14 +516,28 @@ export const agentsPaths = {
       },
       responses: {
         "200": {
-          description: "Agent model updated",
+          description: "Agent model updated — returns the affected model setting",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: { type: "object", properties: { success: { type: "boolean" } } },
+              // Returns the affected model-setting resource (same shape as
+              // GET …/model), composed with the legacy `success` flag kept
+              // additively for backward compatibility (issue #646).
+              schema: {
+                allOf: [
+                  {
+                    type: "object",
+                    required: ["modelId"],
+                    properties: {
+                      modelId: { type: ["string", "null"] },
+                    },
+                  },
+                  { type: "object", properties: { success: { type: "boolean" } } },
+                ],
+              },
             },
           },
         },

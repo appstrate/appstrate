@@ -11,8 +11,9 @@ import {
   deletePackageRuns,
   listPackageRuns,
   listRunLogs,
+  RUN_LOG_LEVELS,
 } from "../services/state/runs.ts";
-import { getVersionDetail } from "../services/package-versions.ts";
+import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { deleteRunWorkspace } from "../services/run-workspace-storage.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
@@ -21,7 +22,7 @@ import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { notFound, conflict } from "../lib/errors.ts";
-import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
+import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
@@ -36,6 +37,8 @@ import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { getEnv } from "@appstrate/env";
 import { currentTraceparent } from "../observability/index.ts";
+import { TERMINAL_RUN_STATUSES } from "@appstrate/db/schema";
+import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
 
 /**
  * Resolve the traceparent to seed the run-execution trace tree with, honoring
@@ -66,25 +69,15 @@ export function createRunsRouter() {
       const agent = c.get("package");
       const orgId = c.get("orgId");
       const actor = getActor(c);
-      // Version override from query param (e.g. ?version=1.2.0 or ?version=latest)
+      // Version selector from query param: `draft`, `published`, or a
+      // version spec (exact / dist-tag / semver range). Default for API and
+      // MCP callers: published when at least one version exists, draft
+      // otherwise (#636). The editor UI passes `version=draft` explicitly.
       const versionOverride = c.req.query("version");
-
-      // If a specific version is requested, resolve and override agent data
-      let effectiveAgent = agent;
-      let overrideVersionLabel: string | undefined;
-      if (versionOverride && agent.source !== "system") {
-        const versionDetail = await getVersionDetail(agent.id, versionOverride);
-        if (!versionDetail) {
-          throw notFound(`Version '${versionOverride}' not found`);
-        }
-        overrideVersionLabel = versionDetail.version;
-        // Override manifest and content — version manifest replaces draft entirely
-        effectiveAgent = {
-          ...agent,
-          manifest: versionDetail.manifest as typeof agent.manifest,
-          prompt: versionDetail.prompt ?? agent.prompt,
-        };
-      }
+      const { agent: effectiveAgent, overrideVersionLabel } = await resolveAgentRunVersion(
+        agent,
+        versionOverride,
+      );
 
       // Single canonical prefix — `run_` — shared with inline + remote origins.
       // Minted BEFORE input parsing so input documents can be streamed straight
@@ -167,7 +160,21 @@ export function createRunsRouter() {
           runnerKind: runner.kind,
         });
 
-        return c.json({ runId });
+        // Return the created run resource — same DTO and serializer as
+        // GET /runs/:id — so callers see the full launched state (resolved
+        // `model_label` / `model_source` for org-default drift detection per
+        // #635, plus status, version_ref, agent_scope, …) without a follow-up
+        // GET. The run row exists once `prepareAndExecuteRun` resolves. The
+        // legacy `runId` field is kept alongside the DTO's `id` for backward
+        // compatibility with existing clients.
+        const row = await getRunFull(getAppScope(c), runId);
+        if (!row) {
+          // The run was just created above; a miss here means a concurrent
+          // teardown raced us. Fall back to the minimal id-only contract
+          // rather than 500-ing a successfully launched run.
+          return c.json({ runId });
+        }
+        return c.json({ runId, ...row });
       } catch (err) {
         // Roll back any input documents streamed into the run workspace before
         // the run launched (size/MIME mismatch, failed preflight, …). Once
@@ -211,9 +218,22 @@ export function createRunsRouter() {
   // See apps/api/src/routes/notifications.ts.
 
   // GET /api/runs/:id — get a single run
+  //
+  // Optional `?wait=<seconds|true>` long-poll (issue #631): holds the
+  // request until the run reaches a terminal status or the wait elapses
+  // (capped at MAX_WAIT_SECONDS, below typical proxy idle timeouts), then
+  // returns the run object exactly as the plain call does. A non-terminal
+  // status in the response means "poll again". The wakeup is event-driven
+  // (run_update PG NOTIFY) with a periodic DB re-check as fallback — see
+  // services/run-wait.ts. Auth/scoping is identical to the plain call:
+  // ownership is verified BEFORE any waiting starts.
   router.get("/runs/:id", async (c) => {
     const runId = c.req.param("id");
     const scope = getAppScope(c);
+    // Validate the wait param before touching the DB so a malformed value
+    // 400s even for runs the caller could not read.
+    const waitMs = parseWaitQuery(c.req.query("wait"));
+
     const row = await getRunFull(scope, runId);
     if (!row) {
       throw notFound("Run not found");
@@ -222,6 +242,25 @@ export function createRunsRouter() {
     if (endUser && row.endUserId !== endUser.id) {
       throw notFound("Run not found");
     }
+
+    if (waitMs > 0 && !TERMINAL_RUN_STATUSES.has(row.status)) {
+      await waitForRunTerminal({
+        runId,
+        scope,
+        timeoutMs: waitMs,
+        // Client disconnect aborts the server-side wait — no leaked
+        // timers/subscriptions for a response nobody will read.
+        signal: c.req.raw.signal,
+      });
+      const fresh = await getRunFull(scope, runId);
+      // The run can be deleted mid-wait (e.g. DELETE agent runs) — surface
+      // the same 404 the initial read would have.
+      if (!fresh) {
+        throw notFound("Run not found");
+      }
+      return c.json(fresh);
+    }
+
     return c.json(row);
   });
 
@@ -235,6 +274,17 @@ export function createRunsRouter() {
   // length. Invalid values (non-numeric, negative) are silently ignored
   // rather than 400'd: a stale or malformed cursor on a re-fetch must
   // never break the tail.
+  //
+  // Optional `?level=<debug|info|warn|error>` filters by MINIMUM severity
+  // (`level=info` skips debug breadcrumbs). Optional `?limit=<1..1000>`
+  // caps the page size; when more rows follow, an RFC 5988
+  // `Link: <…?since=<lastId>>; rel="next"` header points at the next page
+  // — `since` doubles as both the polling-tail cursor and the pagination
+  // cursor, so the two contracts cannot drift. All three params follow
+  // the endpoint's lenient posture: malformed values fall back to the
+  // unfiltered default rather than 400, because a stale cursor or a
+  // typo'd filter on a re-fetch must never break the tail. Default
+  // behavior (no params) is unchanged: the full chronological history.
   router.get("/runs/:id/logs", async (c) => {
     const runId = c.req.param("id");
     const scope = getAppScope(c);
@@ -254,13 +304,31 @@ export function createRunsRouter() {
       if (Number.isInteger(parsed) && parsed >= 0) sinceId = parsed;
     }
 
+    const minLevel = z.enum(RUN_LOG_LEVELS).optional().catch(undefined).parse(c.req.query("level"));
+
+    const limit = z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(1000)
+      .optional()
+      .catch(undefined)
+      .parse(c.req.query("limit"));
+
     // Ownership was just verified via getRun(scope) above — we can hand
-    // off to the org-scoped log reader safely.
-    const logs = await listRunLogs({
+    // off to the org-scoped log reader safely. Over-fetch by one row when
+    // a limit is set so `hasMore` is known without a COUNT round-trip.
+    const rows = await listRunLogs({
       runId,
       orgId: scope.orgId,
       ...(sinceId !== undefined ? { sinceId } : {}),
+      ...(minLevel !== undefined ? { minLevel } : {}),
+      ...(limit !== undefined ? { limit: limit + 1 } : {}),
     });
+
+    const hasMore = limit !== undefined && rows.length > limit;
+    const logs = hasMore ? rows.slice(0, limit) : rows;
+    setSinceLinkHeader({ c, hasMore, lastId: logs.at(-1)?.id });
 
     return c.json(logs);
   });

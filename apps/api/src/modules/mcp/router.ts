@@ -126,7 +126,7 @@ Organization → Applications (id \`app_…\`, one default) → Agents → Runs.
 This MCP server is scoped to ONE organization — the one this endpoint serves — and every operation runs against it plus its default application; you never send those ids per call. To act in another organization, connect that organization's own MCP server (its URL carries its id). Within the org, operations use the default application unless an operation takes an explicit application id.
 
 ## Beyond the per-operation schemas
-- Runs are asynchronous: triggering one returns a runId, then it moves pending→running→success|failed|timeout|cancelled — poll a run get/list operation for status.
+- Runs are asynchronous: triggering one returns a runId, then it moves pending→running→success|failed|timeout|cancelled. To wait for completion, call the run get operation with \`query: { wait: true }\` — the server long-polls up to ~55 s and returns the run when it goes terminal; a still-non-terminal response just means call it again (no sleep needed).
 - Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
 - Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.`;
 

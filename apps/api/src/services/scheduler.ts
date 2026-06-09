@@ -18,6 +18,8 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
+import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
+import type { LoadedPackage } from "../types/index.ts";
 import { ApiError, internalError } from "../lib/errors.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { validateInput } from "./schema.ts";
@@ -283,13 +285,39 @@ async function triggerScheduledRun(
   }
 
   try {
-    const agent = await getPackage(packageId, orgId);
-    if (!agent) {
+    const draftAgent = await getPackage(packageId, orgId);
+    if (!draftAgent) {
       logger.warn("Package not found, skipping schedule", { packageId, scheduleId });
       await failSchedule(`Package '${packageId}' not found`);
       return;
     }
-    agentDenorm = extractRunAgentDenorm(agent);
+    agentDenorm = extractRunAgentDenorm(draftAgent);
+
+    // Resolve which definition this scheduled run executes (#636). The
+    // schedule's `version_override` is a selector (`draft` | `published` |
+    // spec); when absent, scheduled runs default to the latest published
+    // version when one exists (draft otherwise) — same default as the API
+    // run route. Pre-fix, `version_override` only relabeled the run while
+    // the draft executed regardless; resolving here makes the pin real.
+    let agent: LoadedPackage;
+    let overrideVersionLabel: string | undefined;
+    try {
+      const resolved = await resolveAgentRunVersion(draftAgent, overrides.versionOverride);
+      agent = resolved.agent;
+      overrideVersionLabel = resolved.overrideVersionLabel;
+    } catch (err) {
+      if (err instanceof ApiError) {
+        logger.warn("Schedule version resolution failed, skipping run", {
+          scheduleId,
+          packageId,
+          code: err.code,
+          detail: err.message,
+        });
+        await failSchedule(err.message);
+        return;
+      }
+      throw err;
+    }
 
     // Shared preflight: resolve config, validate readiness
     let config: Record<string, unknown>;
@@ -386,7 +414,7 @@ async function triggerScheduledRun(
         configOverride: overrides.configOverride,
         modelId: finalModelId,
         proxyId: finalProxyId,
-        overrideVersionLabel: overrides.versionOverride,
+        overrideVersionLabel,
         scheduleId,
         applicationId,
         scheduleConnectionOverrides: overrides.connectionOverrides ?? null,
