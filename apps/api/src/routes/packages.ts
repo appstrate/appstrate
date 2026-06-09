@@ -48,7 +48,7 @@ import {
   createVersionAndUpload,
   deletePackageVersion,
 } from "../services/package-versions.ts";
-import { agentDetailHandler } from "./agent-detail-handler.ts";
+import { agentDetailHandler, buildAgentDetailDto } from "./agent-detail-handler.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePackageInOrg } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
@@ -338,6 +338,18 @@ interface PackageRouteConfig {
   requireContent?: boolean;
   /** Custom GET detail handler, replaces makeGetHandler when provided. */
   getHandler?: (c: Context<AppEnv>) => Promise<Response>;
+  /**
+   * Custom builder for the package detail DTO returned by mutating endpoints
+   * (create / update / fork). When provided it overrides the generic
+   * `buildPackageDetailDto` so the type's own GET serializer is reused
+   * (agents return the richer Agent detail via `buildAgentDetailDto`).
+   * Returns `null` when the package cannot be resolved.
+   */
+  detailDto?: (
+    c: Context<AppEnv>,
+    itemId: string,
+    orgId: string,
+  ) => Promise<Record<string, unknown> | null>;
 }
 
 // Every AFPS package type exposes user-facing routes. `Partial` is kept so
@@ -362,6 +374,10 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     requireContent: true,
     requireMutableForVersionOps: true,
     getHandler: agentDetailHandler,
+    // Mutating endpoints echo the full Agent detail (same serializer as the
+    // GET). `requireAccess: false` — the caller just wrote this agent in their
+    // org, so the app-install gate must not 404 a successful write.
+    detailDto: (c, itemId) => buildAgentDetailDto(c, { itemId, requireAccess: false }),
   },
   // Integrations are authored via a JSON-body manifest editor (parity with
   // agents/skills). The stored `manifest.json` content mirrors the DB
@@ -532,8 +548,16 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         );
       }
 
+      // Return the created package resource — same DTO/serializer as the GET
+      // detail — so callers see the launched state without a follow-up GET
+      // (issue #646). `packageId` (legacy alias of the DTO's `id`),
+      // `lock_version` (optimistic-lock token), and `message` are retained
+      // additively as operation-result envelope. Defensive fallback to the
+      // legacy stub if the just-created row can't be re-read.
+      const detail = await loadPackageDetailDto(c, rcfg, packageId, orgId);
       return c.json(
         {
+          ...(detail ?? {}),
           packageId,
           lock_version: item.lockVersion,
           message: `${rcfg.cfg.label.slice(0, -1)} created`,
@@ -640,8 +664,12 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       );
     }
 
+    // Return the created package resource (same serializer as GET detail) with
+    // the operation envelope retained additively (issue #646).
+    const detail = await loadPackageDetailDto(c, rcfg, item.id, orgId);
     return c.json(
       {
+        ...(detail ?? {}),
         packageId: item.id,
         lock_version: item.lockVersion,
         message: `${rcfg.cfg.label.slice(0, -1)} created`,
@@ -660,47 +688,84 @@ export function getItemId(c: Context<AppEnv>): string {
   return c.req.param("id")!;
 }
 
+/**
+ * Build the canonical package detail DTO for skills / integrations / mcp-servers
+ * — the exact object the `GET` detail endpoint serializes (`OrgPackageItemDetail`).
+ * Org-scoped (no app-install gate): the GET handler applies that gate before
+ * calling this, while mutating endpoints (create / update / fork) reuse this
+ * directly to echo what the caller just wrote (issue #646). Returns `null` when
+ * the package is not found in the org.
+ */
+async function buildPackageDetailDto(
+  rcfg: PackageRouteConfig,
+  itemId: string,
+  orgId: string,
+): Promise<Record<string, unknown> | null> {
+  const [item, versionCount, latestVersionDate] = await Promise.all([
+    getOrgItem(orgId, itemId, rcfg.cfg),
+    getVersionCount(itemId),
+    getLatestVersionCreatedAt(itemId),
+  ]);
+
+  if (!item) return null;
+
+  // Extract secondary source file from S3 storage (e.g. .ts for tools)
+  let sourceText: string | null = null;
+  if (rcfg.sourceFileName) {
+    const files = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
+    const sourceData = files?.[rcfg.sourceFileName(itemId)];
+    if (sourceData) {
+      sourceText = new TextDecoder().decode(sourceData);
+    }
+  }
+
+  return {
+    ...item,
+    ...(sourceText != null ? { source_code: sourceText } : {}),
+    version_count: versionCount,
+    has_unarchived_changes: computeHasUnpublishedChanges(
+      item.source,
+      versionCount,
+      item.updatedAt ? new Date(item.updatedAt) : null,
+      latestVersionDate,
+    ),
+  };
+}
+
+/**
+ * Resolve the package detail DTO a mutating endpoint should echo — the agent's
+ * richer Agent detail when configured (`rcfg.detailDto`), otherwise the generic
+ * package detail. Single source of truth so create / update / fork stay in
+ * lockstep with their respective GET serializers.
+ */
+function loadPackageDetailDto(
+  c: Context<AppEnv>,
+  rcfg: PackageRouteConfig,
+  itemId: string,
+  orgId: string,
+): Promise<Record<string, unknown> | null> {
+  return rcfg.detailDto
+    ? rcfg.detailDto(c, itemId, orgId)
+    : buildPackageDetailDto(rcfg, itemId, orgId);
+}
+
 function makeGetHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const applicationId = c.get("applicationId");
     const itemId = getItemId(c);
-    const [item, versionCount, latestVersionDate] = await Promise.all([
-      getOrgItem(orgId, itemId, rcfg.cfg),
-      getVersionCount(itemId),
-      getLatestVersionCreatedAt(itemId),
-    ]);
-
-    if (!item) {
-      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
-    }
 
     // Enforce app-level access: all apps can only access installed packages
     if (!(await hasPackageAccess({ orgId, applicationId }, itemId))) {
       throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
 
-    // Extract secondary source file from S3 storage (e.g. .ts for tools)
-    let sourceText: string | null = null;
-    if (rcfg.sourceFileName) {
-      const files = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
-      const sourceData = files?.[rcfg.sourceFileName(itemId)];
-      if (sourceData) {
-        sourceText = new TextDecoder().decode(sourceData);
-      }
+    const dto = await buildPackageDetailDto(rcfg, itemId, orgId);
+    if (!dto) {
+      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
 
-    return c.json({
-      ...item,
-      ...(sourceText != null ? { source_code: sourceText } : {}),
-      version_count: versionCount,
-      has_unarchived_changes: computeHasUnpublishedChanges(
-        item.source,
-        versionCount,
-        item.updatedAt ? new Date(item.updatedAt) : null,
-        latestVersionDate,
-      ),
-    });
+    return c.json(dto);
   };
 }
 
@@ -824,7 +889,13 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       });
     }
 
+    // Return the updated package resource (same serializer as GET detail) with
+    // the operation envelope retained additively — `packageId` (legacy alias of
+    // `id`), `lock_version` (the new optimistic-lock token consumers must read
+    // back for the next edit), and `warnings` (issue #646).
+    const detail = await loadPackageDetailDto(c, rcfg, itemId, orgId);
     return c.json({
+      ...(detail ?? {}),
       packageId: updated.id,
       lock_version: updated.lockVersion,
       ...(warnings.length > 0 ? { warnings } : {}),
@@ -879,6 +950,54 @@ function makeListVersionsHandler(rcfg: PackageRouteConfig) {
   };
 }
 
+/**
+ * Build the canonical version detail DTO — the exact object the `GET` version
+ * detail endpoint serializes. Reused by the version create / restore endpoints
+ * so they echo the resulting version resource instead of an id/message stub
+ * (issue #646). Returns `null` when the version query resolves nothing.
+ */
+async function buildVersionDetailDto(
+  rcfg: PackageRouteConfig,
+  itemId: string,
+  versionQuery: string,
+): Promise<Record<string, unknown> | null> {
+  const detail = await getVersionDetail(itemId, versionQuery);
+  if (!detail) return null;
+
+  const matchingTags = await getMatchingDistTags(itemId, detail.version);
+
+  // Extract primary content file from the ZIP
+  let content: string | null = null;
+  let sourceText: string | null = null;
+  if (detail.content) {
+    const fileName = rcfg.storageFileName(itemId);
+    const fileData = detail.content[fileName];
+    if (fileData) {
+      content = new TextDecoder().decode(fileData);
+    }
+    if (rcfg.sourceFileName) {
+      const sourceData = detail.content[rcfg.sourceFileName(itemId)];
+      if (sourceData) {
+        sourceText = new TextDecoder().decode(sourceData);
+      }
+    }
+  }
+
+  return {
+    id: detail.id,
+    version: detail.version,
+    manifest: detail.manifest,
+    content,
+    ...(sourceText != null ? { source_code: sourceText } : {}),
+    yanked: detail.yanked,
+    yanked_reason: detail.yankedReason,
+    integrity: detail.integrity,
+    artifact_size: detail.artifactSize,
+    createdAt: detail.createdAt,
+    dist_tags: matchingTags,
+  };
+}
+
 function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
@@ -890,43 +1009,12 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
       throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
 
-    const detail = await getVersionDetail(itemId, versionQuery);
-    if (!detail) {
+    const dto = await buildVersionDetailDto(rcfg, itemId, versionQuery);
+    if (!dto) {
       throw notFound(`Version '${versionQuery}' not found`);
     }
 
-    const matchingTags = await getMatchingDistTags(itemId, detail.version);
-
-    // Extract primary content file from the ZIP
-    let content: string | null = null;
-    let sourceText: string | null = null;
-    if (detail.content) {
-      const fileName = rcfg.storageFileName(itemId);
-      const fileData = detail.content[fileName];
-      if (fileData) {
-        content = new TextDecoder().decode(fileData);
-      }
-      if (rcfg.sourceFileName) {
-        const sourceData = detail.content[rcfg.sourceFileName(itemId)];
-        if (sourceData) {
-          sourceText = new TextDecoder().decode(sourceData);
-        }
-      }
-    }
-
-    return c.json({
-      id: detail.id,
-      version: detail.version,
-      manifest: detail.manifest,
-      content,
-      ...(sourceText != null ? { source_code: sourceText } : {}),
-      yanked: detail.yanked,
-      yanked_reason: detail.yankedReason,
-      integrity: detail.integrity,
-      artifact_size: detail.artifactSize,
-      createdAt: detail.createdAt,
-      dist_tags: matchingTags,
-    });
+    return c.json(dto);
   };
 }
 
@@ -996,8 +1084,19 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       throw invalidRequest("Failed to create version (invalid or duplicate)");
     }
 
+    // Return the created version resource — same DTO/serializer as the GET
+    // version detail — so callers see the snapshot (manifest, integrity,
+    // dist_tags, …) without a follow-up GET (issue #646). `id` (version row id)
+    // and `version` are already part of the resource; `message` is retained
+    // additively as operation-result envelope.
+    const detail = await buildVersionDetailDto(rcfg, itemId, result.version);
     return c.json(
-      { id: result.id, version: result.version, message: `Version ${result.version} created` },
+      {
+        ...(detail ?? {}),
+        id: result.id,
+        version: result.version,
+        message: `Version ${result.version} created`,
+      },
       201,
     );
   };
@@ -1085,7 +1184,15 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       });
     }
 
+    // Return the restored version resource — same DTO/serializer as the GET
+    // version detail (issue #646). The operation envelope is retained
+    // additively: `message`, `restored_version` (legacy alias of the resource's
+    // `version`), and `lock_version` — the package's NEW optimistic-lock token
+    // (not part of the version resource), which consumers must read back before
+    // the next draft edit.
+    const versionDto = await buildVersionDetailDto(rcfg, itemId, detail.version);
     return c.json({
+      ...(versionDto ?? {}),
       message: `Version ${detail.version} restored`,
       restored_version: detail.version,
       lock_version: updated.lockVersion,
@@ -1236,7 +1343,24 @@ export function createPackagesRouter() {
       );
     }
 
-    return c.json(result, 201);
+    // Return the forked package resource — same DTO/serializer as the new
+    // package's GET detail, selected by its type (issue #646). The fork
+    // operation fields (`packageId` legacy alias of `id`, `type`, `forked_from`)
+    // are retained additively. Falls back to the fork-result stub if the
+    // freshly-forked row can't be re-read.
+    const forkedRcfg = ROUTE_CONFIGS[result.type as PackageType];
+    const detail = forkedRcfg
+      ? await loadPackageDetailDto(c, forkedRcfg, result.packageId, orgId)
+      : null;
+    return c.json(
+      {
+        ...(detail ?? {}),
+        packageId: result.packageId,
+        type: result.type,
+        forked_from: result.forked_from,
+      },
+      201,
+    );
   });
 
   // --- Package import/download/publish routes ---

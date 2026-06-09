@@ -368,6 +368,36 @@ export const schemas = {
       createdAt: { type: ["string", "null"], format: "date-time" },
     },
   },
+  // Canonical version detail DTO — the exact shape the `GET .../versions/{version}`
+  // endpoints serialize (the per-type GET detail uses a type-specific manifest
+  // `$ref`; this generic form is reused by the version create/restore mutation
+  // responses so they echo the resulting version resource — issue #646).
+  PackageVersionDetail: {
+    type: "object",
+    properties: {
+      id: { type: "integer", description: "Version row id" },
+      version: { type: "string", description: "Semver version string (e.g. 1.0.0)" },
+      manifest: {
+        type: "object",
+        additionalProperties: true,
+        description: "Full version manifest (AFPS)",
+      },
+      content: {
+        type: ["string", "null"],
+        description: "Primary content file extracted from the version ZIP",
+      },
+      source_code: {
+        type: ["string", "null"],
+        description: "Secondary source file content (e.g. .ts), when present",
+      },
+      yanked: { type: "boolean", description: "Whether this version has been yanked" },
+      yanked_reason: { type: ["string", "null"] },
+      integrity: { type: "string", description: "SRI integrity hash (sha256-...)" },
+      artifact_size: { type: "integer", description: "Artifact ZIP size in bytes" },
+      createdAt: { type: ["string", "null"], format: "date-time" },
+      dist_tags: { type: "array", items: { type: "string" } },
+    },
+  },
   Run: {
     type: "object",
     required: ["id", "orgId", "applicationId", "status", "version_dirty", "started_at"],
