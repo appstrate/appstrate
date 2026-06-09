@@ -150,6 +150,20 @@ export async function buildAgentPackage(
     integrity: "",
   };
 
+  // Timing instrumentation: skill dependencies are fetched here one storage
+  // round-trip at a time (DraftPackageCatalog → downloadPackageFiles per
+  // skill). For an inline run this is the per-run critical-path cost a
+  // persisted agent avoids (it pulls one pre-built versioned ZIP), and the
+  // prime suspect for the inline-vs-persisted latency gap. Logging the
+  // duration + skill count makes that measurable in prod instead of guessed.
+  const depsRecord =
+    manifest.dependencies && typeof manifest.dependencies === "object"
+      ? (manifest.dependencies as { skills?: unknown }).skills
+      : undefined;
+  const skillCount =
+    depsRecord && typeof depsRecord === "object" ? Object.keys(depsRecord).length : 0;
+
+  const buildStart = performance.now();
   const bundle = await buildBundleFromCatalog(root, new DraftPackageCatalog({ orgId }), {
     // Run bundle = agent + skills. Integrations/mcp-servers are spawned and
     // fetched separately by the sidecar, not bundled into the agent.
@@ -157,6 +171,11 @@ export async function buildAgentPackage(
     onWarn: (message) => {
       logger.warn("buildAgentPackage: bundle builder warning", { agentId: agent.id, message });
     },
+  });
+  logger.info("buildAgentPackage: bundle assembled", {
+    agentId: agent.id,
+    skillCount,
+    durationMs: Math.round(performance.now() - buildStart),
   });
 
   const zipBuffer = writeBundleToBuffer(bundle);

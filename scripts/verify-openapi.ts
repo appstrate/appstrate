@@ -466,6 +466,11 @@ try {
     // scoped to POST /activate only; all other routes must still have a
     // 2xx response.
     "operation-2xx-response@#/paths/~1activate/post/responses",
+    // GET /api/mcp is the GET channel of the MCP Streamable HTTP transport.
+    // This server runs stateless (no server-initiated SSE stream), so GET
+    // only ever returns 405 — a 2xx would be a lie. Documenting the 405
+    // behaviour is still useful for clients. Scoped to GET /api/mcp only.
+    "operation-2xx-response@#/paths/~1api~1mcp/get/responses",
   ]);
   const problems = rawProblems.filter((p) => {
     const pointer = p.location?.[0]?.pointer ?? "";

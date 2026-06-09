@@ -7,8 +7,27 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "List the in-code model provider registry",
       description:
-        "Returns the catalog of LLM providers Appstrate knows how to talk to. The UI uses this to render the provider picker without hard-coding the catalog client-side.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+        "Returns the catalog of LLM providers Appstrate knows how to talk to. The UI uses this to render the provider picker without hard-coding the catalog client-side. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=providerId,authMode` to skip the heavy per-provider `models` catalog (the bulk of the payload) when you only need to know which providers exist.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        {
+          name: "limit",
+          in: "query",
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 100 },
+        },
+        {
+          name: "offset",
+          in: "query",
+          schema: { type: "integer", minimum: 0, default: 0 },
+        },
+        {
+          name: "fields",
+          in: "query",
+          description:
+            "Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, featured, models. An unknown field is a 400.",
+          schema: { type: "string" },
+        },
+      ],
       responses: {
         "200": {
           description: "Model provider registry list",

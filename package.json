@@ -117,7 +117,7 @@
     "*.{ts,tsx,json,md,yml,yaml}": "prettier --write"
   },
   "dependencies": {
-    "@afps-spec/schema": "^0.6.0",
+    "@afps-spec/schema": "^0.6.1",
     "@appstrate/connect": "workspace:*",
     "@appstrate/core": "workspace:*",
     "@appstrate/mcp-transport": "workspace:*",
@@ -128,6 +128,7 @@
     "zod": "4.4.3"
   },
   "patchedDependencies": {
-    "@redocly/openapi-core@2.25.2": "patches/@redocly%2Fopenapi-core@2.25.2.patch"
+    "@redocly/openapi-core@2.25.2": "patches/@redocly%2Fopenapi-core@2.25.2.patch",
+    "@better-auth/oauth-provider@1.7.0-beta.4": "patches/@better-auth%2Foauth-provider@1.7.0-beta.4.patch"
   }
 }

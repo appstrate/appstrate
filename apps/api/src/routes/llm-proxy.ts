@@ -13,10 +13,22 @@
  *   - `anthropic-messages`   → `/v1/messages`
  *   - `mistral-conversations` → `/v1/chat/completions`
  *
- * Additional families (`openai-responses`, `google-generative-ai`, …)
+ * Additional API-key families (`openai-responses`, `google-generative-ai`, …)
  * are mechanical — drop a new adapter + route and wire it here. The
  * spec explicitly resists premature abstraction so each route keeps its
  * own adapter binding instead of sharing a single dispatch table.
+ *
+ * Run-only shapes (no proxy route, by design):
+ *   - `openai-codex-responses` (the `codex` OAuth subscription provider) and
+ *     the `claude-code` subscription provider are **run-only**. Their
+ *     credentials are short-lived OAuth subscription tokens the sidecar
+ *     injects per-request inside the run sandbox; there is deliberately no
+ *     `/api/llm-proxy/...` route that would hand a third-party caller a path
+ *     to spend a user's personal subscription. A remote/CLI runner using one
+ *     of these providers calls the upstream itself with its own token — it
+ *     does not route through this proxy. (Note `claude-code` rides the
+ *     `anthropic-messages` shape, which DOES have a route for API-key
+ *     Anthropic; the subscription provider still never proxies.)
  *
  * Security:
  *   - Bearer auth only — API keys with `llm-proxy:call` (headless) OR

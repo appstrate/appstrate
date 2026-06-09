@@ -172,6 +172,30 @@ describe("GET /api/integrations", () => {
     const gmail = body.data.find((i) => i.id === "@myorg/gmail");
     expect(gmail?.active).toBe(true);
   });
+
+  it("projects only requested fields, dropping the heavy manifest", async () => {
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    const res = await app.request("/api/integrations?fields=id,source", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: Record<string, unknown>[] };
+    const gmail = body.data.find((i) => i.id === "@myorg/gmail");
+    expect(gmail).toBeDefined();
+    expect(Object.keys(gmail!).sort()).toEqual(["id", "source"]);
+    expect(gmail).not.toHaveProperty("manifest");
+  });
+
+  it("rejects an unknown field in the selector with 400", async () => {
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    const res = await app.request("/api/integrations?fields=id,nope", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("invalid_request");
+    expect(body.detail).toContain("nope");
+  });
 });
 
 describe("GET /api/integrations/:packageId", () => {

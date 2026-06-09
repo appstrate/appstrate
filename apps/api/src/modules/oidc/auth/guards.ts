@@ -41,6 +41,8 @@ import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
 import { deviceCode, oauthClient } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import { loadClientSignupPolicy } from "../services/orgmember-mapping.ts";
+import { markClientSelfService } from "../services/oauth-admin.ts";
+import { isProtectedResourceUri } from "../../../lib/protected-resources.ts";
 import { readPendingClientCookieFromHeaders } from "../services/pending-client-cookie.ts";
 import {
   assertUserRealm,
@@ -53,6 +55,11 @@ const TOKEN_RL_POINTS = 30;
 const AUTHORIZE_RL_POINTS = 30;
 const INTROSPECT_RL_POINTS = 60;
 const REVOKE_RL_POINTS = 60;
+// Unauthenticated Dynamic Client Registration (RFC 7591) — each call inserts
+// an oauth_clients row, so an unbounded endpoint is a DB-bloat / resource-
+// exhaustion vector. A real client registers once (then reuses its client_id),
+// so 10/min/IP is generous for legitimate use and tight against abuse.
+const REGISTER_RL_POINTS = 10;
 // CLI device flow — per-IP limit on `/device/code`. The endpoint is a
 // write (inserts a row) and rarely called more than once per login;
 // 10/min/IP is a loose ceiling.
@@ -614,8 +621,39 @@ async function enforceDeviceApproveRealm(ctx: {
   });
 }
 
+/**
+ * Whether `clientId` is a self-service (DCR / CIMD) client — stamped
+ * `metadata.selfService = true` at registration (`markClientSelfService`).
+ *
+ * Self-service clients mint instance tokens carrying the connecting user's full
+ * authority, so the ONLY safe audience for such a token is a single protected
+ * resource (a per-org MCP endpoint) whose own resource-server check + the
+ * outbound confinement in `protected-resources.ts` jointly cage it; the
+ * `/oauth2/token` guard enforces that at mint time. Reads the client's metadata
+ * directly (same authoritative-row pattern as `enforceDeviceApproveRealm`); a
+ * missing / corrupt / non-self-service row is treated as not self-service, so
+ * admin-provisioned clients (the dashboard SPA / CLI) keep targeting the
+ * platform audience and the other gates apply.
+ */
+async function isSelfServiceClient(clientId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ metadata: oauthClient.metadata })
+    .from(oauthClient)
+    .where(eq(oauthClient.clientId, clientId))
+    .limit(1);
+  if (!row?.metadata) return false;
+  try {
+    const parsed = JSON.parse(row.metadata) as { selfService?: unknown };
+    return parsed.selfService === true;
+  } catch {
+    return false; // corrupt metadata → not provably self-service, defer to other gates
+  }
+}
+
 export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
-  const audiences = [...opts.validAudiences];
+  // Read `opts.validAudiences` LIVE on every request — it is the org-aware
+  // mutable allowlist (see `mcp/audiences.ts`), so a snapshot taken here would
+  // miss orgs created after boot and reject their per-org MCP resource.
 
   return {
     id: "oidc-guards",
@@ -690,15 +728,69 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
             if (clientId) await enforceClientRateLimit(clientId);
 
             const grantType = body.grant_type;
-            if (grantType === "authorization_code" || grantType === "refresh_token") {
-              const resource = Array.isArray(body.resource) ? body.resource[0] : body.resource;
-              if (!resource || !audiences.includes(resource)) {
+            // Every grant that reaches `createUserTokens` and can carry a
+            // `resource` is gated here — `client_credentials` included, so a
+            // future M2M client cannot mint an un-audience-bound (or
+            // multi-resource self-service) token by switching grant type.
+            if (
+              grantType === "authorization_code" ||
+              grantType === "refresh_token" ||
+              grantType === "client_credentials"
+            ) {
+              // Validate EVERY requested resource, not just the first. The
+              // oauth-provider's `checkResource` accepts `resource` as an array
+              // and stamps the FULL list into `aud`, so validating only
+              // `resource[0]` would let a caller smuggle extra audiences past
+              // this gate (e.g. `resource=[<mcp/o/A>, APP_URL]`).
+              const resources = Array.isArray(body.resource)
+                ? body.resource
+                : body.resource
+                  ? [body.resource]
+                  : [];
+              if (
+                resources.length === 0 ||
+                resources.some((r) => !opts.validAudiences.includes(r))
+              ) {
                 throw new APIError("BAD_REQUEST", {
                   error: "invalid_request",
                   error_description:
-                    `The 'resource' parameter is required (RFC 8707) and must be one of: ${audiences.join(", ")}. ` +
+                    `The 'resource' parameter is required (RFC 8707) and every value must be one of: ${opts.validAudiences.join(", ")}. ` +
                     `Without it, the plugin issues opaque access tokens that the Appstrate Bearer auth strategy cannot verify.`,
                 });
+              }
+              // Self-service (DCR / CIMD) clients carry the connecting user's
+              // full authority, so their tokens MUST be confined to a SINGLE
+              // protected resource (one per-org MCP endpoint, `/api/mcp/o/:org`)
+              // — never the broad platform audience (`APP_URL` / `APP_URL/api/auth`),
+              // which would let the token act across the entire REST API, and
+              // never several resources at once (a per-org MCP token is bound to
+              // exactly ONE org by design — a multi-aud request would smuggle a
+              // second org / the platform audience into `aud`). Admin-provisioned
+              // instance clients — the dashboard SPA / CLI — are NOT self-service
+              // and may target the platform audience. The outbound half of
+              // `enforceResourceAudience` then keeps the issued token from being
+              // replayed off its resource. No-op when no protected resource is
+              // registered (mcp module disabled) — `isProtectedResourceUri` is
+              // false for everything, so a self-service client simply cannot mint.
+              if (clientId && (await isSelfServiceClient(clientId))) {
+                if (resources.length !== 1 || !isProtectedResourceUri(resources[0]!)) {
+                  logger.warn(
+                    "oidc: self-service client requested a non-resource / multi-resource audience — rejecting",
+                    {
+                      module: "oidc",
+                      audit: true,
+                      event: "oauth.token.self_service_audience_rejected",
+                      clientId,
+                      resources,
+                    },
+                  );
+                  throw new APIError("BAD_REQUEST", {
+                    error: "invalid_target",
+                    error_description:
+                      "A self-service client may bind a token to exactly one protected-resource " +
+                      "audience (RFC 8707) — e.g. an MCP org endpoint.",
+                  });
+                }
               }
             }
           }),
@@ -719,6 +811,37 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
           matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/revoke",
           handler: createAuthMiddleware(async (ctx) => {
             await enforceRateLimit("oauth-revoke", REVOKE_RL_POINTS, ctx.request);
+          }),
+        },
+        {
+          // RFC 7591 Dynamic Client Registration — unauthenticated + write, so
+          // rate-limit per IP (see REGISTER_RL_POINTS).
+          matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/register",
+          handler: createAuthMiddleware(async (ctx) => {
+            await enforceRateLimit("oauth-register", REGISTER_RL_POINTS, ctx.request);
+          }),
+        },
+      ],
+      after: [
+        {
+          // Stamp the freshly-registered DCR client as a self-service instance
+          // client. Done in an AFTER-hook (not before) because the RFC 7591
+          // register schema strips unknown body fields — a `metadata` injected
+          // before validation never reaches storage. Here we read the
+          // generated `client_id` from the response and update the row, the
+          // same seam as CIMD's `onClientCreated`. See
+          // `markClientSelfService` for why this is required (otherwise token
+          // mint rejects the client for a missing `level`).
+          matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/register",
+          handler: createAuthMiddleware(async (ctx) => {
+            const returned = (ctx.context as { returned?: unknown }).returned;
+            const clientId =
+              returned && typeof returned === "object" && "client_id" in returned
+                ? (returned as { client_id?: unknown }).client_id
+                : undefined;
+            if (typeof clientId === "string" && clientId.length > 0) {
+              await markClientSelfService(clientId);
+            }
           }),
         },
       ],

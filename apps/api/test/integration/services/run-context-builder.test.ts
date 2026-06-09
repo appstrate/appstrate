@@ -8,7 +8,11 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { ModelNotConfiguredError } from "../../../src/services/run-context-builder.ts";
+import {
+  ModelNotConfiguredError,
+  ModelCredentialMissingError,
+  modelCredentialIsPresent,
+} from "../../../src/services/run-context-builder.ts";
 import { signRunToken, parseSignedToken } from "../../../src/lib/run-token.ts";
 
 // ─── ModelNotConfiguredError ────────────────────────────────
@@ -44,6 +48,52 @@ describe("ModelNotConfiguredError", () => {
     }
     expect(caught).toBeInstanceOf(ModelNotConfiguredError);
     expect(caught).toBeInstanceOf(Error);
+  });
+});
+
+// ─── modelCredentialIsPresent ──────────────────────────────
+
+describe("modelCredentialIsPresent", () => {
+  it("returns true for a non-empty key", () => {
+    expect(modelCredentialIsPresent({ apiKey: "sk-abc123" })).toBe(true);
+  });
+
+  it("returns false for an empty-string key (the system-stub hang case)", () => {
+    expect(modelCredentialIsPresent({ apiKey: "" })).toBe(false);
+  });
+
+  it("returns false for a whitespace-only key", () => {
+    expect(modelCredentialIsPresent({ apiKey: "   " })).toBe(false);
+    expect(modelCredentialIsPresent({ apiKey: "\t\n" })).toBe(false);
+  });
+
+  it("returns true for a key with surrounding whitespace but real content", () => {
+    expect(modelCredentialIsPresent({ apiKey: "  sk-real  " })).toBe(true);
+  });
+});
+
+// ─── ModelCredentialMissingError ───────────────────────────
+
+describe("ModelCredentialMissingError", () => {
+  it("is an instance of Error", () => {
+    expect(new ModelCredentialMissingError("GPT-5")).toBeInstanceOf(Error);
+  });
+
+  it("has name set to ModelCredentialMissingError", () => {
+    expect(new ModelCredentialMissingError("GPT-5").name).toBe("ModelCredentialMissingError");
+  });
+
+  it("carries the model label and mentions it in the message", () => {
+    const err = new ModelCredentialMissingError("Claude Opus");
+    expect(err.modelLabel).toBe("Claude Opus");
+    expect(err.message).toContain("Claude Opus");
+    expect(err.message).toContain("no API key");
+  });
+
+  it("is distinguishable from ModelNotConfiguredError via instanceof", () => {
+    const err: Error = new ModelCredentialMissingError("X");
+    expect(err instanceof ModelCredentialMissingError).toBe(true);
+    expect(err instanceof ModelNotConfiguredError).toBe(false);
   });
 });
 

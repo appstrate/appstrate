@@ -178,7 +178,8 @@
     },
     "schema_version": {
       "type": "string",
-      "pattern": "^0\\.(0|[1-9]\\d*)$"
+      "pattern": "^0\\.(0|[1-9]\\d*)$",
+      "description": "AFPS schema version this manifest targets, in MAJOR.MINOR format (e.g. \"0.0\"). Distinct from the package \"version\" field, which uses full MAJOR.MINOR.PATCH semver."
     },
     "dependencies": {
       "type": "object",

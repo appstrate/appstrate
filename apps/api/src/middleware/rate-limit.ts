@@ -127,6 +127,39 @@ export const rateLimit = createRateLimitMiddleware({
   emitHeaders: true,
 });
 
+/**
+ * Rate limiter for the inbound MCP server (`/api/mcp/o/:org`).
+ *
+ * Keys on the caller's identity at JSON-RPC *envelope* granularity (one POST =
+ * one consumed point), independent of how many tools or batched calls the
+ * envelope carries. `invoke_operation` re-dispatches through already
+ * rate-limited platform routes (defence in depth), but `search`/`describe`
+ * touch nothing rate-limited, so this bounds their abuse surface too.
+ *
+ * The identity resolver is intentionally exhaustive — MCP access is grantable
+ * to API keys, dashboard sessions, AND OIDC end-users, so we cannot assume
+ * `c.get("user")` is populated. Prefer the most specific identity available
+ * and fall back to the client IP so a malformed-auth edge can never key on
+ * `undefined`.
+ */
+export const rateLimitMcp = createRateLimitMiddleware({
+  category: "mcp",
+  extractKey: (c) => {
+    const apiKeyId = c.get("apiKeyId");
+    const endUser = c.get("endUser");
+    const user = c.get("user");
+    const identity = apiKeyId
+      ? `apikey:${apiKeyId}`
+      : endUser?.id
+        ? `enduser:${endUser.id}`
+        : user?.id
+          ? `user:${user.id}`
+          : `ip:${getClientIp(c)}`;
+    return `mcp:${identity}`;
+  },
+  emitHeaders: true,
+});
+
 /** Bearer token-based rate limiter for internal container routes. */
 export const rateLimitByBearer = createRateLimitMiddleware({
   category: "bearer",

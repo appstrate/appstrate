@@ -8,6 +8,7 @@
  * import when a core Bearer JWT request only needs to filter scopes.
  */
 
+import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
 import type { Permission } from "../../../lib/permissions.ts";
 
 /**
@@ -50,17 +51,26 @@ export const OIDC_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>(
   // render skill/model metadata alongside their own UI.
   "skills:read",
   "models:read",
+  // LLM proxy — server-side model injection for chat/agent clients that run
+  // completions through the platform with the org's configured models. Metered
+  // per call in the `llm_usage` ledger. Must be in the requestable vocabulary
+  // for clients (e.g. the chat BFF) to acquire it; dashboard tokens remain
+  // gated by the caller's org role on top of the requested scope.
+  "llm-proxy:call",
 ]);
 
 /**
- * Scope vocabulary served by the OIDC module. Identity scopes first, then
- * core `Permission` strings drawn from `OIDC_ALLOWED_SCOPES` — no second
- * vocabulary, no translation layer. The scope `agents:run` grants the
- * `agents:run` permission verbatim.
+ * Static core scope vocabulary: identity scopes first, then the core
+ * `Permission` strings drawn from `OIDC_ALLOWED_SCOPES` — no translation
+ * layer, the scope `agents:run` grants the `agents:run` permission verbatim.
  *
- * Owned wholly by the OIDC module: there is no cross-module scope
- * contribution point. Modules that need to gate routes on an end-user JWT
- * use `permissionsContribution()` + the RBAC pipeline instead.
+ * Module-contributed scopes (e.g. `mcp:read`/`mcp:invoke`) are NOT listed
+ * here — they are merged dynamically by `getAppstrateScopes()` from each
+ * module's `permissionsContribution({ endUserGrantable: true })`, mirroring
+ * the end-user filter in `claims.ts`. This keeps the static list typed
+ * against the core `Permission` union (which doesn't include module
+ * resources at compile time in every consumer) while still advertising
+ * module scopes at runtime.
  */
 export const APPSTRATE_BUILTIN_SCOPES: readonly string[] = [
   ...OIDC_IDENTITY_SCOPES,
@@ -68,16 +78,17 @@ export const APPSTRATE_BUILTIN_SCOPES: readonly string[] = [
 ];
 
 /**
- * Full scope vocabulary served by the OIDC module.
+ * Full scope vocabulary served by the OIDC module — core built-ins plus any
+ * module scopes opted in via `endUserGrantable: true`.
  *
  * Called at boot by `oauthProvider({ scopes })` (so discovery
  * `scopes_supported` advertises the vocabulary), at request time by
  * `GET /api/oauth/scopes`, and on every client (re)registration by
- * `assertValidScopes`. Kept as a function (not a bare const) so callers
- * stay decoupled from the underlying representation.
+ * `assertValidScopes`. Kept as a function (not a bare const) so callers see
+ * the live set after modules have contributed.
  */
 export function getAppstrateScopes(): readonly string[] {
-  return APPSTRATE_BUILTIN_SCOPES;
+  return [...APPSTRATE_BUILTIN_SCOPES, ...getModuleEndUserAllowedScopes()];
 }
 
 /** O(1) membership check on the full vocabulary. Materialized per call (cheap). */

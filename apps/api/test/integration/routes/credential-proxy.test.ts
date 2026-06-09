@@ -344,6 +344,40 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
     expect(upstreamCalls).toBe(0);
   });
 
+  it("maps an integration not activated in the application to 404 (not 500)", async () => {
+    // Package exists in the org but is NOT inserted into applicationPackages,
+    // so assertIntegrationActive throws an RFC 9457 notFound (an ApiError, not
+    // a ProxyCredentialError). The route's catch must surface its 404 status
+    // rather than masking it as a 500.
+    await seedPackage({
+      id: INTEGRATION_ID,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: gmailManifest(),
+    });
+
+    let upstreamCalls = 0;
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response("nope", { status: 599 });
+    });
+
+    const res = await app.request("/api/credential-proxy/proxy", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Org-Id": ctx.orgId,
+        "X-Application-Id": ctx.defaultAppId,
+        "X-Integration-Id": INTEGRATION_ID,
+        "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "X-Session-Id": uuidV4(),
+      },
+    });
+    expect(res.status).toBe(404);
+    expect(upstreamCalls).toBe(0);
+  });
+
   it("maps an off-allowlist target to 403 (ProxyAuthorizationError)", async () => {
     await seedIntegrationWithConnection(ctx);
 

@@ -41,7 +41,7 @@ import { listLlmUsageForRun } from "../../services/state/runs.ts";
  * OAuth-provider modules (`@appstrate/module-codex`,
  * `@appstrate/module-claude-code`) when the env var is unset. External
  * deployments extend the list by appending npm package specifiers, e.g.:
- *   MODULES=oidc,webhooks,core-providers,@appstrate/module-codex,@appstrate/module-claude-code,@scope/module
+ *   MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-codex,@appstrate/module-claude-code,@scope/module
  *
  * `core-providers` ships the API-key model providers (openai, anthropic,
  * openai-compatible) as an explicit, disablable module so cloud SaaS
@@ -60,7 +60,7 @@ import { listLlmUsageForRun } from "../../services/state/runs.ts";
  * load and init successfully or the platform crashes.
  */
 const DEFAULT_MODULES =
-  "oidc,webhooks,core-providers,@appstrate/module-codex,@appstrate/module-claude-code";
+  "oidc,webhooks,mcp,core-providers,@appstrate/module-codex,@appstrate/module-claude-code";
 
 export function getModuleRegistry(): string[] {
   return (process.env.MODULES ?? DEFAULT_MODULES)

@@ -67,6 +67,58 @@ describe("Model Provider Keys API", () => {
       const grok2 = xai!.models.find((m) => m.id === "grok-2");
       expect(grok2?.featured).toBe(false);
     });
+
+    it("projects only requested fields and drops the heavy models catalog", async () => {
+      const res = await app.request(
+        "/api/model-provider-credentials/registry?fields=providerId,authMode",
+        { headers: authHeaders(ctx) },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Record<string, unknown>[] };
+      expect(body.data.length).toBeGreaterThan(0);
+      for (const entry of body.data) {
+        // providerId is always kept; authMode requested; nothing else.
+        expect(Object.keys(entry).sort()).toEqual(["authMode", "providerId"]);
+        expect(entry).not.toHaveProperty("models");
+        expect(entry).not.toHaveProperty("displayName");
+      }
+    });
+
+    it("always keeps providerId even when not explicitly requested", async () => {
+      const res = await app.request("/api/model-provider-credentials/registry?fields=authMode", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Record<string, unknown>[] };
+      expect(body.data[0]).toHaveProperty("providerId");
+      expect(body.data[0]).toHaveProperty("authMode");
+    });
+
+    it("rejects an unknown field with 400 invalid_request", async () => {
+      const res = await app.request(
+        "/api/model-provider-credentials/registry?fields=providerId,bogus",
+        { headers: authHeaders(ctx) },
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code?: string; detail?: string };
+      expect(body.code).toBe("invalid_request");
+      expect(body.detail).toContain("bogus");
+    });
+
+    it("paginates with limit/offset and reports total + hasMore", async () => {
+      const res = await app.request("/api/model-provider-credentials/registry?limit=2", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: unknown[];
+        total: number;
+        hasMore: boolean;
+      };
+      expect(body.data).toHaveLength(2);
+      expect(body.total).toBeGreaterThan(2);
+      expect(body.hasMore).toBe(true);
+    });
   });
 
   describe("GET /api/model-provider-credentials", () => {

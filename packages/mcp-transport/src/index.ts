@@ -136,6 +136,14 @@ export interface AppstrateResourceProvider {
 export interface CreateMcpServerOptions {
   /** Resource provider — when omitted, no `resources/*` capability is advertised. */
   resources?: AppstrateResourceProvider;
+  /**
+   * Server `instructions` returned in the `initialize` result. MCP clients
+   * (Claude Code, Cursor, VSCode, Goose) inject this into the system prompt
+   * before the model sees any tool schema — the canonical place for
+   * cross-cutting guidance a single tool description can't carry. Keep it to
+   * what the tool/operation schemas can't say; don't restate them.
+   */
+  instructions?: string;
 }
 
 /**
@@ -166,7 +174,7 @@ export function createMcpServer(
     capabilities.resources = { listChanged: false, subscribe: false };
   }
 
-  const server = new Server(serverInfo, { capabilities });
+  const server = new Server(serverInfo, { capabilities, instructions: options.instructions });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [...registry.values()].map((t) => t.descriptor),

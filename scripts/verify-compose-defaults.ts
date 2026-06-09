@@ -60,7 +60,7 @@ const CODE_DEFAULTS: Record<string, string> = {
   CONNECTION_ENCRYPTION_KEY_ID: "k1",
   CONNECTION_ENCRYPTION_KEYS: "{}",
   LOG_LEVEL: "info",
-  MODULES: "oidc,webhooks,core-providers,@appstrate/module-codex,@appstrate/module-claude-code",
+  MODULES: "oidc,webhooks,mcp,core-providers,@appstrate/module-codex,@appstrate/module-claude-code",
   OAUTH_REFRESH_WORKER_ENABLED: "false",
   INTEGRATION_REFRESH_MAX_FAILURES: "5",
   INTEGRATION_REFRESH_GRACE_SECONDS: "3600",

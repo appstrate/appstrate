@@ -17,6 +17,8 @@ import {
   seedSchedule,
 } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
+import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
+import { createOrgModel, setDefaultModel } from "../../../src/services/org-models.ts";
 
 const app = getTestApp();
 
@@ -250,6 +252,71 @@ describe("Runs API", () => {
       });
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  // ─── POST /api/agents/:scope/:name/run — missing model credential ──
+  //
+  // Fail-fast guard: a resolved model whose credential has an empty API key
+  // (the `SYSTEM_PROVIDER_KEYS`-stub / blank-secret case) used to slip past
+  // resolution and leave the run stuck in `running` until the timeout ceiling
+  // — the LLM call 401s and the SDK retries silently. buildRunContext now
+  // rejects at kickoff with a clean 400 `model_credential_missing`, BEFORE
+  // the run row is created.
+  describe("POST /api/agents/:scope/:name/run — missing model credential", () => {
+    it("returns 400 model_credential_missing for a default model with an empty key", async () => {
+      await seedAgent({
+        id: "@runorg/nokey-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@runorg/nokey-agent",
+          version: "0.1.0",
+          type: "agent",
+          description: "Agent used to exercise the empty-key kickoff guard",
+        },
+        draftContent: "Do the thing.",
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@runorg/nokey-agent",
+      );
+
+      // Credential with a blank secret — the service layer doesn't enforce a
+      // min length (only the create-route Zod schema does), so this models a
+      // stub/misconfigured key reaching resolution.
+      const credentialId = await createApiKeyCredential({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        label: "Blank OpenAI",
+        providerId: "openai",
+        apiKey: "",
+      });
+      const modelDbId = await createOrgModel(
+        ctx.orgId,
+        "Blank GPT",
+        "gpt-5.5",
+        ctx.user.id,
+        credentialId,
+      );
+      // First org model auto-defaults, but pin it explicitly so the test is
+      // robust to that behavior changing.
+      await setDefaultModel(ctx.orgId, modelDbId);
+
+      const res = await app.request("/api/agents/@runorg/nokey-agent/run", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: {} }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code?: string; detail?: string };
+      expect(body.code).toBe("model_credential_missing");
+      expect(body.detail).toContain("Blank GPT");
+
+      // No run row should have been created — the guard fires before insert.
+      const rows = await db.select().from(runs).where(eq(runs.packageId, "@runorg/nokey-agent"));
+      expect(rows).toHaveLength(0);
     });
   });
 
