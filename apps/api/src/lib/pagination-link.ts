@@ -74,6 +74,30 @@ export function setCursorLinkHeader({
   }
 }
 
+interface SinceLinkArgs {
+  c: Context;
+  /** True when the current page is followed by another. */
+  hasMore: boolean;
+  /** Monotonic id of the last row on this page; required when `hasMore`. */
+  lastId?: number | undefined;
+}
+
+/**
+ * Set RFC 5988 `Link` header for `?since=<id>`-cursor responses
+ * (e.g. `/api/runs/{id}/logs`). Same hypermedia contract as the
+ * Stripe-style helper above, but keyed on the endpoint's existing
+ * monotonic `since` cursor so the polling-tail contract and the
+ * pagination contract are one and the same parameter. Other query
+ * params (`level`, `limit`, …) are preserved so the `next` URL
+ * carries the caller's filters forward.
+ */
+export function setSinceLinkHeader({ c, hasMore, lastId }: SinceLinkArgs): void {
+  if (!hasMore || lastId === undefined) return;
+  const url = new URL(c.req.url);
+  url.searchParams.set("since", String(lastId));
+  c.header("Link", `<${url.toString()}>; rel="next"`);
+}
+
 interface OffsetLinkArgs {
   c: Context;
   /** Current page limit. */

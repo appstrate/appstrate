@@ -11,6 +11,7 @@ import {
   deletePackageRuns,
   listPackageRuns,
   listRunLogs,
+  RUN_LOG_LEVELS,
 } from "../services/state/runs.ts";
 import { getVersionDetail } from "../services/package-versions.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
@@ -21,7 +22,7 @@ import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { notFound, conflict } from "../lib/errors.ts";
-import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
+import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
@@ -232,6 +233,17 @@ export function createRunsRouter() {
   // length. Invalid values (non-numeric, negative) are silently ignored
   // rather than 400'd: a stale or malformed cursor on a re-fetch must
   // never break the tail.
+  //
+  // Optional `?level=<debug|info|warn|error>` filters by MINIMUM severity
+  // (`level=info` skips debug breadcrumbs). Optional `?limit=<1..1000>`
+  // caps the page size; when more rows follow, an RFC 5988
+  // `Link: <…?since=<lastId>>; rel="next"` header points at the next page
+  // — `since` doubles as both the polling-tail cursor and the pagination
+  // cursor, so the two contracts cannot drift. All three params follow
+  // the endpoint's lenient posture: malformed values fall back to the
+  // unfiltered default rather than 400, because a stale cursor or a
+  // typo'd filter on a re-fetch must never break the tail. Default
+  // behavior (no params) is unchanged: the full chronological history.
   router.get("/runs/:id/logs", async (c) => {
     const runId = c.req.param("id");
     const scope = getAppScope(c);
@@ -251,13 +263,31 @@ export function createRunsRouter() {
       if (Number.isInteger(parsed) && parsed >= 0) sinceId = parsed;
     }
 
+    const minLevel = z.enum(RUN_LOG_LEVELS).optional().catch(undefined).parse(c.req.query("level"));
+
+    const limit = z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(1000)
+      .optional()
+      .catch(undefined)
+      .parse(c.req.query("limit"));
+
     // Ownership was just verified via getRun(scope) above — we can hand
-    // off to the org-scoped log reader safely.
-    const logs = await listRunLogs({
+    // off to the org-scoped log reader safely. Over-fetch by one row when
+    // a limit is set so `hasMore` is known without a COUNT round-trip.
+    const rows = await listRunLogs({
       runId,
       orgId: scope.orgId,
       ...(sinceId !== undefined ? { sinceId } : {}),
+      ...(minLevel !== undefined ? { minLevel } : {}),
+      ...(limit !== undefined ? { limit: limit + 1 } : {}),
     });
+
+    const hasMore = limit !== undefined && rows.length > limit;
+    const logs = hasMore ? rows.slice(0, limit) : rows;
+    setSinceLinkHeader({ c, hasMore, lastId: logs.at(-1)?.id });
 
     return c.json(logs);
   });
