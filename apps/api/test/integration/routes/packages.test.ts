@@ -1267,4 +1267,199 @@ describe("Packages API", () => {
       expect(res.status).toBe(404);
     });
   });
+
+  // ═══════════════════════════════════════════════
+  // Issue #646 — mutating endpoints return the affected resource (same shape as
+  // the GET detail) while retaining the operation envelope additively.
+  // ═══════════════════════════════════════════════
+
+  describe("issue #646 — mutating package endpoints return the resource", () => {
+    const agentManifest = (name: string, version = "0.1.0") => ({
+      name,
+      version,
+      type: "agent",
+      schema_version: "0.1",
+      display_name: "Resource Agent",
+      description: "Returns the full resource on mutation",
+    });
+
+    it("POST create agent returns the Agent detail DTO + create envelope", async () => {
+      const res = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: agentManifest("@pkgorg/res-agent"),
+          content: "You are a helpful assistant.",
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      // Operation envelope retained additively.
+      expect(body.packageId).toBe("@pkgorg/res-agent");
+      expect(body.lock_version).toBeNumber();
+      expect(body.message).toBeString();
+      // Full Agent detail resource (same serializer as GET detail).
+      expect(body.id).toBe("@pkgorg/res-agent");
+      expect(body.display_name).toBe("Resource Agent");
+      expect(body.dependencies).toBeDefined();
+      expect(body.config).toBeDefined();
+      expect(body.version_count).toBeNumber();
+    });
+
+    it("POST create integration returns the package detail DTO + create envelope", async () => {
+      const res = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@pkgorg/res-integration",
+            version: "0.1.0",
+            type: "integration",
+            schema_version: "0.1",
+            display_name: "Resource Integration",
+            description: "A remote HTTP MCP integration",
+            source: {
+              kind: "remote",
+              remote: { url: "https://example.com/mcp/v1", transport: "streamable-http" },
+            },
+            auths: {
+              primary: {
+                type: "api_key",
+                authorized_uris: ["https://example.com/**"],
+                credentials: {
+                  schema: {
+                    type: "object",
+                    required: ["api_key"],
+                    properties: { api_key: { type: "string" } },
+                  },
+                },
+                delivery: {
+                  http: {
+                    in: "header",
+                    name: "Authorization",
+                    prefix: "Bearer ",
+                    value: "{$credential.api_key}",
+                  },
+                },
+              },
+            },
+          },
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.packageId).toBe("@pkgorg/res-integration");
+      expect(body.lock_version).toBeNumber();
+      // Full OrgPackageItemDetail resource.
+      expect(body.id).toBe("@pkgorg/res-integration");
+      expect(body.manifest).toBeDefined();
+      expect(body.version_count).toBeNumber();
+      expect(body.has_unarchived_changes).toBeBoolean();
+    });
+
+    it("PUT update agent returns the Agent detail DTO + lock_version envelope", async () => {
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: agentManifest("@pkgorg/upd-res-agent"),
+          content: "original prompt",
+        }),
+      });
+      const created = (await create.json()) as any;
+
+      const res = await app.request("/api/packages/agents/@pkgorg/upd-res-agent", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: agentManifest("@pkgorg/upd-res-agent"),
+          content: "updated prompt",
+          lock_version: created.lock_version,
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      // Envelope retained — new lock token consumers read back.
+      expect(body.packageId).toBe("@pkgorg/upd-res-agent");
+      expect(body.lock_version).toBeGreaterThan(created.lock_version);
+      // Full Agent detail resource.
+      expect(body.id).toBe("@pkgorg/upd-res-agent");
+      expect(body.dependencies).toBeDefined();
+      expect(body.config).toBeDefined();
+    });
+
+    it("POST create version returns the version detail DTO + message envelope", async () => {
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: agentManifest("@pkgorg/ver-res-agent"),
+          content: "v1 prompt",
+        }),
+      });
+      const created = (await create.json()) as any;
+
+      // Change the draft so a new version is not a no-op.
+      await app.request("/api/packages/agents/@pkgorg/ver-res-agent", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: agentManifest("@pkgorg/ver-res-agent"),
+          content: "v2 prompt",
+          lock_version: created.lock_version,
+        }),
+      });
+
+      const res = await app.request("/api/packages/agents/@pkgorg/ver-res-agent/versions", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ version: "0.2.0" }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      // Envelope retained.
+      expect(body.id).toBeNumber();
+      expect(body.version).toBe("0.2.0");
+      expect(body.message).toBeString();
+      // Full version detail resource (same serializer as GET version detail).
+      expect(body.manifest).toBeDefined();
+      expect(body.integrity).toBeString();
+      expect(Array.isArray(body.dist_tags)).toBe(true);
+    });
+
+    it("POST restore version returns the version detail DTO + restore envelope", async () => {
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: agentManifest("@pkgorg/restore-res-agent"),
+          content: "v1 prompt",
+        }),
+      });
+      const created = (await create.json()) as any;
+
+      const res = await app.request(
+        "/api/packages/agents/@pkgorg/restore-res-agent/versions/0.1.0/restore",
+        {
+          method: "POST",
+          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        },
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      // Operation envelope retained additively.
+      expect(body.message).toBeString();
+      expect(body.restored_version).toBe("0.1.0");
+      expect(body.lock_version).toBeGreaterThan(created.lock_version);
+      // Full version detail resource for the restored version.
+      expect(body.version).toBe("0.1.0");
+      expect(body.manifest).toBeDefined();
+      expect(Array.isArray(body.dist_tags)).toBe(true);
+    });
+  });
 });
