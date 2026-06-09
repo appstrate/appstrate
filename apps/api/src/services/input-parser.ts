@@ -191,7 +191,9 @@ export const MAX_INLINE_FILE_BYTES = 4 * 1024 * 1024;
 // oversized payload is rejected without allocating its decoded buffer.
 const MAX_INLINE_BASE64_LENGTH = Math.ceil(MAX_INLINE_FILE_BYTES / 3) * 4;
 
-const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+// Standard base64 alphabet, after url-safe chars are folded in and padding
+// stripped (see parseDataUri).
+const BASE64_RE = /^[A-Za-z0-9+/]*$/;
 
 /** A decoded inline file: declared MIME, optional declared filename, content. */
 export interface InlineFile {
@@ -203,8 +205,9 @@ export interface InlineFile {
 /**
  * Parse + decode an inline `data:<mediatype>;name=<filename>;base64,<payload>`
  * URI (RFC 2397; `name` is the conventional filename parameter). Strict:
- * requires `;base64` (file content is binary-safe only in base64) and a
- * standard-alphabet payload. Enforces the per-file decoded cap. Pure —
+ * requires `;base64` (file content is binary-safe only in base64); accepts
+ * standard or url-safe alphabet, padded or unpadded. Enforces the per-file
+ * decoded cap. Pure —
  * exported for unit tests.
  */
 export function parseDataUri(uri: string, fieldName: string): InlineFile {
@@ -244,10 +247,16 @@ export function parseDataUri(uri: string, fieldName: string): InlineFile {
       `Field '${fieldName}' inline file exceeds ${MAX_INLINE_FILE_BYTES} bytes — use the staged-upload flow (createUpload + signed PUT) for larger files`,
     );
   }
-  if (payload.length % 4 !== 0 || !BASE64_RE.test(payload)) {
+  // Accept standard and url-safe base64, padded or unpadded — MCP/LLM clients
+  // (the JSON-only callers this path targets) commonly emit unpadded and/or
+  // url-safe payloads. Fold `-_` → `+/`, drop trailing padding, then validate
+  // the alphabet. A `length % 4 === 1` remainder is unreachable for any valid
+  // base64 string, so it is the one length that signals a truncated payload.
+  const normalized = payload.replace(/-/g, "+").replace(/_/g, "/").replace(/=+$/, "");
+  if (!BASE64_RE.test(normalized) || normalized.length % 4 === 1) {
     throw invalidRequest(`Field '${fieldName}' data: URI payload is not valid base64`, fieldName);
   }
-  const bytes = new Uint8Array(Buffer.from(payload, "base64"));
+  const bytes = new Uint8Array(Buffer.from(normalized, "base64"));
   if (bytes.byteLength === 0) {
     throw invalidRequest(`Field '${fieldName}' data: URI payload is empty`, fieldName);
   }

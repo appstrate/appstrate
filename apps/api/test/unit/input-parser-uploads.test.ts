@@ -186,6 +186,27 @@ describe("parseDataUri", () => {
     }
   });
 
+  it("accepts an unpadded base64 payload (MCP/LLM clients often omit padding)", () => {
+    // "hi" is normally "aGk=" — `aGk` is the same payload without padding.
+    const file = parseDataUri("data:text/plain;base64,aGk", "doc");
+    expect(Buffer.from(file.bytes).toString("utf-8")).toBe("hi");
+  });
+
+  it("accepts a url-safe base64 payload", () => {
+    // Bytes whose standard base64 contains both '+' and '/' (→ '-' and '_').
+    const raw = Buffer.from([0xfb, 0xff, 0xbf, 0x00]);
+    const std = raw.toString("base64");
+    const urlSafe = std.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    expect(urlSafe).toContain("-");
+    expect(urlSafe).toContain("_");
+    const file = parseDataUri(`data:application/octet-stream;base64,${urlSafe}`, "doc");
+    expect([...file.bytes]).toEqual([...raw]);
+    // Standard alphabet decodes to the same bytes.
+    expect([...parseDataUri(`data:application/octet-stream;base64,${std}`, "doc").bytes]).toEqual([
+      ...raw,
+    ]);
+  });
+
   it("rejects an empty payload", () => {
     try {
       parseDataUri("data:text/plain;base64,", "doc");
