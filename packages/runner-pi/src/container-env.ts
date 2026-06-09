@@ -172,6 +172,19 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   // runtime never builds JSON-RPC envelopes itself.
   Object.assign(env, pickOperatorSidecarEnv(["SIDECAR_MAX_REQUEST_BODY_BYTES"]));
 
+  // Forward the operator-tunable tool-result truncation cap (read by
+  // `truncateToolResult` in pi-runner.ts). Tool results are truncated at
+  // WRITE time before they reach the event sink / `run_logs`, so this is
+  // the only knob that controls how much of a tool result survives into
+  // `getRunLogs`. Absent or empty → the runner's compiled 2048-byte
+  // default. Keep below the platform's 32 KB `run_logs.data` cap.
+  {
+    const toolResultLimit = process.env.TOOL_RESULT_BYTE_LIMIT;
+    if (toolResultLimit !== undefined && toolResultLimit !== "") {
+      env.TOOL_RESULT_BYTE_LIMIT = toolResultLimit;
+    }
+  }
+
   return env;
 }
 

@@ -388,7 +388,27 @@ export const schemas = {
         enum: ["pending", "running", "success", "failed", "timeout", "cancelled"],
       },
       input: { type: "object" },
-      result: { type: "object" },
+      result: {
+        type: ["object", "null"],
+        description:
+          "What the run produced — the stable API contract for the run's deliverable, set when the run reaches a terminal status. `null` while the run is in flight, and on terminal runs that emitted neither structured output nor a report. Persisted even on failed runs (a run that reported and then failed keeps its partial deliverable).",
+        properties: {
+          output: {
+            description:
+              "Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped.",
+          },
+          text: {
+            type: "string",
+            description:
+              "Markdown report emitted via the agent's `report` runtime tool. Multiple report calls are concatenated in call order, joined with newlines. Capped at 256 KiB of UTF-8 — see `text_truncated`. The full untruncated report remains available as individual run-log entries (type='result', event='report').",
+          },
+          text_truncated: {
+            type: "boolean",
+            description:
+              "Present and `true` when `text` exceeded the 256 KiB cap and was truncated at a UTF-8 character boundary. Absent otherwise.",
+          },
+        },
+      },
       checkpoint: { type: "object" },
       error: { type: "string" },
       token_usage: {
@@ -419,7 +439,8 @@ export const schemas = {
       model_label: { type: ["string", "null"], description: "Model label used at run time" },
       model_source: {
         type: ["string", "null"],
-        description: "Model source: 'system' (platform-provided) or 'org' (user-configured)",
+        description:
+          "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override.",
       },
       cost: { type: ["number", "null"], description: "Run cost in dollars" },
       endUserId: {

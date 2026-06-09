@@ -7,7 +7,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Execute an agent",
       description:
-        "Start an agent run (fire-and-forget). Returns the run ID. Rate-limited to 20/min. " +
+        "Start an agent run (fire-and-forget). Returns the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. " +
         "The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the " +
         "agent's input schema) accept either of two forms: " +
         "(1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by " +
@@ -17,7 +17,11 @@ export const runsPaths = {
         "clients such as MCP. Inline bytes are written to the run workspace as a document and " +
         "the payload is stripped from the persisted run input (the stored value keeps only a " +
         "`data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by " +
-        "magic-byte sniffing in both forms.",
+        "magic-byte sniffing in both forms. " +
+        "The effective model is resolved at run creation with precedence: request `modelId` > " +
+        "agent model setting > org default model > system default. Without an explicit `modelId`, " +
+        "a change to the org default model between triggers applies to the next run — send " +
+        "`modelId` to pin a specific model per run.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -51,7 +55,7 @@ export const runsPaths = {
                 modelId: {
                   type: "string",
                   description:
-                    "Model ID override for this run. Takes priority over agent and org defaults.",
+                    "Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `modelId` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses.",
                 },
                 proxyId: {
                   type: "string",
@@ -91,13 +95,28 @@ export const runsPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "object",
-                properties: {
-                  runId: { type: "string" },
-                },
+                allOf: [
+                  { $ref: "#/components/schemas/Run" },
+                  {
+                    type: "object",
+                    properties: {
+                      runId: {
+                        type: "string",
+                        description:
+                          "Legacy alias of the run's `id`, kept for backward compatibility. Prefer `id`.",
+                      },
+                    },
+                  },
+                ],
+                description:
+                  "The created run resource — same shape as `GET /runs/{id}`. Includes the resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed. `runId` is a legacy alias of `id`.",
               },
               example: {
+                id: "run_cm1abc123def456",
                 runId: "run_cm1abc123def456",
+                status: "pending",
+                model_label: "Claude Sonnet 4",
+                model_source: "org",
               },
             },
           },
@@ -519,7 +538,10 @@ export const runsPaths = {
                 orgId: "org_r3t5w8y1z6",
                 status: "success",
                 input: { folder: "inbox", maxEmails: 50 },
-                result: { processed: 42, labeled: 38 },
+                result: {
+                  output: { processed: 42, labeled: 38 },
+                  text: "## Inbox triage\nProcessed 42 emails, labeled 38.",
+                },
                 checkpoint: { lastProcessedId: "msg_99f2a" },
                 token_usage: {
                   input_tokens: 8200,
@@ -555,7 +577,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Get run logs",
       description:
-        "Get persisted log entries for a run. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI's polling tail to bound per-poll payload growth. `id` is a monotonic BIGSERIAL; an invalid cursor falls back to the full list rather than 400.",
+        'Get persisted log entries for a run. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI\'s polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). When `limit` is set and more entries follow, an RFC 5988 `Link: <…?since=<lastId>>; rel="next"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the unfiltered default rather than 400 so a stale cursor never breaks a polling tail. Without query parameters the full chronological history is returned (backward-compatible default). Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -566,7 +588,23 @@ export const runsPaths = {
           required: false,
           schema: { type: "integer", format: "int64", minimum: 0 },
           description:
-            "Return only log entries with `id > since`. Used by the CLI's `appstrate run` remote polling loop to fetch incremental tails without re-shipping the full history each poll.",
+            'Return only log entries with `id > since`. Used by the CLI\'s `appstrate run` remote polling loop to fetch incremental tails without re-shipping the full history each poll, and as the cursor in the `Link; rel="next"` pagination header.',
+        },
+        {
+          name: "level",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["debug", "info", "warn", "error"] },
+          description:
+            "Minimum severity to include (`debug < info < warn < error`). `level=info` returns info, warn and error entries. Defaults to `debug` (everything).",
+        },
+        {
+          name: "limit",
+          in: "query",
+          required: false,
+          schema: { type: "integer", minimum: 1, maximum: 1000 },
+          description:
+            'Maximum number of entries to return. When more entries follow, the response carries a `Link; rel="next"` header whose URL re-uses `since` as the cursor. Absent means no cap (full history).',
         },
       ],
       responses: {
@@ -575,6 +613,7 @@ export const runsPaths = {
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            Link: { $ref: "#/components/headers/Link" },
           },
           content: {
             "application/json": {
@@ -947,6 +986,11 @@ export const runsPaths = {
                   type: "number",
                   minimum: 0,
                   description: "Authoritative terminal run cost written to the `runs` row.",
+                },
+                report: {
+                  type: "string",
+                  description:
+                    "Aggregated markdown report — every `report.appended` event's content joined with `\\n` in call order. Persisted (capped at 256 KiB) as `runs.result.text` so getRun exposes the run's deliverable without log scraping.",
                 },
               },
             },

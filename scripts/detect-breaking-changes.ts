@@ -125,19 +125,42 @@ function extractEnum(schema: Spec | undefined, spec: Spec): string[] | null {
   return null;
 }
 
-/** Get properties from a schema (resolving $ref). */
+/** Get properties from a schema (resolving $ref and flattening `allOf`). */
 function getProperties(schema: Spec | undefined, spec: Spec): Record<string, Spec> {
   if (!schema) return {};
   const s = deref(schema, spec);
-  if (!s || typeof s.properties !== "object" || s.properties === null) return {};
+  if (!s) return {};
+  // `allOf` composes its members — merge each member's properties so a
+  // response documented as `allOf: [$ref Resource, { runId }]` is seen to
+  // carry every field, not zero. Later members win on key collisions.
+  if (Array.isArray(s.allOf)) {
+    let merged: Record<string, Spec> = {};
+    for (const member of s.allOf as Spec[]) {
+      merged = { ...merged, ...getProperties(member, spec) };
+    }
+    if (typeof s.properties === "object" && s.properties !== null) {
+      merged = { ...merged, ...(s.properties as Record<string, Spec>) };
+    }
+    return merged;
+  }
+  if (typeof s.properties !== "object" || s.properties === null) return {};
   return s.properties as Record<string, Spec>;
 }
 
-/** Get required fields from a schema. */
+/** Get required fields from a schema (resolving $ref and flattening `allOf`). */
 function getRequired(schema: Spec | undefined, spec: Spec): Set<string> {
   if (!schema) return new Set();
   const s = deref(schema, spec);
-  if (!s || !Array.isArray(s.required)) return new Set();
+  if (!s) return new Set();
+  if (Array.isArray(s.allOf)) {
+    const required = new Set<string>();
+    for (const member of s.allOf as Spec[]) {
+      for (const key of getRequired(member, spec)) required.add(key);
+    }
+    if (Array.isArray(s.required)) for (const key of s.required as string[]) required.add(key);
+    return required;
+  }
+  if (!Array.isArray(s.required)) return new Set();
   return new Set(s.required as string[]);
 }
 
