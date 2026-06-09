@@ -115,20 +115,15 @@ export const modelsPaths = {
       },
       responses: {
         "201": {
-          description: "Model created",
+          description:
+            "Model created — the full created model resource (same shape as `GET`/`list`). `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "string" },
-                },
-              },
-              example: { id: "cm5mno345" },
+              schema: { $ref: "#/components/schemas/OrgModel" },
             },
           },
         },
@@ -165,14 +160,29 @@ export const modelsPaths = {
       },
       responses: {
         "200": {
-          description: "Default model updated",
+          description:
+            "Default model updated. Returns the new effective default model resource (same shape as `GET`/`list`) plus a legacy `success` flag. When the default is cleared (`modelId: null`) and no default remains in effect, only `{ success: true }` is returned.",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: { type: "object", properties: { success: { type: "boolean" } } },
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/OrgModel" },
+                  {
+                    type: "object",
+                    properties: {
+                      success: {
+                        type: "boolean",
+                        description:
+                          "Legacy acknowledgement flag, always `true`. Retained for backward compatibility; prefer reading the model fields.",
+                      },
+                    },
+                  },
+                ],
+              },
             },
           },
         },
@@ -468,14 +478,15 @@ export const modelsPaths = {
       },
       responses: {
         "200": {
-          description: "Model updated",
+          description:
+            "Model updated — the full updated model resource (same shape as `GET`/`list`). `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: { type: "object", properties: { id: { type: "string" } } },
+              schema: { $ref: "#/components/schemas/OrgModel" },
             },
           },
         },

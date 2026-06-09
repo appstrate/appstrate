@@ -140,7 +140,7 @@ describe("Model Provider Keys API", () => {
   });
 
   describe("POST /api/model-provider-credentials", () => {
-    it("creates a model provider key", async () => {
+    it("creates a model provider key and returns the full non-secret resource", async () => {
       const res = await app.request("/api/model-provider-credentials", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -153,13 +153,26 @@ describe("Model Provider Keys API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
+      // Legacy `id` alias preserved.
       expect(body.id).toBeDefined();
       expect(typeof body.id).toBe("string");
+      // #646: full resource (same shape as GET/list) returned, not an id stub.
+      expect(body.label).toBe("Test Key");
+      expect(body.source).toBe("custom");
+      expect(body.providerId).toBe("openai");
+      expect(body.authMode).toBe("api_key");
+      expect(body.createdAt).toBeDefined();
+      expect(body.updatedAt).toBeDefined();
+      // Security: the api key / any secret material must NEVER be echoed back.
+      const serialized = JSON.stringify(body);
+      expect(serialized).not.toContain("sk-test-key-123");
+      expect(body).not.toHaveProperty("apiKey");
+      expect(body).not.toHaveProperty("credentialsEncrypted");
     });
   });
 
   describe("PUT /api/model-provider-credentials/:id", () => {
-    it("updates model provider key label", async () => {
+    it("updates the label and returns the full non-secret resource", async () => {
       // Create a model provider key first
       const createRes = await app.request("/api/model-provider-credentials", {
         method: "POST",
@@ -173,16 +186,26 @@ describe("Model Provider Keys API", () => {
       expect(createRes.status).toBe(201);
       const { id } = (await createRes.json()) as any;
 
-      // Update the label
+      // Update the label (and rotate the key — must not leak in the response).
       const res = await app.request(`/api/model-provider-credentials/${id}`, {
         method: "PUT",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ label: "Updated Label" }),
+        body: JSON.stringify({ label: "Updated Label", apiKey: "sk-rotated-secret-456" }),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
+      // Legacy `id` alias preserved.
       expect(body.id).toBe(id);
+      // #646: full updated resource reflects the new label without a follow-up GET.
+      expect(body.label).toBe("Updated Label");
+      expect(body.source).toBe("custom");
+      // Security: neither the original nor the rotated key may appear.
+      const serialized = JSON.stringify(body);
+      expect(serialized).not.toContain("sk-test-key-123");
+      expect(serialized).not.toContain("sk-rotated-secret-456");
+      expect(body).not.toHaveProperty("apiKey");
+      expect(body).not.toHaveProperty("credentialsEncrypted");
     });
   });
 
