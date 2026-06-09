@@ -7,7 +7,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Execute an agent",
       description:
-        "Start an agent run (fire-and-forget). Returns the run ID. Rate-limited to 20/min. Supports JSON body or multipart/form-data with file uploads.",
+        "Start an agent run (fire-and-forget). Returns the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. Supports JSON body or multipart/form-data with file uploads. The effective model is resolved at run creation with precedence: request `modelId` > agent model setting > org default model > system default. Without an explicit `modelId`, a change to the org default model between triggers applies to the next run — send `modelId` to pin a specific model per run.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -35,7 +35,7 @@ export const runsPaths = {
                 modelId: {
                   type: "string",
                   description:
-                    "Model ID override for this run. Takes priority over agent and org defaults.",
+                    "Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `modelId` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses.",
                 },
                 proxyId: {
                   type: "string",
@@ -84,13 +84,28 @@ export const runsPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "object",
-                properties: {
-                  runId: { type: "string" },
-                },
+                allOf: [
+                  { $ref: "#/components/schemas/Run" },
+                  {
+                    type: "object",
+                    properties: {
+                      runId: {
+                        type: "string",
+                        description:
+                          "Legacy alias of the run's `id`, kept for backward compatibility. Prefer `id`.",
+                      },
+                    },
+                  },
+                ],
+                description:
+                  "The created run resource — same shape as `GET /runs/{id}`. Includes the resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed. `runId` is a legacy alias of `id`.",
               },
               example: {
+                id: "run_cm1abc123def456",
                 runId: "run_cm1abc123def456",
+                status: "pending",
+                model_label: "Claude Sonnet 4",
+                model_source: "org",
               },
             },
           },

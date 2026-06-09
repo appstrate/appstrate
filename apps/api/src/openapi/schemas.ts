@@ -439,7 +439,8 @@ export const schemas = {
       model_label: { type: ["string", "null"], description: "Model label used at run time" },
       model_source: {
         type: ["string", "null"],
-        description: "Model source: 'system' (platform-provided) or 'org' (user-configured)",
+        description:
+          "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override.",
       },
       cost: { type: ["number", "null"], description: "Run cost in dollars" },
       endUserId: {
