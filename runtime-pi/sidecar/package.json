@@ -13,8 +13,8 @@
     "@appstrate/mcp-transport": "workspace:*",
     "@appstrate/runner-pi": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "fflate": "^0.8.2",
-    "hono": "^4.12.15",
+    "fflate": "^0.8.3",
+    "hono": "^4.12.24",
     "p-limit": "^7.3.0"
   }
 }
