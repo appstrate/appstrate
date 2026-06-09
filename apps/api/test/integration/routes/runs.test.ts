@@ -622,6 +622,168 @@ describe("Runs API", () => {
       const body = (await res.json()) as unknown[];
       expect(body).toHaveLength(0);
     });
+
+    it("filters by ?level= minimum severity", async () => {
+      await seedAgent({ id: "@runorg/level-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/level-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "running",
+      });
+      await seedRunLog({ runId: run.id, orgId: ctx.orgId, message: "boot", level: "debug" });
+      await seedRunLog({ runId: run.id, orgId: ctx.orgId, message: "progress", level: "info" });
+      await seedRunLog({ runId: run.id, orgId: ctx.orgId, message: "careful", level: "warn" });
+      await seedRunLog({ runId: run.id, orgId: ctx.orgId, message: "boom", level: "error" });
+
+      // level=info → info, warn, error (skips debug)
+      const res = await app.request(`/api/runs/${run.id}/logs?level=info`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Array<{ level: string; message: string }>;
+      expect(body.map((l) => l.level)).toEqual(["info", "warn", "error"]);
+
+      // level=error → error only
+      const resErr = await app.request(`/api/runs/${run.id}/logs?level=error`, {
+        headers: authHeaders(ctx),
+      });
+      const bodyErr = (await resErr.json()) as Array<{ level: string }>;
+      expect(bodyErr.map((l) => l.level)).toEqual(["error"]);
+
+      // level=debug → everything (explicit minimum == default)
+      const resAll = await app.request(`/api/runs/${run.id}/logs?level=debug`, {
+        headers: authHeaders(ctx),
+      });
+      const bodyAll = (await resAll.json()) as unknown[];
+      expect(bodyAll).toHaveLength(4);
+    });
+
+    it("ignores an invalid ?level= value (returns full list)", async () => {
+      await seedAgent({ id: "@runorg/badlevel-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/badlevel-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "running",
+      });
+      await seedRunLog({ runId: run.id, orgId: ctx.orgId, message: "a", level: "debug" });
+      await seedRunLog({ runId: run.id, orgId: ctx.orgId, message: "b", level: "info" });
+
+      const res = await app.request(`/api/runs/${run.id}/logs?level=loud`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as unknown[];
+      expect(body).toHaveLength(2);
+    });
+
+    it("paginates with ?limit= and emits a Link rel=next header re-using since", async () => {
+      await seedAgent({ id: "@runorg/page-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/page-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "running",
+      });
+      const log1 = await seedRunLog({ runId: run.id, orgId: ctx.orgId, message: "one" });
+      const log2 = await seedRunLog({ runId: run.id, orgId: ctx.orgId, message: "two" });
+      const log3 = await seedRunLog({ runId: run.id, orgId: ctx.orgId, message: "three" });
+
+      const res = await app.request(`/api/runs/${run.id}/logs?limit=2`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Array<{ id: number }>;
+      expect(body.map((l) => l.id)).toEqual([log1.id, log2.id]);
+
+      // Link header points at the next page, keyed on the last returned id.
+      const link = res.headers.get("Link");
+      expect(link).toContain(`since=${log2.id}`);
+      expect(link).toContain('rel="next"');
+      expect(link).toContain("limit=2");
+
+      // Following the cursor returns the final page with no further Link.
+      const res2 = await app.request(`/api/runs/${run.id}/logs?limit=2&since=${log2.id}`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res2.status).toBe(200);
+      const body2 = (await res2.json()) as Array<{ id: number }>;
+      expect(body2.map((l) => l.id)).toEqual([log3.id]);
+      expect(res2.headers.get("Link")).toBeNull();
+    });
+
+    it("?limit= exactly matching the row count emits no Link header", async () => {
+      await seedAgent({ id: "@runorg/exact-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/exact-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "running",
+      });
+      await seedRunLog({ runId: run.id, orgId: ctx.orgId, message: "only" });
+
+      const res = await app.request(`/api/runs/${run.id}/logs?limit=1`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      expect((await res.json()) as unknown[]).toHaveLength(1);
+      expect(res.headers.get("Link")).toBeNull();
+    });
+
+    it("combines ?since=, ?level= and ?limit=", async () => {
+      await seedAgent({ id: "@runorg/combo-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/combo-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "running",
+      });
+      const first = await seedRunLog({ runId: run.id, orgId: ctx.orgId, level: "info" });
+      await seedRunLog({ runId: run.id, orgId: ctx.orgId, level: "debug" });
+      const kept1 = await seedRunLog({ runId: run.id, orgId: ctx.orgId, level: "warn" });
+      const kept2 = await seedRunLog({ runId: run.id, orgId: ctx.orgId, level: "error" });
+      await seedRunLog({ runId: run.id, orgId: ctx.orgId, level: "info" });
+
+      const res = await app.request(
+        `/api/runs/${run.id}/logs?since=${first.id}&level=info&limit=2`,
+        { headers: authHeaders(ctx) },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Array<{ id: number }>;
+      expect(body.map((l) => l.id)).toEqual([kept1.id, kept2.id]);
+      const link = res.headers.get("Link");
+      expect(link).toContain(`since=${kept2.id}`);
+      expect(link).toContain("level=info");
+      expect(link).toContain('rel="next"');
+    });
+
+    it("default behavior without new params is unchanged (full list, no Link)", async () => {
+      await seedAgent({ id: "@runorg/compat-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/compat-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "running",
+      });
+      await seedRunLog({ runId: run.id, orgId: ctx.orgId, level: "debug" });
+      await seedRunLog({ runId: run.id, orgId: ctx.orgId, level: "info" });
+      await seedRunLog({ runId: run.id, orgId: ctx.orgId, level: "error" });
+
+      const res = await app.request(`/api/runs/${run.id}/logs`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as unknown[];
+      expect(body).toHaveLength(3);
+      expect(res.headers.get("Link")).toBeNull();
+    });
   });
 
   // ─── POST /api/runs/:id/cancel ─────────────────────────────

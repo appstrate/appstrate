@@ -31,4 +31,12 @@ export const headers = {
     description: "Seconds to wait before retrying. Present on 429 responses.",
     schema: { type: "integer" },
   },
+  Link: {
+    description:
+      'RFC 5988 pagination link(s), e.g. `<https://…?since=42&limit=100>; rel="next"`. Present only when another page follows — absence means the listing is complete.',
+    schema: {
+      type: "string",
+      example: '<https://example.com/api/runs/run_x/logs?since=42&limit=100>; rel="next"',
+    },
+  },
 } as const;
