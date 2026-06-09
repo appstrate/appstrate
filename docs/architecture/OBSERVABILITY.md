@@ -37,6 +37,28 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_SERVICE_NAME=appstrate-api
 ```
 
+### Docker self-hosting
+
+Compose does **not** auto-forward host env into containers — only vars listed
+under a service's `environment:` reach the process (there is no `env_file:`).
+The OTel vars are wired as **passthroughs** in the `appstrate` service of every
+self-hosting compose file (`docker-compose.yml`, `examples/self-hosting/*.yml`):
+
+```yaml
+# ── Observability (OpenTelemetry, optional) ──
+- OTEL_ENABLED
+- OTEL_EXPORTER_OTLP_ENDPOINT
+- OTEL_SERVICE_NAME
+- OTEL_TRUST_INCOMING_TRACE
+- OTEL_EXPORTER_OTLP_HEADERS
+- OTEL_EXPORTER_OTLP_PROTOCOL
+```
+
+So setting any of them in your `.env` is enough — Compose substitutes the host
+value into the container, and an unset var falls back to the Zod schema default
+(bare passthrough, no YAML default to duplicate). Running the API directly on
+the host (`bun run dev`) reads `.env` natively, no wiring needed.
+
 ## Architecture
 
 - **Bootstrap**: `apps/api/src/observability/` — `initObservability()` is
