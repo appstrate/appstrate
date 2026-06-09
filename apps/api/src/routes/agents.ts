@@ -96,7 +96,10 @@ export function createAgentsRouter() {
         },
         running_runs: runningCounts[row.id] ?? 0,
         source: row.source ?? "local",
-        scope: parsed?.scope ?? null,
+        // Canonical scope format includes the `@` sigil (e.g. "@myorg") so
+        // list output is directly usable as `{scope}` path-param input — one
+        // operation's output must be valid input for the next (issue #629).
+        scope: parsed ? `@${parsed.scope}` : null,
         version: manifest.version,
         type: manifest.type,
       };

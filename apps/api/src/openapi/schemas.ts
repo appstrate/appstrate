@@ -207,7 +207,8 @@ export const schemas = {
       source: { type: "string", enum: ["system", "local"] },
       scope: {
         type: ["string", "null"],
-        description: "Scope from manifest name (e.g. @myorg from @myorg/name)",
+        description:
+          "Scope from manifest name, including the leading `@` (e.g. `@myorg` from `@myorg/name`). Directly usable as the `{scope}` path parameter of package/agent operations.",
       },
       version: { type: ["string", "null"], description: "Version from manifest" },
       type: {
@@ -234,7 +235,11 @@ export const schemas = {
       display_name: { type: "string" },
       description: { type: "string" },
       source: { type: "string", enum: ["system", "local"] },
-      scope: { type: ["string", "null"], description: "Scope from manifest name" },
+      scope: {
+        type: ["string", "null"],
+        description:
+          "Scope from manifest name, including the leading `@` (e.g. `@myorg`). Directly usable as the `{scope}` path parameter of package/agent operations.",
+      },
       version: { type: ["string", "null"], description: "Version from manifest" },
       manifest: {
         allOf: [{ $ref: "#/components/schemas/AgentManifest" }],
@@ -546,7 +551,7 @@ export const schemas = {
       agent_scope: {
         type: ["string", "null"],
         description:
-          "Denormalized agent scope at run creation. Survives rename, delete, or shadow compaction — the global run view falls back to this when the source package is gone.",
+          "Denormalized agent scope at run creation, including the leading `@` (e.g. `@myorg`). Survives rename, delete, or shadow compaction — the global run view falls back to this when the source package is gone.",
       },
       agent_name: {
         type: ["string", "null"],

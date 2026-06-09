@@ -81,7 +81,9 @@ export async function buildAgentDetailDto(
     display_name: m.display_name,
     description: m.description,
     source: agent.source,
-    scope: parsed?.scope ?? null,
+    // Canonical scope format includes the `@` sigil — same format the
+    // `{scope}` path params accept (issue #629).
+    scope: parsed ? `@${parsed.scope}` : null,
     version: m.version ?? null,
     dependencies: {
       skills: agent.skills.map((s) => ({

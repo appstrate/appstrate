@@ -43,6 +43,7 @@ import {
   runLogDataSchema,
 } from "../../lib/jsonb-schemas.ts";
 import { invalidRequest } from "../../lib/errors.ts";
+import { normalizeScope } from "@appstrate/core/naming";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
 import type {
   RunWireDto,
@@ -217,7 +218,9 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     model_source: row.modelSource,
     runner_name: row.runnerName,
     runner_kind: row.runnerKind,
-    agent_scope: row.agentScope,
+    // Stored bare on historical rows; emitted with the `@` sigil so every
+    // API surface uses the one canonical scope format (issue #629).
+    agent_scope: row.agentScope ? normalizeScope(row.agentScope) : null,
     agent_name: row.agentName,
     runOrigin: row.runOrigin,
     contextSnapshot: row.contextSnapshot,
