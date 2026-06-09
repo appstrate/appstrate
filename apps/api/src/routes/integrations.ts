@@ -328,6 +328,7 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const scope = getAppScope(c);
+      const actor = getActor(c);
       await assertIsIntegration(scope, packageId);
       const row = await installPackage(scope, packageId);
       await recordAuditFromContext(c, {
@@ -335,7 +336,12 @@ export function createIntegrationsRouter() {
         resourceType: "integration",
         resourceId: packageId,
       });
-      return c.json({ active: true, activated_at: row.installedAt.toISOString() }, 201);
+      // Return the full integration DTO — same serializer as
+      // GET /integrations/:packageId — so callers see the resulting state in
+      // one round-trip and activate/deactivate are symmetric (issue #646). The
+      // legacy `active` / `activated_at` fields are kept additively.
+      const detail = await getIntegrationAuthStatuses(scope, packageId, actor);
+      return c.json({ ...detail, active: true, activated_at: row.installedAt.toISOString() }, 201);
     },
   );
 
@@ -345,6 +351,7 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const scope = getAppScope(c);
+      const actor = getActor(c);
       await assertIsIntegration(scope, packageId);
       await uninstallPackage(scope, packageId);
       await recordAuditFromContext(c, {
@@ -352,7 +359,12 @@ export function createIntegrationsRouter() {
         resourceType: "integration",
         resourceId: packageId,
       });
-      return c.json({ active: false });
+      // Return the full integration DTO — same serializer as
+      // GET /integrations/:packageId — symmetric with activate (issue #646).
+      // Deactivation is non-destructive: the manifest + surviving connections
+      // still serialize. The legacy `active` flag is kept additively.
+      const detail = await getIntegrationAuthStatuses(scope, packageId, actor);
+      return c.json({ ...detail, active: false });
     },
   );
 

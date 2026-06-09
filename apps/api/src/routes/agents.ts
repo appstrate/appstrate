@@ -169,7 +169,12 @@ export function createAgentsRouter() {
         after: { proxyId: data.proxyId },
       });
 
-      return c.json({ success: true });
+      // Return the affected proxy-setting resource — same shape and read path
+      // (`getPackageConfig`) as GET /agents/:scope/:name/proxy — so callers see
+      // the persisted override without a follow-up GET (issue #646). The
+      // legacy `success` flag is kept additively for backward compatibility.
+      const { proxyId } = await getPackageConfig(scope.applicationId, agent.id);
+      return c.json({ success: true, proxyId, resolved: proxyId !== "none" });
     },
   );
 
@@ -202,7 +207,12 @@ export function createAgentsRouter() {
         after: { modelId: data.modelId },
       });
 
-      return c.json({ success: true });
+      // Return the affected model-setting resource — same shape and read path
+      // (`getPackageConfig`) as GET /agents/:scope/:name/model — so callers see
+      // the persisted override without a follow-up GET (issue #646). The legacy
+      // `success` flag is kept additively for backward compatibility.
+      const { modelId } = await getPackageConfig(scope.applicationId, agent.id);
+      return c.json({ success: true, modelId });
     },
   );
 
