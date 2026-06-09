@@ -314,19 +314,20 @@ export const organizationsPaths = {
       },
       responses: {
         "200": {
-          description: "Role updated",
+          description: "Updated member — same shape as the members list in GET /api/orgs/{orgId}",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  userId: { type: "string" },
-                  role: { type: "string", enum: [...ASSIGNABLE_ROLES] },
-                },
+              schema: { $ref: "#/components/schemas/OrgMember" },
+              example: {
+                userId: "usr_def456",
+                displayName: "Bob",
+                email: "bob@acme.com",
+                role: "admin",
+                joinedAt: "2026-01-12T10:00:00Z",
               },
             },
           },
@@ -390,19 +391,22 @@ export const organizationsPaths = {
       },
       responses: {
         "200": {
-          description: "Invitation role updated",
+          description:
+            "Updated invitation — same shape as the invitations list in GET /api/orgs/{orgId}",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "string" },
-                  role: { type: "string", enum: [...ASSIGNABLE_ROLES] },
-                },
+              schema: { $ref: "#/components/schemas/OrgInvitationInfo" },
+              example: {
+                id: "inv_abc123",
+                email: "carol@acme.com",
+                role: "admin",
+                token: "tok_xyz789",
+                expiresAt: "2026-02-01T00:00:00Z",
+                createdAt: "2026-01-25T00:00:00Z",
               },
             },
           },

@@ -368,6 +368,36 @@ export const schemas = {
       createdAt: { type: ["string", "null"], format: "date-time" },
     },
   },
+  // Canonical version detail DTO — the exact shape the `GET .../versions/{version}`
+  // endpoints serialize (the per-type GET detail uses a type-specific manifest
+  // `$ref`; this generic form is reused by the version create/restore mutation
+  // responses so they echo the resulting version resource — issue #646).
+  PackageVersionDetail: {
+    type: "object",
+    properties: {
+      id: { type: "integer", description: "Version row id" },
+      version: { type: "string", description: "Semver version string (e.g. 1.0.0)" },
+      manifest: {
+        type: "object",
+        additionalProperties: true,
+        description: "Full version manifest (AFPS)",
+      },
+      content: {
+        type: ["string", "null"],
+        description: "Primary content file extracted from the version ZIP",
+      },
+      source_code: {
+        type: ["string", "null"],
+        description: "Secondary source file content (e.g. .ts), when present",
+      },
+      yanked: { type: "boolean", description: "Whether this version has been yanked" },
+      yanked_reason: { type: ["string", "null"] },
+      integrity: { type: "string", description: "SRI integrity hash (sha256-...)" },
+      artifact_size: { type: "integer", description: "Artifact ZIP size in bytes" },
+      createdAt: { type: ["string", "null"], format: "date-time" },
+      dist_tags: { type: "array", items: { type: "string" } },
+    },
+  },
   Run: {
     type: "object",
     required: [
@@ -396,7 +426,27 @@ export const schemas = {
         enum: ["pending", "running", "success", "failed", "timeout", "cancelled"],
       },
       input: { type: "object" },
-      result: { type: "object" },
+      result: {
+        type: ["object", "null"],
+        description:
+          "What the run produced — the stable API contract for the run's deliverable, set when the run reaches a terminal status. `null` while the run is in flight, and on terminal runs that emitted neither structured output nor a report. Persisted even on failed runs (a run that reported and then failed keeps its partial deliverable).",
+        properties: {
+          output: {
+            description:
+              "Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped.",
+          },
+          text: {
+            type: "string",
+            description:
+              "Markdown report emitted via the agent's `report` runtime tool. Multiple report calls are concatenated in call order, joined with newlines. Capped at 256 KiB of UTF-8 — see `text_truncated`. The full untruncated report remains available as individual run-log entries (type='result', event='report').",
+          },
+          text_truncated: {
+            type: "boolean",
+            description:
+              "Present and `true` when `text` exceeded the 256 KiB cap and was truncated at a UTF-8 character boundary. Absent otherwise.",
+          },
+        },
+      },
       checkpoint: { type: "object" },
       error: { type: "string" },
       token_usage: {
@@ -434,7 +484,8 @@ export const schemas = {
       model_label: { type: ["string", "null"], description: "Model label used at run time" },
       model_source: {
         type: ["string", "null"],
-        description: "Model source: 'system' (platform-provided) or 'org' (user-configured)",
+        description:
+          "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override.",
       },
       cost: { type: ["number", "null"], description: "Run cost in dollars" },
       endUserId: {

@@ -121,6 +121,23 @@ LABEL org.opencontainers.image.title="Appstrate Pi" \
 # rooted in the venv's own site-packages (always present), and the path
 # self-aligns with whatever python3 ships in the base image.
 #
+# Common data libraries are baked into the venv (#628, #316 items 2-3):
+#   - openpyxl   Excel read/write — concrete demand from office-automation
+#                skills (edi-order-parser, orgabusiness-export-compta)
+#   - pandas     tabular data wrangling (CSV/Excel pipelines)
+#   - requests   de-facto HTTP client that generated Python assumes exists
+#   - pypdf2     PDF read/split/merge (PyPDF2 3.0.1 is the final release —
+#                superseded by pypdf, but skills and LLMs still
+#                `import PyPDF2` by that name, so we ship what they import)
+# Pre-installing costs ~150 MB uncompressed (pandas + numpy dominate;
+# the other three total <10 MB) but removes a cold `pip install`
+# (5-15 s) plus a ModuleNotFoundError retry loop from every run that
+# touches spreadsheets or PDFs. Versions are deliberately
+# unpinned: they resolve at image build time and the image is immutable
+# per release tag, so runs are reproducible without a pin list to
+# maintain. All four ship pure-python or musllinux wheels — no build
+# toolchain (gcc, musl-dev) is needed in the image.
+#
 # Create the unprivileged `pi` user in the same layer so subsequent
 # `COPY --chown=pi:pi` resolves without a separate chown pass.
 RUN apk add --no-cache \
@@ -134,6 +151,7 @@ RUN apk add --no-cache \
  && adduser  -D -u 1001 -G pi -s /bin/bash pi \
  && python3 -m venv /opt/agent-venv \
  && /opt/agent-venv/bin/pip install --no-cache-dir --upgrade pip \
+ && /opt/agent-venv/bin/pip install --no-cache-dir openpyxl pandas requests pypdf2 \
  && chown -R pi:pi /opt/agent-venv
 
 # Put the venv first on PATH so `python3` and `pip` resolve to the venv

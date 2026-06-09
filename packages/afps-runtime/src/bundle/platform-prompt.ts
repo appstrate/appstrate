@@ -155,6 +155,15 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     "- **Network access**: Outbound HTTP/HTTPS is available. " +
       "Use `curl`, `fetch`, or any HTTP client to call public APIs and websites directly.",
   );
+  // Pre-installed Python libs (#628). The runtime image bakes common data
+  // libraries into the agent venv — stating it here stops agents (and
+  // weaker models especially) from running speculative `pip install`
+  // steps or spiralling on ModuleNotFoundError before trying the import.
+  sections.push(
+    "- **Python**: `python3` is available with common data libraries pre-installed " +
+      "(`openpyxl`, `pandas`, `requests`, `PyPDF2`). Import them directly — no `pip install` needed. " +
+      "Other packages can be added with `pip install` (the environment is discarded when the run ends).",
+  );
   if (opts.timeoutSeconds) {
     sections.push(
       `- **Timeout**: You have ${opts.timeoutSeconds} seconds to complete this task. ` +

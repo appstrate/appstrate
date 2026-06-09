@@ -10,7 +10,9 @@ import {
   createTestOrg,
   addOrgMember,
   authHeaders,
+  orgOnlyHeaders,
 } from "../../helpers/auth.ts";
+import { createInvitation } from "../../../src/services/invitations.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
 import { assertDbHas } from "../../helpers/assertions.ts";
 import {
@@ -303,6 +305,73 @@ describe("Organizations API", () => {
 
       // addMember is idempotent — duplicate silently ignored, returns 201
       expect(res.status).toBe(201);
+    });
+  });
+
+  // Issue #646 — mutating endpoints return the full resource, not a stub.
+  describe("PUT /api/orgs/:orgId/members/:userId", () => {
+    it("returns the full member DTO (not just {userId, role})", async () => {
+      const ctx = await createTestContext({ orgSlug: "roleorg" });
+      const member = await createTestUser({ email: "promote@test.com" });
+      await addOrgMember(ctx.orgId, member.id, "member");
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/members/${member.id}`, {
+        method: "PUT",
+        headers: orgOnlyHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ role: "admin" }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      // Legacy fields preserved (superset)
+      expect(body.userId).toBe(member.id);
+      expect(body.role).toBe("admin");
+      // Full member DTO — same shape as the members list in GET /api/orgs/:orgId
+      expect(body.email).toBe("promote@test.com");
+      expect(body).toHaveProperty("joinedAt");
+      expect(body.joinedAt).toBeTruthy();
+
+      // Persisted
+      await assertDbHas(
+        organizationMembers,
+        and(eq(organizationMembers.userId, member.id), eq(organizationMembers.role, "admin"))!,
+      );
+    });
+  });
+
+  describe("PUT /api/orgs/:orgId/invitations/:invitationId", () => {
+    it("returns the full invitation DTO (not just {id, role})", async () => {
+      const ctx = await createTestContext({ orgSlug: "invorg" });
+      const invitation = await createInvitation({
+        email: "invitee@test.com",
+        orgId: ctx.orgId,
+        role: "member",
+        invitedBy: ctx.user.id,
+        skipEmail: true,
+      });
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${invitation.id}`, {
+        method: "PUT",
+        headers: orgOnlyHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ role: "admin" }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      // Legacy fields preserved (superset)
+      expect(body.id).toBe(invitation.id);
+      expect(body.role).toBe("admin");
+      // Full invitation DTO — same shape as the invitations list in GET /api/orgs/:orgId
+      expect(body.email).toBe("invitee@test.com");
+      expect(body.token).toBe(invitation.token);
+      expect(body).toHaveProperty("expiresAt");
+      expect(body).toHaveProperty("createdAt");
+
+      // Persisted
+      await assertDbHas(
+        orgInvitations,
+        and(eq(orgInvitations.id, invitation.id), eq(orgInvitations.role, "admin"))!,
+      );
     });
   });
 

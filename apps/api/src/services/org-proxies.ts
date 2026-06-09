@@ -65,6 +65,19 @@ export async function listOrgProxies(orgId: string): Promise<OrgProxyInfo[]> {
   });
 }
 
+// --- Single-item read (system + DB) ---
+
+/**
+ * Fetch a single proxy (built-in or custom) in the exact same shape as
+ * {@link listOrgProxies} / the `GET` list serializer. Used by mutating
+ * handlers to return the resulting resource without a follow-up GET.
+ * Returns null if no proxy with that id is visible to the org.
+ */
+export async function getOrgProxy(orgId: string, proxyId: string): Promise<OrgProxyInfo | null> {
+  const proxies = await listOrgProxies(orgId);
+  return proxies.find((p) => p.id === proxyId) ?? null;
+}
+
 // --- CRUD (DB proxies only) ---
 
 export async function createOrgProxy(

@@ -12,6 +12,7 @@ import {
   deleteOrganization,
   getOrgMembers,
   getOrgMember,
+  getOrgMemberWithProfile,
   addMember,
   removeMember,
   updateMemberRole,
@@ -408,7 +409,18 @@ router.put("/:orgId/invitations/:invitationId", async (c) => {
     orgIdOverride: orgId,
   });
 
-  return c.json({ id: updated.id, role: updated.role });
+  // Return the full invitation DTO — same shape as the invitations list in
+  // GET /orgs/:orgId — so callers see the resulting state without a
+  // follow-up GET (issue #646). `id` + `role` remain present as a superset,
+  // so legacy consumers reading those fields are unaffected.
+  return c.json({
+    id: updated.id,
+    email: updated.email,
+    role: updated.role,
+    token: updated.token,
+    expiresAt: updated.expiresAt?.toISOString(),
+    createdAt: updated.createdAt?.toISOString(),
+  });
 });
 
 // DELETE /api/orgs/:orgId/members/:userId — remove a member (admin+)
@@ -471,7 +483,22 @@ router.put("/:orgId/members/:userId", async (c) => {
     after: { role: data.role },
     orgIdOverride: orgId,
   });
-  return c.json({ userId: targetUserId, role: data.role });
+
+  // Return the full member DTO — same shape as the members list in
+  // GET /orgs/:orgId — so callers see the resulting state without a
+  // follow-up GET (issue #646). `userId` + `role` remain present as a
+  // superset, so legacy consumers reading those fields are unaffected.
+  const updated = await getOrgMemberWithProfile(orgId, targetUserId);
+  if (!updated) {
+    throw notFound("Member not found");
+  }
+  return c.json({
+    userId: updated.userId,
+    role: updated.role,
+    joinedAt: updated.joinedAt,
+    displayName: updated.displayName,
+    email: updated.email,
+  });
 });
 
 // GET /api/orgs/:orgId/settings — get org settings (any member)

@@ -513,6 +513,25 @@ export async function listOrgModelProviderCredentials(
 }
 
 /**
+ * Fetch a single model-provider credential by id, projected through the exact
+ * same serializer as {@link listOrgModelProviderCredentials} — i.e. the public
+ * `ModelProviderCredentialInfo` shape that NEVER carries plaintext (api key /
+ * OAuth token). Returns `undefined` when the id is unknown to either source.
+ *
+ * Used by the create/update handlers to return the full (non-secret) resource
+ * instead of an id-only stub (issue #646). Re-runs the list serializer rather
+ * than duplicating the system+DB merge — guarantees the returned shape matches
+ * `GET`/list and can never leak secret material.
+ */
+export async function getOrgModelProviderCredential(
+  orgId: string,
+  id: string,
+): Promise<ModelProviderCredentialInfo | undefined> {
+  const all = await listOrgModelProviderCredentials(orgId);
+  return all.find((c) => c.id === id);
+}
+
+/**
  * Resolve a credential id to plaintext credentials usable for inference
  * (model probe, LLM proxy, sidecar config). Combines the two read paths
  * into one — system (env-driven) keys from `SYSTEM_PROVIDER_KEYS` and

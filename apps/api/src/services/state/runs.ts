@@ -978,23 +978,36 @@ export async function getRunByOrg(args: { runId: string; orgId: string }) {
  * history. Not legal with `order: "desc"` — the call throws to surface
  * the misuse rather than silently fall back to a full scan.
  *
+ * `minLevel` filters by minimum severity using the fixed `run_logs.level`
+ * domain (`debug < info < warn < error`): `minLevel: "info"` returns
+ * info/warn/error rows and skips the debug breadcrumbs. Implemented as an
+ * `IN (...)` filter so the check constraint's domain stays the single
+ * source of truth — no numeric severity column needed.
+ *
  * Org-scoped by design — `run_logs` has no `applicationId` column, and
  * the object-args shape is the module-facing public contract. App-scoped
  * callers must verify run ownership via `getRun(scope, runId)` first.
  */
+export const RUN_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
+export type RunLogLevel = (typeof RUN_LOG_LEVELS)[number];
+
 export async function listRunLogs(args: {
   runId: string;
   orgId: string;
   limit?: number;
   order?: "asc" | "desc";
   sinceId?: number;
+  minLevel?: RunLogLevel;
 }) {
-  const { runId, orgId, limit, order = "asc", sinceId } = args;
+  const { runId, orgId, limit, order = "asc", sinceId, minLevel } = args;
   if (sinceId !== undefined && order === "desc") {
     throw new Error("listRunLogs: sinceId is not supported with order=desc");
   }
   const filters = [eq(runLogs.runId, runId), eq(runLogs.orgId, orgId)];
   if (sinceId !== undefined) filters.push(gt(runLogs.id, sinceId));
+  if (minLevel !== undefined && minLevel !== "debug") {
+    filters.push(inArray(runLogs.level, RUN_LOG_LEVELS.slice(RUN_LOG_LEVELS.indexOf(minLevel))));
+  }
   const q = db
     .select()
     .from(runLogs)

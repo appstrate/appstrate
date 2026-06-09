@@ -1,13 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the pure upload-reference collector used by the run-request
- * input parser. Covers the dispatch logic between single-file and array-of-files
- * fields, plus the error shapes emitted when the client submits the wrong type.
+ * Unit tests for the pure file-reference collector + inline data: URI parser
+ * used by the run-request input parser. Covers the dispatch logic between
+ * single-file and array-of-files fields, the upload:// vs data: kind tagging,
+ * the error shapes emitted when the client submits the wrong type, and the
+ * RFC 2397 decode rules (base64-only, per-file cap, name parameter).
  */
 
 import { describe, it, expect } from "bun:test";
-import { collectUploadRefs, assertDocsWithinCap } from "../../src/services/input-parser.ts";
+import {
+  collectFileRefs,
+  parseDataUri,
+  assertDocsWithinCap,
+  MAX_INLINE_FILE_BYTES,
+} from "../../src/services/input-parser.ts";
 import { ApiError } from "../../src/lib/errors.ts";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 
@@ -30,20 +37,26 @@ const arrayFileSchema: JSONSchemaObject = {
   },
 };
 
-describe("collectUploadRefs — single-file fields", () => {
+describe("collectFileRefs — single-file fields", () => {
   it("picks up a valid upload:// URI", () => {
-    const refs = collectUploadRefs(singleFileSchema, { doc: "upload://upl_abc", title: "t" });
-    expect(refs).toEqual([{ fieldName: "doc", uri: "upload://upl_abc" }]);
+    const refs = collectFileRefs(singleFileSchema, { doc: "upload://upl_abc", title: "t" });
+    expect(refs).toEqual([{ fieldName: "doc", uri: "upload://upl_abc", kind: "upload" }]);
+  });
+
+  it("picks up an inline data: URI", () => {
+    const uri = "data:application/pdf;base64,JVBERg==";
+    const refs = collectFileRefs(singleFileSchema, { doc: uri });
+    expect(refs).toEqual([{ fieldName: "doc", uri, kind: "data" }]);
   });
 
   it("ignores the field when the value is null or missing", () => {
-    expect(collectUploadRefs(singleFileSchema, { title: "t" })).toEqual([]);
-    expect(collectUploadRefs(singleFileSchema, { doc: null, title: "t" })).toEqual([]);
+    expect(collectFileRefs(singleFileSchema, { title: "t" })).toEqual([]);
+    expect(collectFileRefs(singleFileSchema, { doc: null, title: "t" })).toEqual([]);
   });
 
   it("rejects a non-URI string on a single-file field", () => {
     try {
-      collectUploadRefs(singleFileSchema, { doc: "just-a-name.pdf" });
+      collectFileRefs(singleFileSchema, { doc: "just-a-name.pdf" });
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -54,7 +67,7 @@ describe("collectUploadRefs — single-file fields", () => {
 
   it("rejects an array on a single-file field", () => {
     try {
-      collectUploadRefs(singleFileSchema, { doc: ["upload://upl_x"] });
+      collectFileRefs(singleFileSchema, { doc: ["upload://upl_x"] });
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -62,34 +75,45 @@ describe("collectUploadRefs — single-file fields", () => {
   });
 
   it("skips non-file siblings without inspecting them", () => {
-    const refs = collectUploadRefs(singleFileSchema, { doc: "upload://upl_1", title: 42 });
+    const refs = collectFileRefs(singleFileSchema, { doc: "upload://upl_1", title: 42 });
     expect(refs).toHaveLength(1);
   });
 });
 
-describe("collectUploadRefs — array-of-files fields", () => {
-  it("emits one ref per URI in order", () => {
-    const refs = collectUploadRefs(arrayFileSchema, {
+describe("collectFileRefs — array-of-files fields", () => {
+  it("emits one indexed ref per URI in order", () => {
+    const refs = collectFileRefs(arrayFileSchema, {
       docs: ["upload://upl_1", "upload://upl_2"],
     });
     expect(refs).toEqual([
-      { fieldName: "docs", uri: "upload://upl_1" },
-      { fieldName: "docs", uri: "upload://upl_2" },
+      { fieldName: "docs", uri: "upload://upl_1", kind: "upload", index: 0 },
+      { fieldName: "docs", uri: "upload://upl_2", kind: "upload", index: 1 },
+    ]);
+  });
+
+  it("supports mixing upload:// and data: entries", () => {
+    const dataUri = "data:text/plain;base64,aGVsbG8=";
+    const refs = collectFileRefs(arrayFileSchema, {
+      docs: ["upload://upl_1", dataUri],
+    });
+    expect(refs).toEqual([
+      { fieldName: "docs", uri: "upload://upl_1", kind: "upload", index: 0 },
+      { fieldName: "docs", uri: dataUri, kind: "data", index: 1 },
     ]);
   });
 
   it("accepts an empty array", () => {
-    expect(collectUploadRefs(arrayFileSchema, { docs: [] })).toEqual([]);
+    expect(collectFileRefs(arrayFileSchema, { docs: [] })).toEqual([]);
   });
 
   it("ignores the field when missing or null", () => {
-    expect(collectUploadRefs(arrayFileSchema, {})).toEqual([]);
-    expect(collectUploadRefs(arrayFileSchema, { docs: null })).toEqual([]);
+    expect(collectFileRefs(arrayFileSchema, {})).toEqual([]);
+    expect(collectFileRefs(arrayFileSchema, { docs: null })).toEqual([]);
   });
 
   it("rejects a scalar value on an array field", () => {
     try {
-      collectUploadRefs(arrayFileSchema, { docs: "upload://upl_x" });
+      collectFileRefs(arrayFileSchema, { docs: "upload://upl_x" });
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -99,7 +123,7 @@ describe("collectUploadRefs — array-of-files fields", () => {
 
   it("rejects any non-URI entry inside the array", () => {
     try {
-      collectUploadRefs(arrayFileSchema, {
+      collectFileRefs(arrayFileSchema, {
         docs: ["upload://upl_1", "not-a-uri"],
       });
       throw new Error("expected to throw");
@@ -107,6 +131,110 @@ describe("collectUploadRefs — array-of-files fields", () => {
       expect(e).toBeInstanceOf(ApiError);
       expect((e as ApiError).message).toContain("docs");
     }
+  });
+});
+
+describe("parseDataUri", () => {
+  it("decodes a base64 data URI with mime + name", () => {
+    const file = parseDataUri("data:application/pdf;name=invoice.pdf;base64,JVBERg==", "doc");
+    expect(file.mime).toBe("application/pdf");
+    expect(file.name).toBe("invoice.pdf");
+    expect(Buffer.from(file.bytes).toString("utf-8")).toBe("%PDF");
+  });
+
+  it("decodes a URI-escaped name parameter", () => {
+    const file = parseDataUri("data:text/plain;name=my%20notes.txt;base64,aGk=", "doc");
+    expect(file.name).toBe("my notes.txt");
+  });
+
+  it("defaults the mediatype to text/plain and normalizes parameters", () => {
+    expect(parseDataUri("data:;base64,aGk=", "doc").mime).toBe("text/plain");
+    expect(parseDataUri("data:Text/Plain;charset=utf-8;base64,aGk=", "doc").mime).toBe(
+      "text/plain",
+    );
+  });
+
+  it("rejects a non-base64 (URL-encoded) data URI", () => {
+    try {
+      parseDataUri("data:text/plain,hello%20world", "doc");
+      throw new Error("expected to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).status).toBe(400);
+      expect((e as ApiError).message).toContain("base64");
+    }
+  });
+
+  it("rejects a URI without the ',' separator", () => {
+    try {
+      parseDataUri("data:application/pdf;base64", "doc");
+      throw new Error("expected to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).status).toBe(400);
+    }
+  });
+
+  it("rejects an invalid base64 payload", () => {
+    try {
+      parseDataUri("data:text/plain;base64,no spaces!", "doc");
+      throw new Error("expected to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).status).toBe(400);
+      expect((e as ApiError).message).toContain("base64");
+    }
+  });
+
+  it("accepts an unpadded base64 payload (MCP/LLM clients often omit padding)", () => {
+    // "hi" is normally "aGk=" — `aGk` is the same payload without padding.
+    const file = parseDataUri("data:text/plain;base64,aGk", "doc");
+    expect(Buffer.from(file.bytes).toString("utf-8")).toBe("hi");
+  });
+
+  it("accepts a url-safe base64 payload", () => {
+    // Bytes whose standard base64 contains both '+' and '/' (→ '-' and '_').
+    const raw = Buffer.from([0xfb, 0xff, 0xbf, 0x00]);
+    const std = raw.toString("base64");
+    const urlSafe = std.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    expect(urlSafe).toContain("-");
+    expect(urlSafe).toContain("_");
+    const file = parseDataUri(`data:application/octet-stream;base64,${urlSafe}`, "doc");
+    expect([...file.bytes]).toEqual([...raw]);
+    // Standard alphabet decodes to the same bytes.
+    expect([...parseDataUri(`data:application/octet-stream;base64,${std}`, "doc").bytes]).toEqual([
+      ...raw,
+    ]);
+  });
+
+  it("rejects an empty payload", () => {
+    try {
+      parseDataUri("data:text/plain;base64,", "doc");
+      throw new Error("expected to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).status).toBe(400);
+      expect((e as ApiError).message).toContain("empty");
+    }
+  });
+
+  it("throws 413 when the decoded payload exceeds the per-file cap", () => {
+    // Base64 string longer than the pre-decode ceiling — rejected without decoding.
+    const oversized = "A".repeat(Math.ceil(MAX_INLINE_FILE_BYTES / 3) * 4 + 4);
+    try {
+      parseDataUri(`data:application/octet-stream;base64,${oversized}`, "doc");
+      throw new Error("expected to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).status).toBe(413);
+      expect((e as ApiError).message).toContain("createUpload");
+    }
+  });
+
+  it("accepts a payload exactly at the cap boundary", () => {
+    const exact = Buffer.alloc(MAX_INLINE_FILE_BYTES, 0x61).toString("base64");
+    const file = parseDataUri(`data:application/octet-stream;base64,${exact}`, "doc");
+    expect(file.bytes.byteLength).toBe(MAX_INLINE_FILE_BYTES);
   });
 });
 
@@ -137,16 +265,16 @@ describe("assertDocsWithinCap", () => {
   });
 });
 
-describe("collectUploadRefs — schemas without file fields", () => {
+describe("collectFileRefs — schemas without file fields", () => {
   it("returns [] when no property matches the file shape", () => {
     const schema: JSONSchemaObject = {
       type: "object",
       properties: { name: { type: "string" }, count: { type: "number" } },
     };
-    expect(collectUploadRefs(schema, { name: "x", count: 3 })).toEqual([]);
+    expect(collectFileRefs(schema, { name: "x", count: 3 })).toEqual([]);
   });
 
   it("returns [] for a schema with no properties at all", () => {
-    expect(collectUploadRefs({ type: "object" } as JSONSchemaObject, {})).toEqual([]);
+    expect(collectFileRefs({ type: "object" } as JSONSchemaObject, {})).toEqual([]);
   });
 });

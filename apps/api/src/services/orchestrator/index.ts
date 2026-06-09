@@ -31,3 +31,14 @@ function createOrchestrator(): ContainerOrchestrator {
   if (mode === "process") return new ProcessOrchestrator();
   return new DockerOrchestrator();
 }
+
+/**
+ * Test seam — swap the orchestrator singleton for a fake so route-level
+ * integration tests can exercise the full run kickoff without a real
+ * container runtime (same pattern as `_setRunLimitsForTesting`). Pass
+ * `null` to reset; the next `getOrchestrator()` re-creates the real one.
+ * Never call in production code.
+ */
+export function _setOrchestratorForTesting(orchestrator: ContainerOrchestrator | null): void {
+  instance = orchestrator ?? undefined;
+}

@@ -2,7 +2,7 @@
 
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { getPackageWithAccess } from "../services/package-catalog.ts";
+import { getPackage, getPackageWithAccess } from "../services/package-catalog.ts";
 import { getOrgItem } from "../services/package-items/crud.ts";
 import { CONFIG_BY_TYPE } from "../services/package-items/config.ts";
 import {
@@ -19,20 +19,39 @@ import { getItemId } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
 import { getAppScope } from "../lib/scope.ts";
 
-export async function agentDetailHandler(c: Context<AppEnv>) {
+/**
+ * Build the canonical Agent detail DTO — the exact object the `GET` agent
+ * detail endpoint serializes. Extracted so mutating endpoints (create / update /
+ * fork / restore) can echo the full resource instead of an id-only stub
+ * (issue #646), reusing the single GET serializer.
+ *
+ * `requireAccess` defaults to `true` (the GET semantics: agent must be installed
+ * in the current app). Mutation responses pass `false` — the caller just wrote
+ * the agent within their org, so org-scope is the right gate and the app-install
+ * gate must not 404 a successful write that was not auto-installed.
+ *
+ * Returns `null` when the agent is not found (or not accessible under
+ * `requireAccess`), so the GET wrapper can map it to a 404 and mutation callers
+ * can fall back to the legacy envelope.
+ */
+export async function buildAgentDetailDto(
+  c: Context<AppEnv>,
+  opts: { itemId?: string; requireAccess?: boolean } = {},
+): Promise<Record<string, unknown> | null> {
   const scope = getAppScope(c);
   const { orgId, applicationId } = scope;
-  const itemId = getItemId(c);
+  const itemId = opts.itemId ?? getItemId(c);
+  const requireAccess = opts.requireAccess !== false;
 
   const [agent, rawItem, versionCount, latestVersionDate] = await Promise.all([
-    getPackageWithAccess(itemId, orgId, applicationId),
+    requireAccess ? getPackageWithAccess(itemId, orgId, applicationId) : getPackage(itemId, orgId),
     getOrgItem(orgId, itemId, CONFIG_BY_TYPE.agent),
     getVersionCount(itemId),
     getLatestVersionCreatedAt(itemId),
   ]);
 
   if (!agent) {
-    throw notFound(`Agent '${itemId}' not found`);
+    return null;
   }
 
   const m = agent.manifest;
@@ -57,7 +76,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
     latestVersionDate,
   );
 
-  return c.json({
+  return {
     id: agent.id,
     display_name: m.display_name,
     description: m.description,
@@ -108,5 +127,13 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
           prompt: agent.prompt,
         }
       : {}),
-  });
+  };
+}
+
+export async function agentDetailHandler(c: Context<AppEnv>) {
+  const dto = await buildAgentDetailDto(c, {});
+  if (!dto) {
+    throw notFound(`Agent '${getItemId(c)}' not found`);
+  }
+  return c.json(dto);
 }
