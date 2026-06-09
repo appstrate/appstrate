@@ -48,6 +48,7 @@ describe("OSS-mode module loading", () => {
       expect(getModuleRegistry()).toEqual([
         "oidc",
         "webhooks",
+        "mcp",
         "core-providers",
         "@appstrate/module-codex",
         "@appstrate/module-claude-code",

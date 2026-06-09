@@ -38,6 +38,13 @@ import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { ApiError, invalidRequest, internalError, notFound, parseBody } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
+import {
+  parseListPagination,
+  parseFieldSelection,
+  paginate,
+  projectFields,
+} from "../lib/list-query.ts";
+import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
@@ -176,8 +183,22 @@ export function createIntegrationsRouter() {
 
   // ─── List + detail ─────────────────────────
 
+  // Allowlisted projection keys for the `fields` selector — `manifest` is the
+  // heavy field (full AFPS manifest per row); dropping it lets a caller that
+  // only needs "which integrations exist" fetch a fraction of the payload.
+  const INTEGRATION_FIELDS = [
+    "id",
+    "manifest",
+    "orgId",
+    "source",
+    "active",
+    "block_user_connections",
+  ] as const;
+
   router.get("/", requirePermission("integrations", "read"), async (c) => {
     const scope = getAppScope(c);
+    const fields = parseFieldSelection(c, INTEGRATION_FIELDS);
+    const pagination = parseListPagination(c, { defaultLimit: 100 });
     const summaries = await listIntegrations(scope.orgId);
     // Decorate with `active` + `blockUserConnections` flags for the
     // current application. An integration is "active" when an
@@ -207,7 +228,10 @@ export function createIntegrationsRouter() {
         block_user_connections: row?.blockUserConnections ?? false,
       };
     });
-    return c.json(listResponse(enriched));
+    const { page, total, hasMore } = paginate(enriched, pagination);
+    const projected = page.map((row) => projectFields(row, fields, ["id"]));
+    setOffsetLinkHeader({ c, limit: pagination.limit, offset: pagination.offset, total });
+    return c.json(listResponse(projected, { hasMore, total }));
   });
 
   router.get("/callback", async (c) => {

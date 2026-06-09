@@ -156,6 +156,22 @@ export function forbidden(detail: string): ApiError {
   });
 }
 
+/**
+ * 405 Method Not Allowed. Sets the `Allow` response header to the list of
+ * permitted methods (RFC 9110 §15.5.6 requires it), so a client learns which
+ * verbs the resource accepts.
+ */
+export function methodNotAllowed(allowed: string[], detail?: string): ApiError {
+  const methods = allowed.map((m) => m.toUpperCase());
+  return new ApiError({
+    status: 405,
+    code: "method_not_allowed",
+    title: "Method Not Allowed",
+    detail: detail ?? `Method not allowed. Allowed: ${methods.join(", ")}.`,
+    headers: { Allow: methods.join(", ") },
+  });
+}
+
 export function notFound(detail: string): ApiError {
   return new ApiError({
     status: 404,

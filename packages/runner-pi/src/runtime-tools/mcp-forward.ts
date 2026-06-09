@@ -26,8 +26,7 @@
  * code in either the runner-pi or runtime-pi tree.
  */
 
-import { Type } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
 import type { AppstrateMcpClient, CallToolResult } from "@appstrate/mcp-transport";
 import { RUNTIME_INJECTED_TOOLS, type RuntimeInjectedTool } from "./index.ts";
 

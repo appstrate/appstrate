@@ -6,7 +6,11 @@
  */
 
 import { logger } from "../lib/logger.ts";
-import { buildRunContext, ModelNotConfiguredError } from "./run-context-builder.ts";
+import {
+  buildRunContext,
+  ModelNotConfiguredError,
+  ModelCredentialMissingError,
+} from "./run-context-builder.ts";
 import { createRun } from "./state/runs.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
@@ -279,6 +283,14 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       throw new ApiError({
         status: 400,
         code: "model_not_configured",
+        title: "Bad Request",
+        detail: err.message,
+      });
+    }
+    if (err instanceof ModelCredentialMissingError) {
+      throw new ApiError({
+        status: 400,
+        code: "model_credential_missing",
         title: "Bad Request",
         detail: err.message,
       });

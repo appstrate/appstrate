@@ -84,6 +84,20 @@ interface DeviceApproveDenyArgs {
 }
 
 /**
+ * `GET /device` — verify a user code and, when called with a session, CLAIM it
+ * (associate the device code with the signed-in user). Better Auth 1.7 split
+ * claim from approve: a device code must be claimed via this endpoint before
+ * `/device/approve` or `/device/deny` will accept it (they reject an unclaimed
+ * code with `DEVICE_CODE_NOT_CLAIMED`).
+ */
+interface DeviceVerifyArgs {
+  query: { user_code: string };
+  headers: Headers;
+  request?: Request;
+  asResponse?: boolean;
+}
+
+/**
  * Signature for Better Auth's JWT plugin `signJWT` endpoint. Accepts a raw
  * claims payload (merged with the plugin's defaults at sign time) plus
  * per-call overrideOptions. Returns `{ token }` when called directly via
@@ -111,6 +125,7 @@ export interface OidcAuthApi {
   getOpenIdConfig(args: DiscoveryArgs): Promise<unknown>;
   getOAuthServerConfig(args: DiscoveryArgs): Promise<unknown>;
   getJwks(args: JwksArgs): Promise<{ keys?: jose.JWK[] } | null>;
+  deviceVerify(args: DeviceVerifyArgs): Promise<Response | unknown>;
   deviceApprove(args: DeviceApproveDenyArgs): Promise<Response | unknown>;
   deviceDeny(args: DeviceApproveDenyArgs): Promise<Response | unknown>;
   signJWT(args: SignJWTArgs): Promise<{ token: string } | Response | unknown>;

@@ -2135,6 +2135,14 @@ export function createOidcRouter() {
       .limit(1);
 
     try {
+      // BA 1.7 split claim from approve: associate the device code with the
+      // signed-in user (GET /device) before approving it, else /device/approve
+      // rejects with DEVICE_CODE_NOT_CLAIMED.
+      await getOidcAuthApi().deviceVerify({
+        query: { user_code: userCode },
+        headers: c.req.raw.headers,
+        request: c.req.raw,
+      });
       await getOidcAuthApi().deviceApprove({
         body: { userCode },
         headers: c.req.raw.headers,
@@ -2191,6 +2199,13 @@ export function createOidcRouter() {
     if (!userCode) return c.redirect("/activate", 303);
 
     try {
+      // BA 1.7: claim the code (GET /device) before denying — /device/deny
+      // also rejects an unclaimed code with DEVICE_CODE_NOT_CLAIMED.
+      await getOidcAuthApi().deviceVerify({
+        query: { user_code: userCode },
+        headers: c.req.raw.headers,
+        request: c.req.raw,
+      });
       await getOidcAuthApi().deviceDeny({
         body: { userCode },
         headers: c.req.raw.headers,

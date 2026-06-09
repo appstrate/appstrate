@@ -4,6 +4,13 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "../lib/list-response.ts";
+import {
+  parseListPagination,
+  parseFieldSelection,
+  paginate,
+  projectFields,
+} from "../lib/list-query.ts";
+import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemModelProviderKey } from "../services/model-registry.ts";
@@ -121,8 +128,32 @@ export function createModelProviderCredentialsRouter() {
   // sits behind the same `model-provider-credentials:read` permission as
   // the rest of this resource (the catalog itself is non-sensitive metadata
   // — the gate is for surface uniformity, not the data).
+  // Allowlisted projection keys for the `fields` selector. `models` is the
+  // heavy field — the full per-provider catalog (254 models / ~100KB across
+  // the registry). A caller asking only "which providers exist" can request
+  // `?fields=providerId,authMode` and skip catalog serialization entirely.
+  const REGISTRY_FIELDS = [
+    "providerId",
+    "displayName",
+    "iconUrl",
+    "description",
+    "docsUrl",
+    "apiShape",
+    "defaultBaseUrl",
+    "baseUrlOverridable",
+    "authMode",
+    "featured",
+    "models",
+  ] as const;
+
   router.get("/registry", requirePermission("model-provider-credentials", "read"), (c) => {
-    const data: ProviderRegistryEntry[] = listModelProviders().map((p) => ({
+    const fields = parseFieldSelection(c, REGISTRY_FIELDS);
+    const pagination = parseListPagination(c, { defaultLimit: 100 });
+    // Only pay the catalog serialization cost when `models` is actually
+    // requested (absent `fields` = full shape = include it).
+    const includeModels = fields === null || fields.has("models");
+
+    const all: ProviderRegistryEntry[] = listModelProviders().map((p) => ({
       providerId: p.providerId,
       displayName: p.displayName,
       iconUrl: p.iconUrl,
@@ -133,9 +164,13 @@ export function createModelProviderCredentialsRouter() {
       baseUrlOverridable: p.baseUrlOverridable,
       authMode: p.authMode,
       featured: p.featured ?? false,
-      models: serializeProviderModels(p),
+      models: includeModels ? serializeProviderModels(p) : [],
     }));
-    return c.json(listResponse(data));
+
+    const { page, total, hasMore } = paginate(all, pagination);
+    const projected = page.map((entry) => projectFields(entry, fields, ["providerId"]));
+    setOffsetLinkHeader({ c, limit: pagination.limit, offset: pagination.offset, total });
+    return c.json(listResponse(projected, { hasMore, total }));
   });
 
   // GET /api/model-provider-credentials

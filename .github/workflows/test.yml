@@ -41,9 +41,14 @@ jobs:
       # remain in the heavier `integration` job below — they need DB seeding and
       # are slower to run, so they stay opt-in via the `integration` label or
       # post-merge on main. Anything pure-unit must run on every PR.
+      # --coverage on the always-on unit job is what gives every PR a coverage
+      # signal (Codecov patch coverage + the `unit` flag) without paying for the
+      # heavier `integration` job below. The full project total is reconstructed
+      # on Codecov by carrying the `integration` flag forward from the PR base
+      # (see flags.*.carryforward in .codecov.yml).
       - name: Run unit tests
         run: |
-          bun test \
+          bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage \
             apps/api/test/unit/ \
             apps/api/src/modules/oidc/test/unit/ \
             apps/api/src/modules/webhooks/test/unit/ \
@@ -57,6 +62,40 @@ jobs:
             packages/emails/ \
             packages/env/ \
             packages/ui/
+
+      # Surface the figure in the job summary so humans see it without opening
+      # Codecov. Sums LF/LH across the lcov report; informational only (the gate
+      # is Codecov). Flagged as partial because it omits the integration suite.
+      - name: Coverage summary
+        if: always()
+        run: |
+          if [ -f coverage/lcov.info ]; then
+            pct=$(awk -F: '/^LF:/{lf+=$2} /^LH:/{lh+=$2} END{ if (lf>0) printf "%.2f", (lh/lf)*100; else printf "0.00" }' coverage/lcov.info)
+            files=$(grep -c '^SF:' coverage/lcov.info || echo 0)
+            {
+              echo "## Coverage (unit job)"
+              echo ""
+              echo "Line coverage: **${pct}%** across ${files} instrumented files."
+              echo ""
+              echo "_Partial — unit job only. Full project coverage (unit + integration) is reconciled on Codecov; the project gate runs there._"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Fork-PR note: external contributors' PRs run with no access to repo
+      # secrets, so `secrets.CODECOV_TOKEN` is empty. codecov-action v6 then
+      # attempts a tokenless upload (supported for public repos); if that fails,
+      # `fail_ci_if_error: false` keeps this step — and the CI job — green. The
+      # Codecov `project` status is `informational: true` (.codecov.yml), so it
+      # never blocks a fork PR that could not upload. Same-repo PRs use the
+      # token and upload normally.
+      - name: Upload unit coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+        with:
+          files: coverage/lcov.info
+          flags: unit
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       # CLI tests live in a separate workspace with its own bunfig.toml
       # (no Docker preload needed), so we run them from that directory to
@@ -93,11 +132,15 @@ jobs:
       - name: Run all tests with coverage
         run: bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage
 
-      - name: Upload coverage to Codecov
+      - name: Upload integration coverage to Codecov
         if: always()
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:
-          files: coverage/report.lcov
+          # Bun's lcov reporter writes coverage/lcov.info (the previous
+          # report.lcov path never existed, so this upload was silently a no-op
+          # under fail_ci_if_error: false).
+          files: coverage/lcov.info
+          flags: integration
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -186,7 +229,7 @@ jobs:
           #    passes the same checks for the Anthropic OAuth surface.
           # oidc is kept in lockstep with .env.example / packages/env defaults so
           # the suite stays representative of a default self-host install.
-          MODULES: oidc,webhooks,core-providers,@appstrate/module-codex,@appstrate/module-claude-code
+          MODULES: oidc,webhooks,mcp,core-providers,@appstrate/module-codex,@appstrate/module-claude-code
           # Default system model so run-acceptance passes in specs that POST
           # /agents/:id/run (e.g. upload-flow). The run pipeline only needs a
           # resolvable model at acceptance time — the dummy apiKey is never

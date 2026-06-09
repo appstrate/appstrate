@@ -29,6 +29,7 @@ import {
   assertRequiredIdentityClaims,
   ensureIntegrationOAuthClient,
   extractIdentity,
+  getIntegrationConnectionCredentialFields,
   readIntegrationAuth,
   saveIntegrationConnection,
   usesAutoProvisionedClient,
@@ -243,9 +244,40 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     // came back missing/empty from the IdP. Fail BEFORE persistence so a
     // half-identified connection never lands in `integration_connections`.
     assertRequiredIdentityClaims(manifest, result.authKey, identityClaims);
+
+    // Re-auth (update) path: an IdP may omit `refresh_token` on re-consent
+    // (e.g. Google without `prompt=consent`). Preserve the still-valid stored
+    // token instead of clobbering it with none — mirrors the refresh path's
+    // `parsed.refreshToken ?? refreshToken` carry-forward.
+    let refreshToken = result.refreshToken;
+    if (!refreshToken && result.connectionId) {
+      const existing = await getIntegrationConnectionCredentialFields(result.connectionId);
+      if (existing?.refresh_token) refreshToken = existing.refresh_token;
+    }
+
+    // Fail-fast: a short-lived token (`expires_at` set) with no `refresh_token`
+    // is unrenewable — it 401s within the hour and can never self-refresh,
+    // silently bricking the connection and every schedule on it. Refuse BEFORE
+    // persistence so a born-dead row never lands in `integration_connections`.
+    // Provider-agnostic: catches any OAuth integration missing offline-access
+    // config, not a hard-coded IdP (same posture as the identity-claims gate).
+    if (result.expiresAt && !refreshToken) {
+      logger.warn("Integration OAuth returned short-lived token with no refresh_token", {
+        packageId: result.packageId,
+        authKey: result.authKey,
+        ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+      });
+      throw invalidRequest(
+        `'${result.packageId}' returned a short-lived access token but no refresh token, so ` +
+          `the connection cannot be kept alive. The integration's OAuth configuration is missing ` +
+          `offline access (for Google: access_type=offline + prompt=consent), or a prior grant ` +
+          `must be revoked in your account settings and re-authorised.`,
+      );
+    }
+
     const credentials: Record<string, unknown> = {
       access_token: result.accessToken,
-      ...(result.refreshToken ? { refresh_token: result.refreshToken } : {}),
+      ...(refreshToken ? { refresh_token: refreshToken } : {}),
       ...(result.tokenResponse.token_type
         ? { token_type: String(result.tokenResponse.token_type) }
         : {}),

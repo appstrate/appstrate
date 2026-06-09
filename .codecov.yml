@@ -7,17 +7,100 @@ coverage:
       default:
         target: 75%
         threshold: 2%
+        # informational = report the status but never set a failing/blocking
+        # check. Required during cold-start: `main` has NO integration
+        # carryforward baseline yet, so on a normal PR only the `unit` job runs
+        # and the project total is computed from unit coverage alone (dominated
+        # by ~0%-unit-covered backend files) → a red project status nobody can
+        # fix. It also keeps the project gate non-blocking for FORK PRs, which
+        # cannot read CODECOV_TOKEN (uploads no-op) and otherwise could not
+        # clear a required status. FLIP to blocking (remove this line) once
+        # `main` has a post-merge `integration` upload, i.e. a real combined
+        # baseline exists to carry forward. The 75% target is unchanged — only
+        # blocking-ness is relaxed during cold-start.
+        informational: true
+    # NOTE: PRs that add code exercised only by the integration suite
+    # (orchestrator, run-state, credential paths) should carry the
+    # `integration` label so this `patch` gate and the `component_management`
+    # statuses below reflect real integration runs. carryforward preserves base
+    # coverage but cannot cover NEW lines, so unit-only runs understate them.
     patch:
       default:
         target: 50%
 
+# Coverage arrives from two CI jobs (see .github/workflows/test.yml):
+#   - `unit`        → runs on every push + PR (fast, no integration seeding)
+#   - `integration` → runs on push to main + PRs labelled `integration`
+# carryforward keeps a flag's last-known coverage when its job did not run for a
+# given commit. On a normal PR only the `unit` job runs, so the `integration`
+# flag is carried forward from the PR base — without it the project total would
+# falsely collapse on every PR and the 75% gate would be unusable pre-merge.
+flags:
+  unit:
+    carryforward: true
+  integration:
+    carryforward: true
+
+# Per-path floors for the highest-risk subsystems. `target: auto` enforces a
+# no-regression floor against the PR base (the current measured level is the
+# floor) — chosen over absolute numbers because the full combined coverage of
+# these paths is only produced by the integration suite, which is not run
+# locally here, so a hand-picked absolute target would be a guess. Once a stable
+# Codecov baseline exists these SHOULD be ratcheted to explicit absolute targets,
+# strictest first (orchestrator). Hot paths use a tighter 1% threshold than the
+# global 2% gate.
+component_management:
+  individual_components:
+    - component_id: orchestrator
+      name: orchestrator
+      paths:
+        - apps/api/src/services/orchestrator/**
+      statuses:
+        - type: project
+          target: auto
+          threshold: 1%
+    - component_id: rbac
+      name: rbac
+      paths:
+        - apps/api/src/lib/auth-cookies.ts
+        - apps/api/src/lib/auth-pipeline.ts
+        - apps/api/src/lib/auth-secrets.ts
+        - apps/api/src/middleware/require-permission.ts
+      statuses:
+        - type: project
+          target: auto
+          threshold: 1%
+    - component_id: credentials
+      name: credentials
+      paths:
+        - packages/connect/src/**
+        - apps/api/src/services/connect/**
+      statuses:
+        - type: project
+          target: auto
+          threshold: 1%
+    - component_id: run-state
+      name: run-state
+      paths:
+        - apps/api/src/services/state/**
+      statuses:
+        - type: project
+          target: auto
+          threshold: 1%
+
 ignore:
   - "apps/web/**"
-  - "test/**"
+  # `**/test/**` (not `test/**`) to also drop NESTED test harnesses
+  # (apps/api/test/**, packages/*/test/**, apps/api/src/modules/*/test/**, …).
+  # The `**/` matches the `test` path segment, not the substring, so product
+  # dirs such as apps/api/src/latest/** stay covered. Lockstep with
+  # bunfig.toml coveragePathIgnorePatterns.
+  - "**/test/**"
   - "scripts/**"
   - "packages/db/src/schema/**"
+  - "packages/db/src/schema.ts"
   - "packages/shared-types/**"
 
 comment:
-  layout: "condensed_header, condensed_files, condensed_footer"
+  layout: "condensed_header, condensed_files, components, condensed_footer"
   require_changes: true

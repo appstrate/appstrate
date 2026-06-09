@@ -32,6 +32,7 @@
 import { randomInt, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { oauthProvider } from "@better-auth/oauth-provider";
+import { cimd } from "@better-auth/cimd";
 import { bearer, jwt } from "better-auth/plugins";
 import { deviceAuthorization } from "better-auth/plugins/device-authorization";
 import { APIError } from "better-auth/api";
@@ -57,7 +58,11 @@ import { socialOverridePlugin } from "../services/ba-social-override-plugin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
 import { cliTokenPlugin } from "./cli-plugin.ts";
 import { assertUserRealm } from "./realm-check.ts";
-import { getAppstrateScopes } from "./scopes.ts";
+import { getAppstrateScopes, OIDC_IDENTITY_SCOPES } from "./scopes.ts";
+import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
+import { isBlockedUrlWithDns } from "../../../lib/ssrf-dns.ts";
+import { markClientSelfService } from "../services/oauth-admin.ts";
+import { mcpValidAudiences, initMcpValidAudiences } from "../../mcp/audiences.ts";
 
 export type ActorType = "dashboard_user" | "end_user" | "user";
 export type { OrgRole as OrgRoleClaim } from "@appstrate/core/permissions";
@@ -139,7 +144,40 @@ export interface OidcBetterAuthPluginsOptions {
 
 export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): unknown[] {
   const env = getEnv();
-  const validAudiences = [env.APP_URL, `${env.APP_URL}/api/auth`];
+  // The AS accepts these as RFC 8707 `resource` values and stamps the matching
+  // one as the token `aud`. The inbound MCP server is exposed per organization
+  // (`/api/mcp/o/:org`), so its protected resources are NOT static URIs — there
+  // is one canonical URI per org, layered onto this allowlist at runtime.
+  //
+  // Org-aware, mutable allowlist: the static platform + AS audiences plus one
+  // per-org MCP resource URI each, kept in sync via `mcp/audiences.ts` (seeded
+  // from the `organizations` table at boot, updated on `onOrgCreate` /
+  // `onOrgDelete`). Passed BY REFERENCE to both plugins below; both read it live
+  // per request (the library's `checkResource` reads `opts.validAudiences` on
+  // every mint, the guard reads it per request), so a freshly-created org's
+  // resource becomes mintable without a restart. Never reassign — mutate in
+  // place through the audiences module. The generic `/api/mcp/o/:org` URIs are
+  // per-org; there is no bare `/api/mcp` resource.
+  //
+  // LIBRARY CONTRACT (verified ≤ @better-auth/oauth-provider 1.7.0-beta.4):
+  // `oauth-provider` must read `opts.validAudiences` LIVE on every
+  // `/oauth2/token` call — its `checkResource` rebuilds a Set from
+  // `opts.validAudiences.filter(...)` per call, and `opts` holds this array by
+  // reference (a spread of the options object, not a clone). If a future version
+  // snapshots `validAudiences` into a Set at plugin construction, per-org minting
+  // silently breaks for orgs created after boot. The regression guard is
+  // `oidc/test/integration/services/mcp-org-audience-liveread.test.ts` (add an
+  // org audience at runtime → mint accepts it). Keep `mcpValidAudiences` a plain
+  // array — the library calls `.filter` on it.
+  initMcpValidAudiences([env.APP_URL, `${env.APP_URL}/api/auth`]);
+  const validAudiences = mcpValidAudiences;
+
+  // Scopes a self-service (DCR / CIMD) client may request: identity scopes +
+  // module-contributed end-user-grantable scopes (currently mcp:read/invoke).
+  // Deliberately EXCLUDES core action scopes (agents:run, llm-proxy:call, …) —
+  // those remain for admin-managed first-party clients. The user-consent screen
+  // and the caller's own permissions still gate the actual grant on top of this.
+  const selfServiceScopes = [...OIDC_IDENTITY_SCOPES, ...getModuleEndUserAllowedScopes()];
   const cachedTrustedClients =
     opts.cachedTrustedClientIds && opts.cachedTrustedClientIds.length > 0
       ? new Set(opts.cachedTrustedClientIds)
@@ -222,6 +260,17 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       scopes: [...getAppstrateScopes()],
       validAudiences,
       cachedTrustedClients,
+      // Dynamic Client Registration (RFC 7591) — the fallback discovery path
+      // for MCP clients that can't host a CIMD document. Unauthenticated
+      // registration is what lets a fresh `claude mcp add` self-register with
+      // no operator step. Bounded hard: registrants may only request the
+      // self-service scope set (identity + module scopes), PKCE is enforced by
+      // the plugin, and the /oauth2/register endpoint is rate-limited in
+      // routes.ts. The user-consent screen remains the real authorization gate.
+      allowDynamicClientRegistration: true,
+      allowUnauthenticatedClientRegistration: true,
+      clientRegistrationDefaultScopes: [...OIDC_IDENTITY_SCOPES],
+      clientRegistrationAllowedScopes: selfServiceScopes,
       storeClientSecret: {
         hash: hashSecret,
         verify: sha256HexVerify,
@@ -274,6 +323,34 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
           };
         }
         return withVerified;
+      },
+    }),
+    // Client ID Metadata Documents (CIMD, SEP-991) — the MCP-spec-preferred
+    // discovery path: a client identifies by an HTTPS URL whose document the AS
+    // fetches, validates, and caches. Must come AFTER oauthProvider — its
+    // init() appends a clientDiscovery entry to the provider and advertises
+    // `client_id_metadata_document_supported` in the well-known metadata.
+    //
+    // The plugin already enforces SSRF (private/link-local/cloud-metadata
+    // ranges), a 5s timeout, a 5KB body cap, JSON-only, and no redirects. The
+    // upstream guard and our `isBlockedUrl` are both LITERAL (no DNS), so we
+    // resolve DNS here in `allowFetch` (the documented hostname-defense seam)
+    // and block any URL whose A/AAAA resolves to a private/internal address —
+    // closing the rebind-to-internal vector for the metadata-document fetch.
+    // Also blocks internal Docker hostnames (`sidecar`/`agent`). Origin binding
+    // (redirect/post-logout/client URIs must share the client_id origin) is
+    // left at its secure default.
+    cimd({
+      allowFetch: async (url) => !(await isBlockedUrlWithDns(url)),
+      // A CIMD client is written straight to the DB by the plugin with no
+      // platform `level`, so `buildClaimsForClient` would reject its tokens.
+      // Stamp it as a self-service instance client (same model as a DCR
+      // client) so it can mint instance tokens — which the RFC 8707 audience
+      // confinement then restricts to the protected resource it was issued
+      // for. Without this the entire CIMD onboarding path mints nothing.
+      onClientCreated: async ({ client }) => {
+        const clientId = (client as { clientId?: unknown }).clientId;
+        if (typeof clientId === "string") await markClientSelfService(clientId);
       },
     }),
   ];

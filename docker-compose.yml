@@ -180,7 +180,7 @@ services:
       - COOKIE_DOMAIN=${COOKIE_DOMAIN:-}
       - TRUST_PROXY=${TRUST_PROXY:-false}
       - LOG_LEVEL=${LOG_LEVEL:-info}
-      - MODULES=${MODULES:-oidc,webhooks}
+      - MODULES
       # ── Auth / Crypto ──
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env}
       - CONNECTION_ENCRYPTION_KEY=${CONNECTION_ENCRYPTION_KEY:?Set CONNECTION_ENCRYPTION_KEY in .env}

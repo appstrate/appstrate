@@ -39,6 +39,7 @@ import { getClientCached } from "../services/oauth-admin.ts";
 import { checkFamilyAndTouch } from "../services/cli-tokens.ts";
 import { scopesToPermissions } from "./claims.ts";
 import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
+import { extractOrgIdFromAudiences } from "../../mcp/audiences.ts";
 
 export const oidcAuthStrategy: AuthStrategy = {
   id: "oidc-jwt",
@@ -115,29 +116,38 @@ export const oidcAuthStrategy: AuthStrategy = {
       }
     }
 
+    let resolution: AuthResolution | null;
     if (claims.actorType === "user") {
-      return resolveInstanceUser(claims).then((resolution) => {
-        // Surface the CLI family id on `c.var.extra.cliFamilyId` so route
-        // handlers (and `lib/runner-context.ts`) can resolve the runner's
-        // device name without re-parsing the JWT.
-        if (resolution && claims.cliFamilyId) {
-          return {
-            ...resolution,
-            extra: { ...(resolution.extra ?? {}), cliFamilyId: claims.cliFamilyId },
-          };
-        }
-        return resolution;
-      });
+      resolution = await resolveInstanceUser(claims);
+      // Surface the CLI family id on `c.var.extra.cliFamilyId` so route
+      // handlers (and `lib/runner-context.ts`) can resolve the runner's
+      // device name without re-parsing the JWT.
+      if (resolution && claims.cliFamilyId) {
+        resolution = {
+          ...resolution,
+          extra: { ...(resolution.extra ?? {}), cliFamilyId: claims.cliFamilyId },
+        };
+      }
+    } else if (claims.actorType === "dashboard_user") {
+      resolution = await resolveDashboardUser(claims);
+    } else if (claims.actorType === "end_user") {
+      resolution = await resolveEndUser(claims);
+    } else {
+      // No actor_type claim — malformed token. Fall through so core
+      // Bearer / cookie auth gets a chance to handle it.
+      return null;
     }
-    if (claims.actorType === "dashboard_user") {
-      return resolveDashboardUser(claims);
+
+    // Surface the token's RFC 8707 audiences so a resource server (e.g. a
+    // per-org MCP endpoint `/api/mcp/o/:org`) can enforce that the token was
+    // issued for it.
+    if (resolution) {
+      resolution = {
+        ...resolution,
+        extra: { ...(resolution.extra ?? {}), tokenAudiences: claims.audiences },
+      };
     }
-    if (claims.actorType === "end_user") {
-      return resolveEndUser(claims);
-    }
-    // No actor_type claim — malformed token. Fall through so core
-    // Bearer / cookie auth gets a chance to handle it.
-    return null;
+    return resolution;
   },
 };
 
@@ -154,17 +164,27 @@ async function resolveInstanceUser(claims: AccessTokenClaims): Promise<AuthResol
     });
     return null;
   }
-  // Instance tokens carry no org context. Return a partial resolution —
-  // orgId and orgRole are left undefined. The auth pipeline defers org
-  // resolution to the X-Org-Id middleware (same path as session auth).
-  // Permissions are also deferred — the pipeline derives them from orgRole
-  // after org-context resolves, via resolvePermissions(orgRole).
+  // Pin the org from the token's RFC 8707 audience. An MCP instance token is
+  // audience-bound to EXACTLY one org's per-org resource (`/api/mcp/o/:org`),
+  // so the bound org id lives in the token's audiences — not the URL. Pinning
+  // it here makes the downstream org-context middleware run its membership
+  // re-check (and derive role/permissions) against that org, even on the
+  // in-process self-dispatch path where no `X-Org-Id` header is present.
+  //
+  // We KEEP `deferOrgResolution: true`: the org is only a candidate at this
+  // point. Org-context still re-verifies membership and derives the current
+  // role/permissions (orgRole is left undefined here, permissions deferred —
+  // same as before). A token with NO per-org audience (header-path instance
+  // tokens, the dashboard SPA / CLI) leaves `orgId` undefined, preserving the
+  // original "defer entirely to X-Org-Id" behavior.
+  const boundOrgId = extractOrgIdFromAudiences(claims.audiences ?? []);
   return {
     user: {
       id: authUserRow.id,
       email: authUserRow.email,
       name: authUserRow.name ?? "",
     },
+    orgId: boundOrgId,
     authMethod: "oauth2-instance",
     permissions: [],
     deferOrgResolution: true,

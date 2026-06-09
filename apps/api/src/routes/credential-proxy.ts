@@ -48,6 +48,7 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { requireAppContext } from "../middleware/app-context.ts";
 import {
+  ApiError,
   invalidRequest,
   forbidden,
   notFound,
@@ -359,6 +360,11 @@ export function createCredentialProxyRouter() {
           headers: responseHeaders,
         });
       } catch (err) {
+        // A dependency may already throw a well-formed RFC 9457 error (e.g.
+        // assertIntegrationActive → notFound when the integration isn't
+        // installed). Surface it with its intended status instead of masking
+        // every non-Proxy* error as a 500 below.
+        if (err instanceof ApiError) throw err;
         if (err instanceof ProxyAuthorizationError) {
           logger.warn("credential-proxy: target not in allowlist", {
             authMethod,

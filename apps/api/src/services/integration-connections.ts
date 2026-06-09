@@ -33,6 +33,7 @@ import {
   encryptCredentials,
   encryptCredentialEnvelope,
   decryptCredentials,
+  decryptCredentialsToStringMap,
   resolveOAuthEndpoints,
   discoverProtectedResourceMetadata,
   registerDynamicClient,
@@ -1188,6 +1189,24 @@ export async function persistCredentialBundle(
  * refresh paths (no refresh_token / revoked grant) and the scope-shrink-
  * below-floor guard. Keyed by id (system write); no-ops when the row is gone.
  */
+/**
+ * Read and decrypt the stored credential fields for one connection by id.
+ * Returns `null` when the row is gone. Used by the re-auth (acquisition) path
+ * to preserve a still-valid `refresh_token` when the IdP omits one on
+ * re-consent — the refresh path already does the equivalent inline.
+ */
+export async function getIntegrationConnectionCredentialFields(
+  connectionId: string,
+): Promise<Record<string, string> | null> {
+  const [row] = await db
+    .select({ credentialsEncrypted: integrationConnections.credentialsEncrypted })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  if (!row?.credentialsEncrypted) return null;
+  return decryptCredentialsToStringMap(row.credentialsEncrypted);
+}
+
 export async function markIntegrationConnectionNeedsReconnection(
   connectionId: string,
 ): Promise<void> {

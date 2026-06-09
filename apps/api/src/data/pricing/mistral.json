@@ -286,6 +286,19 @@
       "output": 0.15
     }
   },
+  "ministral-8b-latest": {
+    "label": "Ministral 8b Latest",
+    "contextWindow": 262144,
+    "maxTokens": 262144,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 0.15,
+      "output": 0.15
+    }
+  },
   "mistral-large-2402": {
     "label": "Mistral Large 2402",
     "contextWindow": 32000,

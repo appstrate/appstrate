@@ -28,6 +28,39 @@ export class ModelNotConfiguredError extends Error {
 }
 
 /**
+ * Raised at kickoff when the resolved model carries no usable secret — an
+ * empty/whitespace API key (or OAuth access token). Shipped provider shapes
+ * all send the key as a header/query param, so an empty key reaches the
+ * upstream as an unauthenticated request: the LLM call 401s and the Pi SDK
+ * retries silently, leaving the run stuck in `running` with `error: null`
+ * until the 30-min ceiling or a manual cancel (the failure mode this guards).
+ *
+ * Failing fast here — before the `runs` row is even created — turns that
+ * silent hang into a deterministic 400 with a clear code.
+ */
+export class ModelCredentialMissingError extends Error {
+  /** Resolved model label, surfaced in the error detail for operator triage. */
+  readonly modelLabel: string;
+  constructor(modelLabel: string) {
+    super(
+      `Model '${modelLabel}' has no API key configured — set a key on its provider credential before running`,
+    );
+    this.name = "ModelCredentialMissingError";
+    this.modelLabel = modelLabel;
+  }
+}
+
+/**
+ * True when a resolved model carries a usable inference secret. Pure +
+ * exported for unit testing. An empty or whitespace-only `apiKey` (which is
+ * also where a decrypted OAuth access token lands) means the run would hit
+ * the provider unauthenticated — treated as "not usable".
+ */
+export function modelCredentialIsPresent(model: { apiKey: string }): boolean {
+  return model.apiKey.trim().length > 0;
+}
+
+/**
  * Build the AFPS {@link ExecutionContext} + platform {@link AppstrateRunPlan}
  * for a run. Shared by the run route and the scheduler.
  */
@@ -108,6 +141,15 @@ export async function buildRunContext(params: {
 
   if (!modelResult) {
     throw new ModelNotConfiguredError();
+  }
+
+  // Fail-fast on a resolved-but-keyless model. A system stub
+  // (`SYSTEM_PROVIDER_KEYS` with an empty `apiKey`) or a credential whose
+  // secret decrypted to "" passes the `!modelResult` check above yet would
+  // hang the run on an unauthenticated upstream call. Reject at kickoff so
+  // the caller gets a clean 400 instead of a run silently stuck in `running`.
+  if (!modelCredentialIsPresent(modelResult)) {
+    throw new ModelCredentialMissingError(modelResult.label);
   }
 
   const proxyUrl = proxyResult?.url ?? null;

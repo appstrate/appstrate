@@ -40,6 +40,9 @@ describe("resolvePermissions", () => {
     expect(perms.has("runs:cancel")).toBe(true);
     // Can write end-users
     expect(perms.has("end-users:write")).toBe(true);
+    // Can run completions through the LLM proxy (powers a member-facing chat —
+    // intentionally granted to members, not just admins)
+    expect(perms.has("llm-proxy:call")).toBe(true);
     // Module-owned permissions still part of the core taxonomy
     expect(perms.has("schedules:write")).toBe(true);
     expect(perms.has("models:read")).toBe(true);

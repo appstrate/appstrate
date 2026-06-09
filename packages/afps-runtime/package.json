@@ -66,7 +66,7 @@
     "fixtures:build": "bun run scripts/build-fixtures.ts"
   },
   "dependencies": {
-    "@afps-spec/schema": "^0.6.0",
+    "@afps-spec/schema": "^0.6.1",
     "@afps-spec/types": "^0.1.0",
     "@appstrate/afps-shared": "workspace:*",
     "file-type": "^22.0.1",
@@ -76,8 +76,8 @@
     "zod": "^4.4.3"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "^0.70.6",
-    "@mariozechner/pi-ai": "^0.70.6"
+    "@mariozechner/pi-coding-agent": "0.70.6",
+    "@mariozechner/pi-ai": "0.70.6"
   },
   "peerDependenciesMeta": {
     "@mariozechner/pi-coding-agent": {
@@ -91,7 +91,7 @@
     "@appstrate/core": "workspace:*",
     "@types/mustache": "^4.2.6",
     "@types/semver": "^7.7.1",
-    "@mariozechner/pi-coding-agent": "^0.70.6",
-    "@mariozechner/pi-ai": "^0.70.6"
+    "@mariozechner/pi-coding-agent": "0.70.6",
+    "@mariozechner/pi-ai": "0.70.6"
   }
 }

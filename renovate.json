@@ -13,6 +13,15 @@
       "matchPackageNames": ["@appstrate/core"],
       "groupName": "appstrate core",
       "automerge": false
+    },
+    {
+      "description": "Pi SDK is a single-maintainer, pinned-exact supply-chain dependency. Group both packages into one PR, require manual dashboard approval, never auto-merge. Ordered last so it overrides the devDependencies automerge rule. See docs/architecture/SUPPLY_CHAIN.md",
+      "matchPackageNames": ["@mariozechner/pi-ai", "@mariozechner/pi-coding-agent"],
+      "groupName": "pi sdk (manual review)",
+      "labels": ["dependencies", "supply-chain", "pi-sdk"],
+      "rangeStrategy": "pin",
+      "automerge": false,
+      "dependencyDashboardApproval": true
     }
   ]
 }

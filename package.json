@@ -21,7 +21,7 @@
     "@commitlint/cli": "^20.5.2",
     "@commitlint/config-conventional": "^20.5.0",
     "@eslint/js": "^10.0.1",
-    "@mariozechner/pi-ai": "^0.70.6",
+    "@mariozechner/pi-ai": "0.70.6",
     "@readme/openapi-parser": "^6.0.1",
     "@redocly/openapi-core": "^2.30.2",
     "@types/bun": "latest",
@@ -51,6 +51,7 @@
     "dev": "turbo dev",
     "build": "turbo build",
     "test": "bun test",
+    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=coverage",
     "test:tier0": "TEST_TIER=0 bun test",
     "test:unit": "bun test apps/api/test/unit/",
     "test:watch": "bun test --watch apps/api/test/unit/",
@@ -116,7 +117,7 @@
     "*.{ts,tsx,json,md,yml,yaml}": "prettier --write"
   },
   "dependencies": {
-    "@afps-spec/schema": "^0.6.0",
+    "@afps-spec/schema": "^0.6.1",
     "@appstrate/connect": "workspace:*",
     "@appstrate/core": "workspace:*",
     "@appstrate/mcp-transport": "workspace:*",
@@ -127,6 +128,7 @@
     "zod": "4.4.3"
   },
   "patchedDependencies": {
-    "@redocly/openapi-core@2.25.2": "patches/@redocly%2Fopenapi-core@2.25.2.patch"
+    "@redocly/openapi-core@2.25.2": "patches/@redocly%2Fopenapi-core@2.25.2.patch",
+    "@better-auth/oauth-provider@1.7.0-beta.4": "patches/@better-auth%2Foauth-provider@1.7.0-beta.4.patch"
   }
 }
