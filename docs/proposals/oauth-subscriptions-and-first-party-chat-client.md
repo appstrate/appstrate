@@ -86,9 +86,19 @@ ensureFirstPartyClients()  // idempotent seed of each, on boot
 - Tokens stay **role-filtered at issuance** (`auth/claims.ts`), so the broad
   client scope never escalates a member.
 - **Verified live**: `/authorize?client_id=appstrate-chat` with the inference
-  scopes is accepted (302 → login), and the issued token works on `/api/mcp`,
-  `/api/llm-proxy` and `/api/models` (RFC 8707 `resource=…/api/mcp`, which is in
-  your `validAudiences`).
+  scopes is accepted (302 → login).
+- **Audience confinement → two tokens per connection.** Your
+  `protected-resources.ts` confines a token bound to `/api/mcp` _to_ `/api/mcp`
+  (inbound requires the resource in `aud`; outbound rejects any token bound to a
+  protected resource). So a single token can't serve **both** MCP and inference
+  — they want mutually-exclusive audiences. The chat therefore requests **both**
+  resources at `/authorize` (`resource=<root>` **and** `resource=<root>/api/mcp`
+  — your AS accepts multiple, 302 verified) and mints **two** audience-bound
+  tokens from the one grant: a `<root>`-audience token for `/api/llm-proxy` +
+  `/api/models`, and a `/api/mcp`-audience token for the MCP client. Both come
+  from one consent (code → inference token + refresh; refresh → mcp token).
+  Confirmed against the code: only `/api/mcp` is a registered protected resource
+  (`mcp/router.ts`), so the `<root>`-audience token passes the outbound check.
 
 **Faithful?** Yes — same trust model as the CLI; just declarative so the future
 `appstrate-workspace` is one entry, not a new file.
@@ -99,6 +109,14 @@ ensureFirstPartyClients()  // idempotent seed of each, on boot
   be operator-configured? It's seeded only when its redirect URIs are set.
 - Should it be added to the orphan-whitelist in `instance-client-sync.ts` (the
   CLI is)? — flagged as a likely follow-up, not done here.
+- **Two-token dance vs a broad first-party audience.** A first-party client that
+  needs both MCP and inference must currently hold two audience-bound tokens
+  (above). That's faithful to your confinement model and lives entirely
+  chat-side (no OSS change). If you'd rather a _trusted_ first-party client get a
+  single token valid across the instance (e.g. an opt-in `audience: instance`
+  for seeded clients, MCP accepting a root-audience token), that's a small OSS
+  affordance that would collapse the dance to one token. Flagged for your call —
+  not done, since it loosens the confinement you deliberately set.
 
 ## Security
 
