@@ -7,7 +7,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Execute an agent",
       description:
-        "Start an agent run (fire-and-forget). Returns the run ID. Rate-limited to 20/min. Supports JSON body or multipart/form-data with file uploads.",
+        "Start an agent run (fire-and-forget). Returns the run ID plus the resolved `model_label` / `model_source`. Rate-limited to 20/min. Supports JSON body or multipart/form-data with file uploads. The effective model is resolved at run creation with precedence: request `modelId` > agent model setting > org default model > system default. Without an explicit `modelId`, a change to the org default model between triggers applies to the next run — send `modelId` to pin a specific model per run.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -35,7 +35,7 @@ export const runsPaths = {
                 modelId: {
                   type: "string",
                   description:
-                    "Model ID override for this run. Takes priority over agent and org defaults.",
+                    "Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `modelId` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses.",
                 },
                 proxyId: {
                   type: "string",
@@ -87,10 +87,22 @@ export const runsPaths = {
                 type: "object",
                 properties: {
                   runId: { type: "string" },
+                  model_label: {
+                    type: ["string", "null"],
+                    description:
+                      "Label of the model resolved for this run — snapshot at trigger time, same value as the run object's `model_label`. Lets callers detect org-default drift immediately.",
+                  },
+                  model_source: {
+                    type: ["string", "null"],
+                    description:
+                      "Model source: 'system' (platform-provided) or 'org' (organization-configured). Resolved at run creation.",
+                  },
                 },
               },
               example: {
                 runId: "run_cm1abc123def456",
+                model_label: "Claude Sonnet 4",
+                model_source: "org",
               },
             },
           },

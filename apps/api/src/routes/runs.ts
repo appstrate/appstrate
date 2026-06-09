@@ -142,7 +142,7 @@ export function createRunsRouter() {
         const mergedConfig = mergeAndValidateConfigOverride(effectiveAgent, config, configOverride);
 
         const runner = await resolveRunnerContext(c);
-        await prepareAndExecuteRun({
+        const { modelLabel, modelSource } = await prepareAndExecuteRun({
           runId,
           agent: effectiveAgent,
           orgId,
@@ -164,7 +164,10 @@ export function createRunsRouter() {
           runnerKind: runner.kind,
         });
 
-        return c.json({ runId });
+        // Echo the resolved model so callers can detect org-default drift at
+        // trigger time without polling the run object (#635). Snapshot of the
+        // same values persisted on `runs.model_label` / `runs.model_source`.
+        return c.json({ runId, model_label: modelLabel, model_source: modelSource });
       } catch (err) {
         // Roll back any input documents streamed into the run workspace before
         // the run launched (size/MIME mismatch, failed preflight, …). Once

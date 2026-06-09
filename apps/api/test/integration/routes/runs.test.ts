@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
@@ -19,6 +19,16 @@ import {
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
 import { createOrgModel, setDefaultModel } from "../../../src/services/org-models.ts";
+import { waitForInFlight } from "../../../src/services/run-tracker.ts";
+import {
+  _setOrchestratorForTesting,
+  type ContainerOrchestrator,
+  type WorkloadHandle,
+  type WorkloadSpec,
+  type IsolationBoundary,
+  type CleanupReport,
+  type StopResult,
+} from "../../../src/services/orchestrator/index.ts";
 
 const app = getTestApp();
 
@@ -317,6 +327,168 @@ describe("Runs API", () => {
       // No run row should have been created — the guard fires before insert.
       const rows = await db.select().from(runs).where(eq(runs.packageId, "@runorg/nokey-agent"));
       expect(rows).toHaveLength(0);
+    });
+  });
+
+  // ─── POST /api/agents/:scope/:name/run — resolved model echo ──
+  //
+  // #635: the trigger response echoes the resolved `model_label` +
+  // `model_source` (snapshot of the values persisted on the run row) so
+  // callers can detect org-default drift immediately — the org default is
+  // resolved at run creation, not ahead of time, so a default changed
+  // between triggers silently applies to the next run unless the caller
+  // pins a model via the `modelId` body field.
+  //
+  // These are the only tests in this file that take the trigger to a 200 —
+  // the fire-and-forget background execution runs against a fake
+  // orchestrator (no Docker) so it settles in-process within the test,
+  // instead of a slow real image pull racing the next test's truncateAll.
+  describe("POST /api/agents/:scope/:name/run — resolved model echo", () => {
+    /** Minimal no-op orchestrator: workloads "run" instantly and exit 0. */
+    function createFakeOrchestrator(): ContainerOrchestrator {
+      const handle = (runId: string, role: string): WorkloadHandle => ({
+        id: `${role}_${runId}`,
+        runId,
+        role,
+      });
+      return {
+        async initialize() {},
+        async shutdown() {},
+        async cleanupOrphans(): Promise<CleanupReport> {
+          return { workloads: 0, isolationBoundaries: 0, workspaces: 0 };
+        },
+        async ensureImages() {},
+        async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
+          return {
+            id: `net_${runId}`,
+            name: `appstrate-exec-${runId}`,
+            workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
+          };
+        },
+        async removeIsolationBoundary() {},
+        async createSidecar(runId: string): Promise<WorkloadHandle> {
+          return handle(runId, "sidecar");
+        },
+        async createWorkload(spec: WorkloadSpec): Promise<WorkloadHandle> {
+          return handle(spec.runId, spec.role);
+        },
+        async startWorkload() {},
+        async stopWorkload() {},
+        async removeWorkload() {},
+        async waitForExit(): Promise<number> {
+          return 0;
+        },
+        async *streamLogs(): AsyncGenerator<string> {},
+        async stopByRunId(): Promise<StopResult> {
+          return "stopped";
+        },
+        async resolvePlatformApiUrl(): Promise<string> {
+          return "http://platform:3000";
+        },
+      };
+    }
+
+    beforeAll(() => {
+      _setOrchestratorForTesting(createFakeOrchestrator());
+    });
+
+    afterAll(() => {
+      _setOrchestratorForTesting(null);
+    });
+    async function seedRunnableAgent() {
+      await seedAgent({
+        id: "@runorg/echo-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@runorg/echo-agent",
+          version: "0.1.0",
+          type: "agent",
+          description: "Agent used to exercise the resolved-model echo",
+        },
+        draftContent: "Do the thing.",
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@runorg/echo-agent",
+      );
+    }
+
+    async function seedOrgModel(label: string): Promise<string> {
+      const credentialId = await createApiKeyCredential({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        label: `${label} credential`,
+        providerId: "openai",
+        apiKey: "sk-test-not-a-real-key",
+      });
+      return createOrgModel(ctx.orgId, label, "gpt-5.5", ctx.user.id, credentialId);
+    }
+
+    /**
+     * The trigger is fire-and-forget: the fake-orchestrator workload exits 0
+     * immediately and the platform synthesises a success terminal. Wait for
+     * the in-flight tracker to drain, then give the post-untrack async tail
+     * (`void emitEvent(...)`, event-buffer flush) a beat to finish, so the
+     * background DB writes are contained within THIS test instead of racing
+     * the next test's truncateAll.
+     */
+    async function waitForBackgroundSettled(): Promise<void> {
+      await waitForInFlight(10_000);
+      await Bun.sleep(300);
+    }
+
+    it("echoes the org default's model_label and model_source 'org'", async () => {
+      await seedRunnableAgent();
+      const modelDbId = await seedOrgModel("Echo Default GPT");
+      await setDefaultModel(ctx.orgId, modelDbId);
+
+      const res = await app.request("/api/agents/@runorg/echo-agent/run", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: {} }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        runId?: string;
+        model_label?: string | null;
+        model_source?: string | null;
+      };
+      expect(body.runId).toStartWith("run_");
+      expect(body.model_label).toBe("Echo Default GPT");
+      expect(body.model_source).toBe("org");
+
+      // The echo must match the persisted run-row snapshot — same source of truth.
+      const [row] = await db.select().from(runs).where(eq(runs.id, body.runId!));
+      expect(row!.modelLabel).toBe("Echo Default GPT");
+      expect(row!.modelSource).toBe("org");
+
+      await waitForBackgroundSettled();
+    });
+
+    it("echoes the pinned model when the body carries an explicit modelId", async () => {
+      await seedRunnableAgent();
+      const defaultId = await seedOrgModel("Echo Default GPT");
+      await setDefaultModel(ctx.orgId, defaultId);
+      const pinnedId = await seedOrgModel("Echo Pinned GPT");
+
+      const res = await app.request("/api/agents/@runorg/echo-agent/run", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: {}, modelId: pinnedId }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        runId?: string;
+        model_label?: string | null;
+        model_source?: string | null;
+      };
+      expect(body.model_label).toBe("Echo Pinned GPT");
+      expect(body.model_source).toBe("org");
+
+      await waitForBackgroundSettled();
     });
   });
 
