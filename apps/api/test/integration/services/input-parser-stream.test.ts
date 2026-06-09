@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import type { Context } from "hono";
 import { db } from "@appstrate/db/client";
-import { uploads } from "@appstrate/db/schema";
+import { uploads, runs } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
@@ -56,13 +56,37 @@ async function seedUpload(
   });
 }
 
-/** Minimal Hono context stub — parseRequestInput only reads the JSON body and orgId/applicationId. */
-function fakeCtx(body: unknown, ctx: { orgId: string; applicationId: string }): Context {
+/** Minimal Hono context stub — parseRequestInput reads the JSON body, orgId/applicationId, and (for rerun_from) endUser. */
+function fakeCtx(
+  body: unknown,
+  ctx: { orgId: string; applicationId: string; endUser?: { id: string } },
+): Context {
   return {
     req: { json: async () => body },
     get: (key: string) =>
-      key === "orgId" ? ctx.orgId : key === "applicationId" ? ctx.applicationId : undefined,
+      key === "orgId"
+        ? ctx.orgId
+        : key === "applicationId"
+          ? ctx.applicationId
+          : key === "endUser"
+            ? ctx.endUser
+            : undefined,
   } as unknown as Context;
+}
+
+/** Insert a minimal prior-run row the rerun_from path can resolve. */
+async function seedRun(
+  scope: { orgId: string; applicationId: string },
+  opts: { id: string; input: Record<string, unknown> | null },
+): Promise<void> {
+  await db.insert(runs).values({
+    id: opts.id,
+    orgId: scope.orgId,
+    applicationId: scope.applicationId,
+    packageId: null,
+    status: "cancelled",
+    input: opts.input,
+  });
 }
 
 describe("parseRequestInput — streamed document consume", () => {
@@ -104,10 +128,11 @@ describe("parseRequestInput — streamed document consume", () => {
     const manifest = await downloadRunDocumentsManifest(runId);
     expect(manifest?.documents).toEqual([{ name: "file.pdf", size: PDF_BYTES.length }]);
 
-    // Source upload consumed + its storage object dropped.
+    // Source upload stamped consumed; its storage object is RETAINED so the
+    // same URI stays re-consumable for the post-consume reuse window (#634).
     const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
     expect(row?.consumedAt).not.toBeNull();
-    expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(false);
+    expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(true);
   });
 
   it("rolls the workspace back + releases the claim on a size mismatch", async () => {
@@ -178,5 +203,167 @@ describe("parseRequestInput — streamed document consume", () => {
     expect((thrown as ApiError).status).toBe(400);
     expect(await downloadRunDocumentStream(runId, "file.pdf")).toBeNull();
     expect(await downloadRunDocumentsManifest(runId)).toBeNull();
+  });
+});
+
+describe("parseRequestInput — rerun_from (#634)", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("replays a cancelled run's input — documents re-consumed, no re-upload", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-rerun-ok" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const id = "upl_rerun_ok_1";
+    await seedUpload(scope, { id, bytes: PDF_BYTES });
+
+    // First trigger consumes the upload into run 1's workspace…
+    const priorRunId = `run_${crypto.randomUUID()}`;
+    const input = { doc: `upload://${id}` };
+    await parseRequestInput(fakeCtx({ input }, scope), priorRunId, fileSchema);
+    // …and the run row persists the raw input (URI included). The run is then
+    // cancelled — the upload stays re-consumable for the reuse window.
+    await seedRun(scope, { id: priorRunId, input });
+
+    const newRunId = `run_${crypto.randomUUID()}`;
+    const result = await parseRequestInput(
+      fakeCtx({ rerun_from: priorRunId }, scope),
+      newRunId,
+      fileSchema,
+    );
+
+    expect(result.input).toEqual(input);
+    expect(result.uploadedFiles).toHaveLength(1);
+    expect(result.uploadedFiles![0]).toMatchObject({
+      fieldName: "doc",
+      name: "file.pdf",
+      size: PDF_BYTES.length,
+    });
+    // The replayed document landed in the NEW run's workspace.
+    const docStream = await downloadRunDocumentStream(newRunId, "file.pdf");
+    expect(docStream).not.toBeNull();
+    expect(new Uint8Array(await new Response(docStream!).arrayBuffer())).toEqual(
+      new Uint8Array(PDF_BYTES),
+    );
+  });
+
+  it("rejects when both input and rerun_from are sent", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-rerun-both" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    await expect(
+      parseRequestInput(
+        fakeCtx({ input: {}, rerun_from: "run_x" }, scope),
+        `run_${crypto.randomUUID()}`,
+        fileSchema,
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("rejects a non-string rerun_from", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-rerun-shape" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    await expect(
+      parseRequestInput(
+        fakeCtx({ rerun_from: 42 }, scope),
+        `run_${crypto.randomUUID()}`,
+        fileSchema,
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("hides another tenant's run behind not-found (RBAC)", async () => {
+    const owner = await createTestContext({ orgSlug: "org-rerun-owner" });
+    const other = await createTestContext({ orgSlug: "org-rerun-other" });
+    const priorRunId = `run_${crypto.randomUUID()}`;
+    await seedRun(
+      { orgId: owner.orgId, applicationId: owner.defaultAppId },
+      { id: priorRunId, input: { doc: "upload://upl_whatever1" } },
+    );
+
+    await expect(
+      parseRequestInput(
+        fakeCtx(
+          { rerun_from: priorRunId },
+          { orgId: other.orgId, applicationId: other.defaultAppId },
+        ),
+        `run_${crypto.randomUUID()}`,
+        fileSchema,
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("rejects replaying a different agent's run with 409 rerun_agent_mismatch", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-rerun-agent" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const priorRunId = `run_${crypto.randomUUID()}`;
+    // seedRun stamps packageId NULL — any concrete agent id mismatches.
+    await seedRun(scope, { id: priorRunId, input: {} });
+
+    await expect(
+      parseRequestInput(
+        fakeCtx({ rerun_from: priorRunId }, scope),
+        `run_${crypto.randomUUID()}`,
+        fileSchema,
+        {
+          agentPackageId: "@acme/agent",
+        },
+      ),
+    ).rejects.toMatchObject({ status: 409, code: "rerun_agent_mismatch" });
+  });
+
+  it("end-users cannot replay runs that are not their own", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-rerun-eu" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const priorRunId = `run_${crypto.randomUUID()}`;
+    // Prior run has no end-user → an end-user caller must not see it.
+    await seedRun(scope, { id: priorRunId, input: {} });
+
+    await expect(
+      parseRequestInput(
+        fakeCtx({ rerun_from: priorRunId }, { ...scope, endUser: { id: "eu_someone" } }),
+        `run_${crypto.randomUUID()}`,
+        fileSchema,
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("reports 410 when the replayed upload's reuse window has elapsed", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-rerun-gone" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const id = "upl_rerun_gone_1";
+    await seedUpload(scope, { id, bytes: PDF_BYTES });
+    const input = { doc: `upload://${id}` };
+    const priorRunId = `run_${crypto.randomUUID()}`;
+    await parseRequestInput(fakeCtx({ input }, scope), priorRunId, fileSchema);
+    await seedRun(scope, { id: priorRunId, input });
+    // Push the first consume outside the 24h reuse window.
+    await db
+      .update(uploads)
+      .set({ consumedAt: new Date(Date.now() - 25 * 60 * 60 * 1000) })
+      .where(eq(uploads.id, id));
+
+    await expect(
+      parseRequestInput(
+        fakeCtx({ rerun_from: priorRunId }, scope),
+        `run_${crypto.randomUUID()}`,
+        fileSchema,
+      ),
+    ).rejects.toMatchObject({ status: 410 });
+  });
+
+  it("replays a run with null input as an empty input", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-rerun-null" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const priorRunId = `run_${crypto.randomUUID()}`;
+    await seedRun(scope, { id: priorRunId, input: null });
+
+    const result = await parseRequestInput(
+      fakeCtx({ rerun_from: priorRunId }, scope),
+      `run_${crypto.randomUUID()}`,
+      // No file fields required — empty input passes an empty schema.
+      { type: "object", properties: {} },
+    );
+    expect(result.input).toEqual({});
+    expect(result.uploadedFiles).toBeUndefined();
   });
 });

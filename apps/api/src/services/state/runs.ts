@@ -707,6 +707,9 @@ export async function getRun(scope: AppScope, id: string) {
       orgId: runs.orgId,
       packageId: runs.packageId,
       applicationId: runs.applicationId,
+      // Raw input snapshot (file fields keep their `upload://` URIs) — read
+      // by the `rerun_from` path to replay the same input on a new run.
+      input: runs.input,
     })
     .from(runs)
     .where(and(...conditions))

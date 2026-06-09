@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration tests for `consumeUploadStream` — exercise the atomic claim that
- * prevents two concurrent runs from consuming the same upload:// URI, plus
- * cross-tenant isolation, the streamed size/MIME validation, and the
- * expired/missing-binary paths.
+ * Integration tests for `consumeUploadStream` — exercise the multi-use consume
+ * semantics (first-consume claim + post-consume reuse window), cross-tenant
+ * isolation, the streamed size/MIME validation, and the expired/missing-binary
+ * paths.
  *
  * Uses a real Postgres + filesystem storage; no routes exercised. The sink
  * mirrors production — `fileTypeStream` sniffs the head, a manual drain counts
@@ -87,7 +87,7 @@ describe("consumeUploadStream", () => {
     await truncateAll();
   });
 
-  it("concurrent consume of the same upload: exactly one wins", async () => {
+  it("concurrent consume of the same upload: both succeed (multi-use)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-race" });
     const id = "upl_race_1";
     await seedUpload(
@@ -99,23 +99,70 @@ describe("consumeUploadStream", () => {
       consumeUploadStream(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }, drainSink),
       consumeUploadStream(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }, drainSink),
     ]);
-    const fulfilled = settled.filter((s) => s.status === "fulfilled");
-    const rejected = settled.filter((s) => s.status === "rejected");
-    expect(fulfilled).toHaveLength(1);
-    expect(rejected).toHaveLength(1);
-    const err = (rejected[0] as PromiseRejectedResult).reason;
-    expect(err).toBeInstanceOf(ApiError);
-    expect((err as ApiError).status).toBe(409);
+    // Every consumer streams the same immutable object — no loser.
+    expect(settled.filter((s) => s.status === "fulfilled")).toHaveLength(2);
   });
 
-  it("a second sequential consume fails with 409 conflict", async () => {
+  it("a second sequential consume succeeds within the reuse window (#634)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-seq" });
     const id = "upl_seq_1";
     await seedUpload(
       { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       { id, bytes: PDF_BYTES },
     );
+    const first = await consumeUploadStream(
+      id,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      drainSink,
+    );
+    const [afterFirst] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
+
+    const second = await consumeUploadStream(
+      id,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      drainSink,
+    );
+    expect(second).toEqual(first);
+
+    // consumedAt anchors the reuse window at the FIRST consume — never bumped.
+    const [afterSecond] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
+    expect(afterSecond?.consumedAt).toEqual(afterFirst!.consumedAt!);
+  });
+
+  it("re-consume works even after the PUT-window expiry (cancel → re-run)", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-reuse-expired" });
+    const id = "upl_reuse_expired_1";
+    await seedUpload(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { id, bytes: PDF_BYTES },
+    );
     await consumeUploadStream(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }, drainSink);
+    // Simulate the re-trigger arriving after the 15-min PUT window closed.
+    await db
+      .update(uploads)
+      .set({ expiresAt: new Date(Date.now() - 60_000) })
+      .where(eq(uploads.id, id));
+
+    const meta = await consumeUploadStream(
+      id,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      drainSink,
+    );
+    expect(meta.size).toBe(PDF_BYTES.length);
+  });
+
+  it("re-consume after the reuse window has elapsed reports 410 gone", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-reuse-gone" });
+    const id = "upl_reuse_gone_1";
+    await seedUpload(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { id, bytes: PDF_BYTES },
+    );
+    // Consumed 25h ago — outside the 24h default reuse window.
+    await db
+      .update(uploads)
+      .set({ consumedAt: new Date(Date.now() - 25 * 60 * 60 * 1000) })
+      .where(eq(uploads.id, id));
     try {
       await consumeUploadStream(
         id,
@@ -125,7 +172,33 @@ describe("consumeUploadStream", () => {
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
-      expect((e as ApiError).status).toBe(409);
+      expect((e as ApiError).status).toBe(410);
+    }
+  });
+
+  it("re-consume of another tenant's consumed upload reports not-found", async () => {
+    const owner = await createTestContext({ orgSlug: "org-reuse-owner" });
+    const other = await createTestContext({ orgSlug: "org-reuse-other" });
+    const id = "upl_reuse_cross_1";
+    await seedUpload(
+      { orgId: owner.orgId, applicationId: owner.defaultAppId },
+      { id, bytes: PDF_BYTES },
+    );
+    await consumeUploadStream(
+      id,
+      { orgId: owner.orgId, applicationId: owner.defaultAppId },
+      drainSink,
+    );
+    try {
+      await consumeUploadStream(
+        id,
+        { orgId: other.orgId, applicationId: other.defaultAppId },
+        drainSink,
+      );
+      throw new Error("expected to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).status).toBe(404);
     }
   });
 
@@ -276,7 +349,7 @@ describe("consumeUploadStream", () => {
     expect(row?.consumedAt).toBeNull();
   });
 
-  it("deletes the storage object after a successful consume", async () => {
+  it("retains the storage object after a successful consume (reuse source)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-cleanup-ok" });
     const id = "upl_cleanup_ok_1";
     const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
@@ -288,9 +361,9 @@ describe("consumeUploadStream", () => {
 
     await consumeUploadStream(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }, drainSink);
 
-    // Storage copy is dead weight after consume — must be gone.
-    expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(false);
-    // DB row is kept (with consumedAt set) until the retention sweep runs.
+    // Object + row survive the consume — they back the post-consume reuse
+    // window and are dropped by the GC sweep once it elapses.
+    expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(true);
     const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
     expect(row?.consumedAt).not.toBeNull();
   });
@@ -324,6 +397,7 @@ describe("cleanupExpiredUploads", () => {
   it("sweeps consumed rows older than the 24h retention window", async () => {
     const ctx = await createTestContext({ orgSlug: "org-gc-consumed" });
     const id = "upl_gc_old_1";
+    const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
     await seedUpload(
       { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       { id, bytes: PDF_BYTES },
@@ -337,6 +411,8 @@ describe("cleanupExpiredUploads", () => {
 
     const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
     expect(row).toBeUndefined();
+    // The sweep is the deleter of record for the retained reuse bytes.
+    expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(false);
   });
 
   it("keeps consumed rows still within the retention window", async () => {

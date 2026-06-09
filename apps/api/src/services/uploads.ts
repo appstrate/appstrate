@@ -7,13 +7,21 @@
  *   PUT  <signed url>       → (S3 direct, or /api/uploads/_content for FS)
  *   POST /api/agents/:id/run { input: { file: "upload://upl_xxx" } }
  *                            → consumeUploadStream() streams the bytes to the
- *                              caller's sink + marks consumed (no buffering)
+ *                              caller's sink + stamps consumedAt (no buffering)
+ *
+ * Consumed uploads are NOT single-use: the bytes stay retained — and the same
+ * `upload://` URI stays re-consumable — for `UPLOAD_RETENTION_HOURS` (default
+ * 24 h) after the FIRST consume. This is what lets a run be re-triggered with
+ * the same input (cancel → change model → `rerun_from`) without a
+ * byte-identical re-upload. The GC sweep drops the row + storage object once
+ * the window elapses.
  *
  * Security layers:
  *  - Auth + app context on POST /api/uploads (middleware)
  *  - Pre-signed URL or HMAC token on PUT
- *  - Magic-byte MIME sniffing on consumption (rejects mismatch)
- *  - Expiry window (default 15 min) + GC worker removes orphans
+ *  - Magic-byte MIME sniffing on consumption (rejects mismatch, every consume)
+ *  - Expiry window (default 15 min) for the PUT, post-consume reuse window
+ *    for re-consume + GC worker removes both kinds of leftovers
  */
 
 import { and, eq, lt, isNull, isNotNull, inArray, or, sql } from "drizzle-orm";
@@ -27,9 +35,10 @@ import {
 } from "@appstrate/db/storage";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { StorageAlreadyExistsError } from "@appstrate/core/storage";
+import { getEnv } from "@appstrate/env";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
-import { invalidRequest, notFound, conflict, gone, type ApiError } from "../lib/errors.ts";
+import { invalidRequest, notFound, conflict, gone } from "../lib/errors.ts";
 
 /** Strip charset / boundary / other parameters from a MIME string and lowercase it. */
 function normalizeMime(mime: string): string {
@@ -43,6 +52,21 @@ const DEFAULT_MAX_SIZE = 100 * 1024 * 1024; // 100 MB absolute ceiling
 
 /** `upload://upl_xxx` — the URI form stored inside agent input JSON. */
 export const UPLOAD_URI_PREFIX = "upload://";
+
+/**
+ * Post-consume reuse window in milliseconds. Within `consumedAt + this`, a
+ * consumed upload's bytes are still retained and the URI re-consumable; past
+ * it the GC sweep drops the row + object. Read lazily so tests / operators
+ * can tune `UPLOAD_RETENTION_HOURS` without re-importing the module.
+ */
+function consumedRetentionMs(): number {
+  return getEnv().UPLOAD_RETENTION_HOURS * 60 * 60 * 1000;
+}
+
+/** Is a consumed upload still within its post-consume reuse window? */
+function isWithinReuseWindow(consumedAt: Date): boolean {
+  return consumedAt.getTime() + consumedRetentionMs() > Date.now();
+}
 
 /** Returned to the client from POST /api/uploads. */
 export interface CreateUploadResponse {
@@ -260,7 +284,14 @@ export async function peekUploads(
     if (!row || row.orgId !== ctx.orgId || row.applicationId !== ctx.applicationId) {
       throw notFound(`Upload '${id}' not found`);
     }
-    if (row.expiresAt.getTime() < Date.now()) {
+    // Two validity regimes: an unconsumed upload lives until its PUT-window
+    // expiry; a consumed one stays addressable for the post-consume reuse
+    // window (its `expiresAt` has usually passed by re-trigger time).
+    if (row.consumedAt) {
+      if (!isWithinReuseWindow(row.consumedAt)) {
+        throw gone("upload_expired", `Upload '${id}' reuse window has elapsed`);
+      }
+    } else if (row.expiresAt.getTime() < Date.now()) {
       throw gone("upload_expired", `Upload '${id}' has expired`);
     }
     result.set(id, { id, name: row.name, mime: row.mime, size: row.size });
@@ -269,61 +300,44 @@ export async function peekUploads(
 }
 
 /**
- * Diagnose why an atomic claim returned no row, on the cold (failure) path only,
- * so the caller still gets a precise error instead of a generic conflict. Reads
- * the row by id and maps: missing / cross-tenant → not-found, past expiry →
- * gone, otherwise (already consumed, or re-claimable after a race) → conflict.
- * Returns the error to throw rather than throwing, so the caller's control flow
- * narrows `row` to defined.
- */
-async function unclaimableUploadError(
-  uploadId: string,
-  ctx: { orgId: string; applicationId: string },
-): Promise<ApiError> {
-  const [row] = await db.select().from(uploads).where(eq(uploads.id, uploadId)).limit(1);
-  // Hide cross-tenant existence behind the same not-found as a missing row.
-  if (!row || row.orgId !== ctx.orgId || row.applicationId !== ctx.applicationId) {
-    return notFound(`Upload '${uploadId}' not found`);
-  }
-  if (row.expiresAt.getTime() < Date.now()) {
-    return gone("upload_expired", `Upload '${uploadId}' has expired`);
-  }
-  return conflict("upload_consumed", `Upload '${uploadId}' has already been consumed`);
-}
-
-/**
- * Claim an upload atomically, then STREAM the payload through `sink` (which pipes
- * it to its destination) while validating size + magic-byte MIME on the fly —
- * the platform never buffers the whole upload in memory.
+ * Stream an upload's payload through `sink` (which pipes it to its destination)
+ * while validating size + magic-byte MIME on the fly — the platform never
+ * buffers the whole upload in memory.
  *
- * The claim is a single `UPDATE … WHERE consumedAt IS NULL … RETURNING` that both
- * prevents the TOCTOU double-consume (two concurrent runs posting the same URI
- * see exactly one winning row) AND returns the row data, so the happy path needs
- * no separate SELECT. A returned row is, by construction, owned, fresh, and
- * freshly-claimed; an empty result is diagnosed on the cold path for a precise
- * error.
+ * Uploads are multi-use within a retention window. The FIRST consume claims the
+ * row atomically (`UPDATE … WHERE consumedAt IS NULL … RETURNING` — stamps
+ * `consumedAt` and returns the row data in one statement, no pre-check SELECT).
+ * Subsequent consumes within `UPLOAD_RETENTION_HOURS` of that first claim
+ * re-read the retained object — this is what lets a re-triggered run (cancel →
+ * change model → re-run, or `rerun_from`) reuse the same input without a
+ * byte-identical re-upload. Concurrent consumes are safe: every consumer
+ * streams the same immutable object (the FS sink writes with O_EXCL, so the
+ * bytes cannot be swapped after the first PUT) and validates independently.
  *
  * Size + MIME are validated *after* the stream drains (size is only known at
- * end; MIME is sniffed from the head by the sink). On mismatch the claim is
- * released and the source object dropped so the client can re-PUT. The sink's
- * partially-written destination is NOT cleaned here — the caller owns the
- * destination namespace (e.g. the run workspace) and rolls it back en bloc.
+ * end; MIME is sniffed from the head by the sink). On a first-consume mismatch
+ * the claim is released and the source object dropped so the client can re-PUT;
+ * a failed RE-consume leaves the row + object untouched (other consumers may
+ * be streaming it). The sink's partially-written destination is NOT cleaned
+ * here — the caller owns the destination namespace (e.g. the run workspace)
+ * and rolls it back en bloc.
  *
- * Throws `invalidRequest` / `notFound` / `conflict` / `gone` with stable
- * codes — callers map them back to RFC 9457 problem responses.
+ * Throws `invalidRequest` / `notFound` / `gone` with stable codes — callers
+ * map them back to RFC 9457 problem responses.
  */
 export async function consumeUploadStream(
   uploadId: string,
   ctx: { orgId: string; applicationId: string },
   sink: UploadStreamSink,
 ): Promise<UploadMeta> {
-  // Atomic claim that also reads the row: only the caller whose UPDATE flips
-  // NULL → claimedAt proceeds, and the same statement hands back the row data
-  // (storageKey, size, mime, name) needed below — no separate pre-check SELECT
-  // on the happy path. The WHERE guards (tenant + not-consumed + not-expired)
-  // make a returned row owned, fresh, and freshly-claimed by construction.
+  // Atomic first-consume claim that also reads the row: the caller whose
+  // UPDATE flips NULL → claimedAt owns the destructive failure path below,
+  // and the same statement hands back the row data (storageKey, size, mime,
+  // name) — no separate pre-check SELECT on the happy path. The WHERE guards
+  // (tenant + not-consumed + not-expired) make a returned row owned, fresh,
+  // and freshly-claimed by construction.
   const claimedAt = new Date();
-  const [row] = await db
+  const [claimed] = await db
     .update(uploads)
     .set({ consumedAt: claimedAt })
     .where(
@@ -336,17 +350,35 @@ export async function consumeUploadStream(
       ),
     )
     .returning();
-  // Nothing claimed → diagnose why on the cold path (not-found vs cross-tenant
-  // vs expired vs already-consumed) so the caller still gets a precise error.
+  const firstConsume = claimed !== undefined;
+  let row = claimed;
+  // Nothing claimed → either the upload was already consumed (re-consumable
+  // within the reuse window) or it is missing / cross-tenant / expired. The
+  // cold path diagnoses which, so the caller still gets a precise error.
   if (!row) {
-    throw await unclaimableUploadError(uploadId, ctx);
+    const [existing] = await db.select().from(uploads).where(eq(uploads.id, uploadId)).limit(1);
+    // Hide cross-tenant existence behind the same not-found as a missing row.
+    if (!existing || existing.orgId !== ctx.orgId || existing.applicationId !== ctx.applicationId) {
+      throw notFound(`Upload '${uploadId}' not found`);
+    }
+    if (!existing.consumedAt) {
+      // Never consumed and the claim's expiry guard rejected it → PUT window
+      // closed before any run used it.
+      throw gone("upload_expired", `Upload '${uploadId}' has expired`);
+    }
+    if (!isWithinReuseWindow(existing.consumedAt)) {
+      throw gone("upload_expired", `Upload '${uploadId}' reuse window has elapsed`);
+    }
+    row = existing;
   }
 
-  // Past this point the claim has succeeded. If anything downstream throws
-  // (storage fetch, size/mime mismatch, …) we must release the claim AND
-  // drop the stored object so a retry can re-PUT clean bytes. Without the
-  // storage delete, the FS sink would 409 on re-upload (exclusive write),
-  // leaving the caller stuck until GC.
+  // Past this point the consume may proceed. On a FIRST consume, if anything
+  // downstream throws (storage fetch, size/mime mismatch, …) we must release
+  // the claim AND drop the stored object so a retry can re-PUT clean bytes —
+  // without the storage delete, the FS sink would 409 on re-upload (exclusive
+  // write), leaving the caller stuck until GC. A failed RE-consume is
+  // non-destructive: the object already passed validation once and other
+  // consumers may rely on it.
   const [bucket, ...rest] = row.storageKey.split("/");
   const path = rest.join("/");
   try {
@@ -402,17 +434,9 @@ export async function consumeUploadStream(
       }
     }
 
-    // Bytes have been streamed to the sink's destination. The source copy is
-    // dead weight from here on — delete it best-effort so we don't leak S3/FS
-    // objects for every run. The GC's consumed-retention sweep is the safety
-    // net when this delete fails.
-    await storageDelete(bucket!, path).catch((delErr) => {
-      logger.warn("failed to delete upload storage after consume", {
-        uploadId,
-        error: getErrorMessage(delErr),
-      });
-    });
-
+    // Bytes have been streamed to the sink's destination. The source object is
+    // deliberately RETAINED — it stays re-consumable until the post-consume
+    // reuse window elapses, at which point the GC sweep drops the row + object.
     return {
       id: uploadId,
       name: row.name,
@@ -420,6 +444,14 @@ export async function consumeUploadStream(
       size: bytes,
     };
   } catch (err) {
+    // A failed RE-consume must not destroy state that other consumers (and
+    // future re-runs) rely on — the object already passed validation on its
+    // first consume; this failure is local (transient storage error, or a
+    // first consumer racing its own failure rollback). Propagate only.
+    if (!firstConsume) throw err;
+
+    // First-consume failure: roll back so the client can re-PUT clean bytes.
+    //
     // Order matters: delete the stored bytes FIRST, then release the claim.
     // If we released first, a concurrent consumer could re-claim the row in
     // the window before `storageDelete` completed and race our delete —
@@ -438,8 +470,8 @@ export async function consumeUploadStream(
     });
     // Release the claim so the row can be re-consumed after the client re-uploads.
     // Guarded by `consumedAt = claimedAt` so we only ever release OUR claim —
-    // a hypothetical concurrent consume that somehow held the row would be
-    // left untouched.
+    // a concurrent re-consumer never holds the row (re-consume does not
+    // mutate it), so this only ever unwinds the claim THIS call took.
     await db
       .update(uploads)
       .set({ consumedAt: null })
@@ -495,20 +527,13 @@ export async function writeFsUploadContent(
 // ---------------------------------------------------------------------------
 
 /**
- * Retention window for consumed uploads before the GC drops the row (and any
- * orphaned storage object). The successful-consume path deletes the object
- * inline, so the sweep usually finds the storage key already gone — this is
- * the safety net for cases where the inline delete failed transiently.
- */
-const CONSUMED_RETENTION_MS = 24 * 60 * 60 * 1000; // 24 h
-
-/**
  * Delete uploads that are no longer needed:
  *   - expired AND never consumed (user never finished the PUT, or declared
  *     MIME was wrong and they abandoned the flow), OR
- *   - consumed more than `CONSUMED_RETENTION_MS` ago (the run already ran;
- *     storage object should have been removed inline on consume, but this is
- *     the safety net if that best-effort delete failed).
+ *   - first consumed more than the reuse window (`UPLOAD_RETENTION_HOURS`)
+ *     ago. Consumed uploads keep their storage object so the URI stays
+ *     re-consumable (re-trigger after cancel, `rerun_from`); this sweep is
+ *     the deleter of record for those retained bytes.
  *
  * Storage objects are removed on a best-effort basis. Returns the number of
  * rows removed.
@@ -519,7 +544,7 @@ export async function cleanupExpiredUploads(): Promise<number> {
   // per-query cap between sweeps.
   while (true) {
     const now = new Date();
-    const consumedCutoff = new Date(now.getTime() - CONSUMED_RETENTION_MS);
+    const consumedCutoff = new Date(now.getTime() - consumedRetentionMs());
     const expired = await db
       .select({ id: uploads.id, storageKey: uploads.storageKey })
       .from(uploads)

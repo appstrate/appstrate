@@ -6,8 +6,14 @@
  * The request body is always JSON. File fields carry `upload://upl_xxx` URIs
  * that point to previously staged uploads. Each URI is streamed straight from
  * the uploads bucket into the run workspace via the uploads service (which
- * performs size + magic-byte MIME validation and marks the upload as consumed),
- * leaving a `FileReference` (metadata only — no buffer) on the parsed input.
+ * performs size + magic-byte MIME validation and stamps the upload's first
+ * consume), leaving a `FileReference` (metadata only — no buffer) on the
+ * parsed input.
+ *
+ * Alternatively the body may carry `rerun_from: <run_id>` instead of `input`:
+ * the prior run's persisted input (upload URIs included) is replayed through
+ * the exact same pipeline — uploads stay re-consumable for a retention window
+ * after their first consume, so re-running the same input needs no re-upload.
  */
 
 import type { Context } from "hono";
@@ -15,8 +21,15 @@ import { fileTypeStream } from "file-type";
 import type { FileReference } from "./run-launcher/types.ts";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { validateInput } from "./schema.ts";
-import { invalidRequest, payloadTooLarge, validationFailed } from "../lib/errors.ts";
+import {
+  invalidRequest,
+  notFound,
+  conflict,
+  payloadTooLarge,
+  validationFailed,
+} from "../lib/errors.ts";
 import { consumeUploadStream, peekUploads, isUploadUri, parseUploadUri } from "./uploads.ts";
+import { getRun } from "./state/runs.ts";
 import { sanitizeStorageKey } from "./file-storage.ts";
 import {
   streamRunDocument,
@@ -58,6 +71,15 @@ export interface ParsedInput {
 
 interface RunRequestBody {
   input?: Record<string, unknown>;
+  /**
+   * Run id whose persisted `input` to replay verbatim on this run (wire field
+   * `rerun_from`, mutually exclusive with `input`). File fields keep their
+   * `upload://` URIs in `runs.input`, and consumed uploads stay re-consumable
+   * for `UPLOAD_RETENTION_HOURS` after first consume — so a cancelled (or
+   * completed) run can be re-triggered with the same documents and different
+   * overrides (`modelId`, `config`, `?version`) in one call, no re-upload.
+   */
+  rerun_from?: string;
   modelId?: string;
   proxyId?: string;
   config?: Record<string, unknown>;
@@ -181,14 +203,69 @@ export async function mapWithConcurrency<T, R>(
 }
 
 /**
+ * Resolve `rerun_from` to the prior run's persisted `input` snapshot.
+ *
+ * Access control mirrors `GET /api/runs/:id`: the lookup is scoped to the
+ * caller's org + application (cross-tenant ids surface as the same not-found
+ * as a missing run), end-users can only replay their own runs, and the prior
+ * run must belong to the agent being triggered (its input schema is the one
+ * the replayed input was validated against). The returned input flows through
+ * the exact same consume + validation pipeline as a fresh request — any
+ * `upload://` URI it carries is re-consumed (valid within the post-consume
+ * reuse window) and the JSON is re-validated against the current schema.
+ */
+async function resolveRerunInput(
+  c: Context,
+  rerunFrom: unknown,
+  agentPackageId: string | undefined,
+): Promise<Record<string, unknown>> {
+  if (typeof rerunFrom !== "string" || rerunFrom.length === 0) {
+    throw invalidRequest("`rerun_from` must be a run id", "rerun_from");
+  }
+  const prior = await getRun(
+    { orgId: c.get("orgId"), applicationId: c.get("applicationId") },
+    rerunFrom,
+  );
+  if (!prior) {
+    throw notFound(`Run '${rerunFrom}' not found`);
+  }
+  const endUser = c.get("endUser");
+  if (endUser && prior.endUserId !== endUser.id) {
+    throw notFound(`Run '${rerunFrom}' not found`);
+  }
+  if (agentPackageId !== undefined && prior.packageId !== agentPackageId) {
+    throw conflict(
+      "rerun_agent_mismatch",
+      `Run '${rerunFrom}' belongs to a different agent — rerun_from can only replay runs of the agent being triggered`,
+    );
+  }
+  const input = prior.input;
+  if (input !== null && (typeof input !== "object" || Array.isArray(input))) {
+    // Defensive: `runs.input` is written from a parsed object, but the column
+    // is untyped jsonb — never replay a malformed snapshot.
+    throw invalidRequest(`Run '${rerunFrom}' has no replayable input`, "rerun_from");
+  }
+  return (input as Record<string, unknown> | null) ?? {};
+}
+
+/**
  * Parse and validate the run request body. Returns parsed input + resolved
- * uploaded files. Throws `ApiError` (invalidRequest / notFound) on any
- * validation or resolution failure.
+ * uploaded files. Throws `ApiError` (invalidRequest / notFound / conflict /
+ * gone) on any validation or resolution failure.
  */
 export async function parseRequestInput(
   c: Context,
   runId: string,
   inputSchema?: JSONSchemaObject,
+  opts?: {
+    /**
+     * The triggered agent's package id — `rerun_from` is rejected with a 409
+     * when the prior run belongs to a different agent. When omitted, the
+     * same-agent gate is skipped (service-level callers that already verified
+     * ownership).
+     */
+    agentPackageId?: string;
+  },
 ): Promise<ParsedInput> {
   let body: RunRequestBody = {};
   try {
@@ -197,7 +274,17 @@ export async function parseRequestInput(
   } catch {
     body = {};
   }
-  const input = body.input ?? {};
+
+  let input = body.input ?? {};
+  if (body.rerun_from !== undefined) {
+    if (body.input !== undefined) {
+      throw invalidRequest(
+        "`input` and `rerun_from` are mutually exclusive — the prior run's input is replayed verbatim",
+        "rerun_from",
+      );
+    }
+    input = await resolveRerunInput(c, body.rerun_from, opts?.agentPackageId);
+  }
   let uploadedFiles: FileReference[] = [];
 
   if (inputSchema) {

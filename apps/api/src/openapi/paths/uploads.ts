@@ -9,7 +9,11 @@ export const uploadsPaths = {
       description:
         "Reserve an upload slot and return a signed URL the client PUTs the binary to. " +
         "The returned `uri` (e.g. `upload://upl_xxx`) is embedded in agent `input` fields; " +
-        "the run pipeline resolves and consumes it atomically. Rate-limited to 20/min.",
+        "the run pipeline resolves and consumes it on trigger. Consumed uploads are NOT " +
+        "single-use: the bytes stay retained — and the URI re-consumable — for " +
+        "`UPLOAD_RETENTION_HOURS` (default 24 h) after the first consume, so the same input " +
+        "can be re-run (e.g. via `rerun_from` after cancelling) without re-uploading. " +
+        "Unconsumed uploads expire with the signed URL. Rate-limited to 20/min.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },

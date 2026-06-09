@@ -100,6 +100,9 @@ export function createRunsRouter() {
           effectiveAgent.manifest.input?.schema
             ? asJSONSchemaObject(effectiveAgent.manifest.input.schema)
             : undefined,
+          // Same-agent gate for `rerun_from` — replaying another agent's run
+          // input is rejected with 409 `rerun_agent_mismatch`.
+          { agentPackageId: agent.id },
         );
 
         const {
