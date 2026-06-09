@@ -36,6 +36,8 @@ import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { getEnv } from "@appstrate/env";
 import { currentTraceparent } from "../observability/index.ts";
+import { TERMINAL_RUN_STATUSES } from "@appstrate/db/schema";
+import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
 
 /**
  * Resolve the traceparent to seed the run-execution trace tree with, honoring
@@ -208,9 +210,22 @@ export function createRunsRouter() {
   // See apps/api/src/routes/notifications.ts.
 
   // GET /api/runs/:id — get a single run
+  //
+  // Optional `?wait=<seconds|true>` long-poll (issue #631): holds the
+  // request until the run reaches a terminal status or the wait elapses
+  // (capped at MAX_WAIT_SECONDS, below typical proxy idle timeouts), then
+  // returns the run object exactly as the plain call does. A non-terminal
+  // status in the response means "poll again". The wakeup is event-driven
+  // (run_update PG NOTIFY) with a periodic DB re-check as fallback — see
+  // services/run-wait.ts. Auth/scoping is identical to the plain call:
+  // ownership is verified BEFORE any waiting starts.
   router.get("/runs/:id", async (c) => {
     const runId = c.req.param("id");
     const scope = getAppScope(c);
+    // Validate the wait param before touching the DB so a malformed value
+    // 400s even for runs the caller could not read.
+    const waitMs = parseWaitQuery(c.req.query("wait"));
+
     const row = await getRunFull(scope, runId);
     if (!row) {
       throw notFound("Run not found");
@@ -219,6 +234,25 @@ export function createRunsRouter() {
     if (endUser && row.endUserId !== endUser.id) {
       throw notFound("Run not found");
     }
+
+    if (waitMs > 0 && !TERMINAL_RUN_STATUSES.has(row.status)) {
+      await waitForRunTerminal({
+        runId,
+        scope,
+        timeoutMs: waitMs,
+        // Client disconnect aborts the server-side wait — no leaked
+        // timers/subscriptions for a response nobody will read.
+        signal: c.req.raw.signal,
+      });
+      const fresh = await getRunFull(scope, runId);
+      // The run can be deleted mid-wait (e.g. DELETE agent runs) — surface
+      // the same 404 the initial read would have.
+      if (!fresh) {
+        throw notFound("Run not found");
+      }
+      return c.json(fresh);
+    }
+
     return c.json(row);
   });
 
