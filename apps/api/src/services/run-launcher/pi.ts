@@ -121,7 +121,15 @@ async function runPlatformContainerImpl(
   let sidecarHandle: WorkloadHandle | undefined;
   let agentHandle: WorkloadHandle | undefined;
 
+  // Hoisted out of the try so the spawn-failure metric path (catch) can read
+  // it. Assigned below once the run's sidecar policy is resolved.
+  let skipSidecar = false;
+
   const spawnStart = Date.now();
+  // Guards against double-recording the container-spawn histogram: the success
+  // record fires before `waitForWorkload`, so a later execution failure (which
+  // is NOT a spawn failure) must not also emit a spawn data point.
+  let spawnRecorded = false;
   try {
     boundary = await orch.createIsolationBoundary(runId);
 
@@ -150,8 +158,7 @@ async function runPlatformContainerImpl(
     // is the ONLY path that routes agent egress through it — skipping the
     // sidecar would silently drop the proxy and leak the host IP.
     const hasIntegrations = (plan.integrations?.length ?? 0) > 0;
-    const skipSidecar =
-      !hasIntegrations && !!llmConfig.apiKey && !isOauthCredential && !plan.proxyUrl;
+    skipSidecar = !hasIntegrations && !!llmConfig.apiKey && !isOauthCredential && !plan.proxyUrl;
 
     let sidecarLlm: LlmProxyConfig | undefined;
     if (isOauthCredential) {
@@ -306,8 +313,22 @@ async function runPlatformContainerImpl(
     sidecarHandle = sidecar;
     agentHandle = agent;
     recordContainerSpawn(Date.now() - spawnStart, { sidecar: !skipSidecar });
+    spawnRecorded = true;
 
     return await waitForWorkload(orch, agent, sidecar, plan.timeout, signal);
+  } catch (err) {
+    // SOTA per OTel "Recording errors": the spawn histogram covers failures too,
+    // tagged with a bounded `error.type` naming the phase that failed (no
+    // boundary yet ⇒ isolation-boundary create, else workload spawn). Only when
+    // the success path has not already recorded — a `waitForWorkload` throw is an
+    // execution failure, not a spawn failure, and must not emit a spawn point.
+    if (!spawnRecorded) {
+      recordContainerSpawn(Date.now() - spawnStart, {
+        sidecar: !skipSidecar,
+        errorType: boundary ? "workload" : "boundary",
+      });
+    }
+    throw err;
   } finally {
     // Cleanup order: sidecar → agent → network boundary.
     // Removing the network boundary before its members are gone is an

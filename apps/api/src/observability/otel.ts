@@ -407,6 +407,18 @@ function clampErrorCode(code: string | undefined): string {
   return RUN_ERROR_CODES.has(code) ? code : "other";
 }
 
+/**
+ * Bounded `error.type` values for the container-spawn histogram, naming the
+ * provisioning phase that failed (isolation `boundary` create vs. `workload`
+ * spawn). Same cardinality-clamp rationale as {@link clampErrorCode}: a raw
+ * exception string would be unbounded. Unknown maps to `"other"`.
+ */
+const SPAWN_ERROR_TYPES = new Set(["boundary", "workload"]);
+
+function clampSpawnError(type: string): string {
+  return SPAWN_ERROR_TYPES.has(type) ? type : "other";
+}
+
 export function recordRunDuration(durationMs: number, attrs: { status: string }): void {
   if (!enabled) return;
   runDuration?.record(durationMs / MS_PER_S, attrs);
@@ -420,9 +432,18 @@ export function recordRunTerminal(attrs: { status: string; errorCode?: string })
   });
 }
 
-export function recordContainerSpawn(durationMs: number, attrs?: { sidecar?: boolean }): void {
+export function recordContainerSpawn(
+  durationMs: number,
+  attrs?: { sidecar?: boolean; errorType?: string },
+): void {
   if (!enabled) return;
-  containerSpawn?.record(durationMs / MS_PER_S, { sidecar: attrs?.sidecar ?? false });
+  containerSpawn?.record(durationMs / MS_PER_S, {
+    sidecar: attrs?.sidecar ?? false,
+    // OTel semconv (Recording errors): a single duration histogram covers both
+    // outcomes — `error.type` is present on FAILURE only and omitted on success,
+    // so spawn error-rate and clean-latency are both derivable from one metric.
+    ...(attrs?.errorType !== undefined ? { "error.type": clampSpawnError(attrs.errorType) } : {}),
+  });
 }
 
 export function recordLlmLatency(

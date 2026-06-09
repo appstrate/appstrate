@@ -175,6 +175,30 @@ describe("observability — enabled (in-memory exporters)", () => {
     expect(terminal!.dataPoints[0]?.attributes.error_code).toBe("none");
   });
 
+  it("records container_spawn for both outcomes — error.type on failure only, clamped", async () => {
+    recordContainerSpawn(50, { sidecar: true }); // success
+    recordContainerSpawn(20, { sidecar: false, errorType: "boundary" }); // failure (known phase)
+    recordContainerSpawn(30, { sidecar: true, errorType: "totally-made-up" }); // failure (clamped)
+    await _forceFlushForTesting();
+
+    const spawn = findMetric(metricExporter.getMetrics(), "appstrate.run.container_spawn");
+    const dps = spawn!.dataPoints;
+
+    // Per OTel semconv: the success point carries NO error.type, so clean
+    // latency is filterable; failures carry a bounded one.
+    const success = dps.find((p) => p.attributes["error.type"] === undefined);
+    expect(success).toBeDefined();
+    expect(success!.attributes.sidecar).toBe(true);
+
+    const errTypes = new Set(
+      dps.map((p) => p.attributes["error.type"]).filter((t) => t !== undefined),
+    );
+    expect(errTypes.has("boundary")).toBe(true);
+    // An out-of-allowlist phase collapses to "other" — cardinality stays bounded.
+    expect(errTypes.has("other")).toBe(true);
+    expect(errTypes.has("totally-made-up")).toBe(false);
+  });
+
   it("clamps the terminal error_code label to the bounded allowlist", async () => {
     // Known stable code passes through; an arbitrary runner string collapses to
     // "other" so the dimension's cardinality stays bounded.
