@@ -616,4 +616,70 @@ describe("Agents API", () => {
       expect(res.status).toBe(404);
     });
   });
+
+  describe("PUT /api/agents/:scope/:name/proxy", () => {
+    it("returns the affected proxy setting (same shape as GET), not a bare stub", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/proxy-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        applicationId: ctx.defaultAppId,
+      });
+
+      const res = await app.request("/api/agents/@myorg/proxy-agent/proxy", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ proxyId: "none" }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        success: boolean;
+        proxyId: string | null;
+        resolved: boolean;
+      };
+      // Resource reflecting the new proxy + legacy `success` compat (issue #646).
+      expect(body.proxyId).toBe("none");
+      expect(body.resolved).toBe(false);
+      expect(body.success).toBe(true);
+
+      // The returned shape matches what GET …/proxy serves.
+      const get = await app.request("/api/agents/@myorg/proxy-agent/proxy", {
+        headers: authHeaders(ctx),
+      });
+      const getBody = (await get.json()) as { proxyId: string | null; resolved: boolean };
+      expect(getBody.proxyId).toBe(body.proxyId);
+      expect(getBody.resolved).toBe(body.resolved);
+    });
+  });
+
+  describe("PUT /api/agents/:scope/:name/model", () => {
+    it("returns the affected model setting (same shape as GET), not a bare stub", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/model-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        applicationId: ctx.defaultAppId,
+      });
+
+      const res = await app.request("/api/agents/@myorg/model-agent/model", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId: "model-123" }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { success: boolean; modelId: string | null };
+      // Resource reflecting the new model + legacy `success` compat (issue #646).
+      expect(body.modelId).toBe("model-123");
+      expect(body.success).toBe(true);
+
+      // Reverting to org default returns the null resource, not a stub.
+      const revert = await app.request("/api/agents/@myorg/model-agent/model", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId: null }),
+      });
+      const revertBody = (await revert.json()) as { modelId: string | null };
+      expect(revertBody.modelId).toBeNull();
+    });
+  });
 });

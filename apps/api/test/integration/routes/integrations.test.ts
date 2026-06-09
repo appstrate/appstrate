@@ -335,8 +335,22 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
       body: JSON.stringify({}),
     });
     expect(activate.status).toBe(201);
-    const body = (await activate.json()) as { active: boolean; activated_at: string };
+    const body = (await activate.json()) as {
+      active: boolean;
+      activated_at: string;
+      manifest: { name: string };
+      auths: unknown[];
+      tool_catalog: unknown[];
+      allow_undeclared_tools: boolean;
+    };
+    // Returns the full integration DTO (same shape as GET /:packageId) plus
+    // the legacy `active`/`activated_at` compat fields (issue #646).
     expect(body.active).toBe(true);
+    expect(typeof body.activated_at).toBe("string");
+    expect(body.manifest.name).toBe("@myorg/gmail");
+    expect(Array.isArray(body.auths)).toBe(true);
+    expect(Array.isArray(body.tool_catalog)).toBe(true);
+    expect(typeof body.allow_undeclared_tools).toBe("boolean");
 
     const activeRow = await db
       .select()
@@ -354,8 +368,20 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
       headers: authHeaders(ctx),
     });
     expect(deactivate.status).toBe(200);
-    const deactivateBody = (await deactivate.json()) as { active: boolean };
+    const deactivateBody = (await deactivate.json()) as {
+      active: boolean;
+      manifest: { name: string };
+      auths: unknown[];
+      tool_catalog: unknown[];
+      allow_undeclared_tools: boolean;
+    };
+    // Symmetric with activate: deactivate also returns the full integration
+    // DTO, with `active: false` kept additively (issue #646).
     expect(deactivateBody.active).toBe(false);
+    expect(deactivateBody.manifest.name).toBe("@myorg/gmail");
+    expect(Array.isArray(deactivateBody.auths)).toBe(true);
+    expect(Array.isArray(deactivateBody.tool_catalog)).toBe(true);
+    expect(typeof deactivateBody.allow_undeclared_tools).toBe("boolean");
     const after = await db
       .select()
       .from(applicationPackages)
