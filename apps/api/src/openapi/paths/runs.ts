@@ -514,12 +514,30 @@ export const runsPaths = {
     get: {
       operationId: "getRun",
       tags: ["Runs"],
-      summary: "Get run status/result",
-      description: "Get run details including status, result, input, and duration.",
+      summary: "Get run status/result (optionally long-poll until terminal)",
+      description:
+        "Get run details including status, result, input, and duration.\n\nPass `?wait=<seconds>` (or `?wait=true` for the maximum) to long-poll: the server holds the request until the run reaches a terminal status (`success`, `failed`, `timeout`, `cancelled`) or the wait elapses, then returns the current run object exactly as the plain call does. The wait is capped at **55 seconds** — deliberately below the 60 s idle timeouts that ship as defaults in common reverse proxies (nginx `proxy_read_timeout`, ALB idle timeout) so the long poll always completes with a real response instead of a proxy 504; values above the cap are clamped. A response with a non-terminal `status` simply means the wait timed out — issue the same call again to keep waiting. One long poll replaces N sleep+getRun round-trips, which is the recommended completion-wait pattern for MCP clients (the SSE stream is not reachable through the MCP server).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "wait",
+          in: "query",
+          required: false,
+          schema: {
+            oneOf: [
+              { type: "boolean", description: "`true` waits the maximum 55 s; `false` disables." },
+              {
+                type: "integer",
+                minimum: 0,
+                description: "Wait budget in seconds. Values above 55 are clamped to 55.",
+              },
+            ],
+          },
+          description:
+            "Hold the request until the run reaches a terminal status or this many seconds elapse (capped at 55, see operation description), then return the run object. `0`/`false`/absent = return immediately (default). Negative, fractional, or non-numeric values return 400.",
+        },
       ],
       responses: {
         "200": {
