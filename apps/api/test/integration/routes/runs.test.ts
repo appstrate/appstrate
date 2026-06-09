@@ -451,11 +451,19 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
+        id?: string;
         runId?: string;
+        status?: string;
+        agent_scope?: string | null;
         model_label?: string | null;
         model_source?: string | null;
       };
+      // The trigger response is the full Run DTO (same shape as GET /runs/:id)
+      // plus a legacy `runId` alias of `id`.
       expect(body.runId).toStartWith("run_");
+      expect(body.id).toBe(body.runId!);
+      expect(body.status).toBeString();
+      expect(body.agent_scope).toContain("runorg");
       expect(body.model_label).toBe("Echo Default GPT");
       expect(body.model_source).toBe("org");
 

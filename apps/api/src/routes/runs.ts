@@ -142,7 +142,7 @@ export function createRunsRouter() {
         const mergedConfig = mergeAndValidateConfigOverride(effectiveAgent, config, configOverride);
 
         const runner = await resolveRunnerContext(c);
-        const { modelLabel, modelSource } = await prepareAndExecuteRun({
+        await prepareAndExecuteRun({
           runId,
           agent: effectiveAgent,
           orgId,
@@ -164,10 +164,21 @@ export function createRunsRouter() {
           runnerKind: runner.kind,
         });
 
-        // Echo the resolved model so callers can detect org-default drift at
-        // trigger time without polling the run object (#635). Snapshot of the
-        // same values persisted on `runs.model_label` / `runs.model_source`.
-        return c.json({ runId, model_label: modelLabel, model_source: modelSource });
+        // Return the created run resource — same DTO and serializer as
+        // GET /runs/:id — so callers see the full launched state (resolved
+        // `model_label` / `model_source` for org-default drift detection per
+        // #635, plus status, version_ref, agent_scope, …) without a follow-up
+        // GET. The run row exists once `prepareAndExecuteRun` resolves. The
+        // legacy `runId` field is kept alongside the DTO's `id` for backward
+        // compatibility with existing clients.
+        const row = await getRunFull(getAppScope(c), runId);
+        if (!row) {
+          // The run was just created above; a miss here means a concurrent
+          // teardown raced us. Fall back to the minimal id-only contract
+          // rather than 500-ing a successfully launched run.
+          return c.json({ runId });
+        }
+        return c.json({ runId, ...row });
       } catch (err) {
         // Roll back any input documents streamed into the run workspace before
         // the run launched (size/MIME mismatch, failed preflight, …). Once
