@@ -9,6 +9,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemProxy } from "../services/proxy-registry.ts";
 import {
   listOrgProxies,
+  getOrgProxy,
   createOrgProxy,
   updateOrgProxy,
   deleteOrgProxy,
@@ -66,7 +67,11 @@ export function createProxiesRouter() {
         resourceId: id,
         after: { label: data.label, url: data.url },
       });
-      return c.json({ id }, 201);
+      // Return the created resource — same shape as the GET list serializer —
+      // so callers don't need a follow-up GET. The legacy `id` field is kept
+      // alongside the resource for backward compatibility.
+      const proxy = await getOrgProxy(orgId, id);
+      return c.json({ id, ...proxy }, 201);
     } catch (err) {
       const msg = getErrorMessage(err);
       if (msg.includes("blocked network")) {
@@ -91,7 +96,12 @@ export function createProxiesRouter() {
         resourceType: "proxy",
         resourceId: data.proxyId,
       });
-      return c.json({ success: true });
+      // Return the affected default proxy resource so callers see the new
+      // default state without a follow-up GET. `success` is kept for backward
+      // compatibility. When the default is unset (proxyId null) there is no
+      // resource, so `proxy` is null.
+      const proxy = data.proxyId ? await getOrgProxy(orgId, data.proxyId) : null;
+      return c.json({ success: true, proxy });
     } catch (err) {
       logger.error("Set default proxy failed", {
         error: getErrorMessage(err),
@@ -138,7 +148,11 @@ export function createProxiesRouter() {
         resourceId: proxyId,
         after: data as unknown as Record<string, unknown>,
       });
-      return c.json({ id: proxyId });
+      // Return the updated resource — same shape as the GET list serializer —
+      // so callers don't need a follow-up GET. The legacy `id` field is kept
+      // alongside the resource for backward compatibility.
+      const proxy = await getOrgProxy(orgId, proxyId);
+      return c.json({ id: proxyId, ...proxy });
     } catch (err) {
       const msg = getErrorMessage(err);
       if (msg.includes("blocked network")) {
