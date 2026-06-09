@@ -30,6 +30,7 @@ import {
   recordRunDuration,
   recordRunTerminal,
   recordContainerSpawn,
+  setQueueDepthProvider,
   _resetObservabilityForTesting,
   _forceFlushForTesting,
 } from "../../src/observability/otel.ts";
@@ -207,5 +208,48 @@ describe("observability — enabled (in-memory exporters)", () => {
     expect(finished?.spanContext().traceId).toBe(traceId);
     // The span is a child of the remote inbound span.
     expect(finished?.parentSpanContext?.spanId).toBe("b7ad6b7169203331");
+  });
+
+  // The scheduler queue-depth observable gauge pulls its value from the
+  // registered provider on each metric collection (forceFlush triggers one).
+  // Covers the async-provider, non-finite-guard, and provider-throws branches
+  // of the gauge callback in createInstruments().
+  it("observes the queue depth from the registered provider (sync + async)", async () => {
+    setQueueDepthProvider(() => 7);
+    await _forceFlushForTesting();
+    let gauge = findMetric(metricExporter.getMetrics(), "appstrate.scheduler.queue_depth");
+    expect(gauge).toBeDefined();
+    expect(gauge!.dataPoints.at(-1)?.value).toBe(7);
+
+    // An async provider resolves before the observation is recorded.
+    metricExporter.reset();
+    setQueueDepthProvider(async () => 3);
+    await _forceFlushForTesting();
+    gauge = findMetric(metricExporter.getMetrics(), "appstrate.scheduler.queue_depth");
+    expect(gauge!.dataPoints.at(-1)?.value).toBe(3);
+  });
+
+  it("does not observe a non-finite queue-depth reading", async () => {
+    setQueueDepthProvider(() => Number.NaN);
+    await _forceFlushForTesting();
+    const gauge = findMetric(metricExporter.getMetrics(), "appstrate.scheduler.queue_depth");
+    // NaN is rejected by the finite-guard → no data point emitted.
+    expect(gauge?.dataPoints.length ?? 0).toBe(0);
+  });
+
+  it("a throwing queue-depth provider does not break metric collection", async () => {
+    setQueueDepthProvider(() => {
+      throw new Error("queue read failed");
+    });
+    // A sibling metric recorded in the same collection must still survive.
+    recordRunTerminal({ status: "success" });
+    await _forceFlushForTesting();
+
+    const rms = metricExporter.getMetrics();
+    const gauge = findMetric(rms, "appstrate.scheduler.queue_depth");
+    const terminal = findMetric(rms, "appstrate.run.terminal");
+    expect(gauge?.dataPoints.length ?? 0).toBe(0);
+    expect(terminal).toBeDefined();
+    expect(terminal!.dataPoints.reduce((n, p) => n + (p.value as number), 0)).toBe(1);
   });
 });
