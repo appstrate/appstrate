@@ -7,7 +7,21 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Execute an agent",
       description:
-        "Start an agent run (fire-and-forget). Returns the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. Supports JSON body or multipart/form-data with file uploads. The effective model is resolved at run creation with precedence: request `modelId` > agent model setting > org default model > system default. Without an explicit `modelId`, a change to the org default model between triggers applies to the next run — send `modelId` to pin a specific model per run.",
+        "Start an agent run (fire-and-forget). Returns the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. " +
+        "The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the " +
+        "agent's input schema) accept either of two forms: " +
+        "(1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by " +
+        "PUTting them to the signed URL (see `createUpload` for the step-by-step recipe); or " +
+        "(2) an inline RFC 2397 data URI `data:<mime>;name=<filename>;base64,<payload>` with up " +
+        "to 4 MiB of decoded content (`name` is optional) — the single-call path for JSON-only " +
+        "clients such as MCP. Inline bytes are written to the run workspace as a document and " +
+        "the payload is stripped from the persisted run input (the stored value keeps only a " +
+        "`data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by " +
+        "magic-byte sniffing in both forms. " +
+        "The effective model is resolved at run creation with precedence: request `modelId` > " +
+        "agent model setting > org default model > system default. Without an explicit `modelId`, " +
+        "a change to the org default model between triggers applies to the next run — send " +
+        "`modelId` to pin a specific model per run.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -31,7 +45,13 @@ export const runsPaths = {
             schema: {
               type: "object",
               properties: {
-                input: { type: "object", description: "Run input values" },
+                input: {
+                  type: "object",
+                  description:
+                    "Run input values, validated against the agent's input schema. File fields " +
+                    "take `upload://upl_xxx` references (from `createUpload`) or inline " +
+                    "`data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded).",
+                },
                 modelId: {
                   type: "string",
                   description:
@@ -58,15 +78,6 @@ export const runsPaths = {
             example: {
               input: { message: "Summarize my latest emails" },
               config: { dryRun: true },
-            },
-          },
-          "multipart/form-data": {
-            schema: {
-              type: "object",
-              properties: {
-                input: { type: "string", description: "JSON-encoded input values" },
-                file: { type: "string", format: "binary", description: "File upload" },
-              },
             },
           },
         },

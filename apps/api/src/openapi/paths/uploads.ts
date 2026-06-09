@@ -8,8 +8,19 @@ export const uploadsPaths = {
       summary: "Create a direct-upload descriptor",
       description:
         "Reserve an upload slot and return a signed URL the client PUTs the binary to. " +
-        "The returned `uri` (e.g. `upload://upl_xxx`) is embedded in agent `input` fields; " +
-        "the run pipeline resolves and consumes it atomically. Rate-limited to 20/min.",
+        "Full upload→run recipe: " +
+        "(1) POST /api/uploads with the file's `name`, exact `size` in bytes, and `mime` — " +
+        "the response carries a `uri` (e.g. `upload://upl_xxx`), a signed `url`, and `headers`. " +
+        "(2) PUT the raw file bytes (not multipart) to `url`, sending exactly the returned " +
+        "`headers` (typically just `Content-Type`). No other headers are required — in " +
+        "particular no checksum headers; the signed URL does not bind one. " +
+        "(3) Call `runAgent` with `uri` as the value of the file-typed input field. " +
+        "Uploads are single-use and consumed by the run: the actual byte count must equal the " +
+        "declared `size`, binary MIMEs are verified by magic-byte sniffing, and unused uploads " +
+        "expire after 15 minutes. " +
+        "Small files (≤4 MiB decoded) can skip this flow entirely: inline the content directly " +
+        "in the `runAgent` input as `data:<mime>;name=<filename>;base64,<payload>`. " +
+        "Rate-limited to 20/min.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -63,19 +74,25 @@ export const uploadsPaths = {
                   id: { type: "string" },
                   uri: {
                     type: "string",
-                    description: "Reference to embed in agent input (e.g. `upload://upl_xxx`).",
+                    description:
+                      "Reference to embed in the agent's file-typed input field on `runAgent` " +
+                      "(e.g. `upload://upl_xxx`).",
                   },
                   url: {
                     type: "string",
                     format: "uri",
                     description:
-                      "Pre-signed PUT URL. Points at S3/MinIO directly, or at the platform FS sink.",
+                      "Pre-signed PUT URL. Points at S3/MinIO directly, or at the platform FS sink. " +
+                      "PUT the raw binary body to it before the upload expires.",
                   },
                   method: { type: "string", enum: ["PUT"] },
                   headers: {
                     type: "object",
                     additionalProperties: { type: "string" },
-                    description: "Headers the client MUST forward on the PUT request.",
+                    description:
+                      "The complete set of headers the client MUST send verbatim on the PUT " +
+                      "request (typically just `Content-Type`). Nothing else is required — " +
+                      "no checksum headers.",
                   },
                   expiresAt: { type: "string", format: "date-time" },
                 },

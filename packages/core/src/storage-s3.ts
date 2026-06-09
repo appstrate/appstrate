@@ -41,16 +41,27 @@ export function createS3Storage(config: S3StorageConfig): Storage {
     ...(config.endpoint ? { endpoint: config.endpoint, forcePathStyle: true } : {}),
   });
 
-  // Separate client for presigned URLs when a public endpoint is provided.
-  // The browser needs a URL it can reach, while the server-side SDK keeps
-  // talking to the internal endpoint.
-  const presignClient = config.publicEndpoint
-    ? new S3Client({
-        region: config.region,
-        endpoint: config.publicEndpoint,
-        forcePathStyle: true,
-      })
-    : client;
+  // Separate client for presigned URLs, for two reasons:
+  //
+  //  1. Endpoint: when a public endpoint is provided, the browser needs a URL
+  //     it can reach, while the server-side SDK keeps talking to the internal
+  //     endpoint.
+  //  2. Checksums: since v3.729 the SDK defaults `requestChecksumCalculation`
+  //     to WHEN_SUPPORTED, which makes the flexible-checksums middleware sign
+  //     `x-amz-checksum-crc32` into presigned PutObject URLs. With no body at
+  //     sign time the value is the CRC32 of the empty string (`AAAAAA==`), so
+  //     S3 rejects every non-empty PUT unless the client overrides it with the
+  //     real checksum header — an undocumented trap for direct-upload clients
+  //     (aws-sdk-js-v3#6810). WHEN_REQUIRED keeps the checksum out of the
+  //     signature so a plain PUT works. Integrity is not lost: upload size and
+  //     magic-byte MIME are enforced server-side when the upload is consumed,
+  //     and the regular (non-presign) client keeps default checksum behaviour.
+  const presignEndpoint = config.publicEndpoint ?? config.endpoint;
+  const presignClient = new S3Client({
+    region: config.region,
+    ...(presignEndpoint ? { endpoint: presignEndpoint, forcePathStyle: true } : {}),
+    requestChecksumCalculation: "WHEN_REQUIRED",
+  });
 
   function makeKey(bucket: string, filePath: string): string {
     const key = `${bucket}/${filePath}`.replace(/\/+/g, "/");

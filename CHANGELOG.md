@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Inline file inputs on `runAgent` (#630)** — file-typed input fields now
+  also accept RFC 2397 `data:<mime>;name=<filename>;base64,<payload>` URIs
+  (≤4 MiB decoded) alongside `upload://` references. The bytes are written to
+  the run workspace as a document with the same magic-byte MIME validation as
+  staged uploads, and the payload is stripped from the persisted run input
+  (compact `data:<mime>;name=<doc>;base64,` marker). JSON-only clients (MCP
+  `invoke_operation`) can run an agent with a small file in a single call —
+  no `createUpload` + signed PUT round-trips.
+
 - **Unified memory surface (Letta-style `pin` / `note`, #273, ADR-011/012/013)** —
   `runs.state` + `package_memories` merged into a single `package_persistence`
   table with first-class `(actor_type, actor_id)` scope (`member` / `end_user`
@@ -173,6 +182,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   instead of surfacing them one at a time.
 - `POST /api/runs/inline/validate` runs preflight in `accumulate` mode,
   returning the full list of validation errors in one response.
+
+### Fixed
+
+- **Presigned upload URLs rejected plain PUTs (#630)** — `createUpload`'s
+  signed S3 URL embedded a placeholder `x-amz-checksum-crc32=AAAAAA==`
+  (AWS SDK ≥3.729 default checksum behaviour signing the empty presign body),
+  so S3 refused the upload unless the client reverse-engineered the real
+  base64 CRC32 header. Presigning now opts out of request-checksum
+  calculation: a plain PUT with the returned headers works. Integrity is
+  unchanged — size and magic-byte MIME are still enforced at consume. The
+  `createUpload` / `runAgent` OpenAPI descriptions now document the full
+  upload→run recipe (and the stale `multipart/form-data` body on `runAgent`
+  was removed — the endpoint is JSON-only).
 
 ### Changed — AFPS 2.0 conformance pass (2026-05-26)
 

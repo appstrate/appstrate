@@ -3,20 +3,40 @@
 /**
  * Request input parsing.
  *
- * The request body is always JSON. File fields carry `upload://upl_xxx` URIs
- * that point to previously staged uploads. Each URI is streamed straight from
- * the uploads bucket into the run workspace via the uploads service (which
- * performs size + magic-byte MIME validation and marks the upload as consumed),
- * leaving a `FileReference` (metadata only — no buffer) on the parsed input.
+ * The request body is always JSON. File fields carry either:
+ *
+ *  - `upload://upl_xxx` URIs pointing to previously staged uploads — each is
+ *    streamed straight from the uploads bucket into the run workspace via the
+ *    uploads service (which performs size + magic-byte MIME validation and
+ *    marks the upload as consumed); or
+ *  - inline RFC 2397 `data:<mime>;name=<filename>;base64,<payload>` URIs —
+ *    decoded in-request (capped at `MAX_INLINE_FILE_BYTES`), validated with
+ *    the same magic-byte MIME policy, and written to the run workspace. The
+ *    payload is then stripped from the input value so the persisted run input
+ *    stays small. This lets JSON-only clients (MCP `invoke_operation`) run an
+ *    agent with a small file input in a single call — no createUpload + signed
+ *    PUT round-trips.
+ *
+ * Either way the run ends up with a `FileReference` (metadata only — no
+ * buffer) per document on the parsed input.
  */
 
 import type { Context } from "hono";
-import { fileTypeStream } from "file-type";
+import { fileTypeStream, fileTypeFromBuffer } from "file-type";
 import type { FileReference } from "./run-launcher/types.ts";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { validateInput } from "./schema.ts";
 import { invalidRequest, payloadTooLarge, validationFailed } from "../lib/errors.ts";
-import { consumeUploadStream, peekUploads, isUploadUri, parseUploadUri } from "./uploads.ts";
+import {
+  consumeUploadStream,
+  peekUploads,
+  isUploadUri,
+  parseUploadUri,
+  isUnsniffableMime,
+  normalizeMime,
+  sanitizeFilename,
+  type UploadMeta,
+} from "./uploads.ts";
 import { sanitizeStorageKey } from "./file-storage.ts";
 import {
   streamRunDocument,
@@ -88,16 +108,52 @@ function getArrayItems(prop: JSONSchema7): JSONSchema7 | undefined {
   return prop.items;
 }
 
+/** Is this value an inline RFC 2397 data URI? */
+export function isDataUri(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith("data:");
+}
+
+/**
+ * Reference to one file value found in the run input. `kind` dispatches the
+ * materialization path (staged upload vs inline data URI); `index` is set for
+ * entries of array file fields so the inline path can rewrite the exact
+ * persisted value after extraction.
+ */
+export interface InputFileRef {
+  fieldName: string;
+  uri: string;
+  kind: "upload" | "data";
+  index?: number;
+}
+
+function toFileRef(key: string, value: unknown, index?: number): InputFileRef {
+  if (isUploadUri(value)) {
+    return {
+      fieldName: key,
+      uri: value,
+      kind: "upload",
+      ...(index !== undefined ? { index } : {}),
+    };
+  }
+  if (isDataUri(value)) {
+    return { fieldName: key, uri: value, kind: "data", ...(index !== undefined ? { index } : {}) };
+  }
+  throw invalidRequest(
+    `Field '${key}' must be an 'upload://<id>' URI or an inline 'data:<mime>;base64,<payload>' URI`,
+    key,
+  );
+}
+
 /**
  * Walk the schema, find file-shaped properties, and validate that each
- * matching input value is an `upload://` URI (or an array of them). Pure —
- * exported for unit tests, has no I/O.
+ * matching input value is an `upload://` or `data:` URI (or an array of
+ * them). Pure — exported for unit tests, has no I/O.
  */
-export function collectUploadRefs(
+export function collectFileRefs(
   schema: JSONSchemaObject,
   input: Record<string, unknown>,
-): { fieldName: string; uri: string }[] {
-  const refs: { fieldName: string; uri: string }[] = [];
+): InputFileRef[] {
+  const refs: InputFileRef[] = [];
   for (const [key, prop] of Object.entries(schema.properties ?? {})) {
     if (!isFileField(prop)) continue;
     const value = input[key];
@@ -105,22 +161,141 @@ export function collectUploadRefs(
     const isArrayField = prop.type === "array" || !!getArrayItems(prop);
     if (isArrayField) {
       if (!Array.isArray(value)) {
-        throw invalidRequest(`Field '${key}' expected an array of upload URIs`, key);
+        throw invalidRequest(`Field '${key}' expected an array of upload or data URIs`, key);
       }
-      for (const v of value) {
-        if (!isUploadUri(v)) {
-          throw invalidRequest(`Field '${key}' entries must be 'upload://<id>' URIs`, key);
-        }
-        refs.push({ fieldName: key, uri: v });
-      }
+      value.forEach((v, i) => refs.push(toFileRef(key, v, i)));
     } else {
-      if (!isUploadUri(value)) {
-        throw invalidRequest(`Field '${key}' must be an 'upload://<id>' URI`, key);
+      if (Array.isArray(value)) {
+        throw invalidRequest(`Field '${key}' must be a single URI, not an array`, key);
       }
-      refs.push({ fieldName: key, uri: value });
+      refs.push(toFileRef(key, value));
     }
   }
   return refs;
+}
+
+// ---------------------------------------------------------------------------
+// Inline data: URIs (RFC 2397)
+// ---------------------------------------------------------------------------
+
+/**
+ * Decoded ceiling for one inline `data:` URI file. Inline content rides the
+ * JSON request body (global cap: `API_BODY_LIMIT_BYTES`, 10 MiB by default —
+ * 4 MiB decoded ≈ 5.5 MiB of base64 leaves headroom for the rest of the
+ * input). Larger files must use the staged-upload flow (`createUpload` +
+ * signed PUT), which streams and never buffers in API memory.
+ */
+export const MAX_INLINE_FILE_BYTES = 4 * 1024 * 1024;
+
+// Base64 ceiling derived from the decoded cap — checked BEFORE decoding so an
+// oversized payload is rejected without allocating its decoded buffer.
+const MAX_INLINE_BASE64_LENGTH = Math.ceil(MAX_INLINE_FILE_BYTES / 3) * 4;
+
+// Standard base64 alphabet, after url-safe chars are folded in and padding
+// stripped (see parseDataUri).
+const BASE64_RE = /^[A-Za-z0-9+/]*$/;
+
+/** A decoded inline file: declared MIME, optional declared filename, content. */
+export interface InlineFile {
+  mime: string;
+  name?: string;
+  bytes: Uint8Array;
+}
+
+/**
+ * Parse + decode an inline `data:<mediatype>;name=<filename>;base64,<payload>`
+ * URI (RFC 2397; `name` is the conventional filename parameter). Strict:
+ * requires `;base64` (file content is binary-safe only in base64); accepts
+ * standard or url-safe alphabet, padded or unpadded. Enforces the per-file
+ * decoded cap. Pure —
+ * exported for unit tests.
+ */
+export function parseDataUri(uri: string, fieldName: string): InlineFile {
+  const comma = uri.indexOf(",");
+  if (comma === -1) {
+    throw invalidRequest(`Field '${fieldName}' data: URI is missing the ',' separator`, fieldName);
+  }
+  const meta = uri.slice("data:".length, comma);
+  const payload = uri.slice(comma + 1);
+
+  const params = meta.split(";");
+  // RFC 2397: an omitted mediatype defaults to text/plain.
+  const mime = normalizeMime(params[0] || "text/plain") || "text/plain";
+  let base64 = false;
+  let name: string | undefined;
+  for (const param of params.slice(1)) {
+    if (param === "base64") {
+      base64 = true;
+    } else if (param.startsWith("name=")) {
+      const raw = param.slice("name=".length);
+      try {
+        name = decodeURIComponent(raw);
+      } catch {
+        name = raw;
+      }
+    }
+    // Other mediatype parameters (charset=…) are ignored.
+  }
+  if (!base64) {
+    throw invalidRequest(
+      `Field '${fieldName}' data: URI must be base64-encoded — use 'data:<mime>;base64,<payload>'`,
+      fieldName,
+    );
+  }
+  if (payload.length > MAX_INLINE_BASE64_LENGTH) {
+    throw payloadTooLarge(
+      `Field '${fieldName}' inline file exceeds ${MAX_INLINE_FILE_BYTES} bytes — use the staged-upload flow (createUpload + signed PUT) for larger files`,
+    );
+  }
+  // Accept standard and url-safe base64, padded or unpadded — MCP/LLM clients
+  // (the JSON-only callers this path targets) commonly emit unpadded and/or
+  // url-safe payloads. Fold `-_` → `+/`, drop trailing padding, then validate
+  // the alphabet. A `length % 4 === 1` remainder is unreachable for any valid
+  // base64 string, so it is the one length that signals a truncated payload.
+  const normalized = payload.replace(/-/g, "+").replace(/_/g, "/").replace(/=+$/, "");
+  if (!BASE64_RE.test(normalized) || normalized.length % 4 === 1) {
+    throw invalidRequest(`Field '${fieldName}' data: URI payload is not valid base64`, fieldName);
+  }
+  const bytes = new Uint8Array(Buffer.from(normalized, "base64"));
+  if (bytes.byteLength === 0) {
+    throw invalidRequest(`Field '${fieldName}' data: URI payload is empty`, fieldName);
+  }
+  if (bytes.byteLength > MAX_INLINE_FILE_BYTES) {
+    throw payloadTooLarge(
+      `Field '${fieldName}' inline file exceeds ${MAX_INLINE_FILE_BYTES} bytes — use the staged-upload flow (createUpload + signed PUT) for larger files`,
+    );
+  }
+  return { mime, ...(name ? { name } : {}), bytes };
+}
+
+/** Common extensions for text-shaped MIMEs `file-type` cannot sniff. */
+const MIME_EXT: Record<string, string> = {
+  "text/plain": "txt",
+  "text/markdown": "md",
+  "text/csv": "csv",
+  "text/html": "html",
+  "application/json": "json",
+  "application/xml": "xml",
+  "application/x-yaml": "yaml",
+  "application/yaml": "yaml",
+};
+
+/** Best-effort filename extension for a MIME type (fallback for unnamed inline files). */
+function extFromMime(mime: string): string {
+  const known = MIME_EXT[mime];
+  if (known) return known;
+  const subtype = mime.split("/")[1] ?? "";
+  return /^[a-z0-9]{1,8}$/.test(subtype) ? subtype : "bin";
+}
+
+/**
+ * Payload-stripped form of an inline data URI — what replaces the original
+ * value in the run input before it is persisted (run record, prompt
+ * templates). Keeps the run row small: the bytes live in the run workspace as
+ * a document, referenced by `name`.
+ */
+function strippedDataUri(mime: string, docName: string): string {
+  return `data:${mime};name=${encodeURIComponent(docName)};base64,`;
 }
 
 /**
@@ -201,42 +376,86 @@ export async function parseRequestInput(
   let uploadedFiles: FileReference[] = [];
 
   if (inputSchema) {
-    const refs = collectUploadRefs(inputSchema, input);
+    const refs = collectFileRefs(inputSchema, input);
     const orgId = c.get("orgId");
     const applicationId = c.get("applicationId");
 
-    // Resolve every URI to an upload id up front so a malformed URI fails before
-    // we touch storage.
-    const resolved = refs.map((ref) => {
-      const id = parseUploadUri(ref.uri);
-      if (!id) throw invalidRequest(`Invalid upload URI '${ref.uri}'`, ref.fieldName);
-      return { ref, id };
-    });
+    // Resolve every upload URI to an upload id up front so a malformed URI
+    // fails before we touch storage.
+    const resolved = refs
+      .filter((ref) => ref.kind === "upload")
+      .map((ref) => {
+        const id = parseUploadUri(ref.uri);
+        if (!id) throw invalidRequest(`Invalid upload URI '${ref.uri}'`, ref.fieldName);
+        return { ref, id };
+      });
+
+    // Decode inline data: URIs up front — the per-file cap is enforced inside
+    // parseDataUri (pre-decode on the base64 length, post-decode on the bytes),
+    // so a malformed or oversized inline file also fails before any streaming.
+    const inline = refs
+      .filter((ref) => ref.kind === "data")
+      .map((ref) => ({ ref, file: parseDataUri(ref.uri, ref.fieldName) }));
 
     // Document object names — set once uploads are streamed, used to roll the
     // run workspace back if anything below the stream fails. Empty until we
     // stream, so a pre-stream failure (bad URI, cap, peek) rolls back nothing.
     let docNames: string[] = [];
     try {
-      if (resolved.length > 0) {
+      if (resolved.length > 0 || inline.length > 0) {
         // Bound the total input-document payload on DECLARED sizes BEFORE
         // streaming any bytes. Documents are delivered to the agent out-of-band
         // (fetched + streamed to disk), so an oversized payload is a policy
         // violation rather than a crash. The per-file `bytes === size` check
         // inside consume keeps each actual size ≤ its declared size, so a
-        // declared total under the cap bounds the actual total too. Reject
-        // before launch so the caller gets a clean 413 instead of a mid-flight
-        // run failure.
-        const metas = await peekUploads(
-          resolved.map((r) => r.id),
-          { orgId, applicationId },
+        // declared total under the cap bounds the actual total too. Inline
+        // files count their already-decoded (exact) size. Reject before launch
+        // so the caller gets a clean 413 instead of a mid-flight run failure.
+        const metas: Map<string, UploadMeta> =
+          resolved.length > 0
+            ? await peekUploads(
+                resolved.map((r) => r.id),
+                { orgId, applicationId },
+              )
+            : new Map();
+        assertDocsWithinCap(
+          [...metas.values(), ...inline.map((i) => ({ size: i.file.bytes.byteLength }))],
+          getEnv().WORKSPACE_MAX_DOCS_BYTES,
         );
-        assertDocsWithinCap([...metas.values()], getEnv().WORKSPACE_MAX_DOCS_BYTES);
+
+        // Inline files: sniff the magic bytes once — used both for the
+        // declared-vs-actual MIME check (same policy as the staged-upload
+        // consume path) and as the extension source for unnamed files.
+        const inlineSniffed = await Promise.all(
+          inline.map(({ file }) => fileTypeFromBuffer(file.bytes)),
+        );
+        inline.forEach(({ ref, file }, i) => {
+          const sniffed = inlineSniffed[i]?.mime;
+          if (file.mime !== "application/octet-stream" && !isUnsniffableMime(file.mime)) {
+            if (!sniffed || sniffed !== file.mime) {
+              throw invalidRequest(
+                sniffed
+                  ? `Field '${ref.fieldName}' inline content type '${sniffed}' does not match declared '${file.mime}'`
+                  : `Field '${ref.fieldName}' inline content does not match declared mime '${file.mime}'`,
+                ref.fieldName,
+              );
+            }
+          }
+        });
 
         // The run-workspace document object name. Must match the path the
         // prompt-builder hands the agent (`./documents/<sanitizeStorageKey(name)>`)
-        // and the manifest entry the agent fetches by.
-        docNames = resolved.map(({ id }) => sanitizeStorageKey(metas.get(id)!.name));
+        // and the manifest entry the agent fetches by. Unnamed inline files
+        // are named after their field (array entries get an index suffix so
+        // sibling documents never collide).
+        const uploadDocNames = resolved.map(({ id }) => sanitizeStorageKey(metas.get(id)!.name));
+        const inlineDocNames = inline.map(({ ref, file }, i) => {
+          if (file.name) return sanitizeStorageKey(sanitizeFilename(file.name));
+          const ext = inlineSniffed[i]?.ext ?? extFromMime(file.mime);
+          const suffix = ref.index !== undefined ? `-${ref.index}` : "";
+          return sanitizeStorageKey(`${ref.fieldName}${suffix}.${ext}`);
+        });
+        docNames = [...uploadDocNames, ...inlineDocNames];
 
         // Stream each upload straight from the uploads bucket into the run
         // workspace — validating size + MIME on the fly — so the platform never
@@ -286,15 +505,45 @@ export async function parseRequestInput(
           },
         );
 
+        // Inline files are small (≤ MAX_INLINE_FILE_BYTES) and already decoded
+        // in memory — write them to the run workspace sequentially.
+        const inlined: FileReference[] = [];
+        for (let i = 0; i < inline.length; i++) {
+          const { ref, file } = inline[i]!;
+          const docName = inlineDocNames[i]!;
+          await streamRunDocument(runId, docName, new Blob([file.bytes]).stream());
+          inlined.push({
+            fieldName: ref.fieldName,
+            name: docName,
+            type: file.mime,
+            size: file.bytes.byteLength,
+          });
+        }
+
+        // Strip the inline payloads from the input now that the bytes live in
+        // the run workspace — the persisted run input (run record, prompt
+        // templates) keeps a compact `data:<mime>;name=<doc>;base64,` marker
+        // instead of megabytes of base64.
+        for (let i = 0; i < inline.length; i++) {
+          const { ref, file } = inline[i]!;
+          const marker = strippedDataUri(file.mime, inlineDocNames[i]!);
+          if (ref.index === undefined) {
+            input[ref.fieldName] = marker;
+          } else {
+            (input[ref.fieldName] as unknown[])[ref.index] = marker;
+          }
+        }
+
         // Write the documents manifest once every document has streamed — it
         // doubles as the agent's enumeration index and the run-workspace
         // deletion index on teardown.
+        const allFiles = [...consumed, ...inlined];
         await writeRunDocumentsManifest(
           runId,
-          consumed.map((d, i) => ({ name: docNames[i]!, size: d.size })),
+          allFiles.map((d, i) => ({ name: docNames[i]!, size: d.size })),
         );
 
-        uploadedFiles = consumed;
+        uploadedFiles = allFiles;
       }
 
       // Validate the JSON input shape — once, whether or not the run carries

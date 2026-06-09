@@ -32,7 +32,7 @@ import { logger } from "../lib/logger.ts";
 import { invalidRequest, notFound, conflict, gone, type ApiError } from "../lib/errors.ts";
 
 /** Strip charset / boundary / other parameters from a MIME string and lowercase it. */
-function normalizeMime(mime: string): string {
+export function normalizeMime(mime: string): string {
   return mime.split(";")[0]?.trim().toLowerCase() ?? "";
 }
 
@@ -212,8 +212,11 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
  * For these we skip the sniff check and trust the declared mime. Callers
  * that need strict binary validation should declare a concrete binary MIME
  * (application/pdf, image/*, etc.) which `file-type` can identify.
+ *
+ * Exported so the inline `data:` URI input path (input-parser) applies the
+ * exact same declared-vs-sniffed MIME policy as the staged-upload path.
  */
-function isUnsniffableMime(mime: string): boolean {
+export function isUnsniffableMime(mime: string): boolean {
   if (mime.startsWith("text/")) return true;
   // Structured text payloads with no reliable magic signature.
   const unsniffable = new Set([
