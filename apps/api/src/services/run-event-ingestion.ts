@@ -33,6 +33,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
 import { getEnv } from "@appstrate/env";
+import { runWithSpan, recordRunDuration, recordRunTerminal } from "../observability/index.ts";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
 import { updateRun, appendRunLog, computeRunCost } from "./state/runs.ts";
 import {
@@ -258,6 +259,17 @@ async function ingestInner(
  * from HttpSink end up applying once.
  */
 export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
+  // Finalize span — the single CAS-guarded convergence for every run
+  // termination path. Nests under the active request/run span when present.
+  // A true no-op when observability is disabled.
+  await runWithSpan(
+    "appstrate.run.finalize",
+    { attributes: { "appstrate.run.id": input.run.id } },
+    () => finalizeRunImpl(input),
+  );
+}
+
+async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   const { run, result } = input;
   const scope = { orgId: run.orgId, applicationId: run.applicationId };
 
@@ -424,6 +436,11 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   // Drop the per-run throttle state — the run is terminal, no further
   // metric events will arrive. Bounds the broadcaster's in-memory map.
   clearRunMetricBroadcastState(run.id);
+
+  // SLI emission — exactly-once on the CAS winner. Run-duration histogram +
+  // terminal-status counter (the failure-rate source). No-op when disabled.
+  recordRunDuration(resolvedDurationMs, { status });
+  recordRunTerminal({ status, errorCode: result.error?.code });
 
   // Drop the run's workspace provisioning archive (the AFPS bundle + input
   // docs the agent fetched at startup via GET /api/runs/:runId/workspace).

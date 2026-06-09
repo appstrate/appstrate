@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { Hono } from "hono";
+import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import {
   getRun,
@@ -33,6 +34,21 @@ import { getInlineRunLimits } from "../services/run-limits.ts";
 import { triggerInlineRun, type InlineRunBody } from "../services/inline-run.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
+import { getEnv } from "@appstrate/env";
+import { currentTraceparent } from "../observability/index.ts";
+
+/**
+ * Resolve the traceparent to seed the run-execution trace tree with, honoring
+ * the same anti-spoof gate as the SERVER span. When `OTEL_TRUST_INCOMING_TRACE`
+ * is on we adopt the caller-supplied inbound header; when off we never trust it
+ * — we fall back to the in-process SERVER span (via `currentTraceparent()`) so
+ * the run spans stay in THIS process's trace instead of the unverified inbound
+ * one. Returns `undefined` when observability is disabled or no span is active,
+ * which makes the run span a fresh root (a no-op when telemetry is off).
+ */
+export function runTraceparent(c: Context<AppEnv>): string | undefined {
+  return getEnv().OTEL_TRUST_INCOMING_TRACE ? c.get("traceparent") : currentTraceparent();
+}
 
 // --- Router ---
 
@@ -143,7 +159,7 @@ export function createRunsRouter() {
           applicationId: c.get("applicationId"),
           apiKeyId: c.get("apiKeyId") ?? undefined,
           connectionOverrides: connectionOverrides ?? null,
-          traceparent: c.get("traceparent"),
+          traceparent: runTraceparent(c),
           runnerName: runner.name,
           runnerKind: runner.kind,
         });
@@ -315,7 +331,7 @@ export function createRunsRouter() {
         actor,
         body,
         apiKeyId: c.get("apiKeyId") ?? undefined,
-        traceparent: c.get("traceparent"),
+        traceparent: runTraceparent(c),
       });
 
       c.status(202);

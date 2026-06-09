@@ -14,6 +14,7 @@ import { emitEvent } from "../../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "../inline-run.ts";
 import { synthesiseFinalize } from "../run-event-ingestion.ts";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
+import { runWithSpan } from "../../observability/index.ts";
 
 // --- Background run (decoupled from client) ---
 
@@ -46,10 +47,31 @@ export interface ExecuteAgentInBackgroundInput {
  * point). The only state this function owns is the in-process abort
  * controller used to propagate user-triggered cancellation to the
  * Docker workload.
+ *
+ * The body runs inside the `appstrate.run.execute` span — parented from the
+ * launching request's trace so the whole API→run→container path shares one
+ * trace_id. The container's own outbound events are linked via the forwarded
+ * traceparent (pi.ts). The span is a true no-op when observability is disabled.
  */
 export async function executeAgentInBackground(
   input: ExecuteAgentInBackgroundInput,
 ): Promise<void> {
+  await runWithSpan(
+    "appstrate.run.execute",
+    {
+      traceparent: input.context.traceparent,
+      attributes: {
+        "appstrate.run.id": input.runId,
+        "appstrate.org.id": input.orgId,
+        "appstrate.application.id": input.applicationId,
+        "appstrate.package.id": input.agent.id,
+      },
+    },
+    () => executeAgentInBackgroundImpl(input),
+  );
+}
+
+async function executeAgentInBackgroundImpl(input: ExecuteAgentInBackgroundInput): Promise<void> {
   const {
     runId,
     orgId,

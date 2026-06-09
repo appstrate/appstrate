@@ -122,6 +122,10 @@ export class LocalQueue<T> implements JobQueue<T> {
     this.drain();
   }
 
+  async count(): Promise<number> {
+    return this.pending.length + this.activeJobs;
+  }
+
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
     if (this.cronInterval) clearInterval(this.cronInterval);

@@ -8,6 +8,7 @@ Appstrate is an open-source platform for running autonomous AI agents in sandbox
 > - AFPS integration model → `docs/architecture/INTEGRATIONS_RUNTIME.md`
 > - Sidecar protocol → `docs/architecture/SIDECAR.md`
 > - Run cost tracking → `docs/architecture/RUN_COST.md`
+> - Observability (OpenTelemetry) → `docs/architecture/OBSERVABILITY.md`
 > - Casing policy → `docs/CASING_CONVENTIONS.md`
 > - Module authoring → `apps/api/src/modules/README.md`
 

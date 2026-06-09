@@ -110,6 +110,11 @@ const RunResultSchema = z
       .object({
         message: z.string(),
         stack: z.string().optional(),
+        // Stable, machine-readable failure code (e.g. `"timeout"`,
+        // `"manifest_invalid"`). Bounded length; clamped to a small allowlist
+        // before it becomes the `appstrate.run.terminal` `error_code` label, so
+        // a runner-controlled string can never explode metric cardinality.
+        code: z.string().max(64).optional(),
       })
       .optional(),
     status: z.enum(["success", "failed", "timeout", "cancelled"]).optional(),

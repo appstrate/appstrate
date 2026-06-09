@@ -36,6 +36,11 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 import { uploadRunBundle, deleteRunWorkspace } from "../run-workspace-storage.ts";
+import {
+  runWithSpan,
+  currentTraceparent,
+  recordContainerSpawn,
+} from "../../observability/index.ts";
 
 import { getEnv } from "@appstrate/env";
 import { isOAuthModelProvider, getModelProvider } from "../model-providers/registry.ts";
@@ -89,6 +94,20 @@ export interface RunPlatformContainerInput {
 export async function runPlatformContainer(
   input: RunPlatformContainerInput,
 ): Promise<PlatformContainerResult> {
+  // Container-lifecycle span — a child of the run-pipeline span (or root when
+  // disabled). `currentTraceparent()` (inside the impl) forwards THIS span as
+  // the parent of the agent container's outbound events, so the container nests
+  // under it. A true no-op when observability is disabled.
+  return runWithSpan(
+    "appstrate.run.container",
+    { attributes: { "appstrate.run.id": input.runId } },
+    () => runPlatformContainerImpl(input),
+  );
+}
+
+async function runPlatformContainerImpl(
+  input: RunPlatformContainerInput,
+): Promise<PlatformContainerResult> {
   const { runId, context, plan, sinkCredentials, signal } = input;
   const orch = input.orchestrator ?? getOrchestrator();
   const uploadBundle = input.uploadBundle ?? uploadRunBundle;
@@ -102,6 +121,15 @@ export async function runPlatformContainer(
   let sidecarHandle: WorkloadHandle | undefined;
   let agentHandle: WorkloadHandle | undefined;
 
+  // Hoisted out of the try so the spawn-failure metric path (catch) can read
+  // it. Assigned below once the run's sidecar policy is resolved.
+  let skipSidecar = false;
+
+  const spawnStart = Date.now();
+  // Guards against double-recording the container-spawn histogram: the success
+  // record fires before `waitForWorkload`, so a later execution failure (which
+  // is NOT a spawn failure) must not also emit a spawn data point.
+  let spawnRecorded = false;
   try {
     boundary = await orch.createIsolationBoundary(runId);
 
@@ -130,8 +158,7 @@ export async function runPlatformContainer(
     // is the ONLY path that routes agent egress through it — skipping the
     // sidecar would silently drop the proxy and leak the host IP.
     const hasIntegrations = (plan.integrations?.length ?? 0) > 0;
-    const skipSidecar =
-      !hasIntegrations && !!llmConfig.apiKey && !isOauthCredential && !plan.proxyUrl;
+    skipSidecar = !hasIntegrations && !!llmConfig.apiKey && !isOauthCredential && !plan.proxyUrl;
 
     let sidecarLlm: LlmProxyConfig | undefined;
     if (isOauthCredential) {
@@ -237,8 +264,11 @@ export async function runPlatformContainer(
       // container's outbound HTTP traffic (events, finalize, sidecar
       // proxy) becomes child spans of that trace. The runtime validates
       // the wire format and falls back to a fresh trace on malformed
-      // values, so no defensive parsing is needed here.
-      traceparent: context.traceparent,
+      // values, so no defensive parsing is needed here. When OTel is on,
+      // `currentTraceparent()` hands the container THIS container span as
+      // its parent; otherwise it returns undefined and we keep forwarding
+      // the original request trace unchanged.
+      traceparent: currentTraceparent() ?? context.traceparent,
     });
 
     await orch.ensureImages(
@@ -282,8 +312,23 @@ export async function runPlatformContainer(
     ]);
     sidecarHandle = sidecar;
     agentHandle = agent;
+    recordContainerSpawn(Date.now() - spawnStart, { sidecar: !skipSidecar });
+    spawnRecorded = true;
 
     return await waitForWorkload(orch, agent, sidecar, plan.timeout, signal);
+  } catch (err) {
+    // SOTA per OTel "Recording errors": the spawn histogram covers failures too,
+    // tagged with a bounded `error.type` naming the phase that failed (no
+    // boundary yet ⇒ isolation-boundary create, else workload spawn). Only when
+    // the success path has not already recorded — a `waitForWorkload` throw is an
+    // execution failure, not a spawn failure, and must not emit a spawn point.
+    if (!spawnRecorded) {
+      recordContainerSpawn(Date.now() - spawnStart, {
+        sidecar: !skipSidecar,
+        errorType: boundary ? "workload" : "boundary",
+      });
+    }
+    throw err;
   } finally {
     // Cleanup order: sidecar → agent → network boundary.
     // Removing the network boundary before its members are gone is an

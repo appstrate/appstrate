@@ -210,6 +210,17 @@ services:
       - RUN_HEARTBEAT_INTERVAL_SECONDS
       - RUN_STALL_THRESHOLD_SECONDS
       - RUN_WATCHDOG_INTERVAL_SECONDS
+      # ── Observability (OpenTelemetry, optional) ──────────────────
+      # Off by default; a complete no-op until enabled. Full guide:
+      # docs/architecture/OBSERVABILITY.md
+      - OTEL_ENABLED
+      - OTEL_EXPORTER_OTLP_ENDPOINT
+      - OTEL_SERVICE_NAME
+      - OTEL_TRUST_INCOMING_TRACE
+      # Read straight from process.env by the OTLP exporters (not in the
+      # Zod schema, hence no default to duplicate):
+      - OTEL_EXPORTER_OTLP_HEADERS
+      - OTEL_EXPORTER_OTLP_PROTOCOL
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     healthcheck:
