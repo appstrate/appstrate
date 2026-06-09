@@ -127,7 +127,7 @@ sub-second-aware boundaries via the OTel `advice.explicitBucketBoundaries` hint
 | --------------------------------- | ---------------- | ------------------------------------- | ------------------------------------------ |
 | `appstrate.run.duration`          | histogram (s)    | `status`                              | `finalizeRun` (CAS winner, exactly once)   |
 | `appstrate.run.terminal`          | counter          | `status`, `error_code`                | `finalizeRun` — failure-rate source        |
-| `appstrate.run.container_spawn`   | histogram (s)    | `sidecar`                             | `runPlatformContainer` provisioning time   |
+| `appstrate.run.container_spawn`   | histogram (s)    | `sidecar`, `error.type` (failure)     | `runPlatformContainer` provisioning time   |
 | `appstrate.scheduler.queue_depth` | observable gauge | —                                     | BullMQ / local queue `count()`             |
 | `appstrate.llm.latency`           | histogram (s)    | `api_shape`, `outcome`, `status_code` | platform LLM proxy (`routes/llm-proxy.ts`) |
 
@@ -135,6 +135,14 @@ The `error_code` label on `appstrate.run.terminal` is clamped to a bounded
 allowlist so a runner-controlled string can never explode metric cardinality:
 `timeout`, `manifest_invalid`, `provider_unauthorized` — any other code maps to
 `other`, and an absent code maps to `none`.
+
+`appstrate.run.container_spawn` covers both outcomes from one histogram (OTel
+[Recording errors](https://opentelemetry.io/docs/specs/semconv/general/recording-errors/)):
+a successful provision carries **no** `error.type` (so clean cold-start latency
+is filterable), while a failed one is tagged with the phase that failed —
+`boundary` (isolation-boundary create) or `workload` (sidecar/agent spawn),
+clamped to that allowlist (`other` otherwise). A `waitForWorkload` failure is an
+**execution** failure, not a spawn failure, and emits no spawn data point.
 
 ## Service-level indicators (SLIs)
 
