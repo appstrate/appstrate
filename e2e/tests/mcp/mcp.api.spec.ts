@@ -167,18 +167,28 @@ test.describe("MCP over an API key (full stack)", () => {
   });
 
   test("rejects an unauthenticated call with 401 + RFC 9728 challenge", async ({
-    request,
+    playwright,
     orgContext,
   }) => {
-    const res = await request.post(mcpUrlForOrg(orgContext.org.orgId), {
-      headers: { "Content-Type": "application/json", Accept: MCP_ACCEPT },
-      data: INIT,
-    });
-    expect(res.status()).toBe(401);
-    const challenge = res.headers()["www-authenticate"] ?? "";
-    expect(challenge).toContain("Bearer");
-    expect(challenge).toContain("resource_metadata=");
-    expect(challenge).toContain('scope="mcp:read mcp:invoke"');
+    // Use a dedicated cookie-less context: the shared `request` fixture's jar
+    // carries the session cookie minted during `orgContext` setup, and
+    // Playwright would auto-attach it here — making this call an authenticated
+    // session with no `X-Org-Id` (→ 400) instead of the tokenless call we mean
+    // to assert (→ 401). Same `anon` pattern as the DCR tests below.
+    const anon = await playwright.request.newContext();
+    try {
+      const res = await anon.post(mcpUrlForOrg(orgContext.org.orgId), {
+        headers: { "Content-Type": "application/json", Accept: MCP_ACCEPT },
+        data: INIT,
+      });
+      expect(res.status()).toBe(401);
+      const challenge = res.headers()["www-authenticate"] ?? "";
+      expect(challenge).toContain("Bearer");
+      expect(challenge).toContain("resource_metadata=");
+      expect(challenge).toContain('scope="mcp:read mcp:invoke"');
+    } finally {
+      await anon.dispose();
+    }
   });
 });
 

@@ -6,6 +6,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
 import { forbidden, invalidRequest, notFound } from "../lib/errors.ts";
+import { isInternalDispatch } from "../lib/internal-dispatch.ts";
 
 /**
  * Resolved application row exposed on the Hono context under `c.get("app")`.
@@ -71,10 +72,15 @@ async function defaultAppForOrg(orgId: string): Promise<AppContextRow | null> {
  * pin an application, so their header is still honoured as the primary
  * signal.
  *
- * The default-app fallback exists solely for header-less MCP callers: a per-org
- * MCP Bearer token pins the org but reaches an app-scoped route via an in-process
- * sub-dispatch with no `X-Application-Id`, so it resolves to the org's default
- * application. A header-sending caller (SPA, CLI) never reaches the fallback.
+ * The default-app fallback exists SOLELY for the in-process MCP sub-dispatch: a
+ * per-org MCP Bearer token pins the org but reaches an app-scoped route via an
+ * in-process re-entry carrying NO `X-Application-Id`, so it resolves to the
+ * org's default application. That re-entry is identified by the trusted
+ * internal-dispatch marker (an unguessable per-process secret, stripped from
+ * any client-supplied copy), so the fallback is gated on it. A direct caller —
+ * session/SPA or CLI — that omits `X-Application-Id` still gets a 400, NOT a
+ * silent fallback to the default app (which would weaken app isolation and is
+ * exactly the contract `org-isolation` asserts).
  * Validates that the application belongs to the current org. Sets
  * c.set("applicationId") + c.set("app") on success.
  */
@@ -100,17 +106,21 @@ export function requireAppContext() {
       return next();
     }
 
-    // Header-less caller — fall back to the org's default application.
-    const active = await defaultAppForOrg(orgId);
-    if (!active) {
-      throw invalidRequest(
-        "Application context required. Provide X-Application-Id header or use an API key.",
-        "X-Application-Id",
-      );
+    // Header-less caller. The org's default-application fallback is reserved
+    // for the trusted in-process MCP re-entry (marker present); every other
+    // header-less caller must supply an explicit application.
+    if (isInternalDispatch(c.req.raw.headers)) {
+      const active = await defaultAppForOrg(orgId);
+      if (active) {
+        c.set("applicationId", active.id);
+        c.set("app", active);
+        return next();
+      }
     }
 
-    c.set("applicationId", active.id);
-    c.set("app", active);
-    return next();
+    throw invalidRequest(
+      "Application context required. Provide X-Application-Id header or use an API key.",
+      "X-Application-Id",
+    );
   };
 }
