@@ -14,10 +14,12 @@ export const uploadsPaths = {
         "(2) PUT the raw file bytes (not multipart) to `url`, sending exactly the returned " +
         "`headers` (typically just `Content-Type`). No other headers are required — in " +
         "particular no checksum headers; the signed URL does not bind one. " +
-        "(3) Call `runAgent` with `uri` as the value of the file-typed input field. " +
-        "Uploads are single-use and consumed by the run: the actual byte count must equal the " +
-        "declared `size`, binary MIMEs are verified by magic-byte sniffing, and unused uploads " +
-        "expire after 15 minutes. " +
+        "(3) Call `runAgent` with `uri` as the value of the file-typed input field. The actual " +
+        "byte count must equal the declared `size`, and binary MIMEs are verified by magic-byte " +
+        "sniffing. Consumed uploads are NOT single-use: the bytes stay retained — and the `uri` " +
+        "re-consumable — for `UPLOAD_RETENTION_HOURS` (default 24 h) after the first consume, so " +
+        "the same input can be re-run (e.g. via `rerun_from` after cancelling) without " +
+        "re-uploading. Unconsumed uploads expire with the signed URL. " +
         "Small files (≤4 MiB decoded) can skip this flow entirely: inline the content directly " +
         "in the `runAgent` input as `data:<mime>;name=<filename>;base64,<payload>`. " +
         "Rate-limited to 20/min.",

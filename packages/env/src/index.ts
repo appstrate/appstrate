@@ -408,6 +408,16 @@ const envSchema = z
       .positive()
       .default(256 * 1024 * 1024),
 
+    // How long a consumed upload's bytes stay retained — and its upload://
+    // URI stays re-consumable — after its FIRST consume. Within this window
+    // the same staged upload can feed another run (re-trigger after cancel,
+    // `rerun_from`) without a byte-identical re-upload; once the window
+    // elapses the GC sweep drops the row and its storage object. Set to 0
+    // to restore single-use semantics (consumed uploads become GC-eligible
+    // immediately). Storage cost is bounded by the volume of uploads staged
+    // within the window.
+    UPLOAD_RETENTION_HOURS: z.coerce.number().min(0).max(720).default(24),
+
     // Redis (optional — falls back to in-memory adapters when absent)
     REDIS_URL: z.string().optional(),
 

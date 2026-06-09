@@ -13,8 +13,12 @@ import { applications } from "./applications.ts";
  *  1. Client POST /api/uploads { name, size, mime, applicationId } → creates row, returns { uploadId, url, method, headers }
  *  2. Client PUT url ← binary (to S3 directly, or to /api/uploads/_content for FS)
  *  3. Client POST /api/agents/:id/run { input: { file: "upload://upl_xxx" } }
- *  4. Run pipeline resolves upload:// → buffer, marks `consumedAt`.
- *  5. A GC worker later deletes rows where expiresAt < now() AND consumedAt IS NULL.
+ *  4. Run pipeline streams upload:// into the run workspace, marks `consumedAt`
+ *     (first consume only). The bytes stay retained and the URI re-consumable
+ *     for a reuse window (UPLOAD_RETENTION_HOURS) so a re-triggered run
+ *     (cancel → re-run, `rerun_from`) needs no re-upload.
+ *  5. A GC worker later deletes rows (+ storage objects) that are expired and
+ *     never consumed, or consumed longer than the reuse window ago.
  */
 export const uploads = pgTable(
   "uploads",
@@ -39,7 +43,11 @@ export const uploads = pgTable(
     size: integer("size").notNull(),
     /** When the pre-signed URL expires and the row becomes eligible for GC. */
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    /** Set when a run has consumed the file. NULL = still orphan. */
+    /**
+     * Stamped on the FIRST consume (never updated by re-consumes). NULL =
+     * still orphan. Anchors the post-consume reuse window: the upload stays
+     * re-consumable until `consumedAt + UPLOAD_RETENTION_HOURS`.
+     */
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

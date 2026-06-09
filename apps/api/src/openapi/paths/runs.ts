@@ -18,6 +18,8 @@ export const runsPaths = {
         "the payload is stripped from the persisted run input (the stored value keeps only a " +
         "`data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by " +
         "magic-byte sniffing in both forms. " +
+        "Send `rerun_from` instead of `input` to replay a previous run's input — same documents, " +
+        "new overrides — without re-uploading. " +
         "The effective model is resolved at run creation with precedence: request `modelId` > " +
         "agent model setting > org default model > system default. Without an explicit `modelId`, " +
         "a change to the org default model between triggers applies to the next run — send " +
@@ -51,6 +53,11 @@ export const runsPaths = {
                     "Run input values, validated against the agent's input schema. File fields " +
                     "take `upload://upl_xxx` references (from `createUpload`) or inline " +
                     "`data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded).",
+                },
+                rerun_from: {
+                  type: "string",
+                  description:
+                    "Run id whose `input` to replay verbatim on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). File fields keep their `upload://` URIs in the stored input, and consumed uploads stay re-consumable for `UPLOAD_RETENTION_HOURS` (default 24 h) after their first consume — so a cancelled or completed run can be re-triggered with the same documents and different overrides (`modelId`, `config`, `?version`, `connection_overrides`) in a single call, without re-uploading. Returns 410 `upload_expired` when a referenced upload's reuse window has elapsed (re-upload required).",
                 },
                 modelId: {
                   type: "string",
@@ -140,7 +147,27 @@ export const runsPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { $ref: "#/components/responses/IdempotencyInProgress" },
+        "409": {
+          description:
+            "Concurrent request with the same Idempotency-Key still in flight, or the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`)",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "410": {
+          description:
+            "A referenced upload has expired before consume, or its post-consume reuse window has elapsed (`upload_expired`) — stage a fresh upload and retry",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "412": {
           description: "Missing integration connection (`missing_integration_connection`)",
           content: {
