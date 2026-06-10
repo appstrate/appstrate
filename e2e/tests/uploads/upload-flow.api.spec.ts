@@ -79,7 +79,7 @@ test.describe("upload:// protocol", () => {
     const runRes = await apiClient.post(`/agents/${scope}/${agentName}/run`, {
       input: { doc: descriptor.uri },
     });
-    expect(runRes.status()).toBe(200);
+    expect(runRes.status()).toBe(201);
   });
 
   test("consume rejects a file whose magic bytes don't match contentMediaType", async ({
@@ -142,7 +142,7 @@ test.describe("upload:// protocol", () => {
     const first = await apiClient.post(`/agents/${scope}/${agentName}/run`, {
       input: { doc: descriptor.uri },
     });
-    expect(first.status()).toBe(200);
+    expect(first.status()).toBe(201);
 
     const second = await apiClient.post(`/agents/${scope}/${agentName}/run`, {
       input: { doc: descriptor.uri },
