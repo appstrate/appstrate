@@ -796,7 +796,7 @@
         },
         "responses": {
           "200": {
-            "description": "Agent proxy updated",
+            "description": "Agent proxy updated — returns the affected proxy setting",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -808,12 +808,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
+                  "allOf": [
+                    {
+                      "type": "object",
+                      "required": ["proxyId", "resolved"],
+                      "properties": {
+                        "proxyId": {
+                          "type": ["string", "null"]
+                        },
+                        "resolved": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "success": {
+                          "type": "boolean"
+                        }
+                      }
                     }
-                  }
+                  ]
                 }
               }
             }
@@ -986,7 +1002,7 @@
         "operationId": "deleteAgentPersistence",
         "tags": ["Agents"],
         "summary": "Bulk-delete persistence rows for an agent",
-        "description": "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
+        "description": "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204 (issue #657).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1042,12 +1058,15 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["memories_deleted", "checkpoint_deleted"],
                   "properties": {
                     "memories_deleted": {
-                      "type": "integer"
+                      "type": "integer",
+                      "description": "Number of memory rows deleted"
                     },
                     "checkpoint_deleted": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "Whether the checkpoint slot was deleted"
                     }
                   }
                 }
@@ -1095,7 +1114,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Memory deleted",
             "headers": {
               "Request-Id": {
@@ -1103,18 +1122,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -1159,7 +1166,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Pinned slot deleted",
             "headers": {
               "Request-Id": {
@@ -1167,18 +1174,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -1284,7 +1279,7 @@
         },
         "responses": {
           "200": {
-            "description": "Agent model updated",
+            "description": "Agent model updated — returns the affected model setting",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -1296,12 +1291,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
+                  "allOf": [
+                    {
+                      "type": "object",
+                      "required": ["modelId"],
+                      "properties": {
+                        "modelId": {
+                          "type": ["string", "null"]
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "success": {
+                          "type": "boolean"
+                        }
+                      }
                     }
-                  }
+                  ]
                 }
               }
             }
@@ -1513,7 +1521,7 @@
         "operationId": "runAgent",
         "tags": ["Runs"],
         "summary": "Execute an agent",
-        "description": "Start an agent run (fire-and-forget). Returns the run ID. Rate-limited to 20/min. Supports JSON body or multipart/form-data with file uploads.",
+        "description": "Start an agent run (fire-and-forget). Returns the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the agent's input schema) accept either of two forms: (1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by PUTting them to the signed URL (see `createUpload` for the step-by-step recipe); or (2) an inline RFC 2397 data URI `data:<mime>;name=<filename>;base64,<payload>` with up to 4 MiB of decoded content (`name` is optional) — the single-call path for JSON-only clients such as MCP. Inline bytes are written to the run workspace as a document and the payload is stripped from the persisted run input (the stored value keeps only a `data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by magic-byte sniffing in both forms. Send `rerun_from` instead of `input` to replay a previous run's input — same documents, new overrides — without re-uploading. The effective model is resolved at run creation with precedence: request `modelId` > agent model setting > org default model > system default. Without an explicit `modelId`, a change to the org default model between triggers applies to the next run — send `modelId` to pin a specific model per run.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1543,7 +1551,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Version query to execute (exact version, dist-tag, or semver range). When provided, the run uses the versioned manifest and prompt instead of the live agent."
+            "description": "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version — 404 `no_published_version` if nothing is published), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Default when omitted: the latest published version when one exists, the draft otherwise** — programmatic callers (API, MCP, CLI, CI) run what was published unless they explicitly ask for the draft. The editor UI passes `version=draft` for test-runs. The run object's `version_ref` states which definition executed. Ignored for system agents."
           }
         ],
         "requestBody": {
@@ -1554,11 +1562,15 @@
                 "properties": {
                   "input": {
                     "type": "object",
-                    "description": "Run input values"
+                    "description": "Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`) or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded)."
+                  },
+                  "rerun_from": {
+                    "type": "string",
+                    "description": "Run id whose `input` to replay verbatim on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). File fields keep their `upload://` URIs in the stored input, and consumed uploads stay re-consumable for `UPLOAD_RETENTION_HOURS` (default 24 h) after their first consume — so a cancelled or completed run can be re-triggered with the same documents and different overrides (`modelId`, `config`, `?version`, `connection_overrides`) in a single call, without re-uploading. Returns 410 `upload_expired` when a referenced upload's reuse window has elapsed (re-upload required)."
                   },
                   "modelId": {
                     "type": "string",
-                    "description": "Model ID override for this run. Takes priority over agent and org defaults."
+                    "description": "Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `modelId` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses."
                   },
                   "proxyId": {
                     "type": "string",
@@ -1583,22 +1595,6 @@
                 },
                 "config": {
                   "dryRun": true
-                }
-              }
-            },
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "input": {
-                    "type": "string",
-                    "description": "JSON-encoded input values"
-                  },
-                  "file": {
-                    "type": "string",
-                    "format": "binary",
-                    "description": "File upload"
-                  }
                 }
               }
             }
@@ -1627,15 +1623,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "runId": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Run"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "runId": {
+                          "type": "string",
+                          "description": "Legacy alias of the run's `id`, kept for backward compatibility. Prefer `id`."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The created run resource — same shape as `GET /runs/{id}`. Includes the resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed. `runId` is a legacy alias of `id`."
                 },
                 "example": {
-                  "runId": "run_cm1abc123def456"
+                  "id": "run_cm1abc123def456",
+                  "runId": "run_cm1abc123def456",
+                  "status": "pending",
+                  "model_label": "Claude Sonnet 4",
+                  "model_source": "org"
                 }
               }
             }
@@ -1667,7 +1676,29 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/IdempotencyInProgress"
+            "description": "Concurrent request with the same Idempotency-Key still in flight, or the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`)",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "A referenced upload has expired before consume, or its post-consume reuse window has elapsed (`upload_expired`) — stage a fresh upload and retry",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "412": {
             "description": "Missing integration connection (`missing_integration_connection`)",
@@ -1777,7 +1808,7 @@
         "operationId": "deleteAgentRuns",
         "tags": ["Runs"],
         "summary": "Delete all runs for an agent",
-        "description": "Delete all completed runs for an agent.",
+        "description": "Delete all completed runs for an agent. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1807,9 +1838,11 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["deleted_count"],
                   "properties": {
-                    "deleted": {
-                      "type": "integer"
+                    "deleted_count": {
+                      "type": "integer",
+                      "description": "Number of runs deleted"
                     }
                   }
                 }
@@ -2248,8 +2281,8 @@
       "get": {
         "operationId": "getRun",
         "tags": ["Runs"],
-        "summary": "Get run status/result",
-        "description": "Get run details including status, result, input, and duration.",
+        "summary": "Get run status/result (optionally long-poll until terminal)",
+        "description": "Get run details including status, result, input, and duration.\n\nPass `?wait=<seconds>` (or `?wait=true` for the maximum) to long-poll: the server holds the request until the run reaches a terminal status (`success`, `failed`, `timeout`, `cancelled`) or the wait elapses, then returns the current run object exactly as the plain call does. The wait is capped at **55 seconds** — deliberately below the 60 s idle timeouts that ship as defaults in common reverse proxies (nginx `proxy_read_timeout`, ALB idle timeout) so the long poll always completes with a real response instead of a proxy 504; values above the cap are clamped. A response with a non-terminal `status` simply means the wait timed out — issue the same call again to keep waiting. One long poll replaces N sleep+getRun round-trips, which is the recommended completion-wait pattern for MCP clients (the SSE stream is not reachable through the MCP server).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2264,6 +2297,25 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "wait",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "boolean",
+                  "description": "`true` waits the maximum 55 s; `false` disables."
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Wait budget in seconds. Values above 55 are clamped to 55."
+                }
+              ]
+            },
+            "description": "Hold the request until the run reaches a terminal status or this many seconds elapse (capped at 55, see operation description), then return the run object. `0`/`false`/absent = return immediately (default). Negative, fractional, or non-numeric values return 400."
           }
         ],
         "responses": {
@@ -2293,8 +2345,11 @@
                     "maxEmails": 50
                   },
                   "result": {
-                    "processed": 42,
-                    "labeled": 38
+                    "output": {
+                      "processed": 42,
+                      "labeled": 38
+                    },
+                    "text": "## Inbox triage\nProcessed 42 emails, labeled 38."
                   },
                   "checkpoint": {
                     "lastProcessedId": "msg_99f2a"
@@ -2311,6 +2366,7 @@
                   "scheduleId": "sched_cm1abc456def789",
                   "version_label": "1.2.0",
                   "version_dirty": false,
+                  "version_ref": "1.2.0",
                   "proxy_label": null,
                   "model_label": "Claude Sonnet 4",
                   "model_source": "system",
@@ -2336,7 +2392,7 @@
         "operationId": "getRunLogs",
         "tags": ["Runs"],
         "summary": "Get run logs",
-        "description": "Get persisted log entries for a run. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI's polling tail to bound per-poll payload growth. `id` is a monotonic BIGSERIAL; an invalid cursor falls back to the full list rather than 400.",
+        "description": "Get persisted log entries for a run. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI's polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). When `limit` is set and more entries follow, an RFC 5988 `Link: <…?since=<lastId>>; rel=\"next\"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the unfiltered default rather than 400 so a stale cursor never breaks a polling tail. Without query parameters the full chronological history is returned (backward-compatible default). Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2361,7 +2417,28 @@
               "format": "int64",
               "minimum": 0
             },
-            "description": "Return only log entries with `id > since`. Used by the CLI's `appstrate run` remote polling loop to fetch incremental tails without re-shipping the full history each poll."
+            "description": "Return only log entries with `id > since`. Used by the CLI's `appstrate run` remote polling loop to fetch incremental tails without re-shipping the full history each poll, and as the cursor in the `Link; rel=\"next\"` pagination header."
+          },
+          {
+            "name": "level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["debug", "info", "warn", "error"]
+            },
+            "description": "Minimum severity to include (`debug < info < warn < error`). `level=info` returns info, warn and error entries. Defaults to `debug` (everything)."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "description": "Maximum number of entries to return. When more entries follow, the response carries a `Link; rel=\"next\"` header whose URL re-uses `since` as the cursor. Absent means no cap (full history)."
           }
         ],
         "responses": {
@@ -2373,6 +2450,9 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "Link": {
+                "$ref": "#/components/headers/Link"
               }
             },
             "content": {
@@ -2920,6 +3000,10 @@
                     "type": "number",
                     "minimum": 0,
                     "description": "Authoritative terminal run cost written to the `runs` row."
+                  },
+                  "report": {
+                    "type": "string",
+                    "description": "Aggregated markdown report — every `report.appended` event's content joined with `\\n` in call order. Persisted (capped at 256 KiB) as `runs.result.text` so getRun exposes the run's deliverable without log scraping."
                   }
                 }
               }
@@ -3621,7 +3705,7 @@
                   },
                   "version_override": {
                     "type": "string",
-                    "description": "Pin the agent version every run triggered by this schedule. Literal label or dist-tag."
+                    "description": "Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Default when omitted: the latest published version when one exists, the draft otherwise. The pinned definition (manifest + prompt) is resolved at each fire."
                   },
                   "connection_overrides": {
                     "type": "object",
@@ -3823,7 +3907,8 @@
                     "type": ["string", "null"]
                   },
                   "version_override": {
-                    "type": ["string", "null"]
+                    "type": ["string", "null"],
+                    "description": "Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default: latest published version when one exists, draft otherwise)."
                   },
                   "connection_overrides": {
                     "type": ["object", "null"],
@@ -3899,7 +3984,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Schedule deleted",
             "headers": {
               "Request-Id": {
@@ -3907,18 +3992,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -4024,13 +4097,40 @@
         "operationId": "listIntegrations",
         "tags": ["Integrations"],
         "summary": "List available integrations",
-        "description": "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current application.",
+        "description": "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current application. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
             "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma-separated allowlist of fields to return per item (`id` is always included). Allowed: id, manifest, orgId, source, active, block_user_connections. An unknown field is a 400.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4402,7 +4502,7 @@
         },
         "responses": {
           "201": {
-            "description": "Activated",
+            "description": "Activated — returns the full integration detail",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -4414,17 +4514,182 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": ["active", "activated_at"],
-                  "properties": {
-                    "active": {
-                      "type": "boolean"
+                  "allOf": [
+                    {
+                      "type": "object",
+                      "required": ["manifest", "auths", "tool_catalog", "allow_undeclared_tools"],
+                      "properties": {
+                        "manifest": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "auths": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "auth_key",
+                              "type",
+                              "required",
+                              "scopes",
+                              "resource",
+                              "connections",
+                              "has_oauth_client",
+                              "client_auto_provisioned"
+                            ],
+                            "properties": {
+                              "auth_key": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string",
+                                "enum": ["oauth2", "api_key", "basic", "mtls", "custom"],
+                                "description": "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`."
+                              },
+                              "required": {
+                                "type": "boolean"
+                              },
+                              "scopes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "resource": {
+                                "type": ["string", "null"],
+                                "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC."
+                              },
+                              "connections": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "id",
+                                    "packageId",
+                                    "auth_key",
+                                    "account_id",
+                                    "identity_claims",
+                                    "scopes_granted",
+                                    "needs_reconnection",
+                                    "expiresAt",
+                                    "owner_type",
+                                    "owner_id",
+                                    "createdAt",
+                                    "updatedAt"
+                                  ],
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "packageId": {
+                                      "type": "string"
+                                    },
+                                    "auth_key": {
+                                      "type": "string"
+                                    },
+                                    "account_id": {
+                                      "type": "string"
+                                    },
+                                    "identity_claims": {
+                                      "type": ["object", "null"],
+                                      "additionalProperties": true
+                                    },
+                                    "scopes_granted": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "needs_reconnection": {
+                                      "type": "boolean"
+                                    },
+                                    "expiresAt": {
+                                      "type": ["string", "null"],
+                                      "format": "date-time"
+                                    },
+                                    "owner_type": {
+                                      "type": "string",
+                                      "enum": ["user", "end_user"]
+                                    },
+                                    "owner_id": {
+                                      "type": "string"
+                                    },
+                                    "label": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "shared_with_org": {
+                                      "type": "boolean"
+                                    },
+                                    "createdAt": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "updatedAt": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    }
+                                  }
+                                }
+                              },
+                              "has_oauth_client": {
+                                "type": "boolean"
+                              },
+                              "client_auto_provisioned": {
+                                "type": "boolean",
+                                "description": "True for an oauth2 auth on a remote MCP integration (`source.kind: \"remote\"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required."
+                              }
+                            }
+                          }
+                        },
+                        "tool_catalog": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": ["name"],
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "policy": {
+                                "type": "object",
+                                "properties": {
+                                  "required_scopes": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "allow_undeclared_tools": {
+                          "type": "boolean"
+                        }
+                      }
                     },
-                    "activated_at": {
-                      "type": "string",
-                      "format": "date-time"
+                    {
+                      "type": "object",
+                      "required": ["active", "activated_at"],
+                      "properties": {
+                        "active": {
+                          "type": "boolean"
+                        },
+                        "activated_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
                     }
-                  }
+                  ]
                 }
               }
             }
@@ -4470,7 +4735,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Deactivated",
+            "description": "Deactivated — returns the full integration detail",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -4482,13 +4747,178 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": ["active"],
-                  "properties": {
-                    "active": {
-                      "type": "boolean"
+                  "allOf": [
+                    {
+                      "type": "object",
+                      "required": ["manifest", "auths", "tool_catalog", "allow_undeclared_tools"],
+                      "properties": {
+                        "manifest": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "auths": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "auth_key",
+                              "type",
+                              "required",
+                              "scopes",
+                              "resource",
+                              "connections",
+                              "has_oauth_client",
+                              "client_auto_provisioned"
+                            ],
+                            "properties": {
+                              "auth_key": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string",
+                                "enum": ["oauth2", "api_key", "basic", "mtls", "custom"],
+                                "description": "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`."
+                              },
+                              "required": {
+                                "type": "boolean"
+                              },
+                              "scopes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "resource": {
+                                "type": ["string", "null"],
+                                "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC."
+                              },
+                              "connections": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "id",
+                                    "packageId",
+                                    "auth_key",
+                                    "account_id",
+                                    "identity_claims",
+                                    "scopes_granted",
+                                    "needs_reconnection",
+                                    "expiresAt",
+                                    "owner_type",
+                                    "owner_id",
+                                    "createdAt",
+                                    "updatedAt"
+                                  ],
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "packageId": {
+                                      "type": "string"
+                                    },
+                                    "auth_key": {
+                                      "type": "string"
+                                    },
+                                    "account_id": {
+                                      "type": "string"
+                                    },
+                                    "identity_claims": {
+                                      "type": ["object", "null"],
+                                      "additionalProperties": true
+                                    },
+                                    "scopes_granted": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "needs_reconnection": {
+                                      "type": "boolean"
+                                    },
+                                    "expiresAt": {
+                                      "type": ["string", "null"],
+                                      "format": "date-time"
+                                    },
+                                    "owner_type": {
+                                      "type": "string",
+                                      "enum": ["user", "end_user"]
+                                    },
+                                    "owner_id": {
+                                      "type": "string"
+                                    },
+                                    "label": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "shared_with_org": {
+                                      "type": "boolean"
+                                    },
+                                    "createdAt": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "updatedAt": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    }
+                                  }
+                                }
+                              },
+                              "has_oauth_client": {
+                                "type": "boolean"
+                              },
+                              "client_auto_provisioned": {
+                                "type": "boolean",
+                                "description": "True for an oauth2 auth on a remote MCP integration (`source.kind: \"remote\"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required."
+                              }
+                            }
+                          }
+                        },
+                        "tool_catalog": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": ["name"],
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "policy": {
+                                "type": "object",
+                                "properties": {
+                                  "required_scopes": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "allow_undeclared_tools": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": ["active"],
+                      "properties": {
+                        "active": {
+                          "type": "boolean"
+                        }
+                      }
                     }
-                  }
+                  ]
                 }
               }
             }
@@ -4759,27 +5189,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Deleted",
+          "204": {
+            "description": "OAuth client deleted",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["deleted"],
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -5777,27 +6194,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Deleted",
+          "204": {
+            "description": "Pin removed (idempotent — 204 whether the pin existed or not)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["deleted"],
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -6023,27 +6427,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Deleted",
+          "204": {
+            "description": "Default removed (idempotent — 204 whether a default existed or not)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["deleted"],
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -6207,7 +6598,7 @@
         },
         "responses": {
           "201": {
-            "description": "Model created",
+            "description": "Model created — the full created model resource (same shape as `GET`/`list`). `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -6219,15 +6610,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "example": {
-                  "id": "cm5mno345"
+                  "$ref": "#/components/schemas/OrgModel"
                 }
               }
             }
@@ -6274,7 +6657,7 @@
         },
         "responses": {
           "200": {
-            "description": "Default model updated",
+            "description": "Default model updated. Returns the new effective default model resource (same shape as `GET`/`list`) plus a legacy `success` flag. When the default is cleared (`modelId: null`) and no default remains in effect, only `{ success: true }` is returned.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -6286,12 +6669,20 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OrgModel"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "success": {
+                          "type": "boolean",
+                          "description": "Legacy acknowledgement flag, always `true`. Retained for backward compatibility; prefer reading the model fields."
+                        }
+                      }
                     }
-                  }
+                  ]
                 }
               }
             }
@@ -6722,7 +7113,7 @@
         },
         "responses": {
           "200": {
-            "description": "Model updated",
+            "description": "Model updated — the full updated model resource (same shape as `GET`/`list`). `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -6734,12 +7125,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/OrgModel"
                 }
               }
             }
@@ -6846,10 +7232,37 @@
         "operationId": "listModelProviderRegistry",
         "tags": ["Model Provider Credentials"],
         "summary": "List the in-code model provider registry",
-        "description": "Returns the catalog of LLM providers Appstrate knows how to talk to. The UI uses this to render the provider picker without hard-coding the catalog client-side.",
+        "description": "Returns the catalog of LLM providers Appstrate knows how to talk to. The UI uses this to render the provider picker without hard-coding the catalog client-side. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=providerId,authMode` to skip the heavy per-provider `models` catalog (the bulk of the payload) when you only need to know which providers exist.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, featured, models. An unknown field is a 400.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7124,7 +7537,7 @@
         },
         "responses": {
           "201": {
-            "description": "Model provider credential created",
+            "description": "Model provider credential created — the full created credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back. `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -7136,15 +7549,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "example": {
-                  "id": "cm7stu902"
+                  "$ref": "#/components/schemas/ModelProviderCredential"
                 }
               }
             }
@@ -7298,7 +7703,7 @@
         },
         "responses": {
           "200": {
-            "description": "Model provider credential updated",
+            "description": "Model provider credential updated — the full updated credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back. `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -7310,12 +7715,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/ModelProviderCredential"
                 }
               }
             }
@@ -7858,15 +8258,32 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OrgProxy"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "The created proxy's id. Same value as the resource's `id`; retained as a top-level field for backward compatibility."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The created proxy resource — same shape as the `GET /api/proxies` list items — so no follow-up GET is needed."
                 },
                 "example": {
-                  "id": "cm6pqr679"
+                  "id": "cm6pqr679",
+                  "label": "US Residential Proxy",
+                  "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                  "source": "custom",
+                  "enabled": true,
+                  "isDefault": false,
+                  "created_by": "usr_k7x9m2p4q1",
+                  "createdAt": "2026-01-10T08:00:00Z",
+                  "updatedAt": "2026-01-10T08:00:00Z"
                 }
               }
             }
@@ -7929,10 +8346,37 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["success", "proxy"],
                   "properties": {
                     "success": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "Always true on success. Retained for backward compatibility."
+                    },
+                    "proxy": {
+                      "description": "The affected default proxy resource — same shape as the `GET /api/proxies` list items — or null when the default was unset (proxyId null).",
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/OrgProxy"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "proxy": {
+                    "id": "cm6pqr679",
+                    "label": "US Residential Proxy",
+                    "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                    "source": "custom",
+                    "enabled": true,
+                    "isDefault": true,
+                    "created_by": "usr_k7x9m2p4q1",
+                    "createdAt": "2026-01-10T08:00:00Z",
+                    "updatedAt": "2026-01-10T08:00:00Z"
                   }
                 }
               }
@@ -8006,12 +8450,32 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OrgProxy"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "The updated proxy's id. Same value as the resource's `id`; retained as a top-level field for backward compatibility."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The updated proxy resource — same shape as the `GET /api/proxies` list items — so no follow-up GET is needed."
+                },
+                "example": {
+                  "id": "cm6pqr679",
+                  "label": "US Residential Proxy",
+                  "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                  "source": "custom",
+                  "enabled": true,
+                  "isDefault": false,
+                  "created_by": "usr_k7x9m2p4q1",
+                  "createdAt": "2026-01-10T08:00:00Z",
+                  "updatedAt": "2026-01-12T09:00:00Z"
                 }
               }
             }
@@ -8712,7 +9176,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Organization deleted",
             "headers": {
               "Request-Id": {
@@ -8720,18 +9184,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -8894,7 +9346,7 @@
         },
         "responses": {
           "200": {
-            "description": "Role updated",
+            "description": "Updated member — same shape as the members list in GET /api/orgs/{orgId}",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8906,16 +9358,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "userId": {
-                      "type": "string"
-                    },
-                    "role": {
-                      "type": "string",
-                      "enum": ["viewer", "member", "admin"]
-                    }
-                  }
+                  "$ref": "#/components/schemas/OrgMember"
+                },
+                "example": {
+                  "userId": "usr_def456",
+                  "displayName": "Bob",
+                  "email": "bob@acme.com",
+                  "role": "admin",
+                  "joinedAt": "2026-01-12T10:00:00Z"
                 }
               }
             }
@@ -8955,7 +9405,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Member removed",
             "headers": {
               "Request-Id": {
@@ -8963,18 +9413,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -9033,7 +9471,7 @@
         },
         "responses": {
           "200": {
-            "description": "Invitation role updated",
+            "description": "Updated invitation — same shape as the invitations list in GET /api/orgs/{orgId}",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -9045,16 +9483,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "role": {
-                      "type": "string",
-                      "enum": ["viewer", "member", "admin"]
-                    }
-                  }
+                  "$ref": "#/components/schemas/OrgInvitationInfo"
+                },
+                "example": {
+                  "id": "inv_abc123",
+                  "email": "carol@acme.com",
+                  "role": "admin",
+                  "token": "tok_xyz789",
+                  "expiresAt": "2026-02-01T00:00:00Z",
+                  "createdAt": "2026-01-25T00:00:00Z"
                 }
               }
             }
@@ -9094,7 +9531,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Invitation cancelled",
             "headers": {
               "Request-Id": {
@@ -9102,18 +9539,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -10631,7 +11056,7 @@
         "operationId": "getMcpServerBundle",
         "tags": ["Internal"],
         "summary": "Fetch the AFPS bundle bytes for a referenced mcp-server package",
-        "description": "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`).",
+        "description": "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read; absent, the latest non-yanked version is served (back-compat).",
         "security": [
           {
             "bearerExecToken": []
@@ -10643,6 +11068,15 @@
           },
           {
             "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "description": "Concrete published version to serve (the version the spawn resolver pinned from `source.server.version`). When omitted, the latest non-yanked version is served.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -10699,7 +11133,7 @@
           }
         },
         "responses": {
-          "200": {
+          "204": {
             "description": "Profile updated",
             "headers": {
               "Request-Id": {
@@ -10707,21 +11141,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                },
-                "example": {
-                  "ok": true
-                }
               }
             }
           },
@@ -10931,27 +11350,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Mark result",
+          "204": {
+            "description": "Notification marked as read (idempotent — 204 even if it was already read)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": ["ok"]
-                }
               }
             }
           },
@@ -10975,7 +11381,7 @@
         "operationId": "markAllNotificationsRead",
         "tags": ["Notifications"],
         "summary": "Mark all notifications as read",
-        "description": "Marks all unread notifications as read for the current user.",
+        "description": "Marks all unread notifications as read for the current user. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -11000,12 +11406,12 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "updated": {
+                    "updated_count": {
                       "type": "integer",
                       "description": "Number of notifications marked as read"
                     }
                   },
-                  "required": ["updated"]
+                  "required": ["updated_count"]
                 }
               }
             }
@@ -11571,23 +11977,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OrgPackageItemDetail"
                     },
-                    "lock_version": {
-                      "type": "integer"
-                    },
-                    "message": {
-                      "type": "string"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "packageId": {
+                          "type": "string",
+                          "description": "Legacy alias of the created package's `id`, kept for backward compatibility. Prefer `id`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "Optimistic-lock token to send with the next update."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Human-readable operation message."
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Non-blocking validation warnings (present only when any)."
+                        }
+                      }
                     }
-                  }
-                },
-                "example": {
-                  "packageId": "@acme/summarize",
-                  "lock_version": 1,
-                  "message": "Skill created"
+                  ],
+                  "description": "The created package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, `message`, optional `warnings`). No follow-up GET needed."
                 }
               }
             }
@@ -11767,18 +12186,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/PackageVersionDetail"
                     },
-                    "version": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Human-readable operation message."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The created version resource — same shape as the GET version detail (manifest, integrity, dist_tags, …) — plus a human-readable `message`. `id` (version row id) and `version` are part of the resource. No follow-up GET needed."
                 }
               }
             }
@@ -11838,18 +12260,29 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/PackageVersionDetail"
                     },
-                    "restored_version": {
-                      "type": "string"
-                    },
-                    "lock_version": {
-                      "type": "integer"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Human-readable operation message."
+                        },
+                        "restored_version": {
+                          "type": "string",
+                          "description": "Legacy alias of the restored version's `version`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "The package's NEW optimistic-lock token after the draft was overwritten — not part of the version resource; read it back before the next draft edit."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The restored version resource — same shape as the GET version detail — plus the operation-result envelope (`message`, `restored_version` legacy alias of `version`, and the package's new `lock_version`)."
                 }
               }
             }
@@ -12122,15 +12555,32 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OrgPackageItemDetail"
                     },
-                    "lock_version": {
-                      "type": "integer"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "packageId": {
+                          "type": "string",
+                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "New optimistic-lock token after this update — read it back before the next edit."
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Non-blocking validation warnings (present only when any)."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
                 }
               }
             }
@@ -12300,18 +12750,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/AgentDetail"
                     },
-                    "lock_version": {
-                      "type": "integer"
-                    },
-                    "message": {
-                      "type": "string"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "packageId": {
+                          "type": "string",
+                          "description": "Legacy alias of the created package's `id`, kept for backward compatibility. Prefer `id`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "Optimistic-lock token to send with the next update."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Human-readable operation message."
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Non-blocking validation warnings (present only when any)."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The created package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, `message`, optional `warnings`). No follow-up GET needed."
                 }
               }
             }
@@ -12431,15 +12899,32 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/AgentDetail"
                     },
-                    "lock_version": {
-                      "type": "integer"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "packageId": {
+                          "type": "string",
+                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "New optimistic-lock token after this update — read it back before the next edit."
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Non-blocking validation warnings (present only when any)."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
                 }
               }
             }
@@ -12675,18 +13160,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/PackageVersionDetail"
                     },
-                    "version": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Human-readable operation message."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The created version resource — same shape as the GET version detail (manifest, integrity, dist_tags, …) — plus a human-readable `message`. `id` (version row id) and `version` are part of the resource. No follow-up GET needed."
                 }
               }
             }
@@ -12755,18 +13243,29 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/PackageVersionDetail"
                     },
-                    "restored_version": {
-                      "type": "string"
-                    },
-                    "lock_version": {
-                      "type": "integer"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Human-readable operation message."
+                        },
+                        "restored_version": {
+                          "type": "string",
+                          "description": "Legacy alias of the restored version's `version`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "The package's NEW optimistic-lock token after the draft was overwritten — not part of the version resource; read it back before the next draft edit."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The restored version resource — same shape as the GET version detail — plus the operation-result envelope (`message`, `restored_version` legacy alias of `version`, and the package's new `lock_version`)."
                 }
               }
             }
@@ -12993,22 +13492,37 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": ["packageId", "type", "forked_from"],
-                  "properties": {
-                    "packageId": {
-                      "type": "string",
-                      "description": "New package ID under org scope"
+                  "allOf": [
+                    {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/AgentDetail"
+                        },
+                        {
+                          "$ref": "#/components/schemas/OrgPackageItemDetail"
+                        }
+                      ]
                     },
-                    "type": {
-                      "type": "string",
-                      "enum": ["agent", "skill", "mcp-server", "integration"]
-                    },
-                    "forked_from": {
-                      "type": "string",
-                      "description": "Source package ID"
+                    {
+                      "type": "object",
+                      "required": ["packageId", "type", "forked_from"],
+                      "properties": {
+                        "packageId": {
+                          "type": "string",
+                          "description": "New package ID under org scope. Legacy alias of the forked resource's `id`."
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": ["agent", "skill", "mcp-server", "integration"]
+                        },
+                        "forked_from": {
+                          "type": "string",
+                          "description": "Source package ID"
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The forked package resource — same shape as the new package's GET detail (`AgentDetail` when `type` is `agent`, otherwise `OrgPackageItemDetail`) — merged with the fork operation envelope (`packageId` legacy alias of `id`, `type`, `forked_from`). No follow-up GET needed."
                 }
               }
             }
@@ -13147,15 +13661,32 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OrgPackageItemDetail"
                     },
-                    "lock_version": {
-                      "type": "integer"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "packageId": {
+                          "type": "string",
+                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "New optimistic-lock token after this update — read it back before the next edit."
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Non-blocking validation warnings (present only when any)."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
                 }
               }
             }
@@ -13336,15 +13867,32 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/AgentDetail"
                     },
-                    "lock_version": {
-                      "type": "integer"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "packageId": {
+                          "type": "string",
+                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "New optimistic-lock token after this update — read it back before the next edit."
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Non-blocking validation warnings (present only when any)."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
                 }
               }
             }
@@ -13530,18 +14078,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OrgPackageItemDetail"
                     },
-                    "lock_version": {
-                      "type": "integer"
-                    },
-                    "message": {
-                      "type": "string"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "packageId": {
+                          "type": "string",
+                          "description": "Legacy alias of the created package's `id`, kept for backward compatibility. Prefer `id`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "Optimistic-lock token to send with the next update."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Human-readable operation message."
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Non-blocking validation warnings (present only when any)."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The created package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, `message`, optional `warnings`). No follow-up GET needed."
                 }
               }
             }
@@ -13721,18 +14287,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/PackageVersionDetail"
                     },
-                    "version": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Human-readable operation message."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The created version resource — same shape as the GET version detail (manifest, integrity, dist_tags, …) — plus a human-readable `message`. `id` (version row id) and `version` are part of the resource. No follow-up GET needed."
                 }
               }
             }
@@ -13792,18 +14361,29 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/PackageVersionDetail"
                     },
-                    "restored_version": {
-                      "type": "string"
-                    },
-                    "lock_version": {
-                      "type": "integer"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Human-readable operation message."
+                        },
+                        "restored_version": {
+                          "type": "string",
+                          "description": "Legacy alias of the restored version's `version`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "The package's NEW optimistic-lock token after the draft was overwritten — not part of the version resource; read it back before the next draft edit."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The restored version resource — same shape as the GET version detail — plus the operation-result envelope (`message`, `restored_version` legacy alias of `version`, and the package's new `lock_version`)."
                 }
               }
             }
@@ -14077,15 +14657,32 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OrgPackageItemDetail"
                     },
-                    "lock_version": {
-                      "type": "integer"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "packageId": {
+                          "type": "string",
+                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "New optimistic-lock token after this update — read it back before the next edit."
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Non-blocking validation warnings (present only when any)."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
                 }
               }
             }
@@ -14265,15 +14862,32 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OrgPackageItemDetail"
                     },
-                    "lock_version": {
-                      "type": "integer"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "packageId": {
+                          "type": "string",
+                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "New optimistic-lock token after this update — read it back before the next edit."
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Non-blocking validation warnings (present only when any)."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
                 }
               }
             }
@@ -14478,18 +15092,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OrgPackageItemDetail"
                     },
-                    "lock_version": {
-                      "type": "integer"
-                    },
-                    "message": {
-                      "type": "string"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "packageId": {
+                          "type": "string",
+                          "description": "Legacy alias of the created package's `id`, kept for backward compatibility. Prefer `id`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "Optimistic-lock token to send with the next update."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Human-readable operation message."
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Non-blocking validation warnings (present only when any)."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The created package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, `message`, optional `warnings`). No follow-up GET needed."
                 }
               }
             }
@@ -14669,18 +15301,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/PackageVersionDetail"
                     },
-                    "version": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Human-readable operation message."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The created version resource — same shape as the GET version detail (manifest, integrity, dist_tags, …) — plus a human-readable `message`. `id` (version row id) and `version` are part of the resource. No follow-up GET needed."
                 }
               }
             }
@@ -14740,18 +15375,29 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/PackageVersionDetail"
                     },
-                    "restored_version": {
-                      "type": "string"
-                    },
-                    "lock_version": {
-                      "type": "integer"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Human-readable operation message."
+                        },
+                        "restored_version": {
+                          "type": "string",
+                          "description": "Legacy alias of the restored version's `version`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "The package's NEW optimistic-lock token after the draft was overwritten — not part of the version resource; read it back before the next draft edit."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The restored version resource — same shape as the GET version detail — plus the operation-result envelope (`message`, `restored_version` legacy alias of `version`, and the package's new `lock_version`)."
                 }
               }
             }
@@ -15025,15 +15671,32 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OrgPackageItemDetail"
                     },
-                    "lock_version": {
-                      "type": "integer"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "packageId": {
+                          "type": "string",
+                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "New optimistic-lock token after this update — read it back before the next edit."
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Non-blocking validation warnings (present only when any)."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
                 }
               }
             }
@@ -15213,15 +15876,32 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OrgPackageItemDetail"
                     },
-                    "lock_version": {
-                      "type": "integer"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "packageId": {
+                          "type": "string",
+                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
+                        },
+                        "lock_version": {
+                          "type": "integer",
+                          "description": "New optimistic-lock token after this update — read it back before the next edit."
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Non-blocking validation warnings (present only when any)."
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
                 }
               }
             }
@@ -16536,7 +17216,7 @@
         "operationId": "createUpload",
         "tags": ["Uploads"],
         "summary": "Create a direct-upload descriptor",
-        "description": "Reserve an upload slot and return a signed URL the client PUTs the binary to. The returned `uri` (e.g. `upload://upl_xxx`) is embedded in agent `input` fields; the run pipeline resolves and consumes it atomically. Rate-limited to 20/min.",
+        "description": "Reserve an upload slot and return a signed URL the client PUTs the binary to. Full upload→run recipe: (1) POST /api/uploads with the file's `name`, exact `size` in bytes, and `mime` — the response carries a `uri` (e.g. `upload://upl_xxx`), a signed `url`, and `headers`. (2) PUT the raw file bytes (not multipart) to `url`, sending exactly the returned `headers` (typically just `Content-Type`). No other headers are required — in particular no checksum headers; the signed URL does not bind one. (3) Call `runAgent` with `uri` as the value of the file-typed input field. The actual byte count must equal the declared `size`, and binary MIMEs are verified by magic-byte sniffing. Consumed uploads are NOT single-use: the bytes stay retained — and the `uri` re-consumable — for `UPLOAD_RETENTION_HOURS` (default 24 h) after the first consume, so the same input can be re-run (e.g. via `rerun_from` after cancelling) without re-uploading. Unconsumed uploads expire with the signed URL. Small files (≤4 MiB decoded) can skip this flow entirely: inline the content directly in the `runAgent` input as `data:<mime>;name=<filename>;base64,<payload>`. Rate-limited to 20/min.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16606,12 +17286,12 @@
                     },
                     "uri": {
                       "type": "string",
-                      "description": "Reference to embed in agent input (e.g. `upload://upl_xxx`)."
+                      "description": "Reference to embed in the agent's file-typed input field on `runAgent` (e.g. `upload://upl_xxx`)."
                     },
                     "url": {
                       "type": "string",
                       "format": "uri",
-                      "description": "Pre-signed PUT URL. Points at S3/MinIO directly, or at the platform FS sink."
+                      "description": "Pre-signed PUT URL. Points at S3/MinIO directly, or at the platform FS sink. PUT the raw binary body to it before the upload expires."
                     },
                     "method": {
                       "type": "string",
@@ -16622,7 +17302,7 @@
                       "additionalProperties": {
                         "type": "string"
                       },
-                      "description": "Headers the client MUST forward on the PUT request."
+                      "description": "The complete set of headers the client MUST send verbatim on the PUT request (typically just `Content-Type`). Nothing else is required — no checksum headers."
                     },
                     "expiresAt": {
                       "type": "string",
@@ -18289,6 +18969,13 @@
         "schema": {
           "type": "integer"
         }
+      },
+      "Link": {
+        "description": "RFC 5988 pagination link(s), e.g. `<https://…?since=42&limit=100>; rel=\"next\"`. Present only when another page follows — absence means the listing is complete.",
+        "schema": {
+          "type": "string",
+          "example": "<https://example.com/api/runs/run_x/logs?since=42&limit=100>; rel=\"next\""
+        }
       }
     },
     "schemas": {
@@ -18639,7 +19326,7 @@
           },
           "scope": {
             "type": ["string", "null"],
-            "description": "Scope from manifest name (e.g. @myorg from @myorg/name)"
+            "description": "Scope from manifest name, including the leading `@` (e.g. `@myorg` from `@myorg/name`). Directly usable as the `{scope}` path parameter of package/agent operations."
           },
           "version": {
             "type": ["string", "null"],
@@ -18697,7 +19384,7 @@
           },
           "scope": {
             "type": ["string", "null"],
-            "description": "Scope from manifest name"
+            "description": "Scope from manifest name, including the leading `@` (e.g. `@myorg`). Directly usable as the `{scope}` path parameter of package/agent operations."
           },
           "version": {
             "type": ["string", "null"],
@@ -18925,9 +19612,68 @@
           }
         }
       },
+      "PackageVersionDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Version row id"
+          },
+          "version": {
+            "type": "string",
+            "description": "Semver version string (e.g. 1.0.0)"
+          },
+          "manifest": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Full version manifest (AFPS)"
+          },
+          "content": {
+            "type": ["string", "null"],
+            "description": "Primary content file extracted from the version ZIP"
+          },
+          "source_code": {
+            "type": ["string", "null"],
+            "description": "Secondary source file content (e.g. .ts), when present"
+          },
+          "yanked": {
+            "type": "boolean",
+            "description": "Whether this version has been yanked"
+          },
+          "yanked_reason": {
+            "type": ["string", "null"]
+          },
+          "integrity": {
+            "type": "string",
+            "description": "SRI integrity hash (sha256-...)"
+          },
+          "artifact_size": {
+            "type": "integer",
+            "description": "Artifact ZIP size in bytes"
+          },
+          "createdAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "dist_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "Run": {
         "type": "object",
-        "required": ["id", "orgId", "applicationId", "status", "version_dirty", "started_at"],
+        "required": [
+          "id",
+          "orgId",
+          "applicationId",
+          "status",
+          "version_dirty",
+          "version_ref",
+          "started_at"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -18951,7 +19697,21 @@
             "type": "object"
           },
           "result": {
-            "type": "object"
+            "type": ["object", "null"],
+            "description": "What the run produced — the stable API contract for the run's deliverable, set when the run reaches a terminal status. `null` while the run is in flight, and on terminal runs that emitted neither structured output nor a report. Persisted even on failed runs (a run that reported and then failed keeps its partial deliverable).",
+            "properties": {
+              "output": {
+                "description": "Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped."
+              },
+              "text": {
+                "type": "string",
+                "description": "Markdown report emitted via the agent's `report` runtime tool. Multiple report calls are concatenated in call order, joined with newlines. Capped at 256 KiB of UTF-8 — see `text_truncated`. The full untruncated report remains available as individual run-log entries (type='result', event='report')."
+              },
+              "text_truncated": {
+                "type": "boolean",
+                "description": "Present and `true` when `text` exceeded the 256 KiB cap and was truncated at a UTF-8 character boundary. Absent otherwise."
+              }
+            }
           },
           "checkpoint": {
             "type": "object"
@@ -18999,11 +19759,15 @@
           },
           "version_label": {
             "type": ["string", "null"],
-            "description": "Version label at run time (e.g. '1.0.0')"
+            "description": "Version label at run time (e.g. '1.0.0'). For draft runs this is the latest published version the draft sits on top of — read `version_ref` to know which definition actually executed."
           },
           "version_dirty": {
             "type": "boolean",
-            "description": "Whether the draft had unpublished changes at run time"
+            "description": "Whether the draft had unpublished changes at run time. Kept for backward compatibility — prefer `version_ref`, which states unambiguously what executed."
+          },
+          "version_ref": {
+            "type": "string",
+            "description": "Unambiguous reference to the agent definition the run executed: 'draft' when the mutable draft ran with unpublished changes (or the agent has no published version), or the concrete semver (e.g. '2.1.0') when the run executed that published definition (or a draft identical to it)."
           },
           "proxy_label": {
             "type": ["string", "null"],
@@ -19015,7 +19779,7 @@
           },
           "model_source": {
             "type": ["string", "null"],
-            "description": "Model source: 'system' (platform-provided) or 'org' (user-configured)"
+            "description": "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override."
           },
           "cost": {
             "type": ["number", "null"],
@@ -19074,7 +19838,7 @@
           },
           "agent_scope": {
             "type": ["string", "null"],
-            "description": "Denormalized agent scope at run creation. Survives rename, delete, or shadow compaction — the global run view falls back to this when the source package is gone."
+            "description": "Denormalized agent scope at run creation, including the leading `@` (e.g. `@myorg`). Survives rename, delete, or shadow compaction — the global run view falls back to this when the source package is gone."
           },
           "agent_name": {
             "type": ["string", "null"],
