@@ -90,7 +90,7 @@ jobs:
       # token and upload normally.
       - name: Upload unit coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           files: coverage/lcov.info
           flags: unit
@@ -134,7 +134,7 @@ jobs:
 
       - name: Upload integration coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           # Bun's lcov reporter writes coverage/lcov.info (the previous
           # report.lcov path never existed, so this upload was silently a no-op
