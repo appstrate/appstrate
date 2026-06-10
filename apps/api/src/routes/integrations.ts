@@ -60,6 +60,7 @@ import {
   type IntegrationOAuthClient,
   listIntegrationConnections,
   readIntegrationAuth,
+  serializeIntegrationConnection,
   upsertIntegrationOAuthClient,
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
@@ -330,18 +331,17 @@ export function createIntegrationsRouter() {
       const scope = getAppScope(c);
       const actor = getActor(c);
       await assertIsIntegration(scope, packageId);
-      const row = await installPackage(scope, packageId);
+      await installPackage(scope, packageId);
       await recordAuditFromContext(c, {
         action: "integration.activated",
         resourceType: "integration",
         resourceId: packageId,
       });
-      // Return the full integration DTO — same serializer as
-      // GET /integrations/:packageId — so callers see the resulting state in
-      // one round-trip and activate/deactivate are symmetric (issue #646). The
-      // legacy `active` / `activated_at` fields are kept additively.
+      // 201 + the bare integration resource — same serializer as
+      // GET /integrations/:packageId (issue #657). Activation state is part
+      // of the resource (`active`), not an operation scrap.
       const detail = await getIntegrationAuthStatuses(scope, packageId, actor);
-      return c.json({ ...detail, active: true, activated_at: row.installedAt.toISOString() }, 201);
+      return c.json(detail, 201);
     },
   );
 
@@ -351,7 +351,6 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const scope = getAppScope(c);
-      const actor = getActor(c);
       await assertIsIntegration(scope, packageId);
       await uninstallPackage(scope, packageId);
       await recordAuditFromContext(c, {
@@ -359,12 +358,13 @@ export function createIntegrationsRouter() {
         resourceType: "integration",
         resourceId: packageId,
       });
-      // Return the full integration DTO — same serializer as
-      // GET /integrations/:packageId — symmetric with activate (issue #646).
-      // Deactivation is non-destructive: the manifest + surviving connections
-      // still serialize. The legacy `active` flag is kept additively.
-      const detail = await getIntegrationAuthStatuses(scope, packageId, actor);
-      return c.json({ ...detail, active: false });
+      // 204: deactivation DELETEs the `application_packages` row (it is not a
+      // flag flip), so under the strict mutation convention (issue #657) the
+      // response is empty. The integration detail itself stays GET-able —
+      // connections, OAuth clients, pins and org defaults survive (see the
+      // section comment above) and `GET /integrations/:packageId` serves the
+      // resource with `active: false`.
+      return c.body(null, 204);
     },
   );
 
@@ -596,6 +596,7 @@ export function createIntegrationsRouter() {
       assertOrgAdmin(c);
       const packageId = c.req.param("packageId")!;
       const scope = getAppScope(c);
+      const actor = getActor(c);
       await assertIsIntegration(scope, packageId);
       const body = parseBody(updateSettingsSchema, await c.req.json());
       const result = await setBlockUserConnections(scope, packageId, body.block_user_connections);
@@ -605,7 +606,11 @@ export function createIntegrationsRouter() {
         resourceId: packageId,
         after: { blocked: result.blocked },
       });
-      return c.json(result);
+      // 200 + the bare integration resource — same serializer as
+      // GET /integrations/:packageId; the toggled gate is part of the
+      // resource (`block_user_connections`), not an operation scrap (#657).
+      const detail = await getIntegrationAuthStatuses(scope, packageId, actor);
+      return c.json(detail);
     },
   );
 
@@ -795,12 +800,9 @@ export function createIntegrationsRouter() {
           ...(body.shared_with_org !== undefined ? { sharedWithOrg: body.shared_with_org } : {}),
         },
       });
-      return c.json({
-        id: updated.id,
-        label: updated.label,
-        shared_with_org: updated.sharedWithOrg,
-        updatedAt: updated.updatedAt.toISOString(),
-      });
+      // 200 + the bare connection resource — same serializer as the
+      // connections list / connect flows (#657), not a hand-built stub.
+      return c.json(serializeIntegrationConnection(updated));
     },
   );
 

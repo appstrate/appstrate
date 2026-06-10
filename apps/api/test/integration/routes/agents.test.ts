@@ -243,9 +243,12 @@ describe("Agents API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.config.key).toBe("value");
-      expect(body.validation.valid).toBe(true);
+      // 200 + the bare persisted configuration document (#657) — no
+      // `{config, validation}` envelope; validation failures are 400s.
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.key).toBe("value");
+      expect("config" in body).toBe(false);
+      expect("validation" in body).toBe(false);
     });
   });
 
@@ -642,7 +645,7 @@ describe("Agents API", () => {
   });
 
   describe("PUT /api/agents/:scope/:name/proxy", () => {
-    it("returns the affected proxy setting (same shape as GET), not a bare stub", async () => {
+    it("returns the bare proxy-setting resource (same shape as GET)", async () => {
       await seedInstalledAgent({
         id: "@myorg/proxy-agent",
         orgId: ctx.orgId,
@@ -657,14 +660,13 @@ describe("Agents API", () => {
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        success: boolean;
         proxyId: string | null;
         resolved: boolean;
-      };
-      // Resource reflecting the new proxy + legacy `success` compat (issue #646).
+      } & Record<string, unknown>;
+      // Bare proxy-setting resource — no `success` scrap (#657).
       expect(body.proxyId).toBe("none");
       expect(body.resolved).toBe(false);
-      expect(body.success).toBe(true);
+      expect("success" in body).toBe(false);
 
       // The returned shape matches what GET …/proxy serves.
       const get = await app.request("/api/agents/@myorg/proxy-agent/proxy", {
@@ -677,7 +679,7 @@ describe("Agents API", () => {
   });
 
   describe("PUT /api/agents/:scope/:name/model", () => {
-    it("returns the affected model setting (same shape as GET), not a bare stub", async () => {
+    it("returns the bare model-setting resource (same shape as GET)", async () => {
       await seedInstalledAgent({
         id: "@myorg/model-agent",
         orgId: ctx.orgId,
@@ -691,10 +693,10 @@ describe("Agents API", () => {
         body: JSON.stringify({ modelId: "model-123" }),
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { success: boolean; modelId: string | null };
-      // Resource reflecting the new model + legacy `success` compat (issue #646).
+      const body = (await res.json()) as { modelId: string | null } & Record<string, unknown>;
+      // Bare model-setting resource — no `success` scrap (#657).
       expect(body.modelId).toBe("model-123");
-      expect(body.success).toBe(true);
+      expect("success" in body).toBe(false);
 
       // Reverting to org default returns the null resource, not a stub.
       const revert = await app.request("/api/agents/@myorg/model-agent/model", {

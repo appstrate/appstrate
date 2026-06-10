@@ -119,8 +119,19 @@ describe("block_user_connections workflow", () => {
       body: JSON.stringify({ block_user_connections: true }),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { blocked: boolean };
-    expect(body.blocked).toBe(true);
+    // 200 + the bare integration detail resource (#657): the toggled gate is
+    // the resource's `block_user_connections` field, not a `{blocked}` scrap.
+    const body = (await res.json()) as {
+      block_user_connections: boolean;
+      active: boolean;
+      manifest: { name: string };
+      auths: unknown[];
+    } & Record<string, unknown>;
+    expect(body.block_user_connections).toBe(true);
+    expect(body.active).toBe(true);
+    expect("blocked" in body).toBe(false);
+    expect(body.manifest.name).toBe("@myorg/gmail");
+    expect(Array.isArray(body.auths)).toBe(true);
 
     // Persisted on the application_packages row.
     const [row] = await db
@@ -247,8 +258,25 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
       body: JSON.stringify({ label: "My Gmail" }),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { label: string };
+    // 200 + the bare connection resource (#657) — same serializer as the
+    // connections list, not the previous hand-built {id,label,…} stub.
+    const body = (await res.json()) as {
+      id: string;
+      packageId: string;
+      auth_key: string;
+      label: string;
+      shared_with_org: boolean;
+      owner_type: string;
+      createdAt: string;
+      updatedAt: string;
+    };
     expect(body.label).toBe("My Gmail");
+    expect(body.id).toBe(connId);
+    expect(body.packageId).toBe("@myorg/gmail");
+    expect(body.auth_key).toBe("google");
+    expect(body.owner_type).toBe("user");
+    expect(typeof body.createdAt).toBe("string");
+    expect(typeof body.updatedAt).toBe("string");
 
     const [row] = await db
       .select({ label: integrationConnections.label })

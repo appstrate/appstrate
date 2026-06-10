@@ -162,10 +162,12 @@ export function useActivateIntegration() {
   const applicationId = useCurrentApplicationId();
   return useMutation({
     mutationFn: (packageId: string) =>
-      api<{ active: boolean; activated_at: string }>(
-        `/integrations/${encodePackageIdPath(packageId)}/activate`,
-        { method: "POST", body: "{}" },
-      ),
+      // 201 + the bare integration detail resource (#657) — activation
+      // state is the resource's `active` field.
+      api<IntegrationDetail>(`/integrations/${encodePackageIdPath(packageId)}/activate`, {
+        method: "POST",
+        body: "{}",
+      }),
     onSuccess: () => {
       toast.success(t("integrations.activate.success"));
       qc.invalidateQueries({ queryKey: KEY(orgId, applicationId) });
@@ -181,7 +183,9 @@ export function useDeactivateIntegration() {
   const applicationId = useCurrentApplicationId();
   return useMutation({
     mutationFn: (packageId: string) =>
-      api<{ active: boolean }>(`/integrations/${encodePackageIdPath(packageId)}/deactivate`, {
+      // DELETE → 204 empty (#657): deactivation removes the
+      // application_packages row; the detail stays GET-able.
+      api<void>(`/integrations/${encodePackageIdPath(packageId)}/deactivate`, {
         method: "DELETE",
       }),
     onSuccess: () => {
@@ -382,7 +386,9 @@ export function useUpdateIntegrationSettings() {
       packageId: string;
       blockUserConnections: boolean;
     }) =>
-      api<{ blocked: boolean }>(`/integrations/${encodePackageIdPath(packageId)}/settings`, {
+      // 200 + the bare integration detail resource (#657) — the toggled
+      // gate is the resource's `block_user_connections` field.
+      api<IntegrationDetail>(`/integrations/${encodePackageIdPath(packageId)}/settings`, {
         method: "PATCH",
         body: JSON.stringify({ block_user_connections: blockUserConnections }),
         headers: { "Content-Type": "application/json" },
@@ -531,7 +537,9 @@ export function useUpdateIntegrationConnection() {
       label?: string | null;
       sharedWithOrg?: boolean;
     }) =>
-      api<{ id: string; label: string | null; shared_with_org: boolean; updatedAt: string }>(
+      // 200 + the bare connection resource (#657) — same serializer as the
+      // connections list.
+      api<IntegrationConnection>(
         ...buildUpdateConnectionRequest({ packageId, connectionId, label, sharedWithOrg }),
       ),
     onSuccess: (_data, vars) => {

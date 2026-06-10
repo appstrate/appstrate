@@ -108,20 +108,17 @@ export const agentsPaths = {
       },
       responses: {
         "200": {
-          description: "Configuration saved",
+          description: "Configuration saved — returns the bare persisted configuration document",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  config: { type: "object" },
-                  validation: { type: "object", properties: { valid: { type: "boolean" } } },
-                },
-              },
+              // Bare persisted configuration document (request body merged
+              // with schema defaults) — no `validation` echo (#657):
+              // validation failures are 400s.
+              schema: { type: "object", additionalProperties: true },
             },
           },
         },
@@ -199,28 +196,22 @@ export const agentsPaths = {
       },
       responses: {
         "200": {
-          description: "Agent proxy updated — returns the affected proxy setting",
+          description: "Agent proxy updated — returns the bare proxy-setting resource",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              // Returns the affected proxy-setting resource (same shape as
-              // GET …/proxy), composed with the legacy `success` flag kept
-              // additively for backward compatibility (issue #646).
+              // Bare proxy-setting resource — same shape as GET …/proxy,
+              // no `success` scrap (#657).
               schema: {
-                allOf: [
-                  {
-                    type: "object",
-                    required: ["proxyId", "resolved"],
-                    properties: {
-                      proxyId: { type: ["string", "null"] },
-                      resolved: { type: "boolean" },
-                    },
-                  },
-                  { type: "object", properties: { success: { type: "boolean" } } },
-                ],
+                type: "object",
+                required: ["proxyId", "resolved"],
+                properties: {
+                  proxyId: { type: ["string", "null"] },
+                  resolved: { type: "boolean" },
+                },
               },
             },
           },
@@ -516,27 +507,21 @@ export const agentsPaths = {
       },
       responses: {
         "200": {
-          description: "Agent model updated — returns the affected model setting",
+          description: "Agent model updated — returns the bare model-setting resource",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              // Returns the affected model-setting resource (same shape as
-              // GET …/model), composed with the legacy `success` flag kept
-              // additively for backward compatibility (issue #646).
+              // Bare model-setting resource — same shape as GET …/model,
+              // no `success` scrap (#657).
               schema: {
-                allOf: [
-                  {
-                    type: "object",
-                    required: ["modelId"],
-                    properties: {
-                      modelId: { type: ["string", "null"] },
-                    },
-                  },
-                  { type: "object", properties: { success: { type: "boolean" } } },
-                ],
+                type: "object",
+                required: ["modelId"],
+                properties: {
+                  modelId: { type: ["string", "null"] },
+                },
               },
             },
           },
