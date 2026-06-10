@@ -44,6 +44,7 @@ import {
   isUploadUri,
   parseUploadUri,
   isUnsniffableMime,
+  sniffedMimeMatchesDeclared,
   normalizeMime,
   sanitizeFilename,
   type UploadMeta,
@@ -518,7 +519,7 @@ export async function parseRequestInput(
         inline.forEach(({ ref, file }, i) => {
           const sniffed = inlineSniffed[i]?.mime;
           if (file.mime !== "application/octet-stream" && !isUnsniffableMime(file.mime)) {
-            if (!sniffed || sniffed !== file.mime) {
+            if (!sniffedMimeMatchesDeclared(file.mime, sniffed)) {
               throw invalidRequest(
                 sniffed
                   ? `Field '${ref.fieldName}' inline content type '${sniffed}' does not match declared '${file.mime}'`

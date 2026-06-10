@@ -266,6 +266,58 @@ export function isUnsniffableMime(mime: string): boolean {
 }
 
 /**
+ * MIMEs whose on-disk format is a ZIP container. `file-type` samples only the
+ * head of the stream (~4100 bytes); when the identifying entry of an OOXML/ODF
+ * archive ([Content_Types].xml, mimetype) sits beyond the sample window — the
+ * normal layout for openpyxl/LibreOffice/Google-exported files — it falls back
+ * to plain `application/zip`. Treating that fallback as a mismatch would
+ * reject legitimate office documents, so declared-vs-sniffed comparison uses
+ * Marcel/Tika-style subtype refinement: a declared member of this family is
+ * compatible with a sniffed `application/zip` (and vice versa). A declaration
+ * outside the family (application/pdf, image/png, …) still requires an exact
+ * sniff match.
+ */
+const ZIP_CONTAINER_MIMES = new Set([
+  "application/zip",
+  // OOXML
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // xlsx
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.template", // xltx
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // docx
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.template", // dotx
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation", // pptx
+  "application/vnd.openxmlformats-officedocument.presentationml.slideshow", // ppsx
+  "application/vnd.openxmlformats-officedocument.presentationml.template", // potx
+  // OOXML macro-enabled
+  "application/vnd.ms-excel.sheet.macroenabled.12", // xlsm
+  "application/vnd.ms-excel.template.macroenabled.12", // xltm
+  "application/vnd.ms-word.document.macroenabled.12", // docm
+  "application/vnd.ms-word.template.macroenabled.12", // dotm
+  "application/vnd.ms-powerpoint.presentation.macroenabled.12", // pptm
+  "application/vnd.ms-powerpoint.slideshow.macroenabled.12", // ppsm
+  // OpenDocument
+  "application/vnd.oasis.opendocument.text", // odt
+  "application/vnd.oasis.opendocument.spreadsheet", // ods
+  "application/vnd.oasis.opendocument.presentation", // odp
+  "application/vnd.oasis.opendocument.graphics", // odg
+  // Other ZIP-based formats
+  "application/epub+zip",
+  "application/java-archive", // jar
+]);
+
+/**
+ * Declared-vs-sniffed MIME compatibility for the magic-byte check. Exact match
+ * always passes; within the ZIP-container family the generic and the specific
+ * type refine each other (declared xlsx / sniffed application/zip, declared
+ * application/zip / sniffed xlsx). Exported so the inline `data:` URI input
+ * path (input-parser) applies the exact same policy as the staged-upload path.
+ */
+export function sniffedMimeMatchesDeclared(declared: string, sniffed: string | undefined): boolean {
+  if (!sniffed) return false;
+  if (sniffed === declared) return true;
+  return ZIP_CONTAINER_MIMES.has(declared) && ZIP_CONTAINER_MIMES.has(sniffed);
+}
+
+/**
  * Read declared metadata for a set of staged uploads — without claiming or
  * downloading them. Verifies each exists, belongs to the caller's tenant, and
  * has not expired (same error shapes as consume). Used to enforce the per-run
@@ -423,7 +475,7 @@ export async function consumeUploadStream(
     //    the declared MIME for these — manifests that need binary-grade
     //    validation must declare a sniffable MIME.
     if (row.mime && row.mime !== "application/octet-stream" && !isUnsniffableMime(row.mime)) {
-      if (!sniffedMime || sniffedMime !== row.mime) {
+      if (!sniffedMimeMatchesDeclared(row.mime, sniffedMime)) {
         logger.warn("upload mime mismatch on consume", {
           uploadId,
           declared: row.mime,
