@@ -73,10 +73,9 @@ describe("Models API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      // Legacy `id` alias preserved.
+      // Bare created resource (same shape as GET/list), not an id stub (#657).
       expect(body.id).toBeDefined();
       expect(typeof body.id).toBe("string");
-      // #646: full created resource (same shape as GET/list), not an id stub.
       expect(body.label).toBe("GPT-4o");
       expect(body.modelId).toBe("gpt-4o");
       expect(body.credentialId).toBe(credentialId);
@@ -158,9 +157,8 @@ describe("Models API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      // Legacy `id` alias preserved.
+      // Bare updated resource (#657).
       expect(body.id).toBe(id);
-      // #646: full updated resource reflects the change without a follow-up GET.
       expect(body.label).toBe("After");
       expect(body.enabled).toBe(false);
       expect(body.source).toBe("custom");
@@ -193,25 +191,23 @@ describe("Models API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      // Legacy `success` flag preserved.
-      expect(body.success).toBe(true);
-      // #646: the new default model resource is returned (effective default).
+      // Bare effective default model resource — no `success` envelope (#657).
+      expect(body.success).toBeUndefined();
       expect(body.id).toBe(id);
       expect(body.isDefault).toBe(true);
       expect(body.label).toBe("Default Model");
       expect(body.modelId).toBe("gpt-4o");
     });
 
-    it("clears the default model with null", async () => {
+    it("returns 204 when clearing the default and none remains in effect", async () => {
       const res = await app.request("/api/models/default", {
         method: "PUT",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ modelId: null }),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.success).toBe(true);
+      expect(res.status).toBe(204);
+      expect(await res.text()).toBe("");
     });
   });
 

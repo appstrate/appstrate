@@ -153,13 +153,13 @@ export function createModelsRouter() {
         resourceId: id,
         after: { label, modelId, credentialId },
       });
-      // Return the full created resource (same shape as GET/list) so callers
-      // see the resolved state without a follow-up fetch (#646). `id` is part
-      // of the OrgModel shape, so the legacy `{ id }` consumers keep working.
-      // Fall back to the id stub only if the freshly-created row can't be
-      // re-projected (e.g. credential became unreachable mid-request).
+      // Return the bare created resource (same shape as GET/list) so callers
+      // see the resolved state without a follow-up fetch (#657). The row was
+      // just inserted — failing to re-project it (e.g. credential became
+      // unreachable mid-request) is a server-side inconsistency.
       const model = await getOrgModel(orgId, id);
-      return c.json(model ?? { id }, 201);
+      if (!model) throw internalError();
+      return c.json(model, 201);
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Model create failed", {
@@ -255,16 +255,14 @@ export function createModelsRouter() {
         resourceType: "model",
         resourceId: data.modelId,
       });
-      // Return the new default model resource so callers see the resulting
-      // state without a follow-up GET (#646). `isDefault` is recomputed by
-      // listOrgModels (DB flag, or the system-default fallback when no DB row
-      // is flagged), so this surfaces the *effective* default regardless of
-      // whether `modelId` pointed at a DB or system model. When the default is
-      // cleared (`modelId: null`) and nothing remains in effect, only the
-      // legacy `success` flag is returned. `success` is retained additively.
+      // Return the bare *effective* default model resource — `isDefault` is
+      // recomputed by listOrgModels (DB flag, or the system-default fallback
+      // when no DB row is flagged) — so callers see the resulting state
+      // without a follow-up GET (#657). When no default remains in effect
+      // (cleared with no system fallback) there is no resource: 204.
       const all = await listOrgModels(orgId);
       const def = all.find((m) => m.isDefault);
-      return c.json(def ? { ...def, success: true } : { success: true });
+      return def ? c.json(def) : c.body(null, 204);
     } catch (err) {
       logger.error("Set default model failed", {
         error: getErrorMessage(err),
@@ -457,11 +455,12 @@ export function createModelsRouter() {
         resourceId: modelId,
         after: data as unknown as Record<string, unknown>,
       });
-      // Return the full updated resource (#646). `id` stays part of the shape,
-      // so legacy `{ id }` consumers are unaffected.
+      // Return the bare updated resource (#657).
       const model = await getOrgModel(orgId, modelId);
-      return c.json(model ?? { id: modelId });
+      if (!model) throw notFound("Model not found");
+      return c.json(model);
     } catch (err) {
+      if (err instanceof ApiError) throw err;
       logger.error("Model update failed", {
         modelId,
         error: getErrorMessage(err),
