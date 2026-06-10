@@ -306,15 +306,20 @@ const ZIP_CONTAINER_MIMES = new Set([
 
 /**
  * Declared-vs-sniffed MIME compatibility for the magic-byte check. Exact match
- * always passes; within the ZIP-container family the generic and the specific
- * type refine each other (declared xlsx / sniffed application/zip, declared
- * application/zip / sniffed xlsx). Exported so the inline `data:` URI input
- * path (input-parser) applies the exact same policy as the staged-upload path.
+ * always passes; otherwise refinement is strictly parent↔child against the
+ * generic `application/zip` (declared xlsx / sniffed application/zip, declared
+ * application/zip / sniffed xlsx). Two SPECIFIC container types never satisfy
+ * each other — declared xlsx with sniffed docm/xlsm stays a mismatch, so a
+ * macro-enabled document cannot ride in under a macro-free declaration when
+ * the sniffer DID identify it. Exported so the inline `data:` URI input path
+ * (input-parser) applies the exact same policy as the staged-upload path.
  */
 export function sniffedMimeMatchesDeclared(declared: string, sniffed: string | undefined): boolean {
   if (!sniffed) return false;
   if (sniffed === declared) return true;
-  return ZIP_CONTAINER_MIMES.has(declared) && ZIP_CONTAINER_MIMES.has(sniffed);
+  if (sniffed === "application/zip") return ZIP_CONTAINER_MIMES.has(declared);
+  if (declared === "application/zip") return ZIP_CONTAINER_MIMES.has(sniffed);
+  return false;
 }
 
 /**

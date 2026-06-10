@@ -54,4 +54,18 @@ describe("sniffedMimeMatchesDeclared", () => {
     // gzip/rar are NOT zip containers — no family pass-through.
     expect(sniffedMimeMatchesDeclared(XLSX, "application/gzip")).toBe(false);
   });
+
+  it("two specific container types never satisfy each other", () => {
+    // Refinement is parent↔child only — when the sniffer DID identify the
+    // concrete format, a different concrete declaration is a real mismatch.
+    // Notably keeps macro-enabled documents out of macro-free declarations.
+    expect(sniffedMimeMatchesDeclared(XLSX, DOCX)).toBe(false);
+    expect(sniffedMimeMatchesDeclared(XLSX, "application/vnd.ms-excel.sheet.macroenabled.12")).toBe(
+      false,
+    );
+    expect(
+      sniffedMimeMatchesDeclared(DOCX, "application/vnd.ms-word.document.macroenabled.12"),
+    ).toBe(false);
+    expect(sniffedMimeMatchesDeclared("application/epub+zip", XLSX)).toBe(false);
+  });
 });
