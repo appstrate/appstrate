@@ -7,7 +7,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Execute an agent",
       description:
-        "Start an agent run (fire-and-forget). Returns the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. " +
+        "Start an agent run (fire-and-forget — the response does not wait for execution). Returns `201` + the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. " +
         "The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the " +
         "agent's input schema) accept either of two forms: " +
         "(1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by " +
@@ -90,8 +90,9 @@ export const runsPaths = {
         },
       },
       responses: {
-        "200": {
-          description: "Run started",
+        "201": {
+          description:
+            "Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed.",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -101,26 +102,9 @@ export const runsPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                allOf: [
-                  { $ref: "#/components/schemas/Run" },
-                  {
-                    type: "object",
-                    properties: {
-                      runId: {
-                        type: "string",
-                        description:
-                          "Legacy alias of the run's `id`, kept for backward compatibility. Prefer `id`.",
-                      },
-                    },
-                  },
-                ],
-                description:
-                  "The created run resource — same shape as `GET /runs/{id}`. Includes the resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed. `runId` is a legacy alias of `id`.",
-              },
+              schema: { $ref: "#/components/schemas/Run" },
               example: {
                 id: "run_cm1abc123def456",
-                runId: "run_cm1abc123def456",
                 status: "pending",
                 model_label: "Claude Sonnet 4",
                 model_source: "org",
@@ -286,7 +270,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Execute an inline agent (no persisted package)",
       description:
-        "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `202 { runId, packageId }`. Stream progress via `GET /api/realtime/runs/{id}`. See `docs/specs/INLINE_RUNS.md`.",
+        "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `202` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. See `docs/specs/INLINE_RUNS.md`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -353,18 +337,15 @@ export const runsPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "object",
-                required: ["runId", "packageId"],
-                properties: {
-                  runId: { type: "string" },
-                  packageId: {
-                    type: "string",
-                    description:
-                      "Shadow package id (reserved `@inline/r-<uuid>` scope). Hidden from catalog queries.",
-                  },
-                },
+                $ref: "#/components/schemas/Run",
+                description:
+                  "The created run resource — same shape as `GET /runs/{id}`. `packageId` is the shadow package id (reserved `@inline/r-<uuid>` scope, hidden from catalog queries).",
               },
-              example: { runId: "run_cm1abc123", packageId: "@inline/r-abc12345-..." },
+              example: {
+                id: "run_cm1abc123",
+                packageId: "@inline/r-abc12345-...",
+                status: "pending",
+              },
             },
           },
         },
@@ -679,7 +660,8 @@ export const runsPaths = {
       operationId: "cancelRun",
       tags: ["Runs"],
       summary: "Cancel a run",
-      description: "Cancel a running or pending run.",
+      description:
+        "Cancel a running or pending run. Returns the updated run resource — same shape as `GET /runs/{id}` — read after the terminal pipeline ran, so `status` is `cancelled` and cost/duration reflect the final state.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -687,14 +669,15 @@ export const runsPaths = {
       ],
       responses: {
         "200": {
-          description: "Run cancelled",
+          description: "Run cancelled — the body is the updated run resource (`status: cancelled`)",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: { type: "object", properties: { ok: { type: "boolean" } } },
+              schema: { $ref: "#/components/schemas/Run" },
+              example: { id: "run_cm1abc123def456", status: "cancelled" },
             },
           },
         },
@@ -831,9 +814,11 @@ export const runsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["runId", "url", "finalize_url", "secret", "expiresAt"],
+                description:
+                  "Operation envelope (not the run resource): the one-time sink credentials plus the created run's `id`. Fetch the resource itself via `GET /runs/{id}`.",
+                required: ["id", "url", "finalize_url", "secret", "expiresAt"],
                 properties: {
-                  runId: { type: "string" },
+                  id: { type: "string", description: "The created run's id." },
                   url: {
                     type: "string",
                     format: "uri",
@@ -1249,9 +1234,11 @@ export const runsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["runId", "expiresAt"],
+                description:
+                  "Operation result (not the run resource): `sink_expires_at` is internal sink state, deliberately not part of the public Run shape.",
+                required: ["id", "expiresAt"],
                 properties: {
-                  runId: { type: "string" },
+                  id: { type: "string", description: "The run's id." },
                   expiresAt: { type: "string", format: "date-time" },
                 },
               },

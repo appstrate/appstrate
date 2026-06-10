@@ -3,9 +3,10 @@
 /**
  * `runRemote` — remote execution path for `appstrate run`.
  *
- * Trigger: `POST /api/agents/:scope/:name/run` returns `{ runId }` and
- * the platform spawns a Pi container (same path as the dashboard "Run"
- * button). The CLI then tails the run by polling two endpoints:
+ * Trigger: `POST /api/agents/:scope/:name/run` returns `201` + the bare
+ * created run resource (same shape as `GET /runs/:id` — we read its `id`)
+ * and the platform spawns a Pi container (same path as the dashboard
+ * "Run" button). The CLI then tails the run by polling two endpoints:
  *
  *   - `GET /api/runs/:runId/logs?since=<lastId>` — append-only run-log
  *     entries with `id > since`. The cursor is required for bounded
@@ -481,26 +482,28 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
     });
   }
 
-  // The server's contract is `{ runId: string }` (apps/api/src/routes/runs.ts
-  // → `c.json({ runId })`). We accept *only* that shape — falling back to
-  // alternate keys (`{ id }`, `{ run.id }`, …) would silently mask a
-  // contract drift instead of failing fast at the boundary. The error
-  // body carries the unexpected payload so the user can debug a server
-  // mismatch without re-running with extra logging.
-  const payload = (await res.json().catch(() => null)) as { runId?: unknown } | null;
+  // The server's contract is `201` + the bare created run resource
+  // (apps/api/src/routes/runs.ts → `c.json(row, 201)`, same DTO as
+  // `GET /runs/:id`). We read *only* its `id` — falling back to alternate
+  // keys (`{ runId }`, `{ run.id }`, …) would silently mask a contract
+  // drift instead of failing fast at the boundary (#657 removed the
+  // legacy `runId` alias). The error body carries the unexpected payload
+  // so the user can debug a server mismatch without re-running with
+  // extra logging.
+  const payload = (await res.json().catch(() => null)) as { id?: unknown } | null;
   if (!payload || typeof payload !== "object") {
     throw new RemoteRunError("Trigger returned a non-JSON response", {
       body: payload,
-      hint: "The server should return `{ runId: string }`. Check the platform version on the pinned instance.",
+      hint: "The server should return the created run resource (`{ id: string, ... }`). Check the platform version on the pinned instance.",
     });
   }
-  if (typeof payload.runId !== "string" || payload.runId.length === 0) {
-    throw new RemoteRunError("Trigger response missing `runId` string", {
+  if (typeof payload.id !== "string" || payload.id.length === 0) {
+    throw new RemoteRunError("Trigger response missing `id` string", {
       body: payload,
-      hint: "Expected `{ runId: string }`. The platform may be incompatible with this CLI version.",
+      hint: "Expected the created run resource (`{ id: string, ... }`). The platform may be incompatible with this CLI version.",
     });
   }
-  return payload.runId;
+  return payload.id;
 }
 
 async function fetchRunRecord(

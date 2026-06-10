@@ -138,6 +138,12 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(200);
+    // The response is the bare updated Run resource read AFTER the terminal
+    // pipeline (#657) — it already reflects the cancelled state + final cost.
+    const body = (await res.json()) as { id?: string; status?: string; cost?: number | null };
+    expect(body.id).toBe(runId);
+    expect(body.status).toBe("cancelled");
+    expect(body.cost).toBeCloseTo(0.0551, 4);
 
     expect(spy.callCount()).toBe(1);
     const params = spy.lastParams()!;

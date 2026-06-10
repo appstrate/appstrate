@@ -160,21 +160,20 @@ export function createRunsRouter() {
           runnerKind: runner.kind,
         });
 
-        // Return the created run resource — same DTO and serializer as
+        // 201 + the bare created run resource — same DTO and serializer as
         // GET /runs/:id — so callers see the full launched state (resolved
         // `model_label` / `model_source` for org-default drift detection per
         // #635, plus status, version_ref, agent_scope, …) without a follow-up
-        // GET. The run row exists once `prepareAndExecuteRun` resolves. The
-        // legacy `runId` field is kept alongside the DTO's `id` for backward
-        // compatibility with existing clients.
+        // GET. The run row exists once `prepareAndExecuteRun` resolves.
+        // No legacy `runId` alias (#657): the run id is `id`.
         const row = await getRunFull(getAppScope(c), runId);
         if (!row) {
           // The run was just created above; a miss here means a concurrent
-          // teardown raced us. Fall back to the minimal id-only contract
+          // teardown raced us. Fall back to a minimal id-only resource
           // rather than 500-ing a successfully launched run.
-          return c.json({ runId });
+          return c.json({ id: runId }, 201);
         }
-        return c.json({ runId, ...row });
+        return c.json(row, 201);
       } catch (err) {
         // Roll back any input documents streamed into the run workspace before
         // the run launched (size/MIME mismatch, failed preflight, …). Once
@@ -372,14 +371,25 @@ export function createRunsRouter() {
       error: { message: "Cancelled by user" },
     });
 
-    return c.json({ ok: true });
+    // Return the bare updated run resource — read AFTER synthesiseFinalize so
+    // the response reflects the terminal state (`status: "cancelled"`, cost,
+    // completed_at). Same DTO and serializer as GET /runs/:id (#657).
+    const row = await getRunFull(scope, runId);
+    if (!row) {
+      // The run was readable above; a miss here means a concurrent delete
+      // raced the finalize. The resource is gone — surface the same 404 a
+      // fresh read would.
+      throw notFound("Run not found");
+    }
+    return c.json(row);
   });
 
   // POST /api/runs/inline — execute an inline (no persisted package) agent.
   // See docs/specs/INLINE_RUNS.md. The manifest + prompt travel in the
   // request body; the platform creates a transient shadow package
   // (ephemeral = true), runs it through the existing pipeline, and
-  // returns 202 { runId } immediately. The client streams progress via
+  // returns 202 + the bare created run resource (the shadow package id is
+  // the run's `packageId` field). The client streams progress via
   // GET /api/realtime/runs/:id (existing SSE endpoint).
   router.post(
     "/runs/inline",
@@ -396,7 +406,7 @@ export function createRunsRouter() {
 
       const body = await c.req.json<InlineRunBody>();
 
-      const { runId, packageId } = await triggerInlineRun({
+      const { runId } = await triggerInlineRun({
         orgId,
         applicationId,
         actor,
@@ -405,8 +415,18 @@ export function createRunsRouter() {
         traceparent: runTraceparent(c),
       });
 
-      c.status(202);
-      return c.json({ runId, packageId });
+      // 202 + the bare created run resource (#657) — same DTO and serializer
+      // as GET /runs/:id. The shadow package id callers used to read from
+      // the `packageId` envelope field is the resource's own `packageId`.
+      // The run row exists once `triggerInlineRun` resolves
+      // (`prepareAndExecuteRun` inserts it before returning).
+      const row = await getRunFull(getAppScope(c), runId);
+      if (!row) {
+        // Concurrent teardown raced us — fall back to a minimal id-only
+        // resource rather than 500-ing a successfully launched run.
+        return c.json({ id: runId }, 202);
+      }
+      return c.json(row, 202);
     },
   );
 

@@ -449,7 +449,7 @@ describe("Runs API", () => {
         body: JSON.stringify({ input: {} }),
       });
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(201);
       const body = (await res.json()) as {
         id?: string;
         runId?: string;
@@ -458,17 +458,17 @@ describe("Runs API", () => {
         model_label?: string | null;
         model_source?: string | null;
       };
-      // The trigger response is the full Run DTO (same shape as GET /runs/:id)
-      // plus a legacy `runId` alias of `id`.
-      expect(body.runId).toStartWith("run_");
-      expect(body.id).toBe(body.runId!);
+      // The trigger response is the bare Run DTO (same shape as GET /runs/:id).
+      // The legacy `runId` alias was removed with the strict rule (#657).
+      expect(body.id).toStartWith("run_");
+      expect(body.runId).toBeUndefined();
       expect(body.status).toBeString();
       expect(body.agent_scope).toContain("runorg");
       expect(body.model_label).toBe("Echo Default GPT");
       expect(body.model_source).toBe("org");
 
       // The echo must match the persisted run-row snapshot — same source of truth.
-      const [row] = await db.select().from(runs).where(eq(runs.id, body.runId!));
+      const [row] = await db.select().from(runs).where(eq(runs.id, body.id!));
       expect(row!.modelLabel).toBe("Echo Default GPT");
       expect(row!.modelSource).toBe("org");
 
@@ -487,9 +487,8 @@ describe("Runs API", () => {
         body: JSON.stringify({ input: {}, modelId: pinnedId }),
       });
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(201);
       const body = (await res.json()) as {
-        runId?: string;
         model_label?: string | null;
         model_source?: string | null;
       };
@@ -989,8 +988,12 @@ describe("Runs API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.ok).toBe(true);
+      // The response is the bare updated Run resource (same shape as
+      // GET /runs/:id), read after the terminal pipeline — not `{ok}` (#657).
+      const body = (await res.json()) as { id?: string; ok?: unknown; status?: string };
+      expect(body.ok).toBeUndefined();
+      expect(body.id).toBe(run.id);
+      expect(body.status).toBe("cancelled");
 
       // Convergence assertion — the cancel route flowed through finalizeRun
       // (status flipped to cancelled, sink closed). See `runs-cancel-
@@ -1021,8 +1024,9 @@ describe("Runs API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.ok).toBe(true);
+      const body = (await res.json()) as { id?: string; status?: string };
+      expect(body.id).toBe(run.id);
+      expect(body.status).toBe("cancelled");
 
       const final = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, run.id));
       expect(final[0]!.status).toBe("cancelled");
