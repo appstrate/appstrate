@@ -82,6 +82,15 @@ describe("User Agents API", () => {
       });
 
       expect(res.status).toBe(200);
+      // Bare updated agent resource (issue #657) — same shape as the GET agent
+      // detail. The new skill references appear in `dependencies.skills`; no
+      // `packageId`/`skillIds`/`message` envelope.
+      const body = (await res.json()) as any;
+      expect(body.id).toBe("@myorg/skills-agent");
+      expect(body.dependencies.skills).toEqual([expect.objectContaining({ id: "@myorg/skill-a" })]);
+      expect(body.packageId).toBeUndefined();
+      expect(body.skillIds).toBeUndefined();
+      expect(body.message).toBeUndefined();
 
       // Verify manifest was updated
       const [row] = await db

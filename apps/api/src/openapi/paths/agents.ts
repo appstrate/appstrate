@@ -589,12 +589,11 @@ export const agentsPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  skillIds: { type: "array", items: { type: "string" } },
-                  message: { type: "string" },
-                },
+                // The updated agent resource, bare (issue #657) — the new
+                // skill references appear in `dependencies.skills`.
+                $ref: "#/components/schemas/AgentDetail",
+                description:
+                  "The updated agent resource — same shape as the GET agent detail. The new skill references appear in `dependencies.skills`. No follow-up GET needed.",
               },
             },
           },

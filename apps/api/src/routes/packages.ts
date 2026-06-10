@@ -505,7 +505,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         });
       }
 
-      const item = await createOrgItem(
+      await createOrgItem(
         orgId,
         { id: packageId, content, createdBy: user.id },
         rcfg.cfg,
@@ -548,22 +548,15 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         );
       }
 
-      // Return the created package resource — same DTO/serializer as the GET
-      // detail — so callers see the launched state without a follow-up GET
-      // (issue #646). `packageId` (legacy alias of the DTO's `id`),
-      // `lock_version` (optimistic-lock token), and `message` are retained
-      // additively as operation-result envelope. Defensive fallback to the
-      // legacy stub if the just-created row can't be re-read.
+      // Return the created package resource bare — same DTO/serializer as the
+      // GET detail (issue #657). `id` and `lock_version` (the optimistic-lock
+      // token of the draft) are part of the resource; no operation envelope.
       const detail = await loadPackageDetailDto(c, rcfg, packageId, orgId);
-      return c.json(
-        {
-          ...(detail ?? {}),
-          packageId,
-          lock_version: item.lockVersion,
-          message: `${rcfg.cfg.label.slice(0, -1)} created`,
-        },
-        201,
-      );
+      if (!detail) {
+        logger.error("Created package could not be re-read", { packageId, orgId });
+        throw internalError();
+      }
+      return c.json(detail, 201);
     }
 
     // Skill/Tool create — uses parsePackageUpload (ZIP or JSON body)
@@ -587,7 +580,6 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       );
     }
 
-    let warnings: string[] = [];
     if (rcfg.validateContent) {
       const validation = rcfg.validateContent(parsed.content);
       if (!validation.valid) {
@@ -600,7 +592,6 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
           })),
         );
       }
-      warnings = validation.warnings;
     }
 
     // Merge user-specified version into manifest for createOrgItem
@@ -664,19 +655,14 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       );
     }
 
-    // Return the created package resource (same serializer as GET detail) with
-    // the operation envelope retained additively (issue #646).
+    // Return the created package resource bare — same serializer as the GET
+    // detail (issue #657). `id` and `lock_version` are part of the resource.
     const detail = await loadPackageDetailDto(c, rcfg, item.id, orgId);
-    return c.json(
-      {
-        ...(detail ?? {}),
-        packageId: item.id,
-        lock_version: item.lockVersion,
-        message: `${rcfg.cfg.label.slice(0, -1)} created`,
-        ...(warnings.length > 0 ? { warnings } : {}),
-      },
-      201,
-    );
+    if (!detail) {
+      logger.error("Created package could not be re-read", { packageId: item.id, orgId });
+      throw internalError();
+    }
+    return c.json(detail, 201);
   };
 }
 
@@ -822,7 +808,6 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     }
 
     // Content validation
-    let warnings: string[] = [];
     if (rcfg.validateContent && content) {
       const validation = rcfg.validateContent(content);
       if (!validation.valid) {
@@ -835,7 +820,6 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
           })),
         );
       }
-      warnings = validation.warnings;
     }
 
     // Source validation (tools)
@@ -889,17 +873,15 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       });
     }
 
-    // Return the updated package resource (same serializer as GET detail) with
-    // the operation envelope retained additively — `packageId` (legacy alias of
-    // `id`), `lock_version` (the new optimistic-lock token consumers must read
-    // back for the next edit), and `warnings` (issue #646).
+    // Return the updated package resource bare — same serializer as the GET
+    // detail (issue #657). The resource carries `lock_version`, the NEW
+    // optimistic-lock token consumers must read back for the next edit.
     const detail = await loadPackageDetailDto(c, rcfg, itemId, orgId);
-    return c.json({
-      ...(detail ?? {}),
-      packageId: updated.id,
-      lock_version: updated.lockVersion,
-      ...(warnings.length > 0 ? { warnings } : {}),
-    });
+    if (!detail) {
+      logger.error("Updated package could not be re-read", { packageId: itemId, orgId });
+      throw internalError();
+    }
+    return c.json(detail);
   };
 }
 
@@ -1084,21 +1066,16 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       throw invalidRequest("Failed to create version (invalid or duplicate)");
     }
 
-    // Return the created version resource — same DTO/serializer as the GET
-    // version detail — so callers see the snapshot (manifest, integrity,
-    // dist_tags, …) without a follow-up GET (issue #646). `id` (version row id)
-    // and `version` are already part of the resource; `message` is retained
-    // additively as operation-result envelope.
+    // Return the created version resource bare — same DTO/serializer as the
+    // GET version detail — so callers see the snapshot (manifest, integrity,
+    // dist_tags, …) without a follow-up GET (issue #657). `id` (version row
+    // id) and `version` are part of the resource.
     const detail = await buildVersionDetailDto(rcfg, itemId, result.version);
-    return c.json(
-      {
-        ...(detail ?? {}),
-        id: result.id,
-        version: result.version,
-        message: `Version ${result.version} created`,
-      },
-      201,
-    );
+    if (!detail) {
+      logger.error("Created version could not be re-read", { packageId: itemId, orgId });
+      throw internalError();
+    }
+    return c.json(detail, 201);
   };
 }
 
@@ -1184,19 +1161,17 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       });
     }
 
-    // Return the restored version resource — same DTO/serializer as the GET
-    // version detail (issue #646). The operation envelope is retained
-    // additively: `message`, `restored_version` (legacy alias of the resource's
-    // `version`), and `lock_version` — the package's NEW optimistic-lock token
-    // (not part of the version resource), which consumers must read back before
-    // the next draft edit.
-    const versionDto = await buildVersionDetailDto(rcfg, itemId, detail.version);
-    return c.json({
-      ...(versionDto ?? {}),
-      message: `Version ${detail.version} restored`,
-      restored_version: detail.version,
-      lock_version: updated.lockVersion,
-    });
+    // Restore mutates the package draft — return the updated PACKAGE resource
+    // bare, same DTO/serializer as the package GET detail (issue #657). The
+    // restored version info is reflected in the resource itself (`version`,
+    // `manifest`, `content`), and the resource carries `lock_version`, the
+    // package's NEW optimistic-lock token to read back before the next edit.
+    const packageDto = await loadPackageDetailDto(c, rcfg, itemId, orgId);
+    if (!packageDto) {
+      logger.error("Restored package could not be re-read", { packageId: itemId, orgId });
+      throw internalError();
+    }
+    return c.json(packageDto);
   };
 }
 
@@ -1343,24 +1318,22 @@ export function createPackagesRouter() {
       );
     }
 
-    // Return the forked package resource — same DTO/serializer as the new
-    // package's GET detail, selected by its type (issue #646). The fork
-    // operation fields (`packageId` legacy alias of `id`, `type`, `forked_from`)
-    // are retained additively. Falls back to the fork-result stub if the
-    // freshly-forked row can't be re-read.
+    // Return the forked package resource bare — same DTO/serializer as the new
+    // package's GET detail, selected by its type (issue #657). The fork
+    // provenance is resource state: `forked_from` is part of the detail DTO.
     const forkedRcfg = ROUTE_CONFIGS[result.type as PackageType];
     const detail = forkedRcfg
       ? await loadPackageDetailDto(c, forkedRcfg, result.packageId, orgId)
       : null;
-    return c.json(
-      {
-        ...(detail ?? {}),
+    if (!detail) {
+      logger.error("Forked package could not be re-read", {
         packageId: result.packageId,
         type: result.type,
-        forked_from: result.forked_from,
-      },
-      201,
-    );
+        orgId,
+      });
+      throw internalError();
+    }
+    return c.json(detail, 201);
   });
 
   // --- Package import/download/publish routes ---

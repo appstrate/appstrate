@@ -9,7 +9,8 @@ import type { AppEnv } from "../types/index.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
 import { caretRange } from "@appstrate/core/semver";
 import { requireOrgAgent, requireMutableAgent } from "../middleware/guards.ts";
-import { invalidRequest, parseBody } from "../lib/errors.ts";
+import { buildAgentDetailDto } from "./agent-detail-handler.ts";
+import { internalError, invalidRequest, parseBody } from "../lib/errors.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 export const updateSkillsSchema = z.object({
@@ -85,7 +86,16 @@ export function createUserAgentsRouter() {
 
       await updateManifestDeps(c.get("orgId"), packageId, skillIds);
 
-      return c.json({ packageId, skillIds, message: "Skill references updated" });
+      // Return the updated agent resource bare — same serializer as the GET
+      // agent detail (issue #657). The new skill references appear in
+      // `dependencies.skills`. `requireAccess: false`: the caller just wrote
+      // this agent in their org, so the app-install gate must not 404 a
+      // successful write.
+      const detail = await buildAgentDetailDto(c, { itemId: packageId, requireAccess: false });
+      if (!detail) {
+        throw internalError();
+      }
+      return c.json(detail);
     },
   );
 

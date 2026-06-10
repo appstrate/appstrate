@@ -102,13 +102,16 @@ export function useEditorState<S extends EditorStateBase>(
   const saveDraft = useCallback(async () => {
     if (!isEdit || !packageId) return;
     const cfg = PACKAGE_CONFIG[packageType];
-    await api(`/packages/${cfg.path}/${packageId}`, {
+    // PUT returns the updated package resource bare (issue #657) — read back
+    // the NEW `lock_version` so a subsequent save doesn't go stale.
+    const updated = await api<{ lock_version: number }>(`/packages/${cfg.path}/${packageId}`, {
       method: "PUT",
       body: JSON.stringify({
         ...toWireBody(state),
         lock_version: state.lock_version!,
       }),
     });
+    setState((s) => ({ ...s, lock_version: updated.lock_version }));
     qc.invalidateQueries({ queryKey: ["packages"] });
     qc.invalidateQueries({ queryKey: ["version-info"] });
     if (packageType === "agent") {

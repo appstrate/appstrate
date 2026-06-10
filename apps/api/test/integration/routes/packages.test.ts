@@ -346,9 +346,13 @@ describe("Packages API", () => {
       });
 
       expect(res.status).toBe(201);
+      // Bare created resource (issue #657): `id` + `lock_version` are resource
+      // state; no `packageId`/`message` envelope.
       const body = (await res.json()) as any;
-      expect(body.packageId).toBe("@pkgorg/new-agent");
+      expect(body.id).toBe("@pkgorg/new-agent");
       expect(body.lock_version).toBeNumber();
+      expect(body.packageId).toBeUndefined();
+      expect(body.message).toBeUndefined();
 
       await assertDbHas(packages, eq(packages.id, "@pkgorg/new-agent"));
     });
@@ -440,8 +444,8 @@ describe("Packages API", () => {
 
       // The package is created under the caller's org regardless of its scope name.
       expect(res.status).toBe(201);
-      const body = (await res.json()) as { packageId: string };
-      expect(body.packageId).toBe("@otherscope/foreign-agent");
+      const body = (await res.json()) as { id: string };
+      expect(body.id).toBe("@otherscope/foreign-agent");
     });
   });
 
@@ -495,8 +499,9 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      expect(body.packageId).toBe("@pkgorg/new-integration");
+      expect(body.id).toBe("@pkgorg/new-integration");
       expect(body.lock_version).toBeNumber();
+      expect(body.packageId).toBeUndefined();
 
       await assertDbHas(packages, eq(packages.id, "@pkgorg/new-integration"));
     });
@@ -581,8 +586,9 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.packageId).toBe("@pkgorg/update-agent");
+      expect(body.id).toBe("@pkgorg/update-agent");
       expect(body.lock_version).toBeGreaterThan(agent.lockVersion!);
+      expect(body.packageId).toBeUndefined();
     });
 
     it("returns 400 when lockVersion is missing", async () => {
@@ -1269,11 +1275,12 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
-  // Issue #646 — mutating endpoints return the affected resource (same shape as
-  // the GET detail) while retaining the operation envelope additively.
+  // Issue #657 — mutating endpoints return the affected resource BARE (same
+  // shape as the GET detail). No operation envelope: `lock_version` and
+  // `forked_from` are resource state inside the detail DTO.
   // ═══════════════════════════════════════════════
 
-  describe("issue #646 — mutating package endpoints return the resource", () => {
+  describe("issue #657 — mutating package endpoints return the bare resource", () => {
     const agentManifest = (name: string, version = "0.1.0") => ({
       name,
       version,
@@ -1283,7 +1290,7 @@ describe("Packages API", () => {
       description: "Returns the full resource on mutation",
     });
 
-    it("POST create agent returns the Agent detail DTO + create envelope", async () => {
+    it("POST create agent returns the bare Agent detail DTO", async () => {
       const res = await app.request("/api/packages/agents", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -1295,19 +1302,21 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      // Operation envelope retained additively.
-      expect(body.packageId).toBe("@pkgorg/res-agent");
-      expect(body.lock_version).toBeNumber();
-      expect(body.message).toBeString();
       // Full Agent detail resource (same serializer as GET detail).
       expect(body.id).toBe("@pkgorg/res-agent");
       expect(body.display_name).toBe("Resource Agent");
       expect(body.dependencies).toBeDefined();
       expect(body.config).toBeDefined();
       expect(body.version_count).toBeNumber();
+      // `lock_version` is resource state (draft optimistic-lock token).
+      expect(body.lock_version).toBeNumber();
+      // No operation envelope.
+      expect(body.packageId).toBeUndefined();
+      expect(body.message).toBeUndefined();
+      expect(body.warnings).toBeUndefined();
     });
 
-    it("POST create integration returns the package detail DTO + create envelope", async () => {
+    it("POST create integration returns the bare package detail DTO", async () => {
       const res = await app.request("/api/packages/integrations", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -1350,16 +1359,18 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      expect(body.packageId).toBe("@pkgorg/res-integration");
-      expect(body.lock_version).toBeNumber();
-      // Full OrgPackageItemDetail resource.
+      // Full OrgPackageItemDetail resource, bare.
       expect(body.id).toBe("@pkgorg/res-integration");
+      expect(body.lock_version).toBeNumber();
       expect(body.manifest).toBeDefined();
       expect(body.version_count).toBeNumber();
       expect(body.has_unarchived_changes).toBeBoolean();
+      // No operation envelope.
+      expect(body.packageId).toBeUndefined();
+      expect(body.message).toBeUndefined();
     });
 
-    it("PUT update agent returns the Agent detail DTO + lock_version envelope", async () => {
+    it("PUT update agent returns the bare Agent detail DTO with the new lock_version", async () => {
       const create = await app.request("/api/packages/agents", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -1382,16 +1393,18 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      // Envelope retained — new lock token consumers read back.
-      expect(body.packageId).toBe("@pkgorg/upd-res-agent");
-      expect(body.lock_version).toBeGreaterThan(created.lock_version);
-      // Full Agent detail resource.
+      // Full Agent detail resource, bare. The resource carries the NEW
+      // `lock_version` consumers read back before the next edit.
       expect(body.id).toBe("@pkgorg/upd-res-agent");
+      expect(body.lock_version).toBeGreaterThan(created.lock_version);
       expect(body.dependencies).toBeDefined();
       expect(body.config).toBeDefined();
+      // No operation envelope.
+      expect(body.packageId).toBeUndefined();
+      expect(body.warnings).toBeUndefined();
     });
 
-    it("POST create version returns the version detail DTO + message envelope", async () => {
+    it("POST create version returns the bare version detail DTO", async () => {
       const create = await app.request("/api/packages/agents", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -1421,17 +1434,18 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      // Envelope retained.
+      // Full version detail resource, bare (same serializer as GET version
+      // detail). `id` (version row id) and `version` are part of the resource.
       expect(body.id).toBeNumber();
       expect(body.version).toBe("0.2.0");
-      expect(body.message).toBeString();
-      // Full version detail resource (same serializer as GET version detail).
       expect(body.manifest).toBeDefined();
       expect(body.integrity).toBeString();
       expect(Array.isArray(body.dist_tags)).toBe(true);
+      // No operation envelope.
+      expect(body.message).toBeUndefined();
     });
 
-    it("POST restore version returns the version detail DTO + restore envelope", async () => {
+    it("POST restore version returns the bare updated PACKAGE detail DTO", async () => {
       const create = await app.request("/api/packages/agents", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -1452,14 +1466,17 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      // Operation envelope retained additively.
-      expect(body.message).toBeString();
-      expect(body.restored_version).toBe("0.1.0");
-      expect(body.lock_version).toBeGreaterThan(created.lock_version);
-      // Full version detail resource for the restored version.
+      // A restore mutates the package draft — the response is the updated
+      // PACKAGE resource (Agent detail), bare. The restored version is
+      // reflected in the resource, and the resource carries the package's NEW
+      // `lock_version`.
+      expect(body.id).toBe("@pkgorg/restore-res-agent");
       expect(body.version).toBe("0.1.0");
       expect(body.manifest).toBeDefined();
-      expect(Array.isArray(body.dist_tags)).toBe(true);
+      expect(body.lock_version).toBeGreaterThan(created.lock_version);
+      // No operation envelope.
+      expect(body.message).toBeUndefined();
+      expect(body.restored_version).toBeUndefined();
     });
   });
 });

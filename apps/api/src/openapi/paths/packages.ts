@@ -1,119 +1,53 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mutation response schemas (issue #646)
+// Mutation response schemas (issue #657)
 //
-// Mutating package endpoints return the affected resource — the same shape as
-// the corresponding GET detail — composed with `allOf` so the operation-result
-// envelope (`packageId` / `lock_version` / `message` / `warnings` /
-// `restored_version`) is preserved ADDITIVELY. The legacy stub fields are kept
-// as top-level aliases for backward compatibility. `detect-breaking-changes.ts`
-// flattens `allOf`, so these read as supersets of the previous shapes (0 removed
-// fields → additive).
+// Mutating package endpoints return the affected resource BARE — the exact
+// shape of the corresponding GET detail, `$ref`'d directly. No operation
+// envelope: the optimistic-lock token (`lock_version`) and fork provenance
+// (`forked_from`) are resource state and live INSIDE the detail DTOs.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** `POST /packages/{type}` → created package resource + create envelope. */
+/** `POST /packages/{type}` → the created package resource, bare. */
 function packageCreateResponseSchema(detailRef: string) {
   return {
-    allOf: [
-      { $ref: detailRef },
-      {
-        type: "object",
-        properties: {
-          packageId: {
-            type: "string",
-            description:
-              "Legacy alias of the created package's `id`, kept for backward compatibility. Prefer `id`.",
-          },
-          lock_version: {
-            type: "integer",
-            description: "Optimistic-lock token to send with the next update.",
-          },
-          message: { type: "string", description: "Human-readable operation message." },
-          warnings: {
-            type: "array",
-            items: { type: "string" },
-            description: "Non-blocking validation warnings (present only when any).",
-          },
-        },
-      },
-    ],
+    $ref: detailRef,
     description:
-      "The created package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, `message`, optional `warnings`). No follow-up GET needed.",
+      "The created package resource — same shape as its GET detail. The resource carries `lock_version`, the optimistic-lock token to send with the next update. No follow-up GET needed.",
   };
 }
 
-/** `PUT /packages/{type}/...` → updated package resource + update envelope. */
+/** `PUT /packages/{type}/...` → the updated package resource, bare. */
 function packageUpdateResponseSchema(detailRef: string) {
   return {
-    allOf: [
-      { $ref: detailRef },
-      {
-        type: "object",
-        properties: {
-          packageId: {
-            type: "string",
-            description:
-              "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`.",
-          },
-          lock_version: {
-            type: "integer",
-            description:
-              "New optimistic-lock token after this update — read it back before the next edit.",
-          },
-          warnings: {
-            type: "array",
-            items: { type: "string" },
-            description: "Non-blocking validation warnings (present only when any).",
-          },
-        },
-      },
-    ],
+    $ref: detailRef,
     description:
-      "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed.",
+      "The updated package resource — same shape as its GET detail. The resource carries the NEW `lock_version` — read it back before the next edit. No follow-up GET needed.",
   };
 }
 
-/** `POST /packages/{type}/.../versions` → created version resource + `message`. */
+/** `POST /packages/{type}/.../versions` → the created version resource, bare. */
 function versionCreateResponseSchema() {
   return {
-    allOf: [
-      { $ref: "#/components/schemas/PackageVersionDetail" },
-      {
-        type: "object",
-        properties: {
-          message: { type: "string", description: "Human-readable operation message." },
-        },
-      },
-    ],
+    $ref: "#/components/schemas/PackageVersionDetail",
     description:
-      "The created version resource — same shape as the GET version detail (manifest, integrity, dist_tags, …) — plus a human-readable `message`. `id` (version row id) and `version` are part of the resource. No follow-up GET needed.",
+      "The created version resource — same shape as the GET version detail (manifest, integrity, dist_tags, …). `id` (version row id) and `version` are part of the resource. No follow-up GET needed.",
   };
 }
 
-/** `POST /packages/.../versions/{v}/restore` → restored version resource + envelope. */
-function versionRestoreResponseSchema() {
+/**
+ * `POST /packages/.../versions/{v}/restore` → the updated PACKAGE resource,
+ * bare. A restore mutates the package draft, so the response is the package
+ * detail (not the version detail): the restored version is reflected in the
+ * resource's `version` / `manifest` / `content`, and the resource carries the
+ * package's NEW `lock_version`.
+ */
+function versionRestoreResponseSchema(detailRef: string) {
   return {
-    allOf: [
-      { $ref: "#/components/schemas/PackageVersionDetail" },
-      {
-        type: "object",
-        properties: {
-          message: { type: "string", description: "Human-readable operation message." },
-          restored_version: {
-            type: "string",
-            description: "Legacy alias of the restored version's `version`.",
-          },
-          lock_version: {
-            type: "integer",
-            description:
-              "The package's NEW optimistic-lock token after the draft was overwritten — not part of the version resource; read it back before the next draft edit.",
-          },
-        },
-      },
-    ],
+    $ref: detailRef,
     description:
-      "The restored version resource — same shape as the GET version detail — plus the operation-result envelope (`message`, `restored_version` legacy alias of `version`, and the package's new `lock_version`).",
+      "The updated package resource after the restore — same shape as the package GET detail. The restored version is reflected in `version` / `manifest` / `content`, and the resource carries the package's NEW `lock_version` — read it back before the next draft edit.",
   };
 }
 
@@ -715,7 +649,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: versionRestoreResponseSchema(),
+              schema: versionRestoreResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },
@@ -1267,7 +1201,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: versionRestoreResponseSchema(),
+              schema: versionRestoreResponseSchema("#/components/schemas/AgentDetail"),
             },
           },
         },
@@ -1406,36 +1340,17 @@ export const packagesPaths = {
           content: {
             "application/json": {
               schema: {
-                allOf: [
-                  {
-                    // The forked package resource — same shape as the new
-                    // package's GET detail, selected by `type` at runtime
-                    // (issue #646). Fields vary by type, so they are documented
-                    // as a `oneOf` rather than statically merged.
-                    oneOf: [
-                      { $ref: "#/components/schemas/AgentDetail" },
-                      { $ref: "#/components/schemas/OrgPackageItemDetail" },
-                    ],
-                  },
-                  {
-                    type: "object",
-                    required: ["packageId", "type", "forked_from"],
-                    properties: {
-                      packageId: {
-                        type: "string",
-                        description:
-                          "New package ID under org scope. Legacy alias of the forked resource's `id`.",
-                      },
-                      type: {
-                        type: "string",
-                        enum: ["agent", "skill", "mcp-server", "integration"],
-                      },
-                      forked_from: { type: "string", description: "Source package ID" },
-                    },
-                  },
+                // The forked package resource, bare — same shape as the new
+                // package's GET detail, selected by the source package type at
+                // runtime (issue #657). Fields vary by type, so the response is
+                // a `oneOf`. Fork provenance is resource state: `forked_from`
+                // is part of both detail DTOs.
+                oneOf: [
+                  { $ref: "#/components/schemas/AgentDetail" },
+                  { $ref: "#/components/schemas/OrgPackageItemDetail" },
                 ],
                 description:
-                  "The forked package resource — same shape as the new package's GET detail (`AgentDetail` when `type` is `agent`, otherwise `OrgPackageItemDetail`) — merged with the fork operation envelope (`packageId` legacy alias of `id`, `type`, `forked_from`). No follow-up GET needed.",
+                  "The forked package resource — same shape as the new package's GET detail (`AgentDetail` for agents, otherwise `OrgPackageItemDetail`). The resource's `id` is the new package ID under org scope and `forked_from` carries the source package ID. No follow-up GET needed.",
               },
             },
           },
@@ -1958,7 +1873,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: versionRestoreResponseSchema(),
+              schema: versionRestoreResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },
@@ -2563,7 +2478,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: versionRestoreResponseSchema(),
+              schema: versionRestoreResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },
