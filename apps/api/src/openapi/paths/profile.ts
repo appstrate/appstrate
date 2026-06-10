@@ -16,16 +16,7 @@ export const profilePaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "string" },
-                  displayName: { type: ["string", "null"] },
-                  language: { type: "string", enum: ["fr", "en"] },
-                  email: { type: "string", format: "email" },
-                  name: { type: "string" },
-                },
-              },
+              schema: { $ref: "#/components/schemas/UserProfile" },
               example: {
                 id: "usr_abc123",
                 displayName: "Alice Martin",
@@ -62,27 +53,27 @@ export const profilePaths = {
       },
       responses: {
         "200": {
-          description: "Profile updated",
+          description: "Updated profile — same serializer as GET /api/profile",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  ok: { type: "boolean" },
-                  language: { type: ["string", "null"], enum: ["fr", "en", null] },
-                  displayName: { type: ["string", "null"] },
-                },
+              schema: { $ref: "#/components/schemas/UserProfile" },
+              example: {
+                id: "usr_abc123",
+                displayName: "Alice Martin",
+                language: "en",
+                email: "alice@example.com",
+                name: "Alice Martin",
               },
-              example: { ok: true, language: "en", displayName: "Alice Martin" },
             },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },

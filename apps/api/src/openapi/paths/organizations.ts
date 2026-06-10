@@ -250,7 +250,8 @@ export const organizationsPaths = {
       },
       responses: {
         "201": {
-          description: "User added or invitation created",
+          description:
+            "Polymorphic bare resource: when the user already exists (and no invitation flow applies) they are added directly and the created member is returned (OrgMember — discriminate on `userId`); otherwise an invitation is created and returned (OrgInvitationInfo — discriminate on `id` + `token`). Both use the same serializers as the lists in GET /api/orgs/{orgId}.",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -258,25 +259,33 @@ export const organizationsPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "object",
-                properties: {
-                  added: { type: "boolean", description: "True if user was added directly" },
-                  invited: { type: "boolean", description: "True if invitation was sent" },
-                  userId: { type: "string", description: "User ID (if added)" },
-                  email: { type: "string", description: "Email (if invited)" },
-                  role: { type: "string" },
-                  token: {
-                    type: "string",
-                    description: "Invitation token (only if invited)",
+                oneOf: [
+                  { $ref: "#/components/schemas/OrgMember" },
+                  { $ref: "#/components/schemas/OrgInvitationInfo" },
+                ],
+              },
+              examples: {
+                memberAdded: {
+                  summary: "Existing user added directly",
+                  value: {
+                    userId: "usr_def456",
+                    displayName: "Bob",
+                    email: "bob@acme.com",
+                    role: "member",
+                    joinedAt: "2026-01-12T10:00:00Z",
                   },
                 },
-              },
-              example: {
-                added: false,
-                invited: true,
-                email: "newuser@example.com",
-                role: "member",
-                token: "inv_abc123def456",
+                invitationCreated: {
+                  summary: "Invitation created",
+                  value: {
+                    id: "inv_abc123",
+                    email: "newuser@example.com",
+                    role: "member",
+                    token: "inv_abc123def456",
+                    expiresAt: "2026-02-01T00:00:00Z",
+                    createdAt: "2026-01-25T00:00:00Z",
+                  },
+                },
               },
             },
           },
