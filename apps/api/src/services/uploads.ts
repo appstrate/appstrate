@@ -266,6 +266,88 @@ export function isUnsniffableMime(mime: string): boolean {
 }
 
 /**
+ * MIMEs whose on-disk format is a ZIP container. `file-type` samples only the
+ * head of the stream (~4100 bytes); when the identifying entry of an OOXML/ODF
+ * archive ([Content_Types].xml, mimetype) sits beyond the sample window — the
+ * normal layout for openpyxl/LibreOffice/Google-exported files — it falls back
+ * to plain `application/zip`. Treating that fallback as a mismatch would
+ * reject legitimate office documents, so declared-vs-sniffed comparison uses
+ * Marcel/Tika-style subtype refinement: a declared member of this family is
+ * compatible with a sniffed `application/zip` (and vice versa). A declaration
+ * outside the family (application/pdf, image/png, …) still requires an exact
+ * sniff match.
+ */
+const ZIP_CONTAINER_MIMES = new Set([
+  // OOXML
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // xlsx
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.template", // xltx
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // docx
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.template", // dotx
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation", // pptx
+  "application/vnd.openxmlformats-officedocument.presentationml.slideshow", // ppsx
+  "application/vnd.openxmlformats-officedocument.presentationml.template", // potx
+  // OOXML macro-enabled
+  "application/vnd.ms-excel.sheet.macroenabled.12", // xlsm
+  "application/vnd.ms-excel.template.macroenabled.12", // xltm
+  "application/vnd.ms-word.document.macroenabled.12", // docm
+  "application/vnd.ms-word.template.macroenabled.12", // dotm
+  "application/vnd.ms-powerpoint.presentation.macroenabled.12", // pptm
+  "application/vnd.ms-powerpoint.slideshow.macroenabled.12", // ppsm
+  // OpenDocument
+  "application/vnd.oasis.opendocument.text", // odt
+  "application/vnd.oasis.opendocument.spreadsheet", // ods
+  "application/vnd.oasis.opendocument.presentation", // odp
+  "application/vnd.oasis.opendocument.graphics", // odg
+  // Other ZIP-based formats
+  "application/epub+zip",
+  "application/java-archive", // jar
+]);
+
+/**
+ * Legacy Office formats stored in an OLE2 / Compound File Binary container.
+ * `file-type` identifies the container magic (`application/x-cfb`) but never
+ * refines it to the concrete format, so every legitimate legacy Office upload
+ * sniffs as the generic parent — same shape as the ZIP family above.
+ */
+const CFB_CONTAINER_MIMES = new Set([
+  "application/msword", // .doc
+  "application/vnd.ms-excel", // .xls
+  "application/vnd.ms-powerpoint", // .ppt
+  "application/vnd.ms-outlook", // .msg
+  "application/vnd.visio", // .vsd
+]);
+
+/**
+ * Container families for declared-vs-sniffed refinement: `generic` is the
+ * parent MIME the sniffer reports for the raw container, `members` are the
+ * concrete formats stored in it.
+ */
+const CONTAINER_FAMILIES: ReadonlyArray<{ generic: string; members: Set<string> }> = [
+  { generic: "application/zip", members: ZIP_CONTAINER_MIMES },
+  { generic: "application/x-cfb", members: CFB_CONTAINER_MIMES },
+];
+
+/**
+ * Declared-vs-sniffed MIME compatibility for the magic-byte check. Exact match
+ * always passes; otherwise refinement is strictly parent↔child against a
+ * container family's generic type (declared xlsx / sniffed application/zip,
+ * declared application/zip / sniffed xlsx). Two SPECIFIC container types never
+ * satisfy each other — declared xlsx with sniffed docm/xlsm stays a mismatch,
+ * so a macro-enabled document cannot ride in under a macro-free declaration
+ * when the sniffer DID identify it. Exported so the inline `data:` URI input
+ * path (input-parser) applies the exact same policy as the staged-upload path.
+ */
+export function sniffedMimeMatchesDeclared(declared: string, sniffed: string | undefined): boolean {
+  if (!sniffed) return false;
+  if (sniffed === declared) return true;
+  for (const { generic, members } of CONTAINER_FAMILIES) {
+    if (sniffed === generic && members.has(declared)) return true;
+    if (declared === generic && members.has(sniffed)) return true;
+  }
+  return false;
+}
+
+/**
  * Read declared metadata for a set of staged uploads — without claiming or
  * downloading them. Verifies each exists, belongs to the caller's tenant, and
  * has not expired (same error shapes as consume). Used to enforce the per-run
@@ -423,7 +505,7 @@ export async function consumeUploadStream(
     //    the declared MIME for these — manifests that need binary-grade
     //    validation must declare a sniffable MIME.
     if (row.mime && row.mime !== "application/octet-stream" && !isUnsniffableMime(row.mime)) {
-      if (!sniffedMime || sniffedMime !== row.mime) {
+      if (!sniffedMimeMatchesDeclared(row.mime, sniffedMime)) {
         logger.warn("upload mime mismatch on consume", {
           uploadId,
           declared: row.mime,
