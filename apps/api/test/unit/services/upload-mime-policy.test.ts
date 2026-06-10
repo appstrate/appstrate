@@ -55,6 +55,24 @@ describe("sniffedMimeMatchesDeclared", () => {
     expect(sniffedMimeMatchesDeclared(XLSX, "application/gzip")).toBe(false);
   });
 
+  it("sniffed application/x-cfb refines into a declared legacy Office type", () => {
+    // file-type identifies the OLE2 container magic but never refines it to
+    // the concrete format — every legitimate .doc/.xls/.ppt sniffs as x-cfb.
+    expect(sniffedMimeMatchesDeclared("application/msword", "application/x-cfb")).toBe(true);
+    expect(sniffedMimeMatchesDeclared("application/vnd.ms-excel", "application/x-cfb")).toBe(true);
+    expect(sniffedMimeMatchesDeclared("application/vnd.ms-powerpoint", "application/x-cfb")).toBe(
+      true,
+    );
+    expect(sniffedMimeMatchesDeclared("application/x-cfb", "application/x-cfb")).toBe(true);
+  });
+
+  it("container families do not cross", () => {
+    // A zip member never refines from the cfb generic and vice versa.
+    expect(sniffedMimeMatchesDeclared(XLSX, "application/x-cfb")).toBe(false);
+    expect(sniffedMimeMatchesDeclared("application/vnd.ms-excel", "application/zip")).toBe(false);
+    expect(sniffedMimeMatchesDeclared("application/pdf", "application/x-cfb")).toBe(false);
+  });
+
   it("two specific container types never satisfy each other", () => {
     // Refinement is parent↔child only — when the sniffer DID identify the
     // concrete format, a different concrete declaration is a real mismatch.

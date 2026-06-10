@@ -278,7 +278,6 @@ export function isUnsniffableMime(mime: string): boolean {
  * sniff match.
  */
 const ZIP_CONTAINER_MIMES = new Set([
-  "application/zip",
   // OOXML
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // xlsx
   "application/vnd.openxmlformats-officedocument.spreadsheetml.template", // xltx
@@ -305,20 +304,46 @@ const ZIP_CONTAINER_MIMES = new Set([
 ]);
 
 /**
+ * Legacy Office formats stored in an OLE2 / Compound File Binary container.
+ * `file-type` identifies the container magic (`application/x-cfb`) but never
+ * refines it to the concrete format, so every legitimate legacy Office upload
+ * sniffs as the generic parent — same shape as the ZIP family above.
+ */
+const CFB_CONTAINER_MIMES = new Set([
+  "application/msword", // .doc
+  "application/vnd.ms-excel", // .xls
+  "application/vnd.ms-powerpoint", // .ppt
+  "application/vnd.ms-outlook", // .msg
+  "application/vnd.visio", // .vsd
+]);
+
+/**
+ * Container families for declared-vs-sniffed refinement: `generic` is the
+ * parent MIME the sniffer reports for the raw container, `members` are the
+ * concrete formats stored in it.
+ */
+const CONTAINER_FAMILIES: ReadonlyArray<{ generic: string; members: Set<string> }> = [
+  { generic: "application/zip", members: ZIP_CONTAINER_MIMES },
+  { generic: "application/x-cfb", members: CFB_CONTAINER_MIMES },
+];
+
+/**
  * Declared-vs-sniffed MIME compatibility for the magic-byte check. Exact match
- * always passes; otherwise refinement is strictly parent↔child against the
- * generic `application/zip` (declared xlsx / sniffed application/zip, declared
- * application/zip / sniffed xlsx). Two SPECIFIC container types never satisfy
- * each other — declared xlsx with sniffed docm/xlsm stays a mismatch, so a
- * macro-enabled document cannot ride in under a macro-free declaration when
- * the sniffer DID identify it. Exported so the inline `data:` URI input path
- * (input-parser) applies the exact same policy as the staged-upload path.
+ * always passes; otherwise refinement is strictly parent↔child against a
+ * container family's generic type (declared xlsx / sniffed application/zip,
+ * declared application/zip / sniffed xlsx). Two SPECIFIC container types never
+ * satisfy each other — declared xlsx with sniffed docm/xlsm stays a mismatch,
+ * so a macro-enabled document cannot ride in under a macro-free declaration
+ * when the sniffer DID identify it. Exported so the inline `data:` URI input
+ * path (input-parser) applies the exact same policy as the staged-upload path.
  */
 export function sniffedMimeMatchesDeclared(declared: string, sniffed: string | undefined): boolean {
   if (!sniffed) return false;
   if (sniffed === declared) return true;
-  if (sniffed === "application/zip") return ZIP_CONTAINER_MIMES.has(declared);
-  if (declared === "application/zip") return ZIP_CONTAINER_MIMES.has(sniffed);
+  for (const { generic, members } of CONTAINER_FAMILIES) {
+    if (sniffed === generic && members.has(declared)) return true;
+    if (declared === generic && members.has(sniffed)) return true;
+  }
   return false;
 }
 

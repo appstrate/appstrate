@@ -368,6 +368,28 @@ describe("consumeUploadStream", () => {
     expect(consumed.mime).toBe(declared);
   });
 
+  it("legacy .xls (OLE2/CFB container) declared as ms-excel is accepted", async () => {
+    // file-type identifies the OLE2 magic as generic application/x-cfb and
+    // never refines it to the concrete legacy Office format — parent↔child
+    // refinement must bridge the gap, same as the ZIP family.
+    const ctx = await createTestContext({ orgSlug: "org-xls" });
+    const id = "upl_xls_1";
+    const cfb = new Uint8Array(512);
+    cfb.set([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+    const bytes = Buffer.from(cfb);
+    await seedUpload(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { id, bytes, mime: "application/vnd.ms-excel" },
+    );
+    const consumed = await consumeUploadStream(
+      id,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      drainSink,
+    );
+    expect(consumed.size).toBe(bytes.length);
+    expect(consumed.mime).toBe("application/vnd.ms-excel");
+  });
+
   it("zip bytes declared as pdf are still rejected (family refinement is zip-only)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-zip-spoof" });
     const id = "upl_zip_spoof_1";
