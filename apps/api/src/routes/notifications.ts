@@ -40,16 +40,18 @@ export function createNotificationsRouter() {
     const actor = getActor(c);
     const scope = getAppScope(c);
     const runId = c.req.param("runId");
-    const ok = await markNotificationRead(scope, runId, actor.id);
-    return c.json({ ok });
+    // Idempotent ack — 204 whether the notification was unread or not.
+    await markNotificationRead(scope, runId, actor.id);
+    return c.body(null, 204);
   });
 
-  // PUT /api/notifications/read-all
+  // PUT /api/notifications/read-all — bulk mutation: returns a documented
+  // operation result ({ updated_count }), not a resource (issue #657).
   router.put("/notifications/read-all", async (c) => {
     const actor = getActor(c);
     const scope = getAppScope(c);
     const updated = await markAllNotificationsRead(scope, actor.id);
-    return c.json({ updated });
+    return c.json({ updated_count: updated });
   });
 
   // GET /api/runs — global paginated run list across the application.

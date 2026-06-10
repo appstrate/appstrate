@@ -143,9 +143,7 @@ describe("Notifications API", () => {
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { ok: boolean };
-      expect(body.ok).toBe(true);
+      expect(res.status).toBe(204);
 
       // Verify the count dropped
       const countRes = await app.request("/api/notifications/unread-count", {
@@ -155,18 +153,16 @@ describe("Notifications API", () => {
       expect(countBody.count).toBe(0);
     });
 
-    it("returns false for non-existent run", async () => {
+    it("returns 204 for non-existent run (idempotent ack)", async () => {
       const res = await app.request("/api/notifications/read/exec_nonexistent", {
         method: "PUT",
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { ok: boolean };
-      expect(body.ok).toBe(false);
+      expect(res.status).toBe(204);
     });
 
-    it("returns false for run without notifiedAt", async () => {
+    it("returns 204 for run without notifiedAt (idempotent ack)", async () => {
       await seedAgent({
         id: "@notiforg/no-notif",
         orgId: ctx.orgId,
@@ -185,9 +181,7 @@ describe("Notifications API", () => {
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { ok: boolean };
-      expect(body.ok).toBe(false);
+      expect(res.status).toBe(204);
     });
   });
 
@@ -203,8 +197,8 @@ describe("Notifications API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { updated: number };
-      expect(body.updated).toBe(3);
+      const body = (await res.json()) as { updated_count: number };
+      expect(body.updated_count).toBe(3);
 
       // Verify the count is now 0
       const countRes = await app.request("/api/notifications/unread-count", {
@@ -221,8 +215,8 @@ describe("Notifications API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { updated: number };
-      expect(body.updated).toBe(0);
+      const body = (await res.json()) as { updated_count: number };
+      expect(body.updated_count).toBe(0);
     });
 
     it("does not mark already-read notifications again", async () => {
@@ -247,8 +241,8 @@ describe("Notifications API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { updated: number };
-      expect(body.updated).toBe(0);
+      const body = (await res.json()) as { updated_count: number };
+      expect(body.updated_count).toBe(0);
     });
   });
 
@@ -502,9 +496,7 @@ describe("Notifications API", () => {
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { ok: boolean };
-      expect(body.ok).toBe(true);
+      expect(res.status).toBe(204);
     });
 
     it("counts end-user runs in unread count for org members", async () => {
@@ -571,8 +563,8 @@ describe("Notifications API", () => {
       });
 
       expect(markRes.status).toBe(200);
-      const markBody = (await markRes.json()) as { updated: number };
-      expect(markBody.updated).toBe(2);
+      const markBody = (await markRes.json()) as { updated_count: number };
+      expect(markBody.updated_count).toBe(2);
 
       // Verify count is now 0
       const countRes = await app.request("/api/notifications/unread-count", {

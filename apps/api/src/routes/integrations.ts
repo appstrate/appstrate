@@ -420,7 +420,7 @@ export function createIntegrationsRouter() {
         resourceType: "integration",
         resourceId: `${packageId}#${authKey}`,
       });
-      return c.json({ deleted: true });
+      return c.body(null, 204);
     },
   );
 
@@ -677,7 +677,8 @@ export function createIntegrationsRouter() {
           resourceId: `${packageId}#${agentPackageId}`,
         });
       }
-      return c.json(result);
+      // Idempotent delete — 204 whether the pin existed or not.
+      return c.body(null, 204);
     },
   );
 
@@ -736,7 +737,8 @@ export function createIntegrationsRouter() {
           resourceId: packageId,
         });
       }
-      return c.json(result);
+      // Idempotent delete — 204 whether a default existed or not.
+      return c.body(null, 204);
     },
   );
 

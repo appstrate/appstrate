@@ -540,8 +540,7 @@ describe("Organizations API", () => {
         headers: { Cookie: ctx.cookie },
       });
 
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true });
+      expect(res.status).toBe(204);
 
       // Org row is gone.
       const orgRows = await db.select().from(organizations).where(eq(organizations.id, ctx.orgId));

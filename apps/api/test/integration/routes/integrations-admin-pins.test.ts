@@ -348,7 +348,7 @@ describe("/api/integrations/:packageId admin surface", () => {
   // ─── DELETE /:packageId/pins/:agentPackageId ──────────
 
   describe("DELETE /:packageId/pins/:agentPackageId", () => {
-    it("ALLOW: admin removes a pin (deleted=true)", async () => {
+    it("ALLOW: admin removes a pin (204)", async () => {
       const connId = await seedSharedConnection();
       // Create via PUT first to have something to delete.
       await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
@@ -362,20 +362,16 @@ describe("/api/integrations/:packageId admin surface", () => {
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { deleted: boolean };
-      expect(body.deleted).toBe(true);
+      expect(res.status).toBe(204);
     });
 
-    it("returns deleted=false when the pin doesn't exist (idempotent)", async () => {
+    it("returns 204 when the pin doesn't exist (idempotent)", async () => {
       const res = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { deleted: boolean };
-      expect(body.deleted).toBe(false);
+      expect(res.status).toBe(204);
     });
 
     it("DENY: non-admin member gets 401/403", async () => {
