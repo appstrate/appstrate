@@ -116,7 +116,7 @@ export const modelsPaths = {
       responses: {
         "201": {
           description:
-            "Model created — the full created model resource (same shape as `GET`/`list`). `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
+            "Model created — the bare created model resource (same shape as `GET`/`list`).",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -161,29 +161,22 @@ export const modelsPaths = {
       responses: {
         "200": {
           description:
-            "Default model updated. Returns the new effective default model resource (same shape as `GET`/`list`) plus a legacy `success` flag. When the default is cleared (`modelId: null`) and no default remains in effect, only `{ success: true }` is returned.",
+            "Default model updated — the bare *effective* default model resource (same shape as `GET`/`list`). When no DB row is flagged, the system-default fallback (if any) is surfaced.",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: {
-                allOf: [
-                  { $ref: "#/components/schemas/OrgModel" },
-                  {
-                    type: "object",
-                    properties: {
-                      success: {
-                        type: "boolean",
-                        description:
-                          "Legacy acknowledgement flag, always `true`. Retained for backward compatibility; prefer reading the model fields.",
-                      },
-                    },
-                  },
-                ],
-              },
+              schema: { $ref: "#/components/schemas/OrgModel" },
             },
+          },
+        },
+        "204": {
+          description:
+            "Default cleared and no model remains in effect (no system default configured) — no resource to return.",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -479,7 +472,7 @@ export const modelsPaths = {
       responses: {
         "200": {
           description:
-            "Model updated — the full updated model resource (same shape as `GET`/`list`). `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
+            "Model updated — the bare updated model resource (same shape as `GET`/`list`).",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -492,6 +485,7 @@ export const modelsPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
     delete: {
