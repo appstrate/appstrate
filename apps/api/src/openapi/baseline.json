@@ -1344,21 +1344,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
-                    },
-                    "skillIds": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/AgentDetail",
+                  "description": "The updated agent resource — same shape as the GET agent detail. The new skill references appear in `dependencies.skills`. No follow-up GET needed."
                 }
               }
             }
@@ -11908,36 +11895,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/OrgPackageItemDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "packageId": {
-                          "type": "string",
-                          "description": "Legacy alias of the created package's `id`, kept for backward compatibility. Prefer `id`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "Optimistic-lock token to send with the next update."
-                        },
-                        "message": {
-                          "type": "string",
-                          "description": "Human-readable operation message."
-                        },
-                        "warnings": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "Non-blocking validation warnings (present only when any)."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The created package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, `message`, optional `warnings`). No follow-up GET needed."
+                  "$ref": "#/components/schemas/OrgPackageItemDetail",
+                  "description": "The created package resource — same shape as its GET detail. The resource carries `lock_version`, the optimistic-lock token to send with the next update. No follow-up GET needed."
                 }
               }
             }
@@ -12117,21 +12076,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/PackageVersionDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "message": {
-                          "type": "string",
-                          "description": "Human-readable operation message."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The created version resource — same shape as the GET version detail (manifest, integrity, dist_tags, …) — plus a human-readable `message`. `id` (version row id) and `version` are part of the resource. No follow-up GET needed."
+                  "$ref": "#/components/schemas/PackageVersionDetail",
+                  "description": "The created version resource — same shape as the GET version detail (manifest, integrity, dist_tags, …). `id` (version row id) and `version` are part of the resource. No follow-up GET needed."
                 }
               }
             }
@@ -12191,29 +12137,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/PackageVersionDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "message": {
-                          "type": "string",
-                          "description": "Human-readable operation message."
-                        },
-                        "restored_version": {
-                          "type": "string",
-                          "description": "Legacy alias of the restored version's `version`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "The package's NEW optimistic-lock token after the draft was overwritten — not part of the version resource; read it back before the next draft edit."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The restored version resource — same shape as the GET version detail — plus the operation-result envelope (`message`, `restored_version` legacy alias of `version`, and the package's new `lock_version`)."
+                  "$ref": "#/components/schemas/OrgPackageItemDetail",
+                  "description": "The updated package resource after the restore — same shape as the package GET detail. The restored version is reflected in `version` / `manifest` / `content`, and the resource carries the package's NEW `lock_version` — read it back before the next draft edit."
                 }
               }
             }
@@ -12486,32 +12411,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/OrgPackageItemDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "packageId": {
-                          "type": "string",
-                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "New optimistic-lock token after this update — read it back before the next edit."
-                        },
-                        "warnings": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "Non-blocking validation warnings (present only when any)."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
+                  "$ref": "#/components/schemas/OrgPackageItemDetail",
+                  "description": "The updated package resource — same shape as its GET detail. The resource carries the NEW `lock_version` — read it back before the next edit. No follow-up GET needed."
                 }
               }
             }
@@ -12681,36 +12582,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/AgentDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "packageId": {
-                          "type": "string",
-                          "description": "Legacy alias of the created package's `id`, kept for backward compatibility. Prefer `id`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "Optimistic-lock token to send with the next update."
-                        },
-                        "message": {
-                          "type": "string",
-                          "description": "Human-readable operation message."
-                        },
-                        "warnings": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "Non-blocking validation warnings (present only when any)."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The created package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, `message`, optional `warnings`). No follow-up GET needed."
+                  "$ref": "#/components/schemas/AgentDetail",
+                  "description": "The created package resource — same shape as its GET detail. The resource carries `lock_version`, the optimistic-lock token to send with the next update. No follow-up GET needed."
                 }
               }
             }
@@ -12830,32 +12703,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/AgentDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "packageId": {
-                          "type": "string",
-                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "New optimistic-lock token after this update — read it back before the next edit."
-                        },
-                        "warnings": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "Non-blocking validation warnings (present only when any)."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
+                  "$ref": "#/components/schemas/AgentDetail",
+                  "description": "The updated package resource — same shape as its GET detail. The resource carries the NEW `lock_version` — read it back before the next edit. No follow-up GET needed."
                 }
               }
             }
@@ -13091,21 +12940,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/PackageVersionDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "message": {
-                          "type": "string",
-                          "description": "Human-readable operation message."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The created version resource — same shape as the GET version detail (manifest, integrity, dist_tags, …) — plus a human-readable `message`. `id` (version row id) and `version` are part of the resource. No follow-up GET needed."
+                  "$ref": "#/components/schemas/PackageVersionDetail",
+                  "description": "The created version resource — same shape as the GET version detail (manifest, integrity, dist_tags, …). `id` (version row id) and `version` are part of the resource. No follow-up GET needed."
                 }
               }
             }
@@ -13174,29 +13010,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/PackageVersionDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "message": {
-                          "type": "string",
-                          "description": "Human-readable operation message."
-                        },
-                        "restored_version": {
-                          "type": "string",
-                          "description": "Legacy alias of the restored version's `version`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "The package's NEW optimistic-lock token after the draft was overwritten — not part of the version resource; read it back before the next draft edit."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The restored version resource — same shape as the GET version detail — plus the operation-result envelope (`message`, `restored_version` legacy alias of `version`, and the package's new `lock_version`)."
+                  "$ref": "#/components/schemas/AgentDetail",
+                  "description": "The updated package resource after the restore — same shape as the package GET detail. The restored version is reflected in `version` / `manifest` / `content`, and the resource carries the package's NEW `lock_version` — read it back before the next draft edit."
                 }
               }
             }
@@ -13423,37 +13238,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
+                  "oneOf": [
                     {
-                      "oneOf": [
-                        {
-                          "$ref": "#/components/schemas/AgentDetail"
-                        },
-                        {
-                          "$ref": "#/components/schemas/OrgPackageItemDetail"
-                        }
-                      ]
+                      "$ref": "#/components/schemas/AgentDetail"
                     },
                     {
-                      "type": "object",
-                      "required": ["packageId", "type", "forked_from"],
-                      "properties": {
-                        "packageId": {
-                          "type": "string",
-                          "description": "New package ID under org scope. Legacy alias of the forked resource's `id`."
-                        },
-                        "type": {
-                          "type": "string",
-                          "enum": ["agent", "skill", "mcp-server", "integration"]
-                        },
-                        "forked_from": {
-                          "type": "string",
-                          "description": "Source package ID"
-                        }
-                      }
+                      "$ref": "#/components/schemas/OrgPackageItemDetail"
                     }
                   ],
-                  "description": "The forked package resource — same shape as the new package's GET detail (`AgentDetail` when `type` is `agent`, otherwise `OrgPackageItemDetail`) — merged with the fork operation envelope (`packageId` legacy alias of `id`, `type`, `forked_from`). No follow-up GET needed."
+                  "description": "The forked package resource — same shape as the new package's GET detail (`AgentDetail` for agents, otherwise `OrgPackageItemDetail`). The resource's `id` is the new package ID under org scope and `forked_from` carries the source package ID. No follow-up GET needed."
                 }
               }
             }
@@ -13592,32 +13385,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/OrgPackageItemDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "packageId": {
-                          "type": "string",
-                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "New optimistic-lock token after this update — read it back before the next edit."
-                        },
-                        "warnings": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "Non-blocking validation warnings (present only when any)."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
+                  "$ref": "#/components/schemas/OrgPackageItemDetail",
+                  "description": "The updated package resource — same shape as its GET detail. The resource carries the NEW `lock_version` — read it back before the next edit. No follow-up GET needed."
                 }
               }
             }
@@ -13798,32 +13567,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/AgentDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "packageId": {
-                          "type": "string",
-                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "New optimistic-lock token after this update — read it back before the next edit."
-                        },
-                        "warnings": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "Non-blocking validation warnings (present only when any)."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
+                  "$ref": "#/components/schemas/AgentDetail",
+                  "description": "The updated package resource — same shape as its GET detail. The resource carries the NEW `lock_version` — read it back before the next edit. No follow-up GET needed."
                 }
               }
             }
@@ -14009,36 +13754,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/OrgPackageItemDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "packageId": {
-                          "type": "string",
-                          "description": "Legacy alias of the created package's `id`, kept for backward compatibility. Prefer `id`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "Optimistic-lock token to send with the next update."
-                        },
-                        "message": {
-                          "type": "string",
-                          "description": "Human-readable operation message."
-                        },
-                        "warnings": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "Non-blocking validation warnings (present only when any)."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The created package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, `message`, optional `warnings`). No follow-up GET needed."
+                  "$ref": "#/components/schemas/OrgPackageItemDetail",
+                  "description": "The created package resource — same shape as its GET detail. The resource carries `lock_version`, the optimistic-lock token to send with the next update. No follow-up GET needed."
                 }
               }
             }
@@ -14218,21 +13935,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/PackageVersionDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "message": {
-                          "type": "string",
-                          "description": "Human-readable operation message."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The created version resource — same shape as the GET version detail (manifest, integrity, dist_tags, …) — plus a human-readable `message`. `id` (version row id) and `version` are part of the resource. No follow-up GET needed."
+                  "$ref": "#/components/schemas/PackageVersionDetail",
+                  "description": "The created version resource — same shape as the GET version detail (manifest, integrity, dist_tags, …). `id` (version row id) and `version` are part of the resource. No follow-up GET needed."
                 }
               }
             }
@@ -14292,29 +13996,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/PackageVersionDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "message": {
-                          "type": "string",
-                          "description": "Human-readable operation message."
-                        },
-                        "restored_version": {
-                          "type": "string",
-                          "description": "Legacy alias of the restored version's `version`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "The package's NEW optimistic-lock token after the draft was overwritten — not part of the version resource; read it back before the next draft edit."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The restored version resource — same shape as the GET version detail — plus the operation-result envelope (`message`, `restored_version` legacy alias of `version`, and the package's new `lock_version`)."
+                  "$ref": "#/components/schemas/OrgPackageItemDetail",
+                  "description": "The updated package resource after the restore — same shape as the package GET detail. The restored version is reflected in `version` / `manifest` / `content`, and the resource carries the package's NEW `lock_version` — read it back before the next draft edit."
                 }
               }
             }
@@ -14588,32 +14271,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/OrgPackageItemDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "packageId": {
-                          "type": "string",
-                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "New optimistic-lock token after this update — read it back before the next edit."
-                        },
-                        "warnings": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "Non-blocking validation warnings (present only when any)."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
+                  "$ref": "#/components/schemas/OrgPackageItemDetail",
+                  "description": "The updated package resource — same shape as its GET detail. The resource carries the NEW `lock_version` — read it back before the next edit. No follow-up GET needed."
                 }
               }
             }
@@ -14793,32 +14452,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/OrgPackageItemDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "packageId": {
-                          "type": "string",
-                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "New optimistic-lock token after this update — read it back before the next edit."
-                        },
-                        "warnings": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "Non-blocking validation warnings (present only when any)."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
+                  "$ref": "#/components/schemas/OrgPackageItemDetail",
+                  "description": "The updated package resource — same shape as its GET detail. The resource carries the NEW `lock_version` — read it back before the next edit. No follow-up GET needed."
                 }
               }
             }
@@ -15023,36 +14658,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/OrgPackageItemDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "packageId": {
-                          "type": "string",
-                          "description": "Legacy alias of the created package's `id`, kept for backward compatibility. Prefer `id`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "Optimistic-lock token to send with the next update."
-                        },
-                        "message": {
-                          "type": "string",
-                          "description": "Human-readable operation message."
-                        },
-                        "warnings": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "Non-blocking validation warnings (present only when any)."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The created package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, `message`, optional `warnings`). No follow-up GET needed."
+                  "$ref": "#/components/schemas/OrgPackageItemDetail",
+                  "description": "The created package resource — same shape as its GET detail. The resource carries `lock_version`, the optimistic-lock token to send with the next update. No follow-up GET needed."
                 }
               }
             }
@@ -15232,21 +14839,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/PackageVersionDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "message": {
-                          "type": "string",
-                          "description": "Human-readable operation message."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The created version resource — same shape as the GET version detail (manifest, integrity, dist_tags, …) — plus a human-readable `message`. `id` (version row id) and `version` are part of the resource. No follow-up GET needed."
+                  "$ref": "#/components/schemas/PackageVersionDetail",
+                  "description": "The created version resource — same shape as the GET version detail (manifest, integrity, dist_tags, …). `id` (version row id) and `version` are part of the resource. No follow-up GET needed."
                 }
               }
             }
@@ -15306,29 +14900,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/PackageVersionDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "message": {
-                          "type": "string",
-                          "description": "Human-readable operation message."
-                        },
-                        "restored_version": {
-                          "type": "string",
-                          "description": "Legacy alias of the restored version's `version`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "The package's NEW optimistic-lock token after the draft was overwritten — not part of the version resource; read it back before the next draft edit."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The restored version resource — same shape as the GET version detail — plus the operation-result envelope (`message`, `restored_version` legacy alias of `version`, and the package's new `lock_version`)."
+                  "$ref": "#/components/schemas/OrgPackageItemDetail",
+                  "description": "The updated package resource after the restore — same shape as the package GET detail. The restored version is reflected in `version` / `manifest` / `content`, and the resource carries the package's NEW `lock_version` — read it back before the next draft edit."
                 }
               }
             }
@@ -15602,32 +15175,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/OrgPackageItemDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "packageId": {
-                          "type": "string",
-                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "New optimistic-lock token after this update — read it back before the next edit."
-                        },
-                        "warnings": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "Non-blocking validation warnings (present only when any)."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
+                  "$ref": "#/components/schemas/OrgPackageItemDetail",
+                  "description": "The updated package resource — same shape as its GET detail. The resource carries the NEW `lock_version` — read it back before the next edit. No follow-up GET needed."
                 }
               }
             }
@@ -15807,32 +15356,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/OrgPackageItemDetail"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "packageId": {
-                          "type": "string",
-                          "description": "Legacy alias of the updated package's `id`, kept for backward compatibility. Prefer `id`."
-                        },
-                        "lock_version": {
-                          "type": "integer",
-                          "description": "New optimistic-lock token after this update — read it back before the next edit."
-                        },
-                        "warnings": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "Non-blocking validation warnings (present only when any)."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The updated package resource — same shape as its GET detail — plus the operation-result envelope (`packageId` legacy alias of `id`, `lock_version`, optional `warnings`). No follow-up GET needed."
+                  "$ref": "#/components/schemas/OrgPackageItemDetail",
+                  "description": "The updated package resource — same shape as its GET detail. The resource carries the NEW `lock_version` — read it back before the next edit. No follow-up GET needed."
                 }
               }
             }

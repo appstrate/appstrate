@@ -67,7 +67,9 @@ function useUploadPackage(type: PackageType) {
     mutationFn: async (file: File) => {
       const fd = new FormData();
       fd.append("file", file);
-      return uploadFormData<{ packageId: string; version?: string }>(`/packages/${cfg.path}`, fd);
+      // 201 → the created package resource, bare (issue #657). `version` is
+      // the manifest version of the created draft.
+      return uploadFormData<{ id: string; version: string | null }>(`/packages/${cfg.path}`, fd);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
@@ -214,13 +216,11 @@ export function useCreateVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (version?: string) => {
-      return api<{ id: number; version: string; message: string }>(
-        `${packageBasePath(type, packageId)}/versions`,
-        {
-          method: "POST",
-          body: version ? JSON.stringify({ version }) : undefined,
-        },
-      );
+      // 201 → the created version resource, bare (issue #657).
+      return api<{ id: number; version: string }>(`${packageBasePath(type, packageId)}/versions`, {
+        method: "POST",
+        body: version ? JSON.stringify({ version }) : undefined,
+      });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["package-versions"] });
@@ -251,7 +251,10 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (version: string) =>
-      api<{ message: string; restored_version: string; lock_version: number }>(
+      // 200 → the updated PACKAGE resource, bare (issue #657): the restore is
+      // reflected in `version`/`manifest`/`content` and the resource carries
+      // the package's NEW `lock_version`.
+      api<{ id: string; version: string | null; lock_version: number }>(
         `${packageBasePath(type, packageId)}/versions/${version}/restore`,
         { method: "POST" },
       ),
@@ -281,14 +284,13 @@ export function useForkPackage() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ packageId, name }: { packageId: string; name?: string }) => {
-      return api<{ packageId: string; type: string; forkedFrom: string }>(
-        `/packages/${packageId}/fork`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(name ? { name } : {}),
-        },
-      );
+      // 201 → the forked package resource, bare (issue #657): `id` is the new
+      // package ID under org scope, `forked_from` the source package ID.
+      return api<{ id: string; forked_from: string | null }>(`/packages/${packageId}/fork`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(name ? { name } : {}),
+      });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["agents"] });
