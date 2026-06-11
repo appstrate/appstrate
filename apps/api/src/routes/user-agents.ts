@@ -11,6 +11,7 @@ import { caretRange } from "@appstrate/core/semver";
 import { requireOrgAgent, requireMutableAgent } from "../middleware/guards.ts";
 import { buildAgentDetailDto } from "./agent-detail-handler.ts";
 import { internalError, invalidRequest, parseBody } from "../lib/errors.ts";
+import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 export const updateSkillsSchema = z.object({
@@ -93,6 +94,10 @@ export function createUserAgentsRouter() {
       // successful write.
       const detail = await buildAgentDetailDto(c, { itemId: packageId, requireAccess: false });
       if (!detail) {
+        logger.error("Updated agent could not be re-read", {
+          packageId,
+          orgId: c.get("orgId"),
+        });
         throw internalError();
       }
       return c.json(detail);

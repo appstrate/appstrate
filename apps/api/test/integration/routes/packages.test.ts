@@ -1478,5 +1478,85 @@ describe("Packages API", () => {
       expect(body.message).toBeUndefined();
       expect(body.restored_version).toBeUndefined();
     });
+
+    it("POST fork returns the bare forked AGENT detail DTO (oneOf agent arm)", async () => {
+      // Fork requires a source in ANOTHER org with a published version whose
+      // ZIP exists in storage — go through the API end to end.
+      const srcCtx = await createTestContext({ orgSlug: "forksrc" });
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(srcCtx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: agentManifest("@forksrc/forkable-agent"),
+          content: "source prompt",
+        }),
+      });
+      expect(create.status).toBe(201);
+      const pub = await app.request("/api/packages/agents/@forksrc/forkable-agent/versions", {
+        method: "POST",
+        headers: authHeaders(srcCtx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ version: "0.1.0" }),
+      });
+      expect(pub.status).toBe(201);
+
+      const res = await app.request("/api/packages/@forksrc/forkable-agent/fork", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      // Bare forked Agent detail DTO — fork provenance is resource state.
+      expect(body.id).toBe("@pkgorg/forkable-agent");
+      expect(body.forked_from).toBe("@forksrc/forkable-agent");
+      expect(body.manifest).toBeDefined();
+      expect(body.lock_version).toBeDefined();
+      // No operation envelope.
+      expect(body.packageId).toBeUndefined();
+      expect(body.type).toBeUndefined();
+    });
+
+    it("POST fork returns the bare forked SKILL detail DTO (oneOf non-agent arm)", async () => {
+      const srcCtx = await createTestContext({ orgSlug: "forksrc2" });
+      const create = await app.request("/api/packages/skills", {
+        method: "POST",
+        headers: authHeaders(srcCtx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@forksrc2/forkable-skill",
+            version: "0.1.0",
+            type: "skill",
+            schema_version: "0.1",
+            display_name: "Forkable Skill",
+            description: "Skill arm of the fork oneOf",
+          },
+          content: "# Skill\nDo the thing.",
+        }),
+      });
+      expect(create.status).toBe(201);
+      const pub = await app.request("/api/packages/skills/@forksrc2/forkable-skill/versions", {
+        method: "POST",
+        headers: authHeaders(srcCtx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ version: "0.1.0" }),
+      });
+      expect(pub.status).toBe(201);
+
+      const res = await app.request("/api/packages/@forksrc2/forkable-skill/fork", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      // Bare forked OrgPackageItem detail DTO.
+      expect(body.id).toBe("@pkgorg/forkable-skill");
+      expect(body.forked_from).toBe("@forksrc2/forkable-skill");
+      expect(body.lock_version).toBeDefined();
+      // No operation envelope.
+      expect(body.packageId).toBeUndefined();
+      expect(body.type).toBeUndefined();
+    });
   });
 });

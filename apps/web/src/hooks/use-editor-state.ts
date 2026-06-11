@@ -140,6 +140,11 @@ export function useEditorState<S extends EditorStateBase>(
       allowNavigation();
       const body = toWireBody(state);
       if (isEdit) {
+        // Unlike saveDraft, this path does NOT read back the response's
+        // lock_version: useUpdatePackage.onSuccess navigates away and the
+        // editor unmounts, so the stale token can never be reused. If that
+        // navigation is ever removed, read the token back here too or the
+        // next save will 409.
         updatePkg.mutate(
           {
             ...(body as Parameters<typeof updatePkg.mutate>[0]),
