@@ -207,16 +207,11 @@ export const organizationsPaths = {
       description: "Delete organization and all associated data. Owner only.",
       parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
       responses: {
-        "200": {
+        "204": {
           description: "Organization deleted",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { type: "object", properties: { ok: { type: "boolean" } } },
-            },
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
@@ -347,16 +342,11 @@ export const organizationsPaths = {
         { name: "userId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "200": {
+        "204": {
           description: "Member removed",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { type: "object", properties: { ok: { type: "boolean" } } },
-            },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -426,16 +416,11 @@ export const organizationsPaths = {
         { name: "invitationId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "200": {
+        "204": {
           description: "Invitation cancelled",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { type: "object", properties: { ok: { type: "boolean" } } },
-            },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },

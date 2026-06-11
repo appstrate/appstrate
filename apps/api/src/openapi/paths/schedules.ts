@@ -296,19 +296,11 @@ export const schedulesPaths = {
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "200": {
+        "204": {
           description: "Schedule deleted",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: { ok: { type: "boolean" } },
-              },
-            },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },

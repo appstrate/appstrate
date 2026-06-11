@@ -16,7 +16,7 @@ describe("Welcome API", () => {
   });
 
   describe("POST /api/welcome/setup", () => {
-    it("returns 200 for authenticated user with display name", async () => {
+    it("returns 204 for authenticated user with display name", async () => {
       const testUser = await createTestUser();
 
       const res = await app.request("/api/welcome/setup", {
@@ -28,12 +28,16 @@ describe("Welcome API", () => {
         body: JSON.stringify({ displayName: "New Display Name" }),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.ok).toBe(true);
+      expect(res.status).toBe(204);
+
+      const [row] = await db
+        .select({ name: userTable.name })
+        .from(userTable)
+        .where(eq(userTable.id, testUser.id));
+      expect(row?.name).toBe("New Display Name");
     });
 
-    it("returns 200 for authenticated user without display name", async () => {
+    it("returns 204 for authenticated user without display name", async () => {
       const testUser = await createTestUser();
 
       const res = await app.request("/api/welcome/setup", {
@@ -45,9 +49,7 @@ describe("Welcome API", () => {
         body: JSON.stringify({}),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.ok).toBe(true);
+      expect(res.status).toBe(204);
     });
 
     it("returns 401 without authentication", async () => {
@@ -72,9 +74,13 @@ describe("Welcome API", () => {
         body: JSON.stringify({ displayName: "  Padded Name  " }),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.ok).toBe(true);
+      expect(res.status).toBe(204);
+
+      const [row] = await db
+        .select({ name: userTable.name })
+        .from(userTable)
+        .where(eq(userTable.id, testUser.id));
+      expect(row?.name).toBe("Padded Name");
     });
 
     it("ignores empty string display name", async () => {
@@ -89,10 +95,8 @@ describe("Welcome API", () => {
         body: JSON.stringify({ displayName: "" }),
       });
 
-      // Empty string after trim is falsy, so no DB update happens — still returns ok
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.ok).toBe(true);
+      // Empty string after trim is falsy, so no DB update happens — still 204
+      expect(res.status).toBe(204);
     });
 
     it("ignores whitespace-only display name", async () => {
@@ -107,31 +111,11 @@ describe("Welcome API", () => {
         body: JSON.stringify({ displayName: "   " }),
       });
 
-      // Whitespace-only trims to empty, so no update — still returns ok
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.ok).toBe(true);
+      // Whitespace-only trims to empty, so no update — still 204
+      expect(res.status).toBe(204);
     });
 
-    it("returns application/json content-type", async () => {
-      const testUser = await createTestUser();
-
-      const res = await app.request("/api/welcome/setup", {
-        method: "POST",
-        headers: {
-          Cookie: testUser.cookie,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ displayName: "Test" }),
-      });
-
-      expect(res.status).toBe(200);
-      const contentType = res.headers.get("content-type");
-      expect(contentType).not.toBeNull();
-      expect(contentType!).toContain("application/json");
-    });
-
-    it("response body only contains ok field", async () => {
+    it("returns an empty body (204 No Content)", async () => {
       const testUser = await createTestUser();
 
       const res = await app.request("/api/welcome/setup", {
@@ -143,9 +127,8 @@ describe("Welcome API", () => {
         body: JSON.stringify({ displayName: "Check Shape" }),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body).toEqual({ ok: true });
+      expect(res.status).toBe(204);
+      expect(await res.text()).toBe("");
     });
 
     it("handles extra fields in request body gracefully", async () => {
@@ -160,9 +143,7 @@ describe("Welcome API", () => {
         body: JSON.stringify({ displayName: "Valid", extraField: "ignored" }),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.ok).toBe(true);
+      expect(res.status).toBe(204);
     });
 
     // Issue #172 (extension) — same-class as PATCH /api/profile.
