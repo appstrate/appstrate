@@ -658,7 +658,7 @@
         },
         "responses": {
           "200": {
-            "description": "Configuration saved",
+            "description": "Configuration saved — returns the bare persisted configuration document",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -671,19 +671,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "properties": {
-                    "config": {
-                      "type": "object"
-                    },
-                    "validation": {
-                      "type": "object",
-                      "properties": {
-                        "valid": {
-                          "type": "boolean"
-                        }
-                      }
-                    }
-                  }
+                  "additionalProperties": true
                 }
               }
             }
@@ -796,7 +784,7 @@
         },
         "responses": {
           "200": {
-            "description": "Agent proxy updated — returns the affected proxy setting",
+            "description": "Agent proxy updated — returns the bare proxy-setting resource",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -808,28 +796,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "type": "object",
-                      "required": ["proxyId", "resolved"],
-                      "properties": {
-                        "proxyId": {
-                          "type": ["string", "null"]
-                        },
-                        "resolved": {
-                          "type": "boolean"
-                        }
-                      }
+                  "type": "object",
+                  "required": ["proxyId", "resolved"],
+                  "properties": {
+                    "proxyId": {
+                      "type": ["string", "null"]
                     },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "success": {
-                          "type": "boolean"
-                        }
-                      }
+                    "resolved": {
+                      "type": "boolean"
                     }
-                  ]
+                  }
                 }
               }
             }
@@ -1279,7 +1255,7 @@
         },
         "responses": {
           "200": {
-            "description": "Agent model updated — returns the affected model setting",
+            "description": "Agent model updated — returns the bare model-setting resource",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -1291,25 +1267,13 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "type": "object",
-                      "required": ["modelId"],
-                      "properties": {
-                        "modelId": {
-                          "type": ["string", "null"]
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "success": {
-                          "type": "boolean"
-                        }
-                      }
+                  "type": "object",
+                  "required": ["modelId"],
+                  "properties": {
+                    "modelId": {
+                      "type": ["string", "null"]
                     }
-                  ]
+                  }
                 }
               }
             }
@@ -4288,7 +4252,14 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["manifest", "auths", "tool_catalog", "allow_undeclared_tools"],
+                  "required": [
+                    "manifest",
+                    "auths",
+                    "tool_catalog",
+                    "allow_undeclared_tools",
+                    "active",
+                    "block_user_connections"
+                  ],
                   "properties": {
                     "manifest": {
                       "type": "object",
@@ -4444,6 +4415,12 @@
                     },
                     "allow_undeclared_tools": {
                       "type": "boolean"
+                    },
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "block_user_connections": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -4502,7 +4479,7 @@
         },
         "responses": {
           "201": {
-            "description": "Activated — returns the full integration detail",
+            "description": "Activated — returns the bare integration detail resource",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -4514,182 +4491,178 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
+                  "type": "object",
+                  "required": [
+                    "manifest",
+                    "auths",
+                    "tool_catalog",
+                    "allow_undeclared_tools",
+                    "active",
+                    "block_user_connections"
+                  ],
+                  "properties": {
+                    "manifest": {
                       "type": "object",
-                      "required": ["manifest", "auths", "tool_catalog", "allow_undeclared_tools"],
-                      "properties": {
-                        "manifest": {
-                          "type": "object",
-                          "additionalProperties": true
-                        },
-                        "auths": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "required": [
-                              "auth_key",
-                              "type",
-                              "required",
-                              "scopes",
-                              "resource",
-                              "connections",
-                              "has_oauth_client",
-                              "client_auto_provisioned"
-                            ],
-                            "properties": {
-                              "auth_key": {
-                                "type": "string"
-                              },
-                              "type": {
-                                "type": "string",
-                                "enum": ["oauth2", "api_key", "basic", "mtls", "custom"],
-                                "description": "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`."
-                              },
-                              "required": {
-                                "type": "boolean"
-                              },
-                              "scopes": {
-                                "type": "array",
-                                "items": {
+                      "additionalProperties": true
+                    },
+                    "auths": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "auth_key",
+                          "type",
+                          "required",
+                          "scopes",
+                          "resource",
+                          "connections",
+                          "has_oauth_client",
+                          "client_auto_provisioned"
+                        ],
+                        "properties": {
+                          "auth_key": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": ["oauth2", "api_key", "basic", "mtls", "custom"],
+                            "description": "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`."
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "scopes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "resource": {
+                            "type": ["string", "null"],
+                            "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC."
+                          },
+                          "connections": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "packageId",
+                                "auth_key",
+                                "account_id",
+                                "identity_claims",
+                                "scopes_granted",
+                                "needs_reconnection",
+                                "expiresAt",
+                                "owner_type",
+                                "owner_id",
+                                "createdAt",
+                                "updatedAt"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "packageId": {
                                   "type": "string"
-                                }
-                              },
-                              "resource": {
-                                "type": ["string", "null"],
-                                "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC."
-                              },
-                              "connections": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "required": [
-                                    "id",
-                                    "packageId",
-                                    "auth_key",
-                                    "account_id",
-                                    "identity_claims",
-                                    "scopes_granted",
-                                    "needs_reconnection",
-                                    "expiresAt",
-                                    "owner_type",
-                                    "owner_id",
-                                    "createdAt",
-                                    "updatedAt"
-                                  ],
-                                  "properties": {
-                                    "id": {
-                                      "type": "string",
-                                      "format": "uuid"
-                                    },
-                                    "packageId": {
-                                      "type": "string"
-                                    },
-                                    "auth_key": {
-                                      "type": "string"
-                                    },
-                                    "account_id": {
-                                      "type": "string"
-                                    },
-                                    "identity_claims": {
-                                      "type": ["object", "null"],
-                                      "additionalProperties": true
-                                    },
-                                    "scopes_granted": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "needs_reconnection": {
-                                      "type": "boolean"
-                                    },
-                                    "expiresAt": {
-                                      "type": ["string", "null"],
-                                      "format": "date-time"
-                                    },
-                                    "owner_type": {
-                                      "type": "string",
-                                      "enum": ["user", "end_user"]
-                                    },
-                                    "owner_id": {
-                                      "type": "string"
-                                    },
-                                    "label": {
-                                      "type": ["string", "null"]
-                                    },
-                                    "shared_with_org": {
-                                      "type": "boolean"
-                                    },
-                                    "createdAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    },
-                                    "updatedAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    }
+                                },
+                                "auth_key": {
+                                  "type": "string"
+                                },
+                                "account_id": {
+                                  "type": "string"
+                                },
+                                "identity_claims": {
+                                  "type": ["object", "null"],
+                                  "additionalProperties": true
+                                },
+                                "scopes_granted": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
                                   }
-                                }
-                              },
-                              "has_oauth_client": {
-                                "type": "boolean"
-                              },
-                              "client_auto_provisioned": {
-                                "type": "boolean",
-                                "description": "True for an oauth2 auth on a remote MCP integration (`source.kind: \"remote\"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required."
-                              }
-                            }
-                          }
-                        },
-                        "tool_catalog": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "required": ["name"],
-                            "properties": {
-                              "name": {
-                                "type": "string"
-                              },
-                              "description": {
-                                "type": "string"
-                              },
-                              "policy": {
-                                "type": "object",
-                                "properties": {
-                                  "required_scopes": {
-                                    "type": "object",
-                                    "additionalProperties": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string"
-                                      }
-                                    }
-                                  }
+                                },
+                                "needs_reconnection": {
+                                  "type": "boolean"
+                                },
+                                "expiresAt": {
+                                  "type": ["string", "null"],
+                                  "format": "date-time"
+                                },
+                                "owner_type": {
+                                  "type": "string",
+                                  "enum": ["user", "end_user"]
+                                },
+                                "owner_id": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": ["string", "null"]
+                                },
+                                "shared_with_org": {
+                                  "type": "boolean"
+                                },
+                                "createdAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "updatedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
                                 }
                               }
                             }
+                          },
+                          "has_oauth_client": {
+                            "type": "boolean"
+                          },
+                          "client_auto_provisioned": {
+                            "type": "boolean",
+                            "description": "True for an oauth2 auth on a remote MCP integration (`source.kind: \"remote\"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required."
                           }
-                        },
-                        "allow_undeclared_tools": {
-                          "type": "boolean"
                         }
                       }
                     },
-                    {
-                      "type": "object",
-                      "required": ["active", "activated_at"],
-                      "properties": {
-                        "active": {
-                          "type": "boolean"
-                        },
-                        "activated_at": {
-                          "type": "string",
-                          "format": "date-time"
+                    "tool_catalog": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["name"],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "policy": {
+                            "type": "object",
+                            "properties": {
+                              "required_scopes": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              }
+                            }
+                          }
                         }
                       }
+                    },
+                    "allow_undeclared_tools": {
+                      "type": "boolean"
+                    },
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "block_user_connections": {
+                      "type": "boolean"
                     }
-                  ]
+                  }
                 }
               }
             }
@@ -4734,192 +4707,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Deactivated — returns the full integration detail",
+          "204": {
+            "description": "Deactivated — empty response. The integration detail remains GET-able.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "type": "object",
-                      "required": ["manifest", "auths", "tool_catalog", "allow_undeclared_tools"],
-                      "properties": {
-                        "manifest": {
-                          "type": "object",
-                          "additionalProperties": true
-                        },
-                        "auths": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "required": [
-                              "auth_key",
-                              "type",
-                              "required",
-                              "scopes",
-                              "resource",
-                              "connections",
-                              "has_oauth_client",
-                              "client_auto_provisioned"
-                            ],
-                            "properties": {
-                              "auth_key": {
-                                "type": "string"
-                              },
-                              "type": {
-                                "type": "string",
-                                "enum": ["oauth2", "api_key", "basic", "mtls", "custom"],
-                                "description": "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`."
-                              },
-                              "required": {
-                                "type": "boolean"
-                              },
-                              "scopes": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                }
-                              },
-                              "resource": {
-                                "type": ["string", "null"],
-                                "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC."
-                              },
-                              "connections": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "required": [
-                                    "id",
-                                    "packageId",
-                                    "auth_key",
-                                    "account_id",
-                                    "identity_claims",
-                                    "scopes_granted",
-                                    "needs_reconnection",
-                                    "expiresAt",
-                                    "owner_type",
-                                    "owner_id",
-                                    "createdAt",
-                                    "updatedAt"
-                                  ],
-                                  "properties": {
-                                    "id": {
-                                      "type": "string",
-                                      "format": "uuid"
-                                    },
-                                    "packageId": {
-                                      "type": "string"
-                                    },
-                                    "auth_key": {
-                                      "type": "string"
-                                    },
-                                    "account_id": {
-                                      "type": "string"
-                                    },
-                                    "identity_claims": {
-                                      "type": ["object", "null"],
-                                      "additionalProperties": true
-                                    },
-                                    "scopes_granted": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "needs_reconnection": {
-                                      "type": "boolean"
-                                    },
-                                    "expiresAt": {
-                                      "type": ["string", "null"],
-                                      "format": "date-time"
-                                    },
-                                    "owner_type": {
-                                      "type": "string",
-                                      "enum": ["user", "end_user"]
-                                    },
-                                    "owner_id": {
-                                      "type": "string"
-                                    },
-                                    "label": {
-                                      "type": ["string", "null"]
-                                    },
-                                    "shared_with_org": {
-                                      "type": "boolean"
-                                    },
-                                    "createdAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    },
-                                    "updatedAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    }
-                                  }
-                                }
-                              },
-                              "has_oauth_client": {
-                                "type": "boolean"
-                              },
-                              "client_auto_provisioned": {
-                                "type": "boolean",
-                                "description": "True for an oauth2 auth on a remote MCP integration (`source.kind: \"remote\"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required."
-                              }
-                            }
-                          }
-                        },
-                        "tool_catalog": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "required": ["name"],
-                            "properties": {
-                              "name": {
-                                "type": "string"
-                              },
-                              "description": {
-                                "type": "string"
-                              },
-                              "policy": {
-                                "type": "object",
-                                "properties": {
-                                  "required_scopes": {
-                                    "type": "object",
-                                    "additionalProperties": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string"
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "allow_undeclared_tools": {
-                          "type": "boolean"
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "required": ["active"],
-                      "properties": {
-                        "active": {
-                          "type": "boolean"
-                        }
-                      }
-                    }
-                  ]
-                }
               }
             }
           },
@@ -5812,7 +5607,7 @@
         },
         "responses": {
           "200": {
-            "description": "Updated",
+            "description": "Updated — returns the bare connection resource",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5825,17 +5620,67 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["id", "label", "shared_with_org", "updatedAt"],
+                  "required": [
+                    "id",
+                    "packageId",
+                    "auth_key",
+                    "account_id",
+                    "identity_claims",
+                    "scopes_granted",
+                    "needs_reconnection",
+                    "expiresAt",
+                    "owner_type",
+                    "owner_id",
+                    "createdAt",
+                    "updatedAt"
+                  ],
                   "properties": {
                     "id": {
                       "type": "string",
                       "format": "uuid"
+                    },
+                    "packageId": {
+                      "type": "string"
+                    },
+                    "auth_key": {
+                      "type": "string"
+                    },
+                    "account_id": {
+                      "type": "string"
+                    },
+                    "identity_claims": {
+                      "type": ["object", "null"],
+                      "additionalProperties": true
+                    },
+                    "scopes_granted": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "needs_reconnection": {
+                      "type": "boolean"
+                    },
+                    "expiresAt": {
+                      "type": ["string", "null"],
+                      "format": "date-time"
+                    },
+                    "owner_type": {
+                      "type": "string",
+                      "enum": ["user", "end_user"]
+                    },
+                    "owner_id": {
+                      "type": "string"
                     },
                     "label": {
                       "type": ["string", "null"]
                     },
                     "shared_with_org": {
                       "type": "boolean"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
                     },
                     "updatedAt": {
                       "type": "string",
@@ -5917,7 +5762,7 @@
         },
         "responses": {
           "200": {
-            "description": "Updated",
+            "description": "Updated — returns the bare integration detail resource",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5930,9 +5775,174 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["blocked"],
+                  "required": [
+                    "manifest",
+                    "auths",
+                    "tool_catalog",
+                    "allow_undeclared_tools",
+                    "active",
+                    "block_user_connections"
+                  ],
                   "properties": {
-                    "blocked": {
+                    "manifest": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "auths": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "auth_key",
+                          "type",
+                          "required",
+                          "scopes",
+                          "resource",
+                          "connections",
+                          "has_oauth_client",
+                          "client_auto_provisioned"
+                        ],
+                        "properties": {
+                          "auth_key": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": ["oauth2", "api_key", "basic", "mtls", "custom"],
+                            "description": "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`."
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "scopes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "resource": {
+                            "type": ["string", "null"],
+                            "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC."
+                          },
+                          "connections": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "packageId",
+                                "auth_key",
+                                "account_id",
+                                "identity_claims",
+                                "scopes_granted",
+                                "needs_reconnection",
+                                "expiresAt",
+                                "owner_type",
+                                "owner_id",
+                                "createdAt",
+                                "updatedAt"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "packageId": {
+                                  "type": "string"
+                                },
+                                "auth_key": {
+                                  "type": "string"
+                                },
+                                "account_id": {
+                                  "type": "string"
+                                },
+                                "identity_claims": {
+                                  "type": ["object", "null"],
+                                  "additionalProperties": true
+                                },
+                                "scopes_granted": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "needs_reconnection": {
+                                  "type": "boolean"
+                                },
+                                "expiresAt": {
+                                  "type": ["string", "null"],
+                                  "format": "date-time"
+                                },
+                                "owner_type": {
+                                  "type": "string",
+                                  "enum": ["user", "end_user"]
+                                },
+                                "owner_id": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": ["string", "null"]
+                                },
+                                "shared_with_org": {
+                                  "type": "boolean"
+                                },
+                                "createdAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "updatedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              }
+                            }
+                          },
+                          "has_oauth_client": {
+                            "type": "boolean"
+                          },
+                          "client_auto_provisioned": {
+                            "type": "boolean",
+                            "description": "True for an oauth2 auth on a remote MCP integration (`source.kind: \"remote\"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required."
+                          }
+                        }
+                      }
+                    },
+                    "tool_catalog": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["name"],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "policy": {
+                            "type": "object",
+                            "properties": {
+                              "required_scopes": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "allow_undeclared_tools": {
+                      "type": "boolean"
+                    },
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "block_user_connections": {
                       "type": "boolean"
                     }
                   }

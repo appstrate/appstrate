@@ -114,6 +114,18 @@ export interface IntegrationDetail {
    * `integrations_configuration.<id>.tools = "*"`.
    */
   allow_undeclared_tools: boolean;
+  /**
+   * Activation state in the current application — `true` when an enabled
+   * application_packages row exists. Resource state shared with the list
+   * endpoint; returned by every detail-shaped response (GET detail,
+   * POST activate, PATCH settings) per #657.
+   */
+  active: boolean;
+  /**
+   * Admin gate: when `true`, only org admins may create personal
+   * connections in this application. `false` when not activated.
+   */
+  block_user_connections: boolean;
 }
 
 export interface IntegrationOAuthClient {
