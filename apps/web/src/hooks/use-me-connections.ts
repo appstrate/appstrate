@@ -15,7 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import i18n from "../i18n";
 import { api, apiList } from "../api";
-import type { MeConnectionSourceGroup } from "@appstrate/shared-types";
+import type { IntegrationConnection, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { onMutationError } from "./use-mutations";
 import { buildUpdateConnectionRequest } from "./use-integrations";
 
@@ -90,7 +90,9 @@ export function useUpdateMeIntegrationConnection() {
       label?: string | null;
       sharedWithOrg?: boolean;
     }) =>
-      api<{ id: string; label: string | null; shared_with_org: boolean }>(
+      // 200 + the bare connection resource (#657) — same serializer as the
+      // connections list.
+      api<IntegrationConnection>(
         ...buildUpdateConnectionRequest({
           packageId,
           connectionId,

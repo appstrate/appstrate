@@ -133,6 +133,19 @@ export const schemas = {
       displayName: { type: "string" },
     },
   },
+  UserProfile: {
+    type: "object",
+    description:
+      "The dashboard user's profile — single serializer shared by GET and PATCH /api/profile.",
+    required: ["id", "language", "email", "name"],
+    properties: {
+      id: { type: "string" },
+      displayName: { type: ["string", "null"] },
+      language: { type: "string", enum: ["fr", "en"] },
+      email: { type: "string", format: "email" },
+      name: { type: "string" },
+    },
+  },
   Organization: {
     type: "object",
     required: ["id", "name", "slug", "role", "createdAt"],

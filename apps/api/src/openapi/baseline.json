@@ -658,7 +658,7 @@
         },
         "responses": {
           "200": {
-            "description": "Configuration saved",
+            "description": "Configuration saved — returns the bare persisted configuration document",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -671,19 +671,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "properties": {
-                    "config": {
-                      "type": "object"
-                    },
-                    "validation": {
-                      "type": "object",
-                      "properties": {
-                        "valid": {
-                          "type": "boolean"
-                        }
-                      }
-                    }
-                  }
+                  "additionalProperties": true
                 }
               }
             }
@@ -796,7 +784,7 @@
         },
         "responses": {
           "200": {
-            "description": "Agent proxy updated — returns the affected proxy setting",
+            "description": "Agent proxy updated — returns the bare proxy-setting resource",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -808,28 +796,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "type": "object",
-                      "required": ["proxyId", "resolved"],
-                      "properties": {
-                        "proxyId": {
-                          "type": ["string", "null"]
-                        },
-                        "resolved": {
-                          "type": "boolean"
-                        }
-                      }
+                  "type": "object",
+                  "required": ["proxyId", "resolved"],
+                  "properties": {
+                    "proxyId": {
+                      "type": ["string", "null"]
                     },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "success": {
-                          "type": "boolean"
-                        }
-                      }
+                    "resolved": {
+                      "type": "boolean"
                     }
-                  ]
+                  }
                 }
               }
             }
@@ -1002,7 +978,7 @@
         "operationId": "deleteAgentPersistence",
         "tags": ["Agents"],
         "summary": "Bulk-delete persistence rows for an agent",
-        "description": "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
+        "description": "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204 (issue #657).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1058,12 +1034,15 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["memories_deleted", "checkpoint_deleted"],
                   "properties": {
                     "memories_deleted": {
-                      "type": "integer"
+                      "type": "integer",
+                      "description": "Number of memory rows deleted"
                     },
                     "checkpoint_deleted": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "Whether the checkpoint slot was deleted"
                     }
                   }
                 }
@@ -1111,7 +1090,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Memory deleted",
             "headers": {
               "Request-Id": {
@@ -1119,18 +1098,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -1175,7 +1142,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Pinned slot deleted",
             "headers": {
               "Request-Id": {
@@ -1183,18 +1150,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -1300,7 +1255,7 @@
         },
         "responses": {
           "200": {
-            "description": "Agent model updated — returns the affected model setting",
+            "description": "Agent model updated — returns the bare model-setting resource",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -1312,25 +1267,13 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "type": "object",
-                      "required": ["modelId"],
-                      "properties": {
-                        "modelId": {
-                          "type": ["string", "null"]
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "success": {
-                          "type": "boolean"
-                        }
-                      }
+                  "type": "object",
+                  "required": ["modelId"],
+                  "properties": {
+                    "modelId": {
+                      "type": ["string", "null"]
                     }
-                  ]
+                  }
                 }
               }
             }
@@ -1816,7 +1759,7 @@
         "operationId": "deleteAgentRuns",
         "tags": ["Runs"],
         "summary": "Delete all runs for an agent",
-        "description": "Delete all completed runs for an agent.",
+        "description": "Delete all completed runs for an agent. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1846,9 +1789,11 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["deleted_count"],
                   "properties": {
-                    "deleted": {
-                      "type": "integer"
+                    "deleted_count": {
+                      "type": "integer",
+                      "description": "Number of runs deleted"
                     }
                   }
                 }
@@ -3990,7 +3935,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Schedule deleted",
             "headers": {
               "Request-Id": {
@@ -3998,18 +3943,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -4306,7 +4239,14 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["manifest", "auths", "tool_catalog", "allow_undeclared_tools"],
+                  "required": [
+                    "manifest",
+                    "auths",
+                    "tool_catalog",
+                    "allow_undeclared_tools",
+                    "active",
+                    "block_user_connections"
+                  ],
                   "properties": {
                     "manifest": {
                       "type": "object",
@@ -4462,6 +4402,12 @@
                     },
                     "allow_undeclared_tools": {
                       "type": "boolean"
+                    },
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "block_user_connections": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -4520,7 +4466,7 @@
         },
         "responses": {
           "201": {
-            "description": "Activated — returns the full integration detail",
+            "description": "Activated — returns the bare integration detail resource",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -4532,182 +4478,178 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
+                  "type": "object",
+                  "required": [
+                    "manifest",
+                    "auths",
+                    "tool_catalog",
+                    "allow_undeclared_tools",
+                    "active",
+                    "block_user_connections"
+                  ],
+                  "properties": {
+                    "manifest": {
                       "type": "object",
-                      "required": ["manifest", "auths", "tool_catalog", "allow_undeclared_tools"],
-                      "properties": {
-                        "manifest": {
-                          "type": "object",
-                          "additionalProperties": true
-                        },
-                        "auths": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "required": [
-                              "auth_key",
-                              "type",
-                              "required",
-                              "scopes",
-                              "resource",
-                              "connections",
-                              "has_oauth_client",
-                              "client_auto_provisioned"
-                            ],
-                            "properties": {
-                              "auth_key": {
-                                "type": "string"
-                              },
-                              "type": {
-                                "type": "string",
-                                "enum": ["oauth2", "api_key", "basic", "mtls", "custom"],
-                                "description": "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`."
-                              },
-                              "required": {
-                                "type": "boolean"
-                              },
-                              "scopes": {
-                                "type": "array",
-                                "items": {
+                      "additionalProperties": true
+                    },
+                    "auths": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "auth_key",
+                          "type",
+                          "required",
+                          "scopes",
+                          "resource",
+                          "connections",
+                          "has_oauth_client",
+                          "client_auto_provisioned"
+                        ],
+                        "properties": {
+                          "auth_key": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": ["oauth2", "api_key", "basic", "mtls", "custom"],
+                            "description": "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`."
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "scopes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "resource": {
+                            "type": ["string", "null"],
+                            "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC."
+                          },
+                          "connections": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "packageId",
+                                "auth_key",
+                                "account_id",
+                                "identity_claims",
+                                "scopes_granted",
+                                "needs_reconnection",
+                                "expiresAt",
+                                "owner_type",
+                                "owner_id",
+                                "createdAt",
+                                "updatedAt"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "packageId": {
                                   "type": "string"
-                                }
-                              },
-                              "resource": {
-                                "type": ["string", "null"],
-                                "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC."
-                              },
-                              "connections": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "required": [
-                                    "id",
-                                    "packageId",
-                                    "auth_key",
-                                    "account_id",
-                                    "identity_claims",
-                                    "scopes_granted",
-                                    "needs_reconnection",
-                                    "expiresAt",
-                                    "owner_type",
-                                    "owner_id",
-                                    "createdAt",
-                                    "updatedAt"
-                                  ],
-                                  "properties": {
-                                    "id": {
-                                      "type": "string",
-                                      "format": "uuid"
-                                    },
-                                    "packageId": {
-                                      "type": "string"
-                                    },
-                                    "auth_key": {
-                                      "type": "string"
-                                    },
-                                    "account_id": {
-                                      "type": "string"
-                                    },
-                                    "identity_claims": {
-                                      "type": ["object", "null"],
-                                      "additionalProperties": true
-                                    },
-                                    "scopes_granted": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "needs_reconnection": {
-                                      "type": "boolean"
-                                    },
-                                    "expiresAt": {
-                                      "type": ["string", "null"],
-                                      "format": "date-time"
-                                    },
-                                    "owner_type": {
-                                      "type": "string",
-                                      "enum": ["user", "end_user"]
-                                    },
-                                    "owner_id": {
-                                      "type": "string"
-                                    },
-                                    "label": {
-                                      "type": ["string", "null"]
-                                    },
-                                    "shared_with_org": {
-                                      "type": "boolean"
-                                    },
-                                    "createdAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    },
-                                    "updatedAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    }
+                                },
+                                "auth_key": {
+                                  "type": "string"
+                                },
+                                "account_id": {
+                                  "type": "string"
+                                },
+                                "identity_claims": {
+                                  "type": ["object", "null"],
+                                  "additionalProperties": true
+                                },
+                                "scopes_granted": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
                                   }
-                                }
-                              },
-                              "has_oauth_client": {
-                                "type": "boolean"
-                              },
-                              "client_auto_provisioned": {
-                                "type": "boolean",
-                                "description": "True for an oauth2 auth on a remote MCP integration (`source.kind: \"remote\"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required."
-                              }
-                            }
-                          }
-                        },
-                        "tool_catalog": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "required": ["name"],
-                            "properties": {
-                              "name": {
-                                "type": "string"
-                              },
-                              "description": {
-                                "type": "string"
-                              },
-                              "policy": {
-                                "type": "object",
-                                "properties": {
-                                  "required_scopes": {
-                                    "type": "object",
-                                    "additionalProperties": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string"
-                                      }
-                                    }
-                                  }
+                                },
+                                "needs_reconnection": {
+                                  "type": "boolean"
+                                },
+                                "expiresAt": {
+                                  "type": ["string", "null"],
+                                  "format": "date-time"
+                                },
+                                "owner_type": {
+                                  "type": "string",
+                                  "enum": ["user", "end_user"]
+                                },
+                                "owner_id": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": ["string", "null"]
+                                },
+                                "shared_with_org": {
+                                  "type": "boolean"
+                                },
+                                "createdAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "updatedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
                                 }
                               }
                             }
+                          },
+                          "has_oauth_client": {
+                            "type": "boolean"
+                          },
+                          "client_auto_provisioned": {
+                            "type": "boolean",
+                            "description": "True for an oauth2 auth on a remote MCP integration (`source.kind: \"remote\"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required."
                           }
-                        },
-                        "allow_undeclared_tools": {
-                          "type": "boolean"
                         }
                       }
                     },
-                    {
-                      "type": "object",
-                      "required": ["active", "activated_at"],
-                      "properties": {
-                        "active": {
-                          "type": "boolean"
-                        },
-                        "activated_at": {
-                          "type": "string",
-                          "format": "date-time"
+                    "tool_catalog": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["name"],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "policy": {
+                            "type": "object",
+                            "properties": {
+                              "required_scopes": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              }
+                            }
+                          }
                         }
                       }
+                    },
+                    "allow_undeclared_tools": {
+                      "type": "boolean"
+                    },
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "block_user_connections": {
+                      "type": "boolean"
                     }
-                  ]
+                  }
                 }
               }
             }
@@ -4752,192 +4694,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Deactivated — returns the full integration detail",
+          "204": {
+            "description": "Deactivated — empty response. The integration detail remains GET-able.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "type": "object",
-                      "required": ["manifest", "auths", "tool_catalog", "allow_undeclared_tools"],
-                      "properties": {
-                        "manifest": {
-                          "type": "object",
-                          "additionalProperties": true
-                        },
-                        "auths": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "required": [
-                              "auth_key",
-                              "type",
-                              "required",
-                              "scopes",
-                              "resource",
-                              "connections",
-                              "has_oauth_client",
-                              "client_auto_provisioned"
-                            ],
-                            "properties": {
-                              "auth_key": {
-                                "type": "string"
-                              },
-                              "type": {
-                                "type": "string",
-                                "enum": ["oauth2", "api_key", "basic", "mtls", "custom"],
-                                "description": "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`."
-                              },
-                              "required": {
-                                "type": "boolean"
-                              },
-                              "scopes": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                }
-                              },
-                              "resource": {
-                                "type": ["string", "null"],
-                                "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC."
-                              },
-                              "connections": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "required": [
-                                    "id",
-                                    "packageId",
-                                    "auth_key",
-                                    "account_id",
-                                    "identity_claims",
-                                    "scopes_granted",
-                                    "needs_reconnection",
-                                    "expiresAt",
-                                    "owner_type",
-                                    "owner_id",
-                                    "createdAt",
-                                    "updatedAt"
-                                  ],
-                                  "properties": {
-                                    "id": {
-                                      "type": "string",
-                                      "format": "uuid"
-                                    },
-                                    "packageId": {
-                                      "type": "string"
-                                    },
-                                    "auth_key": {
-                                      "type": "string"
-                                    },
-                                    "account_id": {
-                                      "type": "string"
-                                    },
-                                    "identity_claims": {
-                                      "type": ["object", "null"],
-                                      "additionalProperties": true
-                                    },
-                                    "scopes_granted": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "needs_reconnection": {
-                                      "type": "boolean"
-                                    },
-                                    "expiresAt": {
-                                      "type": ["string", "null"],
-                                      "format": "date-time"
-                                    },
-                                    "owner_type": {
-                                      "type": "string",
-                                      "enum": ["user", "end_user"]
-                                    },
-                                    "owner_id": {
-                                      "type": "string"
-                                    },
-                                    "label": {
-                                      "type": ["string", "null"]
-                                    },
-                                    "shared_with_org": {
-                                      "type": "boolean"
-                                    },
-                                    "createdAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    },
-                                    "updatedAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    }
-                                  }
-                                }
-                              },
-                              "has_oauth_client": {
-                                "type": "boolean"
-                              },
-                              "client_auto_provisioned": {
-                                "type": "boolean",
-                                "description": "True for an oauth2 auth on a remote MCP integration (`source.kind: \"remote\"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required."
-                              }
-                            }
-                          }
-                        },
-                        "tool_catalog": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "required": ["name"],
-                            "properties": {
-                              "name": {
-                                "type": "string"
-                              },
-                              "description": {
-                                "type": "string"
-                              },
-                              "policy": {
-                                "type": "object",
-                                "properties": {
-                                  "required_scopes": {
-                                    "type": "object",
-                                    "additionalProperties": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string"
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "allow_undeclared_tools": {
-                          "type": "boolean"
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "required": ["active"],
-                      "properties": {
-                        "active": {
-                          "type": "boolean"
-                        }
-                      }
-                    }
-                  ]
-                }
               }
             }
           },
@@ -5207,27 +4971,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Deleted",
+          "204": {
+            "description": "OAuth client deleted",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["deleted"],
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -5843,7 +5594,7 @@
         },
         "responses": {
           "200": {
-            "description": "Updated",
+            "description": "Updated — returns the bare connection resource",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5856,17 +5607,67 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["id", "label", "shared_with_org", "updatedAt"],
+                  "required": [
+                    "id",
+                    "packageId",
+                    "auth_key",
+                    "account_id",
+                    "identity_claims",
+                    "scopes_granted",
+                    "needs_reconnection",
+                    "expiresAt",
+                    "owner_type",
+                    "owner_id",
+                    "createdAt",
+                    "updatedAt"
+                  ],
                   "properties": {
                     "id": {
                       "type": "string",
                       "format": "uuid"
+                    },
+                    "packageId": {
+                      "type": "string"
+                    },
+                    "auth_key": {
+                      "type": "string"
+                    },
+                    "account_id": {
+                      "type": "string"
+                    },
+                    "identity_claims": {
+                      "type": ["object", "null"],
+                      "additionalProperties": true
+                    },
+                    "scopes_granted": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "needs_reconnection": {
+                      "type": "boolean"
+                    },
+                    "expiresAt": {
+                      "type": ["string", "null"],
+                      "format": "date-time"
+                    },
+                    "owner_type": {
+                      "type": "string",
+                      "enum": ["user", "end_user"]
+                    },
+                    "owner_id": {
+                      "type": "string"
                     },
                     "label": {
                       "type": ["string", "null"]
                     },
                     "shared_with_org": {
                       "type": "boolean"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
                     },
                     "updatedAt": {
                       "type": "string",
@@ -5948,7 +5749,7 @@
         },
         "responses": {
           "200": {
-            "description": "Updated",
+            "description": "Updated — returns the bare integration detail resource",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5961,9 +5762,174 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["blocked"],
+                  "required": [
+                    "manifest",
+                    "auths",
+                    "tool_catalog",
+                    "allow_undeclared_tools",
+                    "active",
+                    "block_user_connections"
+                  ],
                   "properties": {
-                    "blocked": {
+                    "manifest": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "auths": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "auth_key",
+                          "type",
+                          "required",
+                          "scopes",
+                          "resource",
+                          "connections",
+                          "has_oauth_client",
+                          "client_auto_provisioned"
+                        ],
+                        "properties": {
+                          "auth_key": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": ["oauth2", "api_key", "basic", "mtls", "custom"],
+                            "description": "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`."
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "scopes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "resource": {
+                            "type": ["string", "null"],
+                            "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC."
+                          },
+                          "connections": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "packageId",
+                                "auth_key",
+                                "account_id",
+                                "identity_claims",
+                                "scopes_granted",
+                                "needs_reconnection",
+                                "expiresAt",
+                                "owner_type",
+                                "owner_id",
+                                "createdAt",
+                                "updatedAt"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "packageId": {
+                                  "type": "string"
+                                },
+                                "auth_key": {
+                                  "type": "string"
+                                },
+                                "account_id": {
+                                  "type": "string"
+                                },
+                                "identity_claims": {
+                                  "type": ["object", "null"],
+                                  "additionalProperties": true
+                                },
+                                "scopes_granted": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "needs_reconnection": {
+                                  "type": "boolean"
+                                },
+                                "expiresAt": {
+                                  "type": ["string", "null"],
+                                  "format": "date-time"
+                                },
+                                "owner_type": {
+                                  "type": "string",
+                                  "enum": ["user", "end_user"]
+                                },
+                                "owner_id": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": ["string", "null"]
+                                },
+                                "shared_with_org": {
+                                  "type": "boolean"
+                                },
+                                "createdAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "updatedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              }
+                            }
+                          },
+                          "has_oauth_client": {
+                            "type": "boolean"
+                          },
+                          "client_auto_provisioned": {
+                            "type": "boolean",
+                            "description": "True for an oauth2 auth on a remote MCP integration (`source.kind: \"remote\"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required."
+                          }
+                        }
+                      }
+                    },
+                    "tool_catalog": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["name"],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "policy": {
+                            "type": "object",
+                            "properties": {
+                              "required_scopes": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "allow_undeclared_tools": {
+                      "type": "boolean"
+                    },
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "block_user_connections": {
                       "type": "boolean"
                     }
                   }
@@ -6225,27 +6191,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Deleted",
+          "204": {
+            "description": "Pin removed (idempotent — 204 whether the pin existed or not)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["deleted"],
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -6471,27 +6424,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Deleted",
+          "204": {
+            "description": "Default removed (idempotent — 204 whether a default existed or not)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["deleted"],
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -6655,7 +6595,7 @@
         },
         "responses": {
           "201": {
-            "description": "Model created — the full created model resource (same shape as `GET`/`list`). `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
+            "description": "Model created — the bare created model resource (same shape as `GET`/`list`).",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -6714,7 +6654,7 @@
         },
         "responses": {
           "200": {
-            "description": "Default model updated. Returns the new effective default model resource (same shape as `GET`/`list`) plus a legacy `success` flag. When the default is cleared (`modelId: null`) and no default remains in effect, only `{ success: true }` is returned.",
+            "description": "Default model updated — the bare *effective* default model resource (same shape as `GET`/`list`). When no DB row is flagged, the system-default fallback (if any) is surfaced.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -6726,21 +6666,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/OrgModel"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "success": {
-                          "type": "boolean",
-                          "description": "Legacy acknowledgement flag, always `true`. Retained for backward compatibility; prefer reading the model fields."
-                        }
-                      }
-                    }
-                  ]
+                  "$ref": "#/components/schemas/OrgModel"
                 }
+              }
+            }
+          },
+          "204": {
+            "description": "Default cleared and no model remains in effect (no system default configured) — no resource to return.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
               }
             }
           },
@@ -7170,7 +7105,7 @@
         },
         "responses": {
           "200": {
-            "description": "Model updated — the full updated model resource (same shape as `GET`/`list`). `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
+            "description": "Model updated — the bare updated model resource (same shape as `GET`/`list`).",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -7192,6 +7127,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       },
@@ -7594,7 +7532,7 @@
         },
         "responses": {
           "201": {
-            "description": "Model provider credential created — the full created credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back. `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
+            "description": "Model provider credential created — the bare created credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -7760,7 +7698,7 @@
         },
         "responses": {
           "200": {
-            "description": "Model provider credential updated — the full updated credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back. `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
+            "description": "Model provider credential updated — the bare updated credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8146,7 +8084,7 @@
         },
         "responses": {
           "200": {
-            "description": "Credential persisted in model_provider_credentials; returns credentialId and available model ids.",
+            "description": "Credential persisted in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, and `availableModelIds` is registry-derived operation info the helper prints in its terminal summary. The dashboard obtains the created credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8315,21 +8253,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/OrgProxy"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "description": "The created proxy's id. Same value as the resource's `id`; retained as a top-level field for backward compatibility."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The created proxy resource — same shape as the `GET /api/proxies` list items — so no follow-up GET is needed."
+                  "$ref": "#/components/schemas/OrgProxy",
+                  "description": "The bare created proxy resource — same shape as the `GET /api/proxies` list items — so no follow-up GET is needed."
                 },
                 "example": {
                   "id": "cm6pqr679",
@@ -8390,7 +8315,7 @@
         },
         "responses": {
           "200": {
-            "description": "Default proxy updated",
+            "description": "Default proxy updated — the bare *effective* default proxy resource (same shape as the `GET /api/proxies` list items). When no DB row is flagged, the system-default fallback (if any) is surfaced.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8402,40 +8327,27 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": ["success", "proxy"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "description": "Always true on success. Retained for backward compatibility."
-                    },
-                    "proxy": {
-                      "description": "The affected default proxy resource — same shape as the `GET /api/proxies` list items — or null when the default was unset (proxyId null).",
-                      "oneOf": [
-                        {
-                          "$ref": "#/components/schemas/OrgProxy"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  }
+                  "$ref": "#/components/schemas/OrgProxy"
                 },
                 "example": {
-                  "success": true,
-                  "proxy": {
-                    "id": "cm6pqr679",
-                    "label": "US Residential Proxy",
-                    "urlPrefix": "http://user:****@us-proxy.example.com:8080",
-                    "source": "custom",
-                    "enabled": true,
-                    "isDefault": true,
-                    "created_by": "usr_k7x9m2p4q1",
-                    "createdAt": "2026-01-10T08:00:00Z",
-                    "updatedAt": "2026-01-10T08:00:00Z"
-                  }
+                  "id": "cm6pqr679",
+                  "label": "US Residential Proxy",
+                  "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                  "source": "custom",
+                  "enabled": true,
+                  "isDefault": true,
+                  "created_by": "usr_k7x9m2p4q1",
+                  "createdAt": "2026-01-10T08:00:00Z",
+                  "updatedAt": "2026-01-10T08:00:00Z"
                 }
+              }
+            }
+          },
+          "204": {
+            "description": "Default unset and no proxy remains in effect (no system default configured) — no resource to return.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
               }
             }
           },
@@ -8507,21 +8419,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/OrgProxy"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "description": "The updated proxy's id. Same value as the resource's `id`; retained as a top-level field for backward compatibility."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The updated proxy resource — same shape as the `GET /api/proxies` list items — so no follow-up GET is needed."
+                  "$ref": "#/components/schemas/OrgProxy",
+                  "description": "The bare updated proxy resource — same shape as the `GET /api/proxies` list items — so no follow-up GET is needed."
                 },
                 "example": {
                   "id": "cm6pqr679",
@@ -8545,6 +8444,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
@@ -9233,7 +9135,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Organization deleted",
             "headers": {
               "Request-Id": {
@@ -9241,18 +9143,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -9308,7 +9198,7 @@
         },
         "responses": {
           "201": {
-            "description": "User added or invitation created",
+            "description": "Polymorphic bare resource: when the user already exists (and no invitation flow applies) they are added directly and the created member is returned (OrgMember — discriminate on `userId`); otherwise an invitation is created and returned (OrgInvitationInfo — discriminate on `id` + `token`). Both use the same serializers as the lists in GET /api/orgs/{orgId}.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -9320,39 +9210,37 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "added": {
-                      "type": "boolean",
-                      "description": "True if user was added directly"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/OrgMember"
                     },
-                    "invited": {
-                      "type": "boolean",
-                      "description": "True if invitation was sent"
-                    },
-                    "userId": {
-                      "type": "string",
-                      "description": "User ID (if added)"
-                    },
-                    "email": {
-                      "type": "string",
-                      "description": "Email (if invited)"
-                    },
-                    "role": {
-                      "type": "string"
-                    },
-                    "token": {
-                      "type": "string",
-                      "description": "Invitation token (only if invited)"
+                    {
+                      "$ref": "#/components/schemas/OrgInvitationInfo"
+                    }
+                  ]
+                },
+                "examples": {
+                  "memberAdded": {
+                    "summary": "Existing user added directly",
+                    "value": {
+                      "userId": "usr_def456",
+                      "displayName": "Bob",
+                      "email": "bob@acme.com",
+                      "role": "member",
+                      "joinedAt": "2026-01-12T10:00:00Z"
+                    }
+                  },
+                  "invitationCreated": {
+                    "summary": "Invitation created",
+                    "value": {
+                      "id": "inv_abc123",
+                      "email": "newuser@example.com",
+                      "role": "member",
+                      "token": "inv_abc123def456",
+                      "expiresAt": "2026-02-01T00:00:00Z",
+                      "createdAt": "2026-01-25T00:00:00Z"
                     }
                   }
-                },
-                "example": {
-                  "added": false,
-                  "invited": true,
-                  "email": "newuser@example.com",
-                  "role": "member",
-                  "token": "inv_abc123def456"
                 }
               }
             }
@@ -9474,7 +9362,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Member removed",
             "headers": {
               "Request-Id": {
@@ -9482,18 +9370,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -9612,7 +9488,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Invitation cancelled",
             "headers": {
               "Request-Id": {
@@ -9620,18 +9496,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -9768,26 +9632,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "displayName": {
-                      "type": ["string", "null"]
-                    },
-                    "language": {
-                      "type": "string",
-                      "enum": ["fr", "en"]
-                    },
-                    "email": {
-                      "type": "string",
-                      "format": "email"
-                    },
-                    "name": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/UserProfile"
                 },
                 "example": {
                   "id": "usr_abc123",
@@ -9838,7 +9683,7 @@
         },
         "responses": {
           "200": {
-            "description": "Profile updated",
+            "description": "Updated profile — same serializer as GET /api/profile",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -9850,24 +9695,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "language": {
-                      "type": ["string", "null"],
-                      "enum": ["fr", "en", null]
-                    },
-                    "displayName": {
-                      "type": ["string", "null"]
-                    }
-                  }
+                  "$ref": "#/components/schemas/UserProfile"
                 },
                 "example": {
-                  "ok": true,
+                  "id": "usr_abc123",
+                  "displayName": "Alice Martin",
                   "language": "en",
-                  "displayName": "Alice Martin"
+                  "email": "alice@example.com",
+                  "name": "Alice Martin"
                 }
               }
             }
@@ -9877,6 +9712,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
@@ -10618,7 +10456,7 @@
         },
         "responses": {
           "200": {
-            "description": "Invitation accepted",
+            "description": "Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs, with `role` set to the invitation role). For new users a session cookie is set via Set-Cookie.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -10630,27 +10468,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "is_new_user": {
-                      "type": "boolean"
-                    },
-                    "orgId": {
-                      "type": "string"
-                    },
-                    "requires_login": {
-                      "type": "boolean",
-                      "description": "Present when is_new_user is false"
-                    }
-                  }
+                  "$ref": "#/components/schemas/Organization"
                 },
                 "example": {
-                  "success": true,
-                  "is_new_user": true,
-                  "orgId": "550e8400-e29b-41d4-a716-446655440000"
+                  "id": "550e8400-e29b-41d4-a716-446655440000",
+                  "name": "Acme Corp",
+                  "slug": "acme-corp",
+                  "role": "member",
+                  "createdAt": "2026-01-10T08:00:00Z"
                 }
               }
             }
@@ -11226,7 +11051,7 @@
           }
         },
         "responses": {
-          "200": {
+          "204": {
             "description": "Profile updated",
             "headers": {
               "Request-Id": {
@@ -11234,21 +11059,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                },
-                "example": {
-                  "ok": true
-                }
               }
             }
           },
@@ -11458,27 +11268,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Mark result",
+          "204": {
+            "description": "Notification marked as read (idempotent — 204 even if it was already read)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": ["ok"]
-                }
               }
             }
           },
@@ -11502,7 +11299,7 @@
         "operationId": "markAllNotificationsRead",
         "tags": ["Notifications"],
         "summary": "Mark all notifications as read",
-        "description": "Marks all unread notifications as read for the current user.",
+        "description": "Marks all unread notifications as read for the current user. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -11527,12 +11324,12 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "updated": {
+                    "updated_count": {
                       "type": "integer",
                       "description": "Number of notifications marked as read"
                     }
                   },
-                  "required": ["updated"]
+                  "required": ["updated_count"]
                 }
               }
             }
@@ -18828,6 +18625,30 @@
             "type": "string"
           },
           "displayName": {
+            "type": "string"
+          }
+        }
+      },
+      "UserProfile": {
+        "type": "object",
+        "description": "The dashboard user's profile — single serializer shared by GET and PATCH /api/profile.",
+        "required": ["id", "language", "email", "name"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": ["string", "null"]
+          },
+          "language": {
+            "type": "string",
+            "enum": ["fr", "en"]
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "name": {
             "type": "string"
           }
         }

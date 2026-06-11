@@ -232,7 +232,7 @@ export function createSchedulesRouter() {
       resourceType: "schedule",
       resourceId: id,
     });
-    return c.json({ ok: true });
+    return c.body(null, 204);
   });
 
   // GET /api/schedules/:id/runs — list runs for a schedule

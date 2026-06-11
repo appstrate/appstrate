@@ -136,10 +136,10 @@ export function createAgentsRouter() {
         resourceId: agent.id,
       });
 
-      return c.json({
-        config,
-        validation: { valid: true },
-      });
+      // 200 + the bare persisted configuration document (merged with schema
+      // defaults) — the resource itself, no `validation` echo (#657):
+      // validation failures are 400s, a 200 needs no valid:true scrap.
+      return c.json(config);
     },
   );
 
@@ -172,12 +172,10 @@ export function createAgentsRouter() {
         after: { proxyId: data.proxyId },
       });
 
-      // Return the affected proxy-setting resource — same shape and read path
-      // (`getPackageConfig`) as GET /agents/:scope/:name/proxy — so callers see
-      // the persisted override without a follow-up GET (issue #646). The
-      // legacy `success` flag is kept additively for backward compatibility.
+      // Return the bare proxy-setting resource — same shape and read path
+      // (`getPackageConfig`) as GET /agents/:scope/:name/proxy (#657).
       const { proxyId } = await getPackageConfig(scope.applicationId, agent.id);
-      return c.json({ success: true, proxyId, resolved: proxyId !== "none" });
+      return c.json({ proxyId, resolved: proxyId !== "none" });
     },
   );
 
@@ -210,12 +208,10 @@ export function createAgentsRouter() {
         after: { modelId: data.modelId },
       });
 
-      // Return the affected model-setting resource — same shape and read path
-      // (`getPackageConfig`) as GET /agents/:scope/:name/model — so callers see
-      // the persisted override without a follow-up GET (issue #646). The legacy
-      // `success` flag is kept additively for backward compatibility.
+      // Return the bare model-setting resource — same shape and read path
+      // (`getPackageConfig`) as GET /agents/:scope/:name/model (#657).
       const { modelId } = await getPackageConfig(scope.applicationId, agent.id);
-      return c.json({ success: true, modelId });
+      return c.json({ modelId });
     },
   );
 
@@ -320,7 +316,7 @@ export function createAgentsRouter() {
         resourceId: agent.id,
         after: { memoryId: result.data },
       });
-      return c.json({ deleted: true });
+      return c.body(null, 204);
     },
   );
 
@@ -346,7 +342,7 @@ export function createAgentsRouter() {
         resourceId: agent.id,
         after: { pinnedSlotId: result.data },
       });
-      return c.json({ deleted: true });
+      return c.body(null, 204);
     },
   );
 

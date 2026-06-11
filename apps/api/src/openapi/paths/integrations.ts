@@ -187,7 +187,14 @@ const toolCatalogEntrySchema = {
 
 const integrationDetailSchema = {
   type: "object",
-  required: ["manifest", "auths", "tool_catalog", "allow_undeclared_tools"],
+  required: [
+    "manifest",
+    "auths",
+    "tool_catalog",
+    "allow_undeclared_tools",
+    "active",
+    "block_user_connections",
+  ],
   properties: {
     manifest: { type: "object", additionalProperties: true },
     auths: { type: "array", items: authStatusSchema },
@@ -200,6 +207,13 @@ const integrationDetailSchema = {
     // the agent editor MAY offer the "all upstream tools" toggle that sets
     // `integrations_configuration.<id>.tools = "*"`. Default `false`.
     allow_undeclared_tools: { type: "boolean" },
+    // Activation state in the current application — resource state shared
+    // with the list endpoint, returned by every detail-shaped response
+    // (GET detail, POST activate, PATCH settings).
+    active: { type: "boolean" },
+    // Admin gate (`block_user_connections`): when `true`, only org admins
+    // may create personal connections. `false` when not activated.
+    block_user_connections: { type: "boolean" },
   },
 } as const;
 
@@ -347,27 +361,14 @@ export const integrationsPaths = {
       },
       responses: {
         "201": {
-          description: "Activated — returns the full integration detail",
+          description: "Activated — returns the bare integration detail resource",
           headers: baseResponseHeaders,
           content: {
             "application/json": {
-              // Returns the full integration DTO (same serializer as
-              // GET /integrations/:packageId) so callers see the resulting
-              // state in one round-trip and activate/deactivate are symmetric.
-              // Legacy `active` / `activated_at` kept additively (issue #646).
-              schema: {
-                allOf: [
-                  integrationDetailSchema,
-                  {
-                    type: "object",
-                    required: ["active", "activated_at"],
-                    properties: {
-                      active: { type: "boolean" },
-                      activated_at: { type: "string", format: "date-time" },
-                    },
-                  },
-                ],
-              },
+              // Bare integration resource — same serializer as
+              // GET /integrations/:packageId. Activation state is the
+              // resource's `active` field, not an operation scrap (#657).
+              schema: integrationDetailSchema,
             },
           },
         },
@@ -394,26 +395,14 @@ export const integrationsPaths = {
         packageIdParam,
       ],
       responses: {
-        "200": {
-          description: "Deactivated — returns the full integration detail",
+        "204": {
+          // Deactivation DELETEs the application_packages row (not a flag
+          // flip), so the strict mutation convention applies: DELETE → 204
+          // empty (#657). The integration detail stays GET-able afterwards
+          // (connections, OAuth clients, pins and org defaults survive) and
+          // serves `active: false`.
+          description: "Deactivated — empty response. The integration detail remains GET-able.",
           headers: baseResponseHeaders,
-          content: {
-            "application/json": {
-              // Returns the full integration DTO (same serializer as
-              // GET /integrations/:packageId), symmetric with activate.
-              // Legacy `active` kept additively (issue #646).
-              schema: {
-                allOf: [
-                  integrationDetailSchema,
-                  {
-                    type: "object",
-                    required: ["active"],
-                    properties: { active: { type: "boolean" } },
-                  },
-                ],
-              },
-            },
-          },
         },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
@@ -494,18 +483,9 @@ export const integrationsPaths = {
         authKeyParam,
       ],
       responses: {
-        "200": {
-          description: "Deleted",
+        "204": {
+          description: "OAuth client deleted",
           headers: baseResponseHeaders,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["deleted"],
-                properties: { deleted: { type: "boolean" } },
-              },
-            },
-          },
         },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -763,20 +743,14 @@ export const integrationsPaths = {
       },
       responses: {
         "200": {
-          description: "Updated",
+          description: "Updated — returns the bare connection resource",
           headers: baseResponseHeaders,
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["id", "label", "shared_with_org", "updatedAt"],
-                properties: {
-                  id: { type: "string", format: "uuid" },
-                  label: { type: ["string", "null"] },
-                  shared_with_org: { type: "boolean" },
-                  updatedAt: { type: "string", format: "date-time" },
-                },
-              },
+              // Bare connection resource — same serializer as the
+              // connections list / connect flows, not a hand-built
+              // subset (#657).
+              schema: integrationConnectionSchema,
             },
           },
         },
@@ -819,15 +793,14 @@ export const integrationsPaths = {
       },
       responses: {
         "200": {
-          description: "Updated",
+          description: "Updated — returns the bare integration detail resource",
           headers: baseResponseHeaders,
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["blocked"],
-                properties: { blocked: { type: "boolean" } },
-              },
+              // Bare integration resource — same serializer as
+              // GET /integrations/:packageId; the toggled gate is the
+              // resource's `block_user_connections` field (#657).
+              schema: integrationDetailSchema,
             },
           },
         },
@@ -961,18 +934,9 @@ export const integrationsPaths = {
         agentPackageIdParam,
       ],
       responses: {
-        "200": {
-          description: "Deleted",
+        "204": {
+          description: "Pin removed (idempotent — 204 whether the pin existed or not)",
           headers: baseResponseHeaders,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["deleted"],
-                properties: { deleted: { type: "boolean" } },
-              },
-            },
-          },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -1055,18 +1019,9 @@ export const integrationsPaths = {
         packageIdParam,
       ],
       responses: {
-        "200": {
-          description: "Deleted",
+        "204": {
+          description: "Default removed (idempotent — 204 whether a default existed or not)",
           headers: baseResponseHeaders,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["deleted"],
-                properties: { deleted: { type: "boolean" } },
-              },
-            },
-          },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

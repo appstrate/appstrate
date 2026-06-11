@@ -165,7 +165,7 @@ export function useDeleteAgentRuns(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      return api<{ deleted: number }>(`/agents/${packageId}/runs`, { method: "DELETE" });
+      return api<{ deleted_count: number }>(`/agents/${packageId}/runs`, { method: "DELETE" });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["runs"] });

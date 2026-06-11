@@ -24,22 +24,14 @@ export const batchLookupSchema = z.object({
 
 const profileRouter = new Hono<AppEnv>();
 
-// Issue #172 (extension) — `/api/profile` is the dashboard user's own
-// identity record (Better Auth-owned `user.name` is mutated by PATCH).
-// API keys must not be able to read or rewrite the human creator's
-// account: a customer integration shouldn't get the platform user's
-// PII via GET, nor be able to rename the dashboard owner via PATCH.
-profileRouter.get("/profile", async (c) => {
-  if (c.get("authMethod") === "api_key") {
-    throw forbidden("API keys cannot access the dashboard user profile");
-  }
-  const user = c.get("user");
-  // Intentionally joins `profiles` with `user` so the response carries
-  // the authoritative (BA-owned) email — the CLI's `whoami` surfaces
-  // this as the "current identity" check, catching cases where the
-  // locally cached email is stale after a dashboard-side email change.
-  // One indexed join on the user PK is cheap versus maintaining a
-  // second email copy on `profiles`.
+// Single profile serializer — shared by GET and PATCH so both return the
+// exact same resource shape (issue #657). Intentionally joins `profiles`
+// with `user` so the response carries the authoritative (BA-owned) email —
+// the CLI's `whoami` surfaces this as the "current identity" check,
+// catching cases where the locally cached email is stale after a
+// dashboard-side email change. One indexed join on the user PK is cheap
+// versus maintaining a second email copy on `profiles`.
+async function getProfileResource(userId: string) {
   const rows = await db
     .select({
       id: profiles.id,
@@ -50,20 +42,28 @@ profileRouter.get("/profile", async (c) => {
     })
     .from(profiles)
     .innerJoin(userTable, eq(userTable.id, profiles.id))
-    .where(eq(profiles.id, user.id))
+    .where(eq(profiles.id, userId))
     .limit(1);
 
-  if (!rows[0]) {
+  return rows[0] ?? null;
+}
+
+// Issue #172 (extension) — `/api/profile` is the dashboard user's own
+// identity record (Better Auth-owned `user.name` is mutated by PATCH).
+// API keys must not be able to read or rewrite the human creator's
+// account: a customer integration shouldn't get the platform user's
+// PII via GET, nor be able to rename the dashboard owner via PATCH.
+profileRouter.get("/profile", async (c) => {
+  if (c.get("authMethod") === "api_key") {
+    throw forbidden("API keys cannot access the dashboard user profile");
+  }
+  const user = c.get("user");
+  const profile = await getProfileResource(user.id);
+  if (!profile) {
     throw notFound("Profile not found");
   }
 
-  return c.json({
-    id: rows[0].id,
-    displayName: rows[0].displayName,
-    language: rows[0].language,
-    email: rows[0].email,
-    name: rows[0].name,
-  });
+  return c.json(profile);
 });
 
 profileRouter.patch("/profile", async (c) => {
@@ -96,7 +96,13 @@ profileRouter.patch("/profile", async (c) => {
     throw internalError();
   }
 
-  return c.json({ ok: true, language: language ?? null, displayName: displayName ?? null });
+  // Bare updated resource — same serializer as GET /api/profile (issue #657).
+  const profile = await getProfileResource(user.id);
+  if (!profile) {
+    throw notFound("Profile not found");
+  }
+
+  return c.json(profile);
 });
 
 // POST /api/profiles/batch — batch lookup display names by user IDs (scoped to org members)
