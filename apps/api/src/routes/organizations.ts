@@ -278,7 +278,7 @@ router.delete("/:orgId", async (c) => {
     orgIdOverride: orgId,
   });
 
-  return c.json({ ok: true });
+  return c.body(null, 204);
 });
 
 // POST /api/orgs/:orgId/members — invite a member (admin+)
@@ -410,7 +410,7 @@ router.delete("/:orgId/invitations/:invitationId", async (c) => {
     resourceId: invitationId,
     orgIdOverride: orgId,
   });
-  return c.json({ ok: true });
+  return c.body(null, 204);
 });
 
 // PUT /api/orgs/:orgId/invitations/:invitationId — change invitation role (owner only)
@@ -478,7 +478,7 @@ router.delete("/:orgId/members/:userId", async (c) => {
     resourceId: targetUserId,
     orgIdOverride: orgId,
   });
-  return c.json({ ok: true });
+  return c.body(null, 204);
 });
 
 // PUT /api/orgs/:orgId/members/:userId — change role (owner only)

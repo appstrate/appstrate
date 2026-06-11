@@ -1002,7 +1002,7 @@
         "operationId": "deleteAgentPersistence",
         "tags": ["Agents"],
         "summary": "Bulk-delete persistence rows for an agent",
-        "description": "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
+        "description": "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204 (issue #657).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1058,12 +1058,15 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["memories_deleted", "checkpoint_deleted"],
                   "properties": {
                     "memories_deleted": {
-                      "type": "integer"
+                      "type": "integer",
+                      "description": "Number of memory rows deleted"
                     },
                     "checkpoint_deleted": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "Whether the checkpoint slot was deleted"
                     }
                   }
                 }
@@ -1111,7 +1114,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Memory deleted",
             "headers": {
               "Request-Id": {
@@ -1119,18 +1122,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -1175,7 +1166,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Pinned slot deleted",
             "headers": {
               "Request-Id": {
@@ -1183,18 +1174,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -1829,7 +1808,7 @@
         "operationId": "deleteAgentRuns",
         "tags": ["Runs"],
         "summary": "Delete all runs for an agent",
-        "description": "Delete all completed runs for an agent.",
+        "description": "Delete all completed runs for an agent. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1859,9 +1838,11 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["deleted_count"],
                   "properties": {
-                    "deleted": {
-                      "type": "integer"
+                    "deleted_count": {
+                      "type": "integer",
+                      "description": "Number of runs deleted"
                     }
                   }
                 }
@@ -4003,7 +3984,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Schedule deleted",
             "headers": {
               "Request-Id": {
@@ -4011,18 +3992,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -5220,27 +5189,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Deleted",
+          "204": {
+            "description": "OAuth client deleted",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["deleted"],
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -6238,27 +6194,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Deleted",
+          "204": {
+            "description": "Pin removed (idempotent — 204 whether the pin existed or not)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["deleted"],
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -6484,27 +6427,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Deleted",
+          "204": {
+            "description": "Default removed (idempotent — 204 whether a default existed or not)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["deleted"],
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -6668,7 +6598,7 @@
         },
         "responses": {
           "201": {
-            "description": "Model created — the full created model resource (same shape as `GET`/`list`). `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
+            "description": "Model created — the bare created model resource (same shape as `GET`/`list`).",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -6727,7 +6657,7 @@
         },
         "responses": {
           "200": {
-            "description": "Default model updated. Returns the new effective default model resource (same shape as `GET`/`list`) plus a legacy `success` flag. When the default is cleared (`modelId: null`) and no default remains in effect, only `{ success: true }` is returned.",
+            "description": "Default model updated — the bare *effective* default model resource (same shape as `GET`/`list`). When no DB row is flagged, the system-default fallback (if any) is surfaced.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -6739,21 +6669,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/OrgModel"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "success": {
-                          "type": "boolean",
-                          "description": "Legacy acknowledgement flag, always `true`. Retained for backward compatibility; prefer reading the model fields."
-                        }
-                      }
-                    }
-                  ]
+                  "$ref": "#/components/schemas/OrgModel"
                 }
+              }
+            }
+          },
+          "204": {
+            "description": "Default cleared and no model remains in effect (no system default configured) — no resource to return.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
               }
             }
           },
@@ -7183,7 +7108,7 @@
         },
         "responses": {
           "200": {
-            "description": "Model updated — the full updated model resource (same shape as `GET`/`list`). `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
+            "description": "Model updated — the bare updated model resource (same shape as `GET`/`list`).",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -7205,6 +7130,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       },
@@ -7607,7 +7535,7 @@
         },
         "responses": {
           "201": {
-            "description": "Model provider credential created — the full created credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back. `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
+            "description": "Model provider credential created — the bare created credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -7773,7 +7701,7 @@
         },
         "responses": {
           "200": {
-            "description": "Model provider credential updated — the full updated credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back. `id` is part of the resource, so callers reading the legacy `{ id }` stub are unaffected.",
+            "description": "Model provider credential updated — the bare updated credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8159,7 +8087,7 @@
         },
         "responses": {
           "200": {
-            "description": "Credential persisted in model_provider_credentials; returns credentialId and available model ids.",
+            "description": "Credential persisted in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, and `availableModelIds` is registry-derived operation info the helper prints in its terminal summary. The dashboard obtains the created credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8328,21 +8256,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/OrgProxy"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "description": "The created proxy's id. Same value as the resource's `id`; retained as a top-level field for backward compatibility."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The created proxy resource — same shape as the `GET /api/proxies` list items — so no follow-up GET is needed."
+                  "$ref": "#/components/schemas/OrgProxy",
+                  "description": "The bare created proxy resource — same shape as the `GET /api/proxies` list items — so no follow-up GET is needed."
                 },
                 "example": {
                   "id": "cm6pqr679",
@@ -8403,7 +8318,7 @@
         },
         "responses": {
           "200": {
-            "description": "Default proxy updated",
+            "description": "Default proxy updated — the bare *effective* default proxy resource (same shape as the `GET /api/proxies` list items). When no DB row is flagged, the system-default fallback (if any) is surfaced.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8415,40 +8330,27 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": ["success", "proxy"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "description": "Always true on success. Retained for backward compatibility."
-                    },
-                    "proxy": {
-                      "description": "The affected default proxy resource — same shape as the `GET /api/proxies` list items — or null when the default was unset (proxyId null).",
-                      "oneOf": [
-                        {
-                          "$ref": "#/components/schemas/OrgProxy"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  }
+                  "$ref": "#/components/schemas/OrgProxy"
                 },
                 "example": {
-                  "success": true,
-                  "proxy": {
-                    "id": "cm6pqr679",
-                    "label": "US Residential Proxy",
-                    "urlPrefix": "http://user:****@us-proxy.example.com:8080",
-                    "source": "custom",
-                    "enabled": true,
-                    "isDefault": true,
-                    "created_by": "usr_k7x9m2p4q1",
-                    "createdAt": "2026-01-10T08:00:00Z",
-                    "updatedAt": "2026-01-10T08:00:00Z"
-                  }
+                  "id": "cm6pqr679",
+                  "label": "US Residential Proxy",
+                  "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                  "source": "custom",
+                  "enabled": true,
+                  "isDefault": true,
+                  "created_by": "usr_k7x9m2p4q1",
+                  "createdAt": "2026-01-10T08:00:00Z",
+                  "updatedAt": "2026-01-10T08:00:00Z"
                 }
+              }
+            }
+          },
+          "204": {
+            "description": "Default unset and no proxy remains in effect (no system default configured) — no resource to return.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
               }
             }
           },
@@ -8520,21 +8422,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/OrgProxy"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "description": "The updated proxy's id. Same value as the resource's `id`; retained as a top-level field for backward compatibility."
-                        }
-                      }
-                    }
-                  ],
-                  "description": "The updated proxy resource — same shape as the `GET /api/proxies` list items — so no follow-up GET is needed."
+                  "$ref": "#/components/schemas/OrgProxy",
+                  "description": "The bare updated proxy resource — same shape as the `GET /api/proxies` list items — so no follow-up GET is needed."
                 },
                 "example": {
                   "id": "cm6pqr679",
@@ -8558,6 +8447,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
@@ -9246,7 +9138,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Organization deleted",
             "headers": {
               "Request-Id": {
@@ -9254,18 +9146,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -9485,7 +9365,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Member removed",
             "headers": {
               "Request-Id": {
@@ -9493,18 +9373,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -9623,7 +9491,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Invitation cancelled",
             "headers": {
               "Request-Id": {
@@ -9631,18 +9499,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -11198,7 +11054,7 @@
           }
         },
         "responses": {
-          "200": {
+          "204": {
             "description": "Profile updated",
             "headers": {
               "Request-Id": {
@@ -11206,21 +11062,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                },
-                "example": {
-                  "ok": true
-                }
               }
             }
           },
@@ -11430,27 +11271,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Mark result",
+          "204": {
+            "description": "Notification marked as read (idempotent — 204 even if it was already read)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": ["ok"]
-                }
               }
             }
           },
@@ -11474,7 +11302,7 @@
         "operationId": "markAllNotificationsRead",
         "tags": ["Notifications"],
         "summary": "Mark all notifications as read",
-        "description": "Marks all unread notifications as read for the current user.",
+        "description": "Marks all unread notifications as read for the current user. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -11499,12 +11327,12 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "updated": {
+                    "updated_count": {
                       "type": "integer",
                       "description": "Number of notifications marked as read"
                     }
                   },
-                  "required": ["updated"]
+                  "required": ["updated_count"]
                 }
               }
             }

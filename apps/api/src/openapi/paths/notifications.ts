@@ -93,22 +93,11 @@ export const notificationsPaths = {
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "200": {
-          description: "Mark result",
+        "204": {
+          description: "Notification marked as read (idempotent — 204 even if it was already read)",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  ok: { type: "boolean" },
-                },
-                required: ["ok"],
-              },
-            },
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
@@ -123,7 +112,8 @@ export const notificationsPaths = {
       operationId: "markAllNotificationsRead",
       tags: ["Notifications"],
       summary: "Mark all notifications as read",
-      description: "Marks all unread notifications as read for the current user.",
+      description:
+        "Marks all unread notifications as read for the current user. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -140,12 +130,12 @@ export const notificationsPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  updated: {
+                  updated_count: {
                     type: "integer",
                     description: "Number of notifications marked as read",
                   },
                 },
-                required: ["updated"],
+                required: ["updated_count"],
               },
             },
           },

@@ -34,7 +34,8 @@ export function useCreateModel() {
       reasoning?: boolean;
       cost?: ModelCost;
     }) => {
-      return api<{ id: string }>("/models", {
+      // Bare created model resource (#657).
+      return api<OrgModelInfo>("/models", {
         method: "POST",
         body: JSON.stringify(data),
       });
@@ -65,7 +66,8 @@ export function useUpdateModel() {
         cost?: ModelCost | null;
       };
     }) => {
-      return api(`/models/${id}`, {
+      // Bare updated model resource (#657).
+      return api<OrgModelInfo>(`/models/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
       });
@@ -92,7 +94,9 @@ export function useSetDefaultModel() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (modelId: string | null) => {
-      return api("/models/default", {
+      // Bare effective default model resource, or undefined when no default
+      // remains in effect (204) (#657).
+      return api<OrgModelInfo | undefined>("/models/default", {
         method: "PUT",
         body: JSON.stringify({ modelId }),
       });

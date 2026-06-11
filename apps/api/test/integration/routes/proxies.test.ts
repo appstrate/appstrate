@@ -40,9 +40,8 @@ describe("Proxies API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      // Legacy compat field retained.
+      // Bare resource — same shape as the GET list serializer (#657).
       expect(body.id).toBeTruthy();
-      // Full resource — same shape as the GET list serializer.
       expect(body.label).toBe("Test Proxy");
       expect(body.source).toBe("custom");
       expect(body.enabled).toBe(true);
@@ -73,9 +72,8 @@ describe("Proxies API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      // Legacy compat field retained.
+      // Bare updated resource (#657).
       expect(body.id).toBe(id);
-      // Full resource reflecting the update.
       expect(body.label).toBe("After");
       expect(body.enabled).toBe(false);
       expect(body.source).toBe("custom");
@@ -103,26 +101,22 @@ describe("Proxies API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      // Legacy compat field retained.
-      expect(body.success).toBe(true);
-      // Affected resource returned.
-      expect(body.proxy).toBeTruthy();
-      expect(body.proxy.id).toBe(id);
-      expect(body.proxy.isDefault).toBe(true);
-      expect(body.proxy.label).toBe("Default Candidate");
+      // Bare effective default proxy resource — no `success` envelope (#657).
+      expect(body.success).toBeUndefined();
+      expect(body.id).toBe(id);
+      expect(body.isDefault).toBe(true);
+      expect(body.label).toBe("Default Candidate");
     });
 
-    it("returns success with null proxy when unsetting the default", async () => {
+    it("returns 204 when unsetting the default and none remains in effect", async () => {
       const res = await app.request("/api/proxies/default", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ proxyId: null }),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.success).toBe(true);
-      expect(body.proxy).toBeNull();
+      expect(res.status).toBe(204);
+      expect(await res.text()).toBe("");
     });
   });
 

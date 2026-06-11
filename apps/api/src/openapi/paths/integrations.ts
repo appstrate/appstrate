@@ -494,18 +494,9 @@ export const integrationsPaths = {
         authKeyParam,
       ],
       responses: {
-        "200": {
-          description: "Deleted",
+        "204": {
+          description: "OAuth client deleted",
           headers: baseResponseHeaders,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["deleted"],
-                properties: { deleted: { type: "boolean" } },
-              },
-            },
-          },
         },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -961,18 +952,9 @@ export const integrationsPaths = {
         agentPackageIdParam,
       ],
       responses: {
-        "200": {
-          description: "Deleted",
+        "204": {
+          description: "Pin removed (idempotent — 204 whether the pin existed or not)",
           headers: baseResponseHeaders,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["deleted"],
-                properties: { deleted: { type: "boolean" } },
-              },
-            },
-          },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -1055,18 +1037,9 @@ export const integrationsPaths = {
         packageIdParam,
       ],
       responses: {
-        "200": {
-          description: "Deleted",
+        "204": {
+          description: "Default removed (idempotent — 204 whether a default existed or not)",
           headers: baseResponseHeaders,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["deleted"],
-                properties: { deleted: { type: "boolean" } },
-              },
-            },
-          },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

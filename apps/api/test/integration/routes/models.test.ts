@@ -73,10 +73,9 @@ describe("Models API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      // Legacy `id` alias preserved.
+      // Bare created resource (same shape as GET/list), not an id stub (#657).
       expect(body.id).toBeDefined();
       expect(typeof body.id).toBe("string");
-      // #646: full created resource (same shape as GET/list), not an id stub.
       expect(body.label).toBe("GPT-4o");
       expect(body.modelId).toBe("gpt-4o");
       expect(body.credentialId).toBe(credentialId);
@@ -104,6 +103,39 @@ describe("Models API", () => {
       expect(res.status).toBe(400);
       const body = (await res.json()) as { detail?: string };
       expect(body.detail).toContain("UUID");
+    });
+
+    it("rejects a needs-reconnection credential with 400 before inserting (explicit label path)", async () => {
+      // Regression for the hoisted reachability gate: with an explicit label,
+      // the old code skipped `loadInferenceCredentials` entirely, inserted the
+      // row, then 500'd on the bare-resource re-projection (the list
+      // serializer filters models bound to unreachable credentials) — leaving
+      // a phantom row the caller could never see.
+      const dead = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        needsReconnection: true,
+      });
+
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Phantom",
+          modelId: "gpt-4o",
+          credentialId: dead.id,
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body400 = (await res.json()) as { detail?: string };
+      expect(body400.detail).toContain("unreachable");
+
+      // No phantom row inserted.
+      const rows = await db
+        .select()
+        .from(orgModels)
+        .where(and(eq(orgModels.orgId, ctx.orgId), eq(orgModels.label, "Phantom")));
+      expect(rows).toHaveLength(0);
     });
   });
 
@@ -158,12 +190,48 @@ describe("Models API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      // Legacy `id` alias preserved.
+      // Bare updated resource (#657).
       expect(body.id).toBe(id);
-      // #646: full updated resource reflects the change without a follow-up GET.
       expect(body.label).toBe("After");
       expect(body.enabled).toBe(false);
       expect(body.source).toBe("custom");
+    });
+
+    it("rejects switching to a needs-reconnection credential with 400, model unchanged", async () => {
+      // Regression for the PUT-side reachability gate: re-pointing a model to
+      // a dead credential used to let the UPDATE land, then the bare-resource
+      // re-read 404'd ("Model not found" after a write that DID succeed).
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Stable",
+          modelId: "gpt-4o",
+          credentialId,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const dead = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        needsReconnection: true,
+      });
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId: dead.id }),
+      });
+
+      expect(res.status).toBe(400);
+      const body400 = (await res.json()) as { detail?: string };
+      expect(body400.detail).toContain("unreachable");
+
+      // The write was rejected before landing — credential pointer unchanged.
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.credentialId).toBe(credentialId);
     });
   });
 
@@ -193,25 +261,23 @@ describe("Models API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      // Legacy `success` flag preserved.
-      expect(body.success).toBe(true);
-      // #646: the new default model resource is returned (effective default).
+      // Bare effective default model resource — no `success` envelope (#657).
+      expect(body.success).toBeUndefined();
       expect(body.id).toBe(id);
       expect(body.isDefault).toBe(true);
       expect(body.label).toBe("Default Model");
       expect(body.modelId).toBe("gpt-4o");
     });
 
-    it("clears the default model with null", async () => {
+    it("returns 204 when clearing the default and none remains in effect", async () => {
       const res = await app.request("/api/models/default", {
         method: "PUT",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ modelId: null }),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.success).toBe(true);
+      expect(res.status).toBe(204);
+      expect(await res.text()).toBe("");
     });
   });
 

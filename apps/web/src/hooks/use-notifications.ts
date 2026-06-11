@@ -47,7 +47,7 @@ export function useMarkRead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (runId: string) => {
-      return api<{ ok: boolean }>(`/notifications/read/${runId}`, { method: "PUT" });
+      return api<void>(`/notifications/read/${runId}`, { method: "PUT" });
     },
     onSuccess: () => invalidateRunAndNotificationQueries(qc),
   });
@@ -57,7 +57,7 @@ export function useMarkAllRead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      return api<{ updated: number }>("/notifications/read-all", { method: "PUT" });
+      return api<{ updated_count: number }>("/notifications/read-all", { method: "PUT" });
     },
     onSuccess: () => invalidateRunAndNotificationQueries(qc),
   });

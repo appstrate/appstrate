@@ -1115,7 +1115,7 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.deleted).toBeGreaterThanOrEqual(2);
+      expect(body.deleted_count).toBeGreaterThanOrEqual(2);
     });
 
     it("returns 409 when running runs exist", async () => {
@@ -1183,7 +1183,7 @@ describe("Runs API", () => {
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.deleted).toBe(1);
+      expect(body.deleted_count).toBe(1);
 
       // AppB run should still exist
       const appBHeaders = {

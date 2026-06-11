@@ -33,7 +33,9 @@ router.post("/welcome/setup", async (c) => {
     await setDisplayName(currentUser.id, data.displayName.trim());
   }
 
-  return c.json({ ok: true });
+  // 204: onboarding ack, no resource to return (the profile lives under
+  // GET /api/profile and the frontend redirects without reading a body).
+  return c.body(null, 204);
 });
 
 export default router;

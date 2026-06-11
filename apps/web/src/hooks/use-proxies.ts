@@ -19,7 +19,8 @@ export function useCreateProxy() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data: { label: string; url: string }) => {
-      return api<{ id: string }>("/proxies", {
+      // Bare created proxy resource (#657).
+      return api<OrgProxyInfo>("/proxies", {
         method: "POST",
         body: JSON.stringify(data),
       });
@@ -40,7 +41,8 @@ export function useUpdateProxy() {
       id: string;
       data: { label?: string; url?: string; enabled?: boolean };
     }) => {
-      return api(`/proxies/${id}`, {
+      // Bare updated proxy resource (#657).
+      return api<OrgProxyInfo>(`/proxies/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
       });
@@ -67,7 +69,9 @@ export function useSetDefaultProxy() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (proxyId: string | null) => {
-      return api("/proxies/default", {
+      // Bare effective default proxy resource, or undefined when no default
+      // remains in effect (204) (#657).
+      return api<OrgProxyInfo | undefined>("/proxies/default", {
         method: "PUT",
         body: JSON.stringify({ proxyId }),
       });

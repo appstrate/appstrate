@@ -399,6 +399,58 @@ describe("Organizations API", () => {
     });
   });
 
+  describe("DELETE /api/orgs/:orgId/members/:userId", () => {
+    it("removes the member and returns 204 with an empty body", async () => {
+      const ctx = await createTestContext({ orgSlug: "delmemorg" });
+      const member = await createTestUser({ email: "leaver@test.com" });
+      await addOrgMember(ctx.orgId, member.id, "member");
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/members/${member.id}`, {
+        method: "DELETE",
+        headers: orgOnlyHeaders(ctx),
+      });
+
+      expect(res.status).toBe(204);
+      expect(await res.text()).toBe("");
+
+      const rows = await db
+        .select()
+        .from(organizationMembers)
+        .where(
+          and(eq(organizationMembers.userId, member.id), eq(organizationMembers.orgId, ctx.orgId)),
+        );
+      expect(rows).toHaveLength(0);
+    });
+  });
+
+  describe("DELETE /api/orgs/:orgId/invitations/:invitationId", () => {
+    it("revokes the invitation and returns 204 with an empty body", async () => {
+      const ctx = await createTestContext({ orgSlug: "delinvorg" });
+      const invitation = await createInvitation({
+        email: "revoked@test.com",
+        orgId: ctx.orgId,
+        role: "member",
+        invitedBy: ctx.user.id,
+        skipEmail: true,
+      });
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${invitation.id}`, {
+        method: "DELETE",
+        headers: orgOnlyHeaders(ctx),
+      });
+
+      expect(res.status).toBe(204);
+      expect(await res.text()).toBe("");
+
+      // Soft-cancel: the row is kept with status flipped to "cancelled".
+      const [row] = await db
+        .select()
+        .from(orgInvitations)
+        .where(eq(orgInvitations.id, invitation.id));
+      expect(row!.status).toBe("cancelled");
+    });
+  });
+
   // Issue #172 — API keys must stay confined to their bound organization.
   // Setup: a user belongs to two orgs (A + B); a key issued in A must
   // never be able to read, enumerate, or mutate B.
@@ -564,8 +616,7 @@ describe("Organizations API", () => {
         headers: { Cookie: ctx.cookie },
       });
 
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true });
+      expect(res.status).toBe(204);
 
       // Org row is gone.
       const orgRows = await db.select().from(organizations).where(eq(organizations.id, ctx.orgId));
