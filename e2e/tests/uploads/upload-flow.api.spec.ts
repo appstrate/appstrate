@@ -117,17 +117,19 @@ test.describe("upload:// protocol", () => {
     expect(body.toLowerCase()).toContain("mime");
   });
 
-  test("reusing an upload:// URI twice fails with 409", async ({
+  test("reusing an upload:// URI within the retention window starts a second run", async ({
     apiClient,
     browserCtx,
     request,
   }) => {
+    // Consumed uploads are retained for UPLOAD_RETENTION_HOURS (default 24h),
+    // so the same URI is re-consumable — each trigger creates a distinct run.
     const scope = `@${browserCtx.org.orgSlug}`;
-    const agentName = `upload-once-${Date.now()}`;
+    const agentName = `upload-reuse-${Date.now()}`;
     await createAgentWithFileInput(apiClient, scope, agentName);
 
     const createRes = await apiClient.post("/uploads", {
-      name: "once.pdf",
+      name: "reuse.pdf",
       size: PDF_MAGIC.length,
       mime: "application/pdf",
     });
@@ -143,10 +145,13 @@ test.describe("upload:// protocol", () => {
       input: { doc: descriptor.uri },
     });
     expect(first.status()).toBe(201);
+    const firstRun = await first.json();
 
     const second = await apiClient.post(`/agents/${scope}/${agentName}/run`, {
       input: { doc: descriptor.uri },
     });
-    expect([404, 409, 410]).toContain(second.status());
+    expect(second.status()).toBe(201);
+    const secondRun = await second.json();
+    expect(secondRun.id).not.toBe(firstRun.id);
   });
 });
