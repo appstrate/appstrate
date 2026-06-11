@@ -174,6 +174,9 @@ describe("Schedules API", () => {
       expect(body.timezone).toBe("Europe/Paris");
       // Schedule runs as the creating member.
       expect(body.userId).toBe(ctx.user.id);
+      // EnrichedSchedule — same serializer as GET /schedules/:id (#657).
+      expect(body.actor_type).toBe("user");
+      expect(body).toHaveProperty("actor_name");
     });
 
     it("rejects invalid cron expression", async () => {
@@ -289,6 +292,9 @@ describe("Schedules API", () => {
       const body = (await res.json()) as any;
       expect(body.name).toBe("New Name");
       expect(body.cron_expression).toBe("0 12 * * *");
+      // EnrichedSchedule — same serializer as GET /schedules/:id (#657).
+      expect(body.actor_type).toBe("user");
+      expect(body).toHaveProperty("actor_name");
     });
   });
 

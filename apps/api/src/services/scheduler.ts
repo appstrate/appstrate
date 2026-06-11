@@ -556,7 +556,7 @@ export async function createSchedule(
     versionOverride?: string | null;
     connectionOverrides?: Record<string, string> | null;
   },
-): Promise<ScheduleWireDto> {
+): Promise<EnrichedSchedule> {
   const id = `sched_${crypto.randomUUID()}`;
   const tz = data.timezone || "UTC";
 
@@ -593,7 +593,10 @@ export async function createSchedule(
 
   await upsertScheduleJob(schedule, scope.orgId);
 
-  return schedule;
+  // Same EnrichedSchedule serializer as getSchedule/listSchedules, so the
+  // create response matches the GET detail shape (actor_name/actor_type).
+  const [enriched] = await enrichSchedules([schedule], scope.orgId);
+  return enriched ?? { ...schedule, actor_name: null, actor_type: null };
 }
 
 export async function updateSchedule(
@@ -611,7 +614,7 @@ export async function updateSchedule(
     versionOverride?: string | null;
     connectionOverrides?: Record<string, string> | null;
   },
-): Promise<ScheduleWireDto | null> {
+): Promise<EnrichedSchedule | null> {
   const existing = await getSchedule(id, scope);
   if (!existing) return null;
 
@@ -662,7 +665,10 @@ export async function updateSchedule(
     await removeScheduleJob(id);
   }
 
-  return schedule;
+  // Same EnrichedSchedule serializer as getSchedule/listSchedules, so the
+  // update response matches the GET detail shape (actor_name/actor_type).
+  const [enriched] = await enrichSchedules([schedule], scope.orgId);
+  return enriched ?? { ...schedule, actor_name: null, actor_type: null };
 }
 
 export async function deleteSchedule(scope: AppScope, id: string): Promise<boolean> {

@@ -277,7 +277,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Execute an inline agent (no persisted package)",
       description:
-        "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `202` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. See `docs/specs/INLINE_RUNS.md`.",
+        "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. See `docs/specs/INLINE_RUNS.md`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -332,9 +332,9 @@ export const runsPaths = {
         },
       },
       responses: {
-        "202": {
+        "201": {
           description:
-            "Inline run accepted — stream via SSE. The body is the created run resource (same shape as `GET /runs/{id}`); under a rare concurrent-teardown race (the run is deleted between creation and serialization) it may degrade to `{id}` only.",
+            "Inline run created — stream via SSE. The body is the created run resource (same shape as `GET /runs/{id}`); under a rare concurrent-teardown race (the run is deleted between creation and serialization) it may degrade to `{id}` only.",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
