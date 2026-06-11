@@ -104,6 +104,39 @@ describe("Models API", () => {
       const body = (await res.json()) as { detail?: string };
       expect(body.detail).toContain("UUID");
     });
+
+    it("rejects a needs-reconnection credential with 400 before inserting (explicit label path)", async () => {
+      // Regression for the hoisted reachability gate: with an explicit label,
+      // the old code skipped `loadInferenceCredentials` entirely, inserted the
+      // row, then 500'd on the bare-resource re-projection (the list
+      // serializer filters models bound to unreachable credentials) — leaving
+      // a phantom row the caller could never see.
+      const dead = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        needsReconnection: true,
+      });
+
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Phantom",
+          modelId: "gpt-4o",
+          credentialId: dead.id,
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body400 = (await res.json()) as { detail?: string };
+      expect(body400.detail).toContain("unreachable");
+
+      // No phantom row inserted.
+      const rows = await db
+        .select()
+        .from(orgModels)
+        .where(and(eq(orgModels.orgId, ctx.orgId), eq(orgModels.label, "Phantom")));
+      expect(rows).toHaveLength(0);
+    });
   });
 
   describe("DELETE /api/models/:id", () => {
@@ -162,6 +195,43 @@ describe("Models API", () => {
       expect(body.label).toBe("After");
       expect(body.enabled).toBe(false);
       expect(body.source).toBe("custom");
+    });
+
+    it("rejects switching to a needs-reconnection credential with 400, model unchanged", async () => {
+      // Regression for the PUT-side reachability gate: re-pointing a model to
+      // a dead credential used to let the UPDATE land, then the bare-resource
+      // re-read 404'd ("Model not found" after a write that DID succeed).
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Stable",
+          modelId: "gpt-4o",
+          credentialId,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const dead = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        needsReconnection: true,
+      });
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId: dead.id }),
+      });
+
+      expect(res.status).toBe(400);
+      const body400 = (await res.json()) as { detail?: string };
+      expect(body400.detail).toContain("unreachable");
+
+      // The write was rejected before landing — credential pointer unchanged.
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.credentialId).toBe(credentialId);
     });
   });
 
