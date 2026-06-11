@@ -21,17 +21,11 @@ export const welcomePaths = {
         },
       },
       responses: {
-        "200": {
+        "204": {
           description: "Profile updated",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { type: "object", properties: { ok: { type: "boolean" } } },
-              example: { ok: true },
-            },
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },

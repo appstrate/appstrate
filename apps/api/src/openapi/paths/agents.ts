@@ -330,7 +330,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Bulk-delete persistence rows for an agent",
       description:
-        "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
+        "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204 (issue #657).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -366,9 +366,16 @@ export const agentsPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["memories_deleted", "checkpoint_deleted"],
                 properties: {
-                  memories_deleted: { type: "integer" },
-                  checkpoint_deleted: { type: "boolean" },
+                  memories_deleted: {
+                    type: "integer",
+                    description: "Number of memory rows deleted",
+                  },
+                  checkpoint_deleted: {
+                    type: "boolean",
+                    description: "Whether the checkpoint slot was deleted",
+                  },
                 },
               },
             },
@@ -394,19 +401,11 @@ export const agentsPaths = {
         { name: "id", in: "path", required: true, schema: { type: "integer" } },
       ],
       responses: {
-        "200": {
+        "204": {
           description: "Memory deleted",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: { deleted: { type: "boolean" } },
-              },
-            },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -430,19 +429,11 @@ export const agentsPaths = {
         { name: "id", in: "path", required: true, schema: { type: "integer" } },
       ],
       responses: {
-        "200": {
+        "204": {
           description: "Pinned slot deleted",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: { deleted: { type: "boolean" } },
-              },
-            },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },

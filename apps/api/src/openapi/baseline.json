@@ -1002,7 +1002,7 @@
         "operationId": "deleteAgentPersistence",
         "tags": ["Agents"],
         "summary": "Bulk-delete persistence rows for an agent",
-        "description": "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
+        "description": "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204 (issue #657).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1058,12 +1058,15 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["memories_deleted", "checkpoint_deleted"],
                   "properties": {
                     "memories_deleted": {
-                      "type": "integer"
+                      "type": "integer",
+                      "description": "Number of memory rows deleted"
                     },
                     "checkpoint_deleted": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "Whether the checkpoint slot was deleted"
                     }
                   }
                 }
@@ -1111,7 +1114,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Memory deleted",
             "headers": {
               "Request-Id": {
@@ -1119,18 +1122,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -1175,7 +1166,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Pinned slot deleted",
             "headers": {
               "Request-Id": {
@@ -1183,18 +1174,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -1829,7 +1808,7 @@
         "operationId": "deleteAgentRuns",
         "tags": ["Runs"],
         "summary": "Delete all runs for an agent",
-        "description": "Delete all completed runs for an agent.",
+        "description": "Delete all completed runs for an agent. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1859,9 +1838,11 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["deleted_count"],
                   "properties": {
-                    "deleted": {
-                      "type": "integer"
+                    "deleted_count": {
+                      "type": "integer",
+                      "description": "Number of runs deleted"
                     }
                   }
                 }
@@ -4003,7 +3984,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Schedule deleted",
             "headers": {
               "Request-Id": {
@@ -4011,18 +3992,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -5220,27 +5189,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Deleted",
+          "204": {
+            "description": "OAuth client deleted",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["deleted"],
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -6238,27 +6194,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Deleted",
+          "204": {
+            "description": "Pin removed (idempotent — 204 whether the pin existed or not)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["deleted"],
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -6484,27 +6427,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Deleted",
+          "204": {
+            "description": "Default removed (idempotent — 204 whether a default existed or not)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["deleted"],
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -9208,7 +9138,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Organization deleted",
             "headers": {
               "Request-Id": {
@@ -9216,18 +9146,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -9449,7 +9367,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Member removed",
             "headers": {
               "Request-Id": {
@@ -9457,18 +9375,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -9587,7 +9493,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Invitation cancelled",
             "headers": {
               "Request-Id": {
@@ -9595,18 +9501,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
               }
             }
           },
@@ -11201,7 +11095,7 @@
           }
         },
         "responses": {
-          "200": {
+          "204": {
             "description": "Profile updated",
             "headers": {
               "Request-Id": {
@@ -11209,21 +11103,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                },
-                "example": {
-                  "ok": true
-                }
               }
             }
           },
@@ -11433,27 +11312,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Mark result",
+          "204": {
+            "description": "Notification marked as read (idempotent — 204 even if it was already read)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": ["ok"]
-                }
               }
             }
           },
@@ -11477,7 +11343,7 @@
         "operationId": "markAllNotificationsRead",
         "tags": ["Notifications"],
         "summary": "Mark all notifications as read",
-        "description": "Marks all unread notifications as read for the current user.",
+        "description": "Marks all unread notifications as read for the current user. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -11502,12 +11368,12 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "updated": {
+                    "updated_count": {
                       "type": "integer",
                       "description": "Number of notifications marked as read"
                     }
                   },
-                  "required": ["updated"]
+                  "required": ["updated_count"]
                 }
               }
             }

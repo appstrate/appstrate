@@ -14,6 +14,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { fileTypeStream } from "file-type";
+import { zipSync } from "fflate";
 import { db } from "@appstrate/db/client";
 import { uploads } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
@@ -323,6 +324,91 @@ describe("consumeUploadStream", () => {
       expect(e).toBeInstanceOf(ApiError);
       expect((e as ApiError).status).toBe(400);
       expect((e as ApiError).message.toLowerCase()).toContain("mime");
+    }
+  });
+
+  it("xlsx whose head sniffs as application/zip is accepted (#zip-container refinement)", async () => {
+    // Mirror the openpyxl/LibreOffice OOXML layout: content entries first,
+    // `[Content_Types].xml` LAST. The big stored entry pushes the identifying
+    // entry past `fileTypeStream`'s ~4100-byte sample, so the sniffer falls
+    // back to plain `application/zip` — which must refine into the declared
+    // spreadsheet type instead of failing the consume.
+    const ctx = await createTestContext({ orgSlug: "org-xlsx" });
+    const id = "upl_xlsx_1";
+    const enc = new TextEncoder();
+    // Incompressible pseudo-random payload (deterministic LCG) — keeps the
+    // deflated sheet entry well past the sniffer's sample window, like the
+    // real-world spreadsheet data this reproduces.
+    const sheetData = new Uint8Array(20000);
+    let seed = 0x12345678;
+    for (let i = 0; i < sheetData.length; i++) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      sheetData[i] = seed & 0xff;
+    }
+    const bytes = Buffer.from(
+      zipSync({
+        "docProps/app.xml": enc.encode(`<x>${"a".repeat(150)}</x>`),
+        "xl/worksheets/sheet1.xml": sheetData,
+        "[Content_Types].xml": enc.encode(
+          '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>',
+        ),
+      }),
+    );
+    const declared = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    await seedUpload(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { id, bytes, mime: declared },
+    );
+    const consumed = await consumeUploadStream(
+      id,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      drainSink,
+    );
+    expect(consumed.size).toBe(bytes.length);
+    expect(consumed.mime).toBe(declared);
+  });
+
+  it("legacy .xls (OLE2/CFB container) declared as ms-excel is accepted", async () => {
+    // file-type identifies the OLE2 magic as generic application/x-cfb and
+    // never refines it to the concrete legacy Office format — parent↔child
+    // refinement must bridge the gap, same as the ZIP family.
+    const ctx = await createTestContext({ orgSlug: "org-xls" });
+    const id = "upl_xls_1";
+    const cfb = new Uint8Array(512);
+    cfb.set([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+    const bytes = Buffer.from(cfb);
+    await seedUpload(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { id, bytes, mime: "application/vnd.ms-excel" },
+    );
+    const consumed = await consumeUploadStream(
+      id,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      drainSink,
+    );
+    expect(consumed.size).toBe(bytes.length);
+    expect(consumed.mime).toBe("application/vnd.ms-excel");
+  });
+
+  it("zip bytes declared as pdf are still rejected (family refinement is zip-only)", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-zip-spoof" });
+    const id = "upl_zip_spoof_1";
+    const bytes = Buffer.from(zipSync({ "a.txt": new TextEncoder().encode("hi") }));
+    await seedUpload(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { id, bytes, mime: "application/pdf" },
+    );
+    try {
+      await consumeUploadStream(
+        id,
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        drainSink,
+      );
+      throw new Error("expected to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).status).toBe(400);
+      expect((e as ApiError).message).toContain("does not match declared");
     }
   });
 

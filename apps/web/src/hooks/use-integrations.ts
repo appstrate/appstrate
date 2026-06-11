@@ -435,7 +435,7 @@ export function useDeleteIntegrationPin() {
   const applicationId = useCurrentApplicationId();
   return useMutation({
     mutationFn: ({ packageId, agentPackageId }: { packageId: string; agentPackageId: string }) =>
-      api<{ deleted: boolean }>(
+      api<void>(
         `/integrations/${encodePackageIdPath(packageId)}/pins/${encodePackageIdPath(agentPackageId)}`,
         { method: "DELETE" },
       ),
@@ -501,7 +501,7 @@ export function useDeleteIntegrationOrgDefault() {
   const applicationId = useCurrentApplicationId();
   return useMutation({
     mutationFn: ({ packageId }: { packageId: string }) =>
-      api<{ deleted: boolean }>(`/integrations/${encodePackageIdPath(packageId)}/default`, {
+      api<void>(`/integrations/${encodePackageIdPath(packageId)}/default`, {
         method: "DELETE",
       }),
     onSuccess: (_data, vars) => {
@@ -553,7 +553,7 @@ export function useDeleteIntegrationOAuthClient() {
   const applicationId = useCurrentApplicationId();
   return useMutation({
     mutationFn: ({ packageId, authKey }: { packageId: string; authKey: string }) =>
-      api<{ deleted: boolean }>(
+      api<void>(
         `/integrations/${encodePackageIdPath(packageId)}/oauth-clients/${encodeURI(authKey)}`,
         { method: "DELETE" },
       ),
