@@ -720,7 +720,7 @@ describe("OAuth client CRUD", () => {
       method: "DELETE",
       headers: authHeaders(ctx),
     });
-    expect(del.status).toBe(200);
+    expect(del.status).toBe(204);
     const after = await db
       .select()
       .from(integrationOauthClients)
@@ -1000,8 +1000,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
       method: "DELETE",
       headers: authHeaders(ctx),
     });
-    expect(del.status).toBe(200);
-    expect(await del.json()).toEqual({ deleted: true });
+    expect(del.status).toBe(204);
     const get = await app.request("/api/integrations/@myorg/gmail/default", {
       headers: authHeaders(ctx),
     });

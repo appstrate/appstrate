@@ -316,7 +316,7 @@ export function createAgentsRouter() {
         resourceId: agent.id,
         after: { memoryId: result.data },
       });
-      return c.json({ deleted: true });
+      return c.body(null, 204);
     },
   );
 
@@ -342,7 +342,7 @@ export function createAgentsRouter() {
         resourceId: agent.id,
         after: { pinnedSlotId: result.data },
       });
-      return c.json({ deleted: true });
+      return c.body(null, 204);
     },
   );
 

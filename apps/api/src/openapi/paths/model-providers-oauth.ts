@@ -204,7 +204,7 @@ export const modelProvidersOAuthPaths = {
       responses: {
         "200": {
           description:
-            "Credential persisted in model_provider_credentials; returns credentialId and available model ids.",
+            "Credential persisted in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, and `availableModelIds` is registry-derived operation info the helper prints in its terminal summary. The dashboard obtains the created credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list.",
           content: {
             "application/json": {
               schema: {

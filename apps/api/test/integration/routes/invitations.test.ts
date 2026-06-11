@@ -68,10 +68,16 @@ describe("Invitations API", () => {
       });
 
       expect(res.status).toBe(200);
+      // Bare joined-org resource — same shape as the items in GET /api/orgs
       const body = (await res.json()) as any;
-      expect(body.success).toBe(true);
-      expect(body.is_new_user).toBe(true);
-      expect(body.orgId).toBe(ctx.orgId);
+      expect(body.id).toBe(ctx.orgId);
+      expect(body.name).toBeTruthy();
+      expect(body.slug).toBe("inviteorg");
+      expect(body.role).toBe("member");
+      expect(body.createdAt).toBeTruthy();
+      expect(body).not.toHaveProperty("success");
+      // New-user flow sets the session cookie on the response
+      expect(res.headers.get("set-cookie")).toBeTruthy();
     });
 
     it("rejects already accepted invitation", async () => {
@@ -118,14 +124,16 @@ describe("Invitations API", () => {
       });
 
       expect(res.status).toBe(200);
+      // Bare joined-org resource with the invitation's role
       const body = (await res.json()) as any;
-      expect(body.success).toBe(true);
-      expect(body.is_new_user).toBe(false);
-      expect(body.orgId).toBe(ctx.orgId);
-      expect(body.requires_login).toBe(false);
+      expect(body.id).toBe(ctx.orgId);
+      expect(body.slug).toBe("inviteorg");
+      expect(body.role).toBe("admin");
+      expect(body).not.toHaveProperty("success");
+      expect(body).not.toHaveProperty("requires_login");
     });
 
-    it("returns requiresLogin when existing user is not authenticated", async () => {
+    it("accepts for an unauthenticated existing user and returns the joined org", async () => {
       await createTestUser({ email: "noauth@test.com" });
 
       const inv = await seedInvitation({
@@ -143,9 +151,8 @@ describe("Invitations API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.success).toBe(true);
-      expect(body.is_new_user).toBe(false);
-      expect(body.requires_login).toBe(true);
+      expect(body.id).toBe(ctx.orgId);
+      expect(body.role).toBe(inv.role);
     });
 
     it("reports isNewUser=false in info when user exists", async () => {
@@ -214,7 +221,7 @@ describe("Invitations API", () => {
       // Should succeed (idempotent), not 500
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.success).toBe(true);
+      expect(body.id).toBe(ctx.orgId);
     });
   });
 });

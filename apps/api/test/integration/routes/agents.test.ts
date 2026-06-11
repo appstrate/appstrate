@@ -588,7 +588,7 @@ describe("Agents API", () => {
         `/api/agents/@myorg/persist-del-cp/persistence/pinned/${slotId}`,
         { method: "DELETE", headers: authHeaders(ctx) },
       );
-      expect(delRes.status).toBe(200);
+      expect(delRes.status).toBe(204);
 
       const after = await app.request("/api/agents/@myorg/persist-del-cp/persistence?kind=pinned", {
         headers: authHeaders(ctx),
@@ -625,7 +625,7 @@ describe("Agents API", () => {
         `/api/agents/@myorg/persist-del-persona/persistence/pinned/${personaSlot.id}`,
         { method: "DELETE", headers: authHeaders(ctx) },
       );
-      expect(delRes.status).toBe(200);
+      expect(delRes.status).toBe(204);
     });
 
     it("returns 404 for unknown pinned slot id", async () => {
