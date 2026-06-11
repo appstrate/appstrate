@@ -300,6 +300,21 @@ router.post("/:orgId/members", async (c) => {
 
   const targetUser = await findUserByEmail(data.email.trim());
 
+  // Polymorphic response (documented as oneOf in OpenAPI): the operation
+  // either creates an invitation (201 + bare OrgInvitationInfo — has `id` +
+  // `token`) or adds an existing user directly (201 + bare OrgMember — has
+  // `userId`). Both DTOs use the same serializers as the lists in
+  // GET /orgs/:orgId. The `token` is exposed because this endpoint is
+  // admin-gated, consistent with the invitations list.
+  const serializeInvitation = (inv: Awaited<ReturnType<typeof createInvitation>>) => ({
+    id: inv.id,
+    email: inv.email,
+    role: inv.role,
+    token: inv.token,
+    expiresAt: inv.expiresAt?.toISOString(),
+    createdAt: inv.createdAt?.toISOString(),
+  });
+
   if (targetUser) {
     if (getAppConfig().features.smtp) {
       // User exists + SMTP → create invitation with magic link (auto-auth on click)
@@ -318,7 +333,7 @@ router.post("/:orgId/members", async (c) => {
         after: { email: invitation.email, role },
         orgIdOverride: orgId,
       });
-      return c.json({ invited: true, email: invitation.email, role }, 201);
+      return c.json(serializeInvitation(invitation), 201);
     }
     // User exists + no SMTP → add directly
     try {
@@ -338,7 +353,20 @@ router.post("/:orgId/members", async (c) => {
       after: { email: data.email.trim(), role },
       orgIdOverride: orgId,
     });
-    return c.json({ userId: targetUser.id, role, added: true }, 201);
+    const member = await getOrgMemberWithProfile(orgId, targetUser.id);
+    if (!member) {
+      throw notFound("Member not found");
+    }
+    return c.json(
+      {
+        userId: member.userId,
+        role: member.role,
+        joinedAt: member.joinedAt,
+        displayName: member.displayName,
+        email: member.email,
+      },
+      201,
+    );
   }
 
   // User doesn't exist — create invitation
@@ -357,7 +385,7 @@ router.post("/:orgId/members", async (c) => {
       after: { email: invitation.email, role },
       orgIdOverride: orgId,
     });
-    return c.json({ invited: true, email: invitation.email, role, token: invitation.token }, 201);
+    return c.json(serializeInvitation(invitation), 201);
   } catch (err) {
     throw new ApiError({
       status: 500,
@@ -409,10 +437,9 @@ router.put("/:orgId/invitations/:invitationId", async (c) => {
     orgIdOverride: orgId,
   });
 
-  // Return the full invitation DTO — same shape as the invitations list in
-  // GET /orgs/:orgId — so callers see the resulting state without a
-  // follow-up GET (issue #646). `id` + `role` remain present as a superset,
-  // so legacy consumers reading those fields are unaffected.
+  // Bare updated resource — same serializer as the invitations list in
+  // GET /orgs/:orgId (issue #657). `token` is included because the
+  // endpoint is owner-gated, consistent with the list.
   return c.json({
     id: updated.id,
     email: updated.email,
@@ -484,10 +511,8 @@ router.put("/:orgId/members/:userId", async (c) => {
     orgIdOverride: orgId,
   });
 
-  // Return the full member DTO — same shape as the members list in
-  // GET /orgs/:orgId — so callers see the resulting state without a
-  // follow-up GET (issue #646). `userId` + `role` remain present as a
-  // superset, so legacy consumers reading those fields are unaffected.
+  // Bare updated resource — same serializer as the members list in
+  // GET /orgs/:orgId (issue #657).
   const updated = await getOrgMemberWithProfile(orgId, targetUserId);
   if (!updated) {
     throw notFound("Member not found");

@@ -255,9 +255,14 @@ describe("Organizations API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      expect(body.added).toBe(true);
+      // Bare created member — same shape as the members list in GET /api/orgs/:orgId
       expect(body.userId).toBe(member.id);
       expect(body.role).toBe("member");
+      expect(body.email).toBe("member@test.com");
+      expect(body.joinedAt).toBeTruthy();
+      // No operation scraps
+      expect(body).not.toHaveProperty("added");
+      expect(body).not.toHaveProperty("invited");
 
       // Verify membership in DB
       await assertDbHas(organizationMembers, eq(organizationMembers.userId, member.id));
@@ -273,9 +278,17 @@ describe("Organizations API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      expect(body.invited).toBe(true);
+      // Bare created invitation — same shape as the invitations list in
+      // GET /api/orgs/:orgId (token included: endpoint is admin-gated)
+      expect(body.id).toBeTruthy();
       expect(body.email).toBe("newuser@test.com");
       expect(body.role).toBe("admin");
+      expect(body.token).toBeTruthy();
+      expect(body.expiresAt).toBeTruthy();
+      expect(body.createdAt).toBeTruthy();
+      // No operation scraps
+      expect(body).not.toHaveProperty("invited");
+      expect(body).not.toHaveProperty("added");
 
       // Verify invitation in DB
       await assertDbHas(orgInvitations, eq(orgInvitations.email, "newuser@test.com"));
@@ -308,9 +321,9 @@ describe("Organizations API", () => {
     });
   });
 
-  // Issue #646 — mutating endpoints return the full resource, not a stub.
+  // Issue #657 — mutations return the bare full resource, not a stub.
   describe("PUT /api/orgs/:orgId/members/:userId", () => {
-    it("returns the full member DTO (not just {userId, role})", async () => {
+    it("returns the bare member DTO (same shape as the members list)", async () => {
       const ctx = await createTestContext({ orgSlug: "roleorg" });
       const member = await createTestUser({ email: "promote@test.com" });
       await addOrgMember(ctx.orgId, member.id, "member");
@@ -323,13 +336,18 @@ describe("Organizations API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      // Legacy fields preserved (superset)
+      // Bare member DTO — same shape as the members list in GET /api/orgs/:orgId
       expect(body.userId).toBe(member.id);
       expect(body.role).toBe("admin");
-      // Full member DTO — same shape as the members list in GET /api/orgs/:orgId
       expect(body.email).toBe("promote@test.com");
-      expect(body).toHaveProperty("joinedAt");
       expect(body.joinedAt).toBeTruthy();
+      expect(Object.keys(body).sort()).toEqual([
+        "displayName",
+        "email",
+        "joinedAt",
+        "role",
+        "userId",
+      ]);
 
       // Persisted
       await assertDbHas(
@@ -340,7 +358,7 @@ describe("Organizations API", () => {
   });
 
   describe("PUT /api/orgs/:orgId/invitations/:invitationId", () => {
-    it("returns the full invitation DTO (not just {id, role})", async () => {
+    it("returns the bare invitation DTO (same shape as the invitations list)", async () => {
       const ctx = await createTestContext({ orgSlug: "invorg" });
       const invitation = await createInvitation({
         email: "invitee@test.com",
@@ -358,14 +376,20 @@ describe("Organizations API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      // Legacy fields preserved (superset)
+      // Bare invitation DTO — same shape as the invitations list in
+      // GET /api/orgs/:orgId (token kept: endpoint is owner-gated)
       expect(body.id).toBe(invitation.id);
       expect(body.role).toBe("admin");
-      // Full invitation DTO — same shape as the invitations list in GET /api/orgs/:orgId
       expect(body.email).toBe("invitee@test.com");
       expect(body.token).toBe(invitation.token);
-      expect(body).toHaveProperty("expiresAt");
-      expect(body).toHaveProperty("createdAt");
+      expect(Object.keys(body).sort()).toEqual([
+        "createdAt",
+        "email",
+        "expiresAt",
+        "id",
+        "role",
+        "token",
+      ]);
 
       // Persisted
       await assertDbHas(

@@ -63,7 +63,7 @@ describe("Profile API", () => {
   });
 
   describe("PATCH /api/profile", () => {
-    it("updates language", async () => {
+    it("updates language and returns the full profile", async () => {
       const res = await app.request("/api/profile", {
         method: "PATCH",
         headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
@@ -71,9 +71,13 @@ describe("Profile API", () => {
       });
 
       expect(res.status).toBe(200);
+      // Bare updated resource — same serializer as GET /api/profile
       const body = (await res.json()) as any;
-      expect(body.ok).toBe(true);
+      expect(body.id).toBe(ctx.user.id);
       expect(body.language).toBe("en");
+      expect(body.email).toBe(ctx.user.email);
+      expect(body.name).toBe(ctx.user.name);
+      expect(body).not.toHaveProperty("ok");
 
       // Verify persistence
       const getRes = await app.request("/api/profile", {
@@ -83,7 +87,7 @@ describe("Profile API", () => {
       expect(profile.language).toBe("en");
     });
 
-    it("updates display name", async () => {
+    it("updates display name and returns the full profile", async () => {
       const res = await app.request("/api/profile", {
         method: "PATCH",
         headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
@@ -92,8 +96,16 @@ describe("Profile API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.ok).toBe(true);
+      expect(body.id).toBe(ctx.user.id);
       expect(body.displayName).toBe("New Name");
+      expect(body.email).toBe(ctx.user.email);
+      expect(body).not.toHaveProperty("ok");
+
+      // PATCH returns the exact same shape as GET /api/profile
+      const getRes = await app.request("/api/profile", {
+        headers: { Cookie: ctx.cookie },
+      });
+      expect(await getRes.json()).toEqual(body);
     });
 
     it("rejects invalid language", async () => {
