@@ -23,7 +23,7 @@ import { CopyLinkButton } from "../../components/copy-link-button";
 import { api } from "../../api";
 import { roleI18nKey, INVITE_ROLES } from "../../hooks/use-permissions";
 import { Spinner } from "../../components/spinner";
-import type { OrgInvitation } from "@appstrate/shared-types";
+import type { OrganizationMember, OrgInvitation } from "@appstrate/shared-types";
 
 export function OnboardingMembersStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -46,7 +46,7 @@ export function OnboardingMembersStep() {
 
   const addMemberMutation = useMutation({
     mutationFn: async ({ email, role }: { email: string; role: "viewer" | "member" | "admin" }) => {
-      return api<{ invited?: boolean; added?: boolean; token?: string }>(`/orgs/${orgId}/members`, {
+      return api<OrganizationMember | OrgInvitation>(`/orgs/${orgId}/members`, {
         method: "POST",
         body: JSON.stringify({ email, role }),
       });
