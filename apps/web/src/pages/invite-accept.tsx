@@ -79,12 +79,14 @@ export function InviteAcceptPage() {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.detail || t("invite.error"));
       }
+      // The accept endpoint returns the joined org resource (same shape as
+      // the GET /api/orgs list items).
       const data = await res.json();
       await refreshAuth();
       // Refetch orgs so the new org is in the cache BEFORE setId triggers useAutoSelect
       await queryClient.invalidateQueries({ queryKey: ["orgs"] });
-      if (data.orgId) {
-        orgStore.getState().setId(data.orgId);
+      if (data.id) {
+        orgStore.getState().setId(data.id);
       }
       navigate("/");
     },

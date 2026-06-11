@@ -108,20 +108,17 @@ export const agentsPaths = {
       },
       responses: {
         "200": {
-          description: "Configuration saved",
+          description: "Configuration saved — returns the bare persisted configuration document",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  config: { type: "object" },
-                  validation: { type: "object", properties: { valid: { type: "boolean" } } },
-                },
-              },
+              // Bare persisted configuration document (request body merged
+              // with schema defaults) — no `validation` echo (#657):
+              // validation failures are 400s.
+              schema: { type: "object", additionalProperties: true },
             },
           },
         },
@@ -199,28 +196,22 @@ export const agentsPaths = {
       },
       responses: {
         "200": {
-          description: "Agent proxy updated — returns the affected proxy setting",
+          description: "Agent proxy updated — returns the bare proxy-setting resource",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              // Returns the affected proxy-setting resource (same shape as
-              // GET …/proxy), composed with the legacy `success` flag kept
-              // additively for backward compatibility (issue #646).
+              // Bare proxy-setting resource — same shape as GET …/proxy,
+              // no `success` scrap (#657).
               schema: {
-                allOf: [
-                  {
-                    type: "object",
-                    required: ["proxyId", "resolved"],
-                    properties: {
-                      proxyId: { type: ["string", "null"] },
-                      resolved: { type: "boolean" },
-                    },
-                  },
-                  { type: "object", properties: { success: { type: "boolean" } } },
-                ],
+                type: "object",
+                required: ["proxyId", "resolved"],
+                properties: {
+                  proxyId: { type: ["string", "null"] },
+                  resolved: { type: "boolean" },
+                },
               },
             },
           },
@@ -330,7 +321,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Bulk-delete persistence rows for an agent",
       description:
-        "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
+        "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204 (issue #657).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -366,9 +357,16 @@ export const agentsPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["memories_deleted", "checkpoint_deleted"],
                 properties: {
-                  memories_deleted: { type: "integer" },
-                  checkpoint_deleted: { type: "boolean" },
+                  memories_deleted: {
+                    type: "integer",
+                    description: "Number of memory rows deleted",
+                  },
+                  checkpoint_deleted: {
+                    type: "boolean",
+                    description: "Whether the checkpoint slot was deleted",
+                  },
                 },
               },
             },
@@ -394,19 +392,11 @@ export const agentsPaths = {
         { name: "id", in: "path", required: true, schema: { type: "integer" } },
       ],
       responses: {
-        "200": {
+        "204": {
           description: "Memory deleted",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: { deleted: { type: "boolean" } },
-              },
-            },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -430,19 +420,11 @@ export const agentsPaths = {
         { name: "id", in: "path", required: true, schema: { type: "integer" } },
       ],
       responses: {
-        "200": {
+        "204": {
           description: "Pinned slot deleted",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: { deleted: { type: "boolean" } },
-              },
-            },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -516,27 +498,21 @@ export const agentsPaths = {
       },
       responses: {
         "200": {
-          description: "Agent model updated — returns the affected model setting",
+          description: "Agent model updated — returns the bare model-setting resource",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              // Returns the affected model-setting resource (same shape as
-              // GET …/model), composed with the legacy `success` flag kept
-              // additively for backward compatibility (issue #646).
+              // Bare model-setting resource — same shape as GET …/model,
+              // no `success` scrap (#657).
               schema: {
-                allOf: [
-                  {
-                    type: "object",
-                    required: ["modelId"],
-                    properties: {
-                      modelId: { type: ["string", "null"] },
-                    },
-                  },
-                  { type: "object", properties: { success: { type: "boolean" } } },
-                ],
+                type: "object",
+                required: ["modelId"],
+                properties: {
+                  modelId: { type: ["string", "null"] },
+                },
               },
             },
           },
@@ -589,12 +565,11 @@ export const agentsPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  skillIds: { type: "array", items: { type: "string" } },
-                  message: { type: "string" },
-                },
+                // The updated agent resource, bare (issue #657) — the new
+                // skill references appear in `dependencies.skills`.
+                $ref: "#/components/schemas/AgentDetail",
+                description:
+                  "The updated agent resource — same shape as the GET agent detail. The new skill references appear in `dependencies.skills`. No follow-up GET needed.",
               },
             },
           },

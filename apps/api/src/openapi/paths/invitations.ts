@@ -103,29 +103,21 @@ export const invitationsPaths = {
       },
       responses: {
         "200": {
-          description: "Invitation accepted",
+          description:
+            "Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs, with `role` set to the invitation role). For new users a session cookie is set via Set-Cookie.",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  success: { type: "boolean" },
-                  is_new_user: { type: "boolean" },
-                  orgId: { type: "string" },
-                  requires_login: {
-                    type: "boolean",
-                    description: "Present when is_new_user is false",
-                  },
-                },
-              },
+              schema: { $ref: "#/components/schemas/Organization" },
               example: {
-                success: true,
-                is_new_user: true,
-                orgId: "550e8400-e29b-41d4-a716-446655440000",
+                id: "550e8400-e29b-41d4-a716-446655440000",
+                name: "Acme Corp",
+                slug: "acme-corp",
+                role: "member",
+                createdAt: "2026-01-10T08:00:00Z",
               },
             },
           },

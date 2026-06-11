@@ -65,7 +65,7 @@ export function ForkPackageModal({ open, onClose, packageId, defaultName, type }
       {
         onSuccess: (result) => {
           handleClose();
-          navigate(packageDetailPath(type, result.packageId));
+          navigate(packageDetailPath(type, result.id));
         },
         onError: (err) => {
           const code = err instanceof ApiError ? err.code : "";

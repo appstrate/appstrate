@@ -88,21 +88,9 @@ export const proxiesPaths = {
           content: {
             "application/json": {
               schema: {
-                allOf: [
-                  { $ref: "#/components/schemas/OrgProxy" },
-                  {
-                    type: "object",
-                    properties: {
-                      id: {
-                        type: "string",
-                        description:
-                          "The created proxy's id. Same value as the resource's `id`; retained as a top-level field for backward compatibility.",
-                      },
-                    },
-                  },
-                ],
+                $ref: "#/components/schemas/OrgProxy",
                 description:
-                  "The created proxy resource — same shape as the `GET /api/proxies` list items — so no follow-up GET is needed.",
+                  "The bare created proxy resource — same shape as the `GET /api/proxies` list items — so no follow-up GET is needed.",
               },
               example: {
                 id: "cm6pqr679",
@@ -152,43 +140,34 @@ export const proxiesPaths = {
       },
       responses: {
         "200": {
-          description: "Default proxy updated",
+          description:
+            "Default proxy updated — the bare *effective* default proxy resource (same shape as the `GET /api/proxies` list items). When no DB row is flagged, the system-default fallback (if any) is surfaced.",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["success", "proxy"],
-                properties: {
-                  success: {
-                    type: "boolean",
-                    description: "Always true on success. Retained for backward compatibility.",
-                  },
-                  proxy: {
-                    description:
-                      "The affected default proxy resource — same shape as the `GET /api/proxies` list items — or null when the default was unset (proxyId null).",
-                    oneOf: [{ $ref: "#/components/schemas/OrgProxy" }, { type: "null" }],
-                  },
-                },
-              },
+              schema: { $ref: "#/components/schemas/OrgProxy" },
               example: {
-                success: true,
-                proxy: {
-                  id: "cm6pqr679",
-                  label: "US Residential Proxy",
-                  urlPrefix: "http://user:****@us-proxy.example.com:8080",
-                  source: "custom",
-                  enabled: true,
-                  isDefault: true,
-                  created_by: "usr_k7x9m2p4q1",
-                  createdAt: "2026-01-10T08:00:00Z",
-                  updatedAt: "2026-01-10T08:00:00Z",
-                },
+                id: "cm6pqr679",
+                label: "US Residential Proxy",
+                urlPrefix: "http://user:****@us-proxy.example.com:8080",
+                source: "custom",
+                enabled: true,
+                isDefault: true,
+                created_by: "usr_k7x9m2p4q1",
+                createdAt: "2026-01-10T08:00:00Z",
+                updatedAt: "2026-01-10T08:00:00Z",
               },
             },
+          },
+        },
+        "204": {
+          description:
+            "Default unset and no proxy remains in effect (no system default configured) — no resource to return.",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -233,21 +212,9 @@ export const proxiesPaths = {
           content: {
             "application/json": {
               schema: {
-                allOf: [
-                  { $ref: "#/components/schemas/OrgProxy" },
-                  {
-                    type: "object",
-                    properties: {
-                      id: {
-                        type: "string",
-                        description:
-                          "The updated proxy's id. Same value as the resource's `id`; retained as a top-level field for backward compatibility.",
-                      },
-                    },
-                  },
-                ],
+                $ref: "#/components/schemas/OrgProxy",
                 description:
-                  "The updated proxy resource — same shape as the `GET /api/proxies` list items — so no follow-up GET is needed.",
+                  "The bare updated proxy resource — same shape as the `GET /api/proxies` list items — so no follow-up GET is needed.",
               },
               example: {
                 id: "cm6pqr679",
@@ -266,6 +233,7 @@ export const proxiesPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },

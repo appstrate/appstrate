@@ -217,12 +217,12 @@ export function createModelProviderCredentialsRouter() {
         resourceId: id,
         after: { label, providerId, baseUrlOverride: baseUrlOverride ?? null },
       });
-      // Return the full created resource — the public, non-secret
-      // `ModelProviderCredentialInfo` shape (same as GET/list). The api key is
-      // NEVER echoed back. `id` is part of that shape, so legacy `{ id }`
-      // consumers keep working (#646).
+      // Return the bare created resource — the public, non-secret
+      // `ModelProviderCredentialInfo` projection (same as GET/list). The api
+      // key is NEVER echoed back (#657).
       const credential = await getOrgModelProviderCredential(orgId, id);
-      return c.json(credential ?? { id }, 201);
+      if (!credential) throw internalError();
+      return c.json(credential, 201);
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Model provider credential create failed", {
@@ -320,12 +320,14 @@ export function createModelProviderCredentialsRouter() {
         resourceId: id,
         after: auditData as Record<string, unknown>,
       });
-      // Return the full updated resource (non-secret `ModelProviderCredentialInfo`
-      // shape, same as GET/list). The api key is NEVER echoed back; `id` stays
-      // part of the shape so legacy `{ id }` consumers are unaffected (#646).
+      // Return the bare updated resource (non-secret
+      // `ModelProviderCredentialInfo` projection, same as GET/list). The api
+      // key is NEVER echoed back (#657).
       const credential = await getOrgModelProviderCredential(orgId, id);
-      return c.json(credential ?? { id });
+      if (!credential) throw notFound("Model provider credential not found");
+      return c.json(credential);
     } catch (err) {
+      if (err instanceof ApiError) throw err;
       logger.error("Model provider credential update failed", {
         id,
         error: getErrorMessage(err),

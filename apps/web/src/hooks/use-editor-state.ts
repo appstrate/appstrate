@@ -102,13 +102,16 @@ export function useEditorState<S extends EditorStateBase>(
   const saveDraft = useCallback(async () => {
     if (!isEdit || !packageId) return;
     const cfg = PACKAGE_CONFIG[packageType];
-    await api(`/packages/${cfg.path}/${packageId}`, {
+    // PUT returns the updated package resource bare (issue #657) — read back
+    // the NEW `lock_version` so a subsequent save doesn't go stale.
+    const updated = await api<{ lock_version: number }>(`/packages/${cfg.path}/${packageId}`, {
       method: "PUT",
       body: JSON.stringify({
         ...toWireBody(state),
         lock_version: state.lock_version!,
       }),
     });
+    setState((s) => ({ ...s, lock_version: updated.lock_version }));
     qc.invalidateQueries({ queryKey: ["packages"] });
     qc.invalidateQueries({ queryKey: ["version-info"] });
     if (packageType === "agent") {
@@ -137,6 +140,11 @@ export function useEditorState<S extends EditorStateBase>(
       allowNavigation();
       const body = toWireBody(state);
       if (isEdit) {
+        // Unlike saveDraft, this path does NOT read back the response's
+        // lock_version: useUpdatePackage.onSuccess navigates away and the
+        // editor unmounts, so the stale token can never be reused. If that
+        // navigation is ever removed, read the token back here too or the
+        // next save will 409.
         updatePkg.mutate(
           {
             ...(body as Parameters<typeof updatePkg.mutate>[0]),

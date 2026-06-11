@@ -150,7 +150,7 @@ export function ResourceSection({
 
     try {
       const result = await upload.mutateAsync(file);
-      const newId = result.packageId;
+      const newId = result.id;
       const newVersion = result.version;
       if (!newVersion) return;
 

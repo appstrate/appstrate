@@ -67,12 +67,13 @@ export function createProxiesRouter() {
         resourceId: id,
         after: { label: data.label, url: data.url },
       });
-      // Return the created resource — same shape as the GET list serializer —
-      // so callers don't need a follow-up GET. The legacy `id` field is kept
-      // alongside the resource for backward compatibility.
+      // Return the bare created resource — same shape as the GET list
+      // serializer — so callers don't need a follow-up GET (#657).
       const proxy = await getOrgProxy(orgId, id);
-      return c.json({ id, ...proxy }, 201);
+      if (!proxy) throw internalError();
+      return c.json(proxy, 201);
     } catch (err) {
+      if (err instanceof ApiError) throw err;
       const msg = getErrorMessage(err);
       if (msg.includes("blocked network")) {
         throw new ApiError({ status: 400, code: "blocked_url", title: "Bad Request", detail: msg });
@@ -96,12 +97,14 @@ export function createProxiesRouter() {
         resourceType: "proxy",
         resourceId: data.proxyId,
       });
-      // Return the affected default proxy resource so callers see the new
-      // default state without a follow-up GET. `success` is kept for backward
-      // compatibility. When the default is unset (proxyId null) there is no
-      // resource, so `proxy` is null.
-      const proxy = data.proxyId ? await getOrgProxy(orgId, data.proxyId) : null;
-      return c.json({ success: true, proxy });
+      // Return the bare *effective* default proxy resource — recomputed from
+      // the list serializer (DB flag, or the system-default fallback when no
+      // DB row is flagged) — so callers see the resulting state without a
+      // follow-up GET (#657). When no default remains in effect (unset with
+      // no system fallback) there is no resource: 204.
+      const proxies = await listOrgProxies(orgId);
+      const def = proxies.find((p) => p.isDefault);
+      return def ? c.json(def) : c.body(null, 204);
     } catch (err) {
       logger.error("Set default proxy failed", {
         error: getErrorMessage(err),
@@ -148,12 +151,13 @@ export function createProxiesRouter() {
         resourceId: proxyId,
         after: data as unknown as Record<string, unknown>,
       });
-      // Return the updated resource — same shape as the GET list serializer —
-      // so callers don't need a follow-up GET. The legacy `id` field is kept
-      // alongside the resource for backward compatibility.
+      // Return the bare updated resource — same shape as the GET list
+      // serializer — so callers don't need a follow-up GET (#657).
       const proxy = await getOrgProxy(orgId, proxyId);
-      return c.json({ id: proxyId, ...proxy });
+      if (!proxy) throw notFound("Proxy not found");
+      return c.json(proxy);
     } catch (err) {
+      if (err instanceof ApiError) throw err;
       const msg = getErrorMessage(err);
       if (msg.includes("blocked network")) {
         throw new ApiError({ status: 400, code: "blocked_url", title: "Bad Request", detail: msg });

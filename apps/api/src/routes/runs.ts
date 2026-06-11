@@ -473,7 +473,7 @@ export function createRunsRouter() {
       }
 
       const deleted = await deletePackageRuns(scope, agent.id);
-      return c.json({ deleted });
+      return c.json({ deleted_count: deleted });
     },
   );
 

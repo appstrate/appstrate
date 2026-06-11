@@ -337,16 +337,18 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
     expect(activate.status).toBe(201);
     const body = (await activate.json()) as {
       active: boolean;
-      activated_at: string;
+      block_user_connections: boolean;
       manifest: { name: string };
       auths: unknown[];
       tool_catalog: unknown[];
       allow_undeclared_tools: boolean;
-    };
-    // Returns the full integration DTO (same shape as GET /:packageId) plus
-    // the legacy `active`/`activated_at` compat fields (issue #646).
+    } & Record<string, unknown>;
+    // 201 + the bare integration detail resource (#657): same shape as
+    // GET /:packageId — activation state is the resource's `active` field,
+    // no `activated_at` operation scrap.
     expect(body.active).toBe(true);
-    expect(typeof body.activated_at).toBe("string");
+    expect(body.block_user_connections).toBe(false);
+    expect("activated_at" in body).toBe(false);
     expect(body.manifest.name).toBe("@myorg/gmail");
     expect(Array.isArray(body.auths)).toBe(true);
     expect(Array.isArray(body.tool_catalog)).toBe(true);
@@ -367,21 +369,28 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
       method: "DELETE",
       headers: authHeaders(ctx),
     });
-    expect(deactivate.status).toBe(200);
-    const deactivateBody = (await deactivate.json()) as {
+    // DELETE → 204 empty (#657): deactivation removes the
+    // application_packages row. The detail stays GET-able afterwards and
+    // serves `active: false`.
+    expect(deactivate.status).toBe(204);
+    expect(await deactivate.text()).toBe("");
+
+    const detailAfter = await app.request("/api/integrations/@myorg/gmail", {
+      headers: authHeaders(ctx),
+    });
+    expect(detailAfter.status).toBe(200);
+    const detailBody = (await detailAfter.json()) as {
       active: boolean;
       manifest: { name: string };
       auths: unknown[];
       tool_catalog: unknown[];
       allow_undeclared_tools: boolean;
     };
-    // Symmetric with activate: deactivate also returns the full integration
-    // DTO, with `active: false` kept additively (issue #646).
-    expect(deactivateBody.active).toBe(false);
-    expect(deactivateBody.manifest.name).toBe("@myorg/gmail");
-    expect(Array.isArray(deactivateBody.auths)).toBe(true);
-    expect(Array.isArray(deactivateBody.tool_catalog)).toBe(true);
-    expect(typeof deactivateBody.allow_undeclared_tools).toBe("boolean");
+    expect(detailBody.active).toBe(false);
+    expect(detailBody.manifest.name).toBe("@myorg/gmail");
+    expect(Array.isArray(detailBody.auths)).toBe(true);
+    expect(Array.isArray(detailBody.tool_catalog)).toBe(true);
+    expect(typeof detailBody.allow_undeclared_tools).toBe("boolean");
     const after = await db
       .select()
       .from(applicationPackages)
@@ -711,7 +720,7 @@ describe("OAuth client CRUD", () => {
       method: "DELETE",
       headers: authHeaders(ctx),
     });
-    expect(del.status).toBe(200);
+    expect(del.status).toBe(204);
     const after = await db
       .select()
       .from(integrationOauthClients)
@@ -991,8 +1000,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
       method: "DELETE",
       headers: authHeaders(ctx),
     });
-    expect(del.status).toBe(200);
-    expect(await del.json()).toEqual({ deleted: true });
+    expect(del.status).toBe(204);
     const get = await app.request("/api/integrations/@myorg/gmail/default", {
       headers: authHeaders(ctx),
     });

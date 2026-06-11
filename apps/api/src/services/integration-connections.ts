@@ -1099,7 +1099,7 @@ export async function persistCredentialBundle(
     if (!row) {
       throw new Error("persistCredentialBundle: insert returned no row");
     }
-    return rowToSummary(row);
+    return serializeIntegrationConnection(row);
   }
 
   // UPDATE — shared column set; WHERE differs by target.
@@ -1161,7 +1161,7 @@ export async function persistCredentialBundle(
     if (!row) {
       throw notFound(`Connection '${target.connectionId}' not found or not owned by caller`);
     }
-    return rowToSummary(row);
+    return serializeIntegrationConnection(row);
   }
 
   // update-by-id (system write-back) — keyed by id only, silent no-op on miss.
@@ -1314,7 +1314,7 @@ export async function listIntegrationConnections(
         ownerPredicate,
       ),
     );
-  return rows.map(rowToSummary);
+  return rows.map(serializeIntegrationConnection);
 }
 
 /**
@@ -1342,7 +1342,12 @@ export async function deleteIntegrationConnection(
   }
 }
 
-function rowToSummary(
+/**
+ * Single wire serializer for an `integration_connections` row — every route
+ * that returns a connection (list, connect flows, metadata PATCH) goes
+ * through this so the DTO shape never forks.
+ */
+export function serializeIntegrationConnection(
   row: typeof integrationConnections.$inferSelect,
 ): IntegrationConnectionSummary {
   if (row.userId && row.endUserId) {
@@ -1405,6 +1410,18 @@ export async function getIntegrationAuthStatuses(
    * set `integrations_configuration.<id>.tools = "*"`.
    */
   allow_undeclared_tools: boolean;
+  /**
+   * Whether the integration is activated in the current application — an
+   * enabled `application_packages` row exists. Part of the resource state
+   * (mirrors the list endpoint's `active` flag), not an operation scrap.
+   */
+  active: boolean;
+  /**
+   * Admin gate: when `true`, only org admins may create personal
+   * connections in this application. Defaults to `false` when the
+   * integration is not activated. Same source as the list endpoint.
+   */
+  block_user_connections: boolean;
 }> {
   await assertAppBelongsToOrg(scope);
   const manifest = await loadManifestOrThrow(scope, packageId);
@@ -1438,6 +1455,19 @@ export async function getIntegrationAuthStatuses(
   });
 
   const allConnections = await listIntegrationConnections(scope, packageId, actor);
+  const [installedRow] = await db
+    .select({
+      enabled: applicationPackages.enabled,
+      blockUserConnections: applicationPackages.blockUserConnections,
+    })
+    .from(applicationPackages)
+    .where(
+      and(
+        eq(applicationPackages.applicationId, scope.applicationId),
+        eq(applicationPackages.packageId, packageId),
+      ),
+    )
+    .limit(1);
   const oauthClients = await db
     .select({ authKey: integrationOauthClients.authKey })
     .from(integrationOauthClients)
@@ -1480,6 +1510,8 @@ export async function getIntegrationAuthStatuses(
     tool_catalog: toolCatalog,
     allow_undeclared_tools:
       (manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools === true,
+    active: installedRow !== undefined && installedRow.enabled,
+    block_user_connections: installedRow?.blockUserConnections ?? false,
   };
 }
 

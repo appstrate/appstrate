@@ -56,7 +56,9 @@ export function OrgSettingsMembersPage() {
 
   const addMemberMutation = useMutation({
     mutationFn: async ({ email, role }: { email: string; role: "viewer" | "member" | "admin" }) => {
-      return api<{ invited?: boolean; added?: boolean; token?: string }>(`/orgs/${orgId}/members`, {
+      // Polymorphic bare resource: the created member (has `userId`) or the
+      // created invitation (has `id` + `token`).
+      return api<OrganizationMember | OrgInvitation>(`/orgs/${orgId}/members`, {
         method: "POST",
         body: JSON.stringify({ email, role }),
       });

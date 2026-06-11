@@ -153,10 +153,9 @@ describe("Model Provider Keys API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      // Legacy `id` alias preserved.
+      // Bare resource (same shape as GET/list), not an id stub (#657).
       expect(body.id).toBeDefined();
       expect(typeof body.id).toBe("string");
-      // #646: full resource (same shape as GET/list) returned, not an id stub.
       expect(body.label).toBe("Test Key");
       expect(body.source).toBe("custom");
       expect(body.providerId).toBe("openai");
@@ -195,9 +194,8 @@ describe("Model Provider Keys API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      // Legacy `id` alias preserved.
+      // Bare updated resource (#657).
       expect(body.id).toBe(id);
-      // #646: full updated resource reflects the new label without a follow-up GET.
       expect(body.label).toBe("Updated Label");
       expect(body.source).toBe("custom");
       // Security: neither the original nor the rotated key may appear.

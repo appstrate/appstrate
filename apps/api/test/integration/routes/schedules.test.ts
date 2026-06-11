@@ -309,7 +309,7 @@ describe("Schedules API", () => {
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(204);
     });
   });
 

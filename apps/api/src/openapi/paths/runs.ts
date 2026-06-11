@@ -220,7 +220,8 @@ export const runsPaths = {
       operationId: "deleteAgentRuns",
       tags: ["Runs"],
       summary: "Delete all runs for an agent",
-      description: "Delete all completed runs for an agent.",
+      description:
+        "Delete all completed runs for an agent. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -238,7 +239,13 @@ export const runsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                properties: { deleted: { type: "integer" } },
+                required: ["deleted_count"],
+                properties: {
+                  deleted_count: {
+                    type: "integer",
+                    description: "Number of runs deleted",
+                  },
+                },
               },
             },
           },

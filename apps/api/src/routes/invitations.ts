@@ -15,7 +15,7 @@ import {
   type AssignableRole,
 } from "../services/invitations.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { addMember } from "../services/organizations.ts";
+import { addMember, getOrgById } from "../services/organizations.ts";
 
 const router = new Hono();
 
@@ -74,6 +74,25 @@ router.post("/:token/accept", async (c) => {
   assertInvitationExists(invitation);
   assertInvitationUsable(invitation);
 
+  // Bare joined-org resource — same shape as the items in GET /api/orgs
+  // (issue #657). The web accept page reads `id` to pin the org store.
+  const org = await getOrgById(invitation.orgId);
+  if (!org) {
+    throw new ApiError({
+      status: 404,
+      code: "org_not_found",
+      title: "Not Found",
+      detail: "Organization not found",
+    });
+  }
+  const joinedOrg = {
+    id: org.id,
+    name: org.name,
+    slug: org.slug,
+    role: invitation.role,
+    createdAt: org.createdAt,
+  };
+
   // Check if user already exists
   const [existingUser] = await db
     .select({ id: user.id })
@@ -129,14 +148,7 @@ router.post("/:token/accept", async (c) => {
         headers.set("Set-Cookie", setCookieHeader);
       }
 
-      return new Response(
-        JSON.stringify({
-          success: true,
-          is_new_user: true,
-          orgId: invitation.orgId,
-        }),
-        { status: 200, headers },
-      );
+      return new Response(JSON.stringify(joinedOrg), { status: 200, headers });
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Invitation accept failed (new user)", {
@@ -165,12 +177,7 @@ router.post("/:token/accept", async (c) => {
 
     await markInvitationAccepted(invitation.id, existingUser.id);
 
-    return c.json({
-      success: true,
-      is_new_user: false,
-      orgId: invitation.orgId,
-      requires_login: !session?.user,
-    });
+    return c.json(joinedOrg);
   }
 });
 

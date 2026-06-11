@@ -41,7 +41,8 @@ export function useCreateModelProviderCredential() {
       apiKey: string;
       baseUrlOverride?: string | null;
     }) => {
-      return api<{ id: string }>("/model-provider-credentials", {
+      // Bare created credential resource (non-secret projection) (#657).
+      return api<ModelProviderCredentialInfo>("/model-provider-credentials", {
         method: "POST",
         body: JSON.stringify(data),
       });
@@ -67,7 +68,8 @@ export function useUpdateModelProviderCredential() {
         apiKey?: string;
       };
     }) => {
-      return api(`/model-provider-credentials/${id}`, {
+      // Bare updated credential resource (non-secret projection) (#657).
+      return api<ModelProviderCredentialInfo>(`/model-provider-credentials/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
       });

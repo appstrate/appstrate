@@ -31,8 +31,8 @@ import { getAppScope } from "../lib/scope.ts";
  * gate must not 404 a successful write that was not auto-installed.
  *
  * Returns `null` when the agent is not found (or not accessible under
- * `requireAccess`), so the GET wrapper can map it to a 404 and mutation callers
- * can fall back to the legacy envelope.
+ * `requireAccess`), so the GET wrapper can map it to a 404 and mutation
+ * callers to a 500 (a just-written agent must be re-readable).
  */
 export async function buildAgentDetailDto(
   c: Context<AppEnv>,

@@ -168,7 +168,7 @@ export function useDeleteAgentRuns(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      return api<{ deleted: number }>(`/agents/${packageId}/runs`, { method: "DELETE" });
+      return api<{ deleted_count: number }>(`/agents/${packageId}/runs`, { method: "DELETE" });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["runs"] });
@@ -239,7 +239,8 @@ export function useCreatePackage(type: PackageType) {
       content: string;
       source_code?: string;
     }) => {
-      return api<{ packageId: string }>(`/packages/${cfg.path}`, {
+      // 201 → the created package resource, bare (issue #657).
+      return api<{ id: string }>(`/packages/${cfg.path}`, {
         method: "POST",
         body: JSON.stringify(body),
       });
@@ -248,8 +249,8 @@ export function useCreatePackage(type: PackageType) {
       qc.invalidateQueries({ queryKey: ["packages"] });
       if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
       if (type === "integration") qc.invalidateQueries({ queryKey: ["integrations"] });
-      if (data.packageId) {
-        navigate(packageDetailPath(type, data.packageId));
+      if (data.id) {
+        navigate(packageDetailPath(type, data.id));
       }
     },
     onError: onMutationError,
@@ -267,7 +268,9 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       source_code?: string;
       lock_version: number;
     }) => {
-      return api<{ lock_version: number }>(`/packages/${cfg.path}/${packageId}`, {
+      // 200 → the updated package resource, bare (issue #657). The resource
+      // carries the NEW `lock_version` optimistic-lock token.
+      return api<{ id: string; lock_version: number }>(`/packages/${cfg.path}/${packageId}`, {
         method: "PUT",
         body: JSON.stringify(body),
       });
