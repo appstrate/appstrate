@@ -172,16 +172,9 @@ router.post("/", async (c) => {
 
 // --- Routes below require org context (orgId from params, verified via membership) ---
 
-// GET /api/orgs/:orgId — org details + members
-router.get("/:orgId", async (c) => {
-  const user = c.get("user");
-  const orgId = c.req.param("orgId");
-
-  const member = await getOrgMember(orgId, user.id);
-  if (!member) {
-    throw forbidden("Not a member of this organization");
-  }
-
+// OrgDetail serializer — shared by GET /:orgId and PUT /:orgId so the update
+// response is the exact same resource shape as the detail read.
+async function buildOrgDetail(orgId: string) {
   const [org, members, invitations] = await Promise.all([
     getOrgById(orgId),
     getOrgMembers(orgId),
@@ -191,7 +184,7 @@ router.get("/:orgId", async (c) => {
     throw notFound("Organization not found");
   }
 
-  return c.json({
+  return {
     id: org.id,
     name: org.name,
     slug: org.slug,
@@ -211,7 +204,20 @@ router.get("/:orgId", async (c) => {
       expiresAt: inv.expiresAt?.toISOString(),
       createdAt: inv.createdAt?.toISOString(),
     })),
-  });
+  };
+}
+
+// GET /api/orgs/:orgId — org details + members
+router.get("/:orgId", async (c) => {
+  const user = c.get("user");
+  const orgId = c.req.param("orgId");
+
+  const member = await getOrgMember(orgId, user.id);
+  if (!member) {
+    throw forbidden("Not a member of this organization");
+  }
+
+  return c.json(await buildOrgDetail(orgId));
 });
 
 // PUT /api/orgs/:orgId — update name/slug (owner only — org routes skip org context)
@@ -235,7 +241,7 @@ router.put("/:orgId", async (c) => {
     }
   }
 
-  const updated = await updateOrganization(orgId, {
+  await updateOrganization(orgId, {
     ...(data.name?.trim() ? { name: data.name.trim() } : {}),
     ...(data.slug ? { slug: data.slug } : {}),
   });
@@ -248,8 +254,8 @@ router.put("/:orgId", async (c) => {
     orgIdOverride: orgId,
   });
 
-  const { createdBy, ...updatedRest } = updated;
-  return c.json({ ...updatedRest, created_by: createdBy });
+  // Bare updated resource — same OrgDetail serializer as GET /:orgId.
+  return c.json(await buildOrgDetail(orgId));
 });
 
 // DELETE /api/orgs/:orgId — delete organization and all related data (owner only)

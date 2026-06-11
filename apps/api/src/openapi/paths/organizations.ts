@@ -174,30 +174,21 @@ export const organizationsPaths = {
       },
       responses: {
         "200": {
-          description: "Organization updated",
+          description: "Updated organization — same OrgDetail shape as GET /api/orgs/{orgId}",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "string" },
-                  name: { type: "string" },
-                  slug: { type: "string" },
-                  created_by: { type: "string" },
-                  createdAt: { type: "string", format: "date-time" },
-                  updatedAt: { type: "string", format: "date-time" },
-                },
-              },
+              schema: { $ref: "#/components/schemas/OrgDetail" },
             },
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
     delete: {

@@ -139,7 +139,7 @@ describe("POST /api/runs/inline — dependency resolution", () => {
   }
 
   // Success path of dep resolution is covered in inline-run-validate.test.ts
-  // (same preflight function), and asserting 202 here would fire
+  // (same preflight function), and asserting 201 here would fire
   // `executeAgentInBackground()` whose async tail would keep writing to the
   // runs/run_logs tables past the end of the test — a source of flakiness
   // when the next test's `truncateAll()` races the background work.
@@ -186,7 +186,7 @@ describe("POST /api/runs/inline — rate limiting", () => {
     const headers = { ...authHeaders(ctx), "Content-Type": "application/json" };
 
     // First two requests consume the quota. Status doesn't matter here —
-    // whatever the outcome (validation pass or fail, 202 or 500), the
+    // whatever the outcome (validation pass or fail, 201 or 500), the
     // rate-limit middleware has already decremented the bucket.
     await limitedApp.request("/api/runs/inline", { method: "POST", headers, body });
     await limitedApp.request("/api/runs/inline", { method: "POST", headers, body });

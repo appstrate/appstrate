@@ -242,6 +242,29 @@ describe("Organizations API", () => {
     });
   });
 
+  describe("PUT /api/orgs/:orgId", () => {
+    it("returns the bare OrgDetail (same serializer as GET /api/orgs/:orgId)", async () => {
+      const ctx = await createTestContext({ orgSlug: "renameorg" });
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "PUT",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Renamed Org" }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.id).toBe(ctx.orgId);
+      expect(body.name).toBe("Renamed Org");
+      expect(body.members).toBeArray();
+      expect(body.members).toHaveLength(1);
+      expect(body.invitations).toBeArray();
+      // No serializer drift: the divergent pre-#657 shape is gone.
+      expect(body).not.toHaveProperty("created_by");
+      expect(body).not.toHaveProperty("updatedAt");
+    });
+  });
+
   describe("POST /api/orgs/:orgId/members", () => {
     it("adds existing user directly when SMTP is disabled", async () => {
       const ctx = await createTestContext({ orgSlug: "memberorg" });

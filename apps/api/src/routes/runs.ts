@@ -388,7 +388,7 @@ export function createRunsRouter() {
   // See docs/specs/INLINE_RUNS.md. The manifest + prompt travel in the
   // request body; the platform creates a transient shadow package
   // (ephemeral = true), runs it through the existing pipeline, and
-  // returns 202 + the bare created run resource (the shadow package id is
+  // returns 201 + the bare created run resource (the shadow package id is
   // the run's `packageId` field). The client streams progress via
   // GET /api/realtime/runs/:id (existing SSE endpoint).
   router.post(
@@ -415,18 +415,19 @@ export function createRunsRouter() {
         traceparent: runTraceparent(c),
       });
 
-      // 202 + the bare created run resource (#657) — same DTO and serializer
-      // as GET /runs/:id. The shadow package id callers used to read from
-      // the `packageId` envelope field is the resource's own `packageId`.
-      // The run row exists once `triggerInlineRun` resolves
+      // 201 + the bare created run resource (#657) — same DTO and serializer
+      // as GET /runs/:id, same status code as the sibling trigger
+      // POST /agents/{scope}/{name}/run. The shadow package id callers used
+      // to read from the `packageId` envelope field is the resource's own
+      // `packageId`. The run row exists once `triggerInlineRun` resolves
       // (`prepareAndExecuteRun` inserts it before returning).
       const row = await getRunFull(getAppScope(c), runId);
       if (!row) {
         // Concurrent teardown raced us — fall back to a minimal id-only
         // resource rather than 500-ing a successfully launched run.
-        return c.json({ id: runId }, 202);
+        return c.json({ id: runId }, 201);
       }
-      return c.json(row, 202);
+      return c.json(row, 201);
     },
   );
 
