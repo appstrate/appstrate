@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import type { EnrichedRun } from "@appstrate/shared-types";
 import i18n from "../i18n";
 import { api, ApiError, buildQs, uploadFormData } from "../api";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
@@ -67,7 +68,9 @@ export function useRunAgent(packageId: string) {
       const body: Record<string, unknown> = {};
       if (input !== undefined) body.input = input;
       if (connectionOverrides !== undefined) body.connection_overrides = connectionOverrides;
-      return api<{ runId: string }>(`/agents/${packageId}/run${qs}`, {
+      // 201 + the bare created Run resource (same shape as GET /runs/:id) —
+      // the legacy `runId` alias was removed (#657).
+      return api<EnrichedRun>(`/agents/${packageId}/run${qs}`, {
         method: "POST",
         body: JSON.stringify(body),
       });
@@ -75,7 +78,7 @@ export function useRunAgent(packageId: string) {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["runs"] });
       qc.invalidateQueries({ queryKey: ["paginated-runs"] });
-      navigate(`/agents/${packageId}/runs/${data.runId}`);
+      navigate(`/agents/${packageId}/runs/${data.id}`);
     },
     onError: onMutationError,
   });

@@ -193,8 +193,10 @@ export async function startReportSession(
     );
   }
 
+  // Operation envelope: one-time sink credentials + the created run's `id`
+  // (the legacy `runId` alias was removed — #657).
   const payload = (await res.json()) as {
-    runId: string;
+    id: string;
     url: string;
     finalize_url: string;
     secret: string;
@@ -208,9 +210,9 @@ export async function startReportSession(
   });
 
   return {
-    runId: payload.runId,
+    runId: payload.id,
     httpSink,
-    proxyHeaders: { "X-Run-Id": payload.runId },
+    proxyHeaders: { "X-Run-Id": payload.id },
     sinkUrl: payload.url,
     runSecret: payload.secret,
   };

@@ -104,11 +104,13 @@ describe("POST /api/runs/remote — kind: registry", () => {
     });
 
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { runId: string };
-    expect(body.runId).toBeString();
+    const body = (await res.json()) as { id: string; runId?: unknown };
+    expect(body.id).toBeString();
+    // Legacy `runId` alias removed (#657) — the envelope carries `id`.
+    expect(body.runId).toBeUndefined();
 
     // Run is attributed to the real package, not a shadow row.
-    const [run] = await db.select().from(runs).where(eq(runs.id, body.runId)).limit(1);
+    const [run] = await db.select().from(runs).where(eq(runs.id, body.id)).limit(1);
     expect(run).toBeDefined();
     expect(run!.packageId).toBe("@acme/briefing");
     expect(run!.versionLabel).toBe("1.2.3");
@@ -131,8 +133,8 @@ describe("POST /api/runs/remote — kind: registry", () => {
     });
 
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { runId: string };
-    const [run] = await db.select().from(runs).where(eq(runs.id, body.runId)).limit(1);
+    const body = (await res.json()) as { id: string };
+    const [run] = await db.select().from(runs).where(eq(runs.id, body.id)).limit(1);
     expect(run!.versionLabel).toBe("1.0.0");
   });
 
@@ -161,8 +163,8 @@ describe("POST /api/runs/remote — kind: registry", () => {
     });
 
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { runId: string };
-    const [run] = await db.select().from(runs).where(eq(runs.id, body.runId)).limit(1);
+    const body = (await res.json()) as { id: string };
+    const [run] = await db.select().from(runs).where(eq(runs.id, body.id)).limit(1);
     expect(run!.packageId).toBe("@acme/draft-only");
     expect(run!.versionLabel).toBe("draft");
   });

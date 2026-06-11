@@ -180,8 +180,8 @@ describe("runRemote — URL encoding (regression #355)", () => {
     const fetchImpl = makeFetchImpl(
       {
         "POST /api/agents/@pierre-cabriere/hello-world/run": {
-          status: 200,
-          body: { runId: "run_url" },
+          status: 201,
+          body: { id: "run_url" },
         },
         "GET /api/runs/run_url/logs": { status: 200, body: [] },
         "GET /api/runs/run_url": {
@@ -215,8 +215,8 @@ describe("runRemote — happy path", () => {
     const fetchImpl = makeFetchImpl(
       {
         "POST /api/agents/@system/hello-world/run": {
-          status: 200,
-          body: { runId: "run_test_1" },
+          status: 201,
+          body: { id: "run_test_1" },
         },
         "GET /api/runs/run_test_1/logs": [
           {
@@ -294,7 +294,7 @@ describe("runRemote — happy path", () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
-        "POST /api/agents/@scope/agent/run": { status: 200, body: { runId: "run_2" } },
+        "POST /api/agents/@scope/agent/run": { status: 201, body: { id: "run_2" } },
         "GET /api/runs/run_2/logs": { status: 200, body: [] },
         "GET /api/runs/run_2": {
           status: 200,
@@ -328,7 +328,7 @@ describe("runRemote — happy path", () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
-        "POST /api/agents/@system/hello-world/run": { status: 200, body: { runId: "run_3" } },
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_3" } },
         "GET /api/runs/run_3/logs": { status: 200, body: [] },
         "GET /api/runs/run_3": {
           status: 200,
@@ -349,7 +349,7 @@ describe("runRemote — happy path", () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
-        "POST /api/agents/@system/hello-world/run": { status: 200, body: { runId: "run_4" } },
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_4" } },
         "GET /api/runs/run_4/logs": { status: 200, body: [] },
         "GET /api/runs/run_4": {
           status: 200,
@@ -385,7 +385,7 @@ describe("runRemote — happy path", () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
-        "POST /api/agents/@system/hello-world/run": { status: 200, body: { runId: "run_4e" } },
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_4e" } },
         "GET /api/runs/run_4e/logs": { status: 200, body: [] },
         "GET /api/runs/run_4e": {
           status: 200,
@@ -419,7 +419,7 @@ describe("runRemote — happy path", () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
-        "POST /api/agents/@system/hello-world/run": { status: 200, body: { runId: "run_5" } },
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_5" } },
         "GET /api/runs/run_5/logs": {
           status: 200,
           body: [
@@ -483,7 +483,7 @@ describe("runRemote — non-success terminals", () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
-        "POST /api/agents/@system/hello-world/run": { status: 200, body: { runId: "run_f" } },
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_f" } },
         "GET /api/runs/run_f/logs": { status: 200, body: [] },
         "GET /api/runs/run_f": {
           status: 200,
@@ -506,7 +506,7 @@ describe("runRemote — non-success terminals", () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
-        "POST /api/agents/@system/hello-world/run": { status: 200, body: { runId: "run_t" } },
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_t" } },
         "GET /api/runs/run_t/logs": { status: 200, body: [] },
         "GET /api/runs/run_t": {
           status: 200,
@@ -531,7 +531,7 @@ describe("runRemote — cancellation", () => {
     let recordHits = 0;
     const fetchImpl = makeFetchImpl(
       {
-        "POST /api/agents/@system/hello-world/run": { status: 200, body: { runId: "run_c" } },
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_c" } },
         "GET /api/runs/run_c/logs": { status: 200, body: [] },
         "GET /api/runs/run_c": [
           { status: 200, body: recordSummary({ id: "run_c", status: "running" }) },
@@ -579,7 +579,7 @@ describe("runRemote — cancellation", () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
-        "POST /api/agents/@system/hello-world/run": { status: 200, body: { runId: "run_dc" } },
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_dc" } },
         "GET /api/runs/run_dc/logs": { status: 200, body: [] },
         "GET /api/runs/run_dc": {
           status: 200,
@@ -648,12 +648,12 @@ describe("runRemote — error paths", () => {
     }
   });
 
-  it("throws RemoteRunError when trigger response lacks runId", async () => {
+  it("throws RemoteRunError when trigger response lacks an id", async () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
         "POST /api/agents/@system/hello-world/run": {
-          status: 200,
+          status: 201,
           body: { somethingElse: true },
         },
       },
@@ -669,7 +669,7 @@ describe("runRemote — error paths", () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
-        "POST /api/agents/@system/hello-world/run": { status: 200, body: { runId: "run_ll" } },
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_ll" } },
         "GET /api/runs/run_ll/logs": { status: 500, body: { error: "transient" } },
         "GET /api/runs/run_ll": {
           status: 200,
@@ -704,7 +704,7 @@ describe("runRemote — log dedup", () => {
     // catch a server that fails to honor the cursor.
     const fetchImpl = makeFetchImpl(
       {
-        "POST /api/agents/@system/hello-world/run": { status: 200, body: { runId: "run_dd" } },
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_dd" } },
         "GET /api/runs/run_dd/logs": [
           { status: 200, body: [log(1, "a")] },
           { status: 200, body: [log(1, "a"), log(2, "b")] },
@@ -748,8 +748,8 @@ describe("runRemote — log cursor (?since=)", () => {
     const fetchImpl = makeFetchImpl(
       {
         "POST /api/agents/@system/hello-world/run": {
-          status: 200,
-          body: { runId: "run_cursor" },
+          status: 201,
+          body: { id: "run_cursor" },
         },
         "GET /api/runs/run_cursor/logs": [
           { status: 200, body: [log(1), log(2)] },
@@ -797,7 +797,7 @@ describe("runRemote — log cursor (?since=)", () => {
     });
     const fetchImpl = makeFetchImpl(
       {
-        "POST /api/agents/@system/hello-world/run": { status: 200, body: { runId: "run_tail" } },
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_tail" } },
         "GET /api/runs/run_tail/logs": [
           { status: 200, body: [log(1)] },
           // After terminal, the post-terminal "tail" fetch picks up a
@@ -841,7 +841,7 @@ describe("runRemote — record-poll cadence", () => {
     // to log-activity-driven refresh.
     const fetchImpl = makeFetchImpl(
       {
-        "POST /api/agents/@system/hello-world/run": { status: 200, body: { runId: "run_quiet" } },
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_quiet" } },
         "GET /api/runs/run_quiet/logs": { status: 200, body: [] },
         "GET /api/runs/run_quiet": [
           { status: 200, body: recordSummary({ id: "run_quiet", status: "running" }) },
@@ -874,12 +874,12 @@ describe("runRemote — record-poll cadence", () => {
 });
 
 describe("runRemote — trigger response shape", () => {
-  it("rejects a 200 response that is not a JSON object", async () => {
+  it("rejects a 201 response that is not a JSON object", async () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
         "POST /api/agents/@system/hello-world/run": {
-          status: 200,
+          status: 201,
           contentType: "text/plain",
           body: "ok",
         },
@@ -899,13 +899,13 @@ describe("runRemote — trigger response shape", () => {
     }
   });
 
-  it("rejects a 200 response where runId is not a string", async () => {
+  it("rejects a 201 response where id is not a string", async () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
         "POST /api/agents/@system/hello-world/run": {
-          status: 200,
-          body: { runId: 12345 },
+          status: 201,
+          body: { id: 12345 },
         },
       },
       calls,
@@ -919,18 +919,18 @@ describe("runRemote — trigger response shape", () => {
       throw new Error("expected throw");
     } catch (err) {
       if (!(err instanceof RemoteRunError)) throw err;
-      expect(err.message).toMatch(/runId/);
+      expect(err.message).toMatch(/`id`/);
       expect(err.hint).toBeDefined();
     }
   });
 
-  it("rejects a 200 response with empty-string runId", async () => {
+  it("rejects a 201 response with empty-string id", async () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
         "POST /api/agents/@system/hello-world/run": {
-          status: 200,
-          body: { runId: "" },
+          status: 201,
+          body: { id: "" },
         },
       },
       calls,
@@ -944,7 +944,7 @@ describe("runRemote — trigger response shape", () => {
       throw new Error("expected throw");
     } catch (err) {
       if (!(err instanceof RemoteRunError)) throw err;
-      expect(err.message).toMatch(/runId/);
+      expect(err.message).toMatch(/`id`/);
     }
   });
 });
@@ -962,7 +962,7 @@ describe("runRemote — trigger retry on transient 5xx", () => {
       {
         "POST /api/agents/@system/hello-world/run": [
           { status: 503, body: { error: "service unavailable" } },
-          { status: 200, body: { runId: "run_retry_1" } },
+          { status: 201, body: { id: "run_retry_1" } },
         ],
         "GET /api/runs/run_retry_1/logs": { status: 200, body: [] },
         "GET /api/runs/run_retry_1": {
@@ -991,7 +991,7 @@ describe("runRemote — trigger retry on transient 5xx", () => {
         "POST /api/agents/@system/hello-world/run": [
           { status: 502, body: { error: "bad gateway" } },
           { status: 504, body: { error: "gateway timeout" } },
-          { status: 200, body: { runId: "run_retry_2" } },
+          { status: 201, body: { id: "run_retry_2" } },
         ],
         "GET /api/runs/run_retry_2/logs": { status: 200, body: [] },
         "GET /api/runs/run_retry_2": {
@@ -1064,7 +1064,7 @@ describe("runRemote — record-poll resilience", () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
-        "POST /api/agents/@system/hello-world/run": { status: 200, body: { runId: "run_rec_5xx" } },
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_rec_5xx" } },
         "GET /api/runs/run_rec_5xx/logs": { status: 200, body: [] },
         "GET /api/runs/run_rec_5xx": [
           // First poll fails — the runner must NOT crash.
@@ -1110,8 +1110,8 @@ describe("runRemote — record-poll resilience", () => {
       const method = (init?.method ?? "GET").toUpperCase();
       calls.push({ url, method, headers: {}, body: undefined });
       if (url.endsWith("/run") && method === "POST") {
-        return new Response(JSON.stringify({ runId: "run_final_5xx" }), {
-          status: 200,
+        return new Response(JSON.stringify({ id: "run_final_5xx" }), {
+          status: 201,
           headers: { "Content-Type": "application/json" },
         });
       }

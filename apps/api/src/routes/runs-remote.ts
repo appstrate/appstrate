@@ -320,9 +320,12 @@ export function createRunsRemoteRouter() {
         versionLabel: overrideVersionLabel ?? null,
       });
 
+      // Operation envelope (legit exception under #657: one-time sink
+      // credentials are not part of the run resource). The run id field is
+      // `id` — the legacy `runId` alias was removed with the strict rule.
       c.status(201);
       return c.json({
-        runId: result.runId,
+        id: result.runId,
         ...result.sinkCredentials,
       });
     },
@@ -376,7 +379,14 @@ export function createRunsRemoteRouter() {
         throw notFound(`run ${runId} not found or sink already closed`);
       }
 
-      return c.json({ runId, expiresAt: newExpiresAt.toISOString() });
+      // Operation result, not a resource: `sink_expires_at` is internal
+      // server state deliberately NOT projected on the Run DTO (see
+      // runRowToWireDto), so a full Run fetch here would not even carry the
+      // value the caller asked to extend. No first-party client reads this
+      // body today (the CLI/runtime keep-alive is POST /events/heartbeat);
+      // the field naming is aligned with the resource convention (`id`,
+      // no `runId` alias — #657) for third-party runners.
+      return c.json({ id: runId, expiresAt: newExpiresAt.toISOString() });
     },
   );
 

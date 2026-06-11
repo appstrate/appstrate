@@ -35,7 +35,7 @@ const SNAPSHOT = {
 };
 
 const SUCCESS_BODY = {
-  runId: "run_test_1234567890",
+  id: "run_test_1234567890",
   url: "https://app.example.com/api/runs/run_test/events",
   finalize_url: "https://app.example.com/api/runs/run_test/events/finalize",
   secret: "ZWZmZWN0aXZlbHkgYW55dGhpbmc=",
