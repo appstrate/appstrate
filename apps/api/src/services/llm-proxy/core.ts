@@ -277,6 +277,35 @@ function cloneResponseHeaders(src: Headers): Headers {
   return out;
 }
 
+/**
+ * Upper bound on usage-bearing frames retained by {@link tapSseStream}.
+ * Real providers emit at most two (Anthropic: `message_start` +
+ * terminal `message_delta`; OpenAI-compatible: the terminal frame when
+ * `stream_options.include_usage` is set). The cap only guards against a
+ * pathological upstream stamping usage on every frame.
+ */
+const MAX_RETAINED_USAGE_FRAMES = 64;
+
+/**
+ * Tap the teed SSE stream and extract usage WITHOUT retaining the full
+ * response (the previous implementation accumulated every frame —
+ * O(response) memory per in-flight stream). Frames are parsed as they
+ * are delimited; only frames that individually yield usage (probed via
+ * `adapter.parseSseUsage([frame])`) are retained, in arrival order, and
+ * the adapter extracts the final result from that subset:
+ *
+ *   - OpenAI-compatible (`openai.ts`): usage appears only on the
+ *     terminal frame; the adapter's newest-first scan over the retained
+ *     subset returns the same frame it would find scanning all frames.
+ *   - Anthropic (`anthropic.ts`): `message_start` (input + cache
+ *     tokens) and `message_delta` (cumulative output tokens) carry
+ *     usage and are merged in order; every other frame contributed
+ *     nothing to the aggregate.
+ *
+ * A frame the probe rejects can never alter `parseSseUsage`'s result
+ * for either adapter, so the final call over the retained subset is
+ * behaviour-identical to the old call over every frame.
+ */
 async function tapSseStream(
   stream: ReadableStream<Uint8Array>,
   adapter: LlmProxyAdapter,
@@ -284,7 +313,17 @@ async function tapSseStream(
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  const frames: string[] = [];
+  const usageFrames: string[] = [];
+  const considerFrame = (frame: string): void => {
+    if (adapter.parseSseUsage([frame]) === null) return;
+    if (usageFrames.length >= MAX_RETAINED_USAGE_FRAMES) {
+      // Keep the FIRST retained frame (Anthropic's `message_start`
+      // seeds input/cache tokens) and the newest tail; drop the oldest
+      // intermediate — both adapters let later frames supersede it.
+      usageFrames.splice(1, 1);
+    }
+    usageFrames.push(frame);
+  };
   try {
     for (;;) {
       const { value, done } = await reader.read();
@@ -294,18 +333,18 @@ async function tapSseStream(
       // buffer until the next chunk — a frame may straddle chunks.
       let idx: number;
       while ((idx = buffer.indexOf("\n\n")) !== -1) {
-        frames.push(buffer.slice(0, idx));
+        considerFrame(buffer.slice(0, idx));
         buffer = buffer.slice(idx + 2);
       }
     }
-    if (buffer.trim().length > 0) frames.push(buffer);
+    if (buffer.trim().length > 0) considerFrame(buffer);
   } catch (err) {
     logger.warn("llm-proxy: stream tap read failed — usage not recorded", {
       error: getErrorMessage(err),
     });
     return null;
   }
-  return adapter.parseSseUsage(frames);
+  return adapter.parseSseUsage(usageFrames);
 }
 
 interface RecordUsageInputs {

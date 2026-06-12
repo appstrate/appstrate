@@ -20,6 +20,43 @@ import { isPlainObject } from "./safe-json.ts";
 
 const ajv = createAjv({ coerceTypes: true });
 
+// Compiled-validator cache. `validateConfig` runs on hot paths (per run,
+// per config save) and receives schemas freshly parsed from JSONB, so
+// AJV's own by-reference cache never hits — compilation (the expensive
+// step) ran on every call AND each compile was retained forever in the
+// Ajv instance's internal registry (unbounded growth in a long-lived
+// process). Key by the schema's canonical JSON so structurally-equal
+// schemas share one compiled validator; bound the map to cap memory.
+// Mirrors `compileCached` in `apps/api/src/services/schema.ts`.
+const validatorCache = new Map<string, ReturnType<typeof ajv.compile>>();
+const MAX_CACHED_VALIDATORS = 500;
+
+function compileCached(schema: JSONSchemaObject): ReturnType<typeof ajv.compile> {
+  const key = JSON.stringify(schema);
+  let validate = validatorCache.get(key);
+  if (!validate) {
+    try {
+      validate = ajv.compile(schema);
+    } finally {
+      // `ajv.compile` registers the schema object (and its `$id`, when
+      // present) in the instance's internal reference-keyed registry.
+      // Because every schema arrives as a fresh object, that registry
+      // would (a) retain each compiled schema forever and (b) throw
+      // "schema with key or id ... already exists" the next time a
+      // *different* object carrying the same `$id` is compiled. Evict
+      // immediately — the returned validate closure is self-contained.
+      ajv.removeSchema(schema);
+    }
+    if (validatorCache.size >= MAX_CACHED_VALIDATORS) {
+      // Simple FIFO eviction: Map preserves insertion order.
+      const oldest = validatorCache.keys().next().value;
+      if (oldest !== undefined) validatorCache.delete(oldest);
+    }
+    validatorCache.set(key, validate);
+  }
+  return validate;
+}
+
 export interface ConfigValidationResult {
   valid: boolean;
   errors: { field: string; message: string }[];
@@ -53,7 +90,7 @@ export function validateConfig(
     return { valid: true, errors: [], data };
   }
   const effectiveData = stripEmptyRequired(data, schema.required ?? []);
-  const validate = ajv.compile(schema);
+  const validate = compileCached(schema);
   const valid = validate(effectiveData);
   if (valid) return { valid: true, errors: [], data: effectiveData };
   const errors = (validate.errors ?? []).map((e) => ({

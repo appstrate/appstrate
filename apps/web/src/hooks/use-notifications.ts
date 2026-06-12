@@ -35,9 +35,14 @@ export function useUnreadCountsByAgent() {
   });
 }
 
-export function invalidateRunAndNotificationQueries(qc: ReturnType<typeof useQueryClient>) {
+/** Notification badge counters only — no run-list invalidation. */
+export function invalidateNotificationQueries(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["unread-count"] });
   qc.invalidateQueries({ queryKey: ["unread-counts-by-agent"] });
+}
+
+export function invalidateRunAndNotificationQueries(qc: ReturnType<typeof useQueryClient>) {
+  invalidateNotificationQueries(qc);
   qc.invalidateQueries({ queryKey: ["paginated-runs"] });
   qc.invalidateQueries({ queryKey: ["runs"] });
   qc.invalidateQueries({ queryKey: ["run"] });

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { DiffEditor } from "@monaco-editor/react";
+import { MonacoDiffEditor as DiffEditor } from "./monaco";
 import { useTheme } from "../stores/theme-store";
 
 interface DraftDiffViewProps {

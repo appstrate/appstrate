@@ -51,10 +51,16 @@ export interface DraftPackageCatalogOptions {
 
 type DraftStorageFolder = "skills";
 
+interface DraftPackageRow {
+  draftManifest: unknown;
+  /** `null` → system package (global `_system/` storage namespace). */
+  orgId: string | null;
+}
+
 export class DraftPackageCatalog implements PackageCatalog {
   private readonly rowCache = new Map<
     string,
-    { draftManifest: unknown } | null | Promise<{ draftManifest: unknown } | null>
+    DraftPackageRow | null | Promise<DraftPackageRow | null>
   >();
   private readonly fetchCache = new Map<PackageIdentity, BundlePackage>();
 
@@ -102,7 +108,18 @@ export class DraftPackageCatalog implements PackageCatalog {
       );
     }
 
-    const files = await downloadPackageFiles(folder, this.opts.orgId, parsed.packageId);
+    // The package row tells us where the bytes live: `orgId === null` is a
+    // system package (global `_system/` namespace), otherwise org-scoped.
+    // Passing the hint saves a guaranteed-miss org-path GET for system
+    // packages on the run hot path.
+    const ownership = row.orgId === null ? "system" : "org";
+    const files = await downloadPackageFiles(
+      folder,
+      this.opts.orgId,
+      parsed.packageId,
+      undefined,
+      ownership,
+    );
     if (!files) {
       throw new BundleError(
         "DEPENDENCY_UNRESOLVED",
@@ -130,12 +147,12 @@ export class DraftPackageCatalog implements PackageCatalog {
     return pkg;
   }
 
-  private getPackageRow(packageId: string): Promise<{ draftManifest: unknown } | null> {
+  private getPackageRow(packageId: string): Promise<DraftPackageRow | null> {
     const cached = this.rowCache.get(packageId);
     if (cached !== undefined) return Promise.resolve(cached);
 
     const promise = db
-      .select({ draftManifest: packages.draftManifest })
+      .select({ draftManifest: packages.draftManifest, orgId: packages.orgId })
       .from(packages)
       .where(
         and(

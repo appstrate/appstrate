@@ -218,22 +218,29 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       name: session.user.name ?? "",
     });
     c.set("authMethod", "session");
-    // Look up the user's realm so the realm guard middleware below can
+    // Resolve the user's realm so the realm guard middleware below can
     // reject cookie sessions minted for a non-platform audience (OIDC
-    // end-users) from hitting platform routes. We query the DB rather
-    // than read `session.user.realm` because BA's `cookieCache` serializes
-    // only the standard user fields into the cookie — custom columns
-    // like `realm` are not reliably exposed on cached session objects
-    // across BA versions. One indexed lookup on the user PK per
-    // authenticated request is an acceptable cost for audience
-    // enforcement; the platform route guards run after this so the
-    // query cost is only paid on session-backed requests.
-    const [userRow] = await db
-      .select({ realm: userTable.realm })
-      .from(userTable)
-      .where(eq(userTable.id, session.user.id))
-      .limit(1);
-    if (userRow) c.set("sessionRealm", userRow.realm);
+    // end-users) from hitting platform routes. The realm is denormalized
+    // onto the session row at create time (`databaseHooks.session.create
+    // .before` + `session.additionalFields.realm` in packages/db/src/
+    // auth.ts), and `cookieCache` is disabled, so `getSession` always
+    // returns the fresh DB row with the declared additionalField — read
+    // it from there instead of re-querying the user table on every
+    // session-backed request. Fall back to the user-table lookup only
+    // when the field is absent (sessions created before the
+    // denormalization shipped, or a BA version stripping undeclared
+    // output fields) so audience enforcement never silently degrades.
+    const sessionRealm = (session.session as { realm?: unknown }).realm;
+    if (typeof sessionRealm === "string") {
+      c.set("sessionRealm", sessionRealm);
+    } else {
+      const [userRow] = await db
+        .select({ realm: userTable.realm })
+        .from(userTable)
+        .where(eq(userTable.id, session.user.id))
+        .limit(1);
+      if (userRow) c.set("sessionRealm", userRow.realm);
+    }
 
     return next();
   });

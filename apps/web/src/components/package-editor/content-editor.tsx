@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback } from "react";
-import Editor, { type OnMount } from "@monaco-editor/react";
+import type { OnMount } from "@monaco-editor/react";
+import { MonacoEditor as Editor } from "../monaco";
 import { useTheme } from "../../stores/theme-store";
 
 interface ContentEditorProps {

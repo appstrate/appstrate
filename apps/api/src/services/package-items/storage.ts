@@ -35,22 +35,40 @@ export async function uploadPackageFiles(
 /** Global namespace for system packages in S3 (not org-scoped). */
 export const SYSTEM_STORAGE_NAMESPACE = "_system";
 
+/**
+ * Where a package's files live in the bucket. Derived from the package
+ * row's `orgId` (`null` → system, non-null → org). Callers that already
+ * hold the row pass the hint so a system package costs ONE storage GET
+ * instead of always paying a missed org-path GET first.
+ */
+export type PackageStorageOwnership = "org" | "system";
+
 /** Download a package item's full files from Storage. Returns normalized file map or null.
- *  Tries org-scoped path first, falls back to global _system/ namespace for system packages.
+ *  With an `ownership` hint, fetches the correct path directly (org-scoped or
+ *  global _system/ namespace). Without it (ambiguous callers), tries the
+ *  org-scoped path first and falls back to the system namespace.
  *  When expectedIntegrity is provided, verifies SHA256 SRI hash before unzipping. */
 export async function downloadPackageFiles(
   type: "agents" | "skills" | "integrations" | "mcp-servers",
   orgId: string,
   itemId: string,
   expectedIntegrity?: string | null,
+  ownership?: PackageStorageOwnership,
 ): Promise<Record<string, Uint8Array> | null> {
-  // Try org-scoped path first, fall back to global system namespace
   const orgPath = `${orgId}/${type}/${itemId}.afps`;
   const systemPath = `${SYSTEM_STORAGE_NAMESPACE}/${type}/${itemId}.afps`;
 
-  let data = await storage.downloadFile(PACKAGE_ITEMS_BUCKET, orgPath);
-  if (!data) {
+  let data: Awaited<ReturnType<typeof storage.downloadFile>>;
+  if (ownership === "system") {
     data = await storage.downloadFile(PACKAGE_ITEMS_BUCKET, systemPath);
+  } else if (ownership === "org") {
+    data = await storage.downloadFile(PACKAGE_ITEMS_BUCKET, orgPath);
+  } else {
+    // Ambiguous — try org-scoped path first, fall back to system namespace.
+    data = await storage.downloadFile(PACKAGE_ITEMS_BUCKET, orgPath);
+    if (!data) {
+      data = await storage.downloadFile(PACKAGE_ITEMS_BUCKET, systemPath);
+    }
   }
   if (!data) return null;
 

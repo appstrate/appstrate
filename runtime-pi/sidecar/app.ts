@@ -333,9 +333,22 @@ export interface SidecarRuntimeDeps {
  * once in `server.ts` (shared with boot) and as a fallback inside
  * `createApp` for tests that don't pre-build them.
  */
+/**
+ * Blob-store cap for production sidecars. MUST stay well below the
+ * sidecar container's cgroup memory limit (SIDECAR_MEMORY_BYTES =
+ * 256 MiB, `apps/api/src/services/orchestrator/constants.ts`): at the
+ * store's 256 MiB class default the kernel OOM-killer fires before the
+ * store's own guard, killing every integration mid-run. 128 MiB leaves
+ * headroom for the Bun runtime, spawned-runner bookkeeping, and
+ * in-flight request buffers.
+ */
+const RUN_BLOB_STORE_MAX_BYTES = 128 * 1024 * 1024;
+
 export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
   const fetchFn = deps.fetchFn ?? fetch;
-  const blobStore = new BlobStore(deps.runId ?? "unknown");
+  const blobStore = new BlobStore(deps.runId ?? "unknown", {
+    maxTotalBytes: RUN_BLOB_STORE_MAX_BYTES,
+  });
   const inlineCapTokens = readPositiveTokenEnv(
     "SIDECAR_INLINE_TOOL_OUTPUT_TOKENS",
     DEFAULT_INLINE_OUTPUT_TOKENS,

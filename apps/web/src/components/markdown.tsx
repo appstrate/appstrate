@@ -1,30 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import ReactMarkdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkBreaks from "remark-breaks";
+import { lazy, Suspense } from "react";
 
-const remarkPlugins = [remarkGfm, remarkBreaks];
-
-const components: Components = {
-  a: ({ href, children, ...props }) => {
-    const isExternal = href?.startsWith("http");
-    return (
-      <a
-        href={href}
-        {...(isExternal ? { target: "_blank", rel: "noopener noreferrer" } : {})}
-        {...props}
-      >
-        {children}
-      </a>
-    );
-  },
-};
-
-const inlineComponents: Components = {
-  ...components,
-  p: ({ children }) => <span>{children}</span>,
-};
+/**
+ * Lazy boundary around the react-markdown/micromark stack (markdown-impl.tsx).
+ * Markdown only renders on run result/report surfaces, so the parser is
+ * fetched on demand instead of shipping in the entry chunk. While the chunk
+ * loads we render the raw text — same content, unformatted — to avoid any
+ * layout flash.
+ */
+const MarkdownImpl = lazy(() => import("./markdown-impl").then((m) => ({ default: m.Markdown })));
+const InlineMarkdownImpl = lazy(() =>
+  import("./markdown-impl").then((m) => ({ default: m.InlineMarkdown })),
+);
 
 interface MarkdownProps {
   children: string;
@@ -33,20 +21,22 @@ interface MarkdownProps {
 
 export function Markdown({ children, className }: MarkdownProps) {
   return (
-    <div className={`prose prose-sm max-w-none ${className ?? ""}`}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
-        {children}
-      </ReactMarkdown>
-    </div>
+    <Suspense
+      fallback={
+        <div className={`prose prose-sm max-w-none ${className ?? ""}`}>
+          <p>{children}</p>
+        </div>
+      }
+    >
+      <MarkdownImpl className={className}>{children}</MarkdownImpl>
+    </Suspense>
   );
 }
 
 export function InlineMarkdown({ children, className }: MarkdownProps) {
   return (
-    <span className={className}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={inlineComponents}>
-        {children}
-      </ReactMarkdown>
-    </span>
+    <Suspense fallback={<span className={className}>{children}</span>}>
+      <InlineMarkdownImpl className={className}>{children}</InlineMarkdownImpl>
+    </Suspense>
   );
 }

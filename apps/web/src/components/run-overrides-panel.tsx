@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { SchemaForm } from "@appstrate/ui/schema-form";
+import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { uploadClient } from "../api";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";

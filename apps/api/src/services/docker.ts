@@ -314,9 +314,16 @@ export async function waitForExit(containerId: string): Promise<number> {
   // PATCH (local) — bypass Docker's POST /wait which is blocking long-running.
   // Bun's fetch with unix: option has an internal headers timeout (~5 min) that
   // can't be disabled via signal:undefined or globalThis.fetch replacement.
-  // Polling /containers/{id}/json every 2s keeps each fetch short (< 30s
-  // dockerFetch timeout) and avoids the wall entirely. The CPU cost of
-  // polling is negligible compared to the cost of agent runs failing at 5 min.
+  // Polling /containers/{id}/json keeps each fetch short (< 30s dockerFetch
+  // timeout) and avoids the wall entirely. The CPU cost of polling is
+  // negligible compared to the cost of agent runs failing at 5 min.
+  //
+  // Adaptive backoff: start at 50ms and double up to a 2s cap. Short-lived
+  // containers (e.g. the workspace-chown init container on every run start)
+  // resolve in one or two cheap inspects instead of eating a fixed 2s sleep,
+  // while long-lived agent containers converge to the previous 2s cadence.
+  let delayMs = 50;
+  const maxDelayMs = 2000;
   while (true) {
     const res = await dockerFetch(`/containers/${containerId}/json`);
     if (!res.ok) {
@@ -329,7 +336,8 @@ export async function waitForExit(containerId: string): Promise<number> {
     if (status === "exited" || status === "dead") {
       return data.State?.ExitCode ?? 0;
     }
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, delayMs));
+    delayMs = Math.min(delayMs * 2, maxDelayMs);
   }
 }
 

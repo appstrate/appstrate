@@ -49,7 +49,7 @@ import type { ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import { actorFilter } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
-import { fetchIntegrationManifest } from "./integration-service.ts";
+import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
 import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
@@ -519,6 +519,13 @@ export interface ResolveConnectionsForRunInput {
   scheduleOverrides?: ConnectionOverrides | null;
   /** Resolve inert integrations too — see {@link ResolveConnectionsInput.includeInert}. */
   includeInert?: boolean;
+  /**
+   * Per-call-graph memo for integration manifest fetches — threaded from the
+   * run kickoff path so readiness, the snapshot pass, and the spawn resolver
+   * share one SELECT + Zod parse per integration. See
+   * {@link IntegrationManifestCache}.
+   */
+  manifestCache?: IntegrationManifestCache;
 }
 
 export async function resolveConnectionsForRun(
@@ -528,7 +535,9 @@ export async function resolveConnectionsForRun(
   if (entries.length === 0) return { resolved: {}, errors: [] };
 
   // Fetch integration manifests in parallel — most agents declare 1-3.
-  const requirements = await Promise.all(entries.map((entry) => buildRequirement(entry)));
+  const requirements = await Promise.all(
+    entries.map((entry) => buildRequirement(entry, input.manifestCache)),
+  );
   const validReqs = requirements.filter((r): r is IntegrationRequirement => r !== null);
 
   // End-users never own member pins — only dashboard users can pin via
@@ -668,8 +677,9 @@ const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {
 
 async function buildRequirement(
   entry: ManifestIntegrationEntry,
+  manifestCache?: IntegrationManifestCache,
 ): Promise<IntegrationRequirement | null> {
-  const res = await fetchIntegrationManifest(entry.id);
+  const res = await fetchIntegrationManifest(entry.id, manifestCache);
   if (!res.ok) return null; // Missing/invalid manifests are surfaced separately by
   //                          the run-readiness check (agent-readiness.ts); the
   //                          resolver ignores them.

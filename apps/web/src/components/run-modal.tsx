@@ -4,7 +4,7 @@ import type RjsfForm from "@rjsf/core";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
-import { SchemaForm } from "@appstrate/ui/schema-form";
+import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
 import type { SchemaWrapper, JSONSchemaObject } from "@appstrate/core/form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { uploadClient } from "../api";

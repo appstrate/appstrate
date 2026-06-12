@@ -17,10 +17,16 @@
  *     are forbidden.
  *   - In-memory only. The agent run lives in a single container with a
  *     bounded lifetime; persistence buys nothing and complicates teardown.
- *   - TTL = run lifetime + 60s grace. After grace, `read` returns
- *     `-32002 Resource not found` so cancelled reads see a clean error.
- *   - Sidecar process exit is sufficient eviction — we don't ship a
- *     reaper because there's no shared state to leak.
+ *   - Bounded by `maxTotalBytes` with LRU eviction on insert: when a new
+ *     blob would push the store over its cap, the least-recently-used
+ *     blobs are dropped until it fits. Blobs are written by `api_call`
+ *     spillover and read via `resources/read` immediately after (the
+ *     agent follows the `resource_link` from the same tool result), so
+ *     the LRU victim is almost always a blob the agent already consumed.
+ *     A read of an evicted URI returns `-32002 Resource not found` —
+ *     the same contract as an unknown id.
+ *   - No TTL reaper: sidecar process exit is the terminal eviction —
+ *     there's no shared state to leak across runs.
  *
  * What this file deliberately is NOT:
  *   - A general-purpose KV store. Run-scoped, ULID-only, no
@@ -125,8 +131,11 @@ export class BlobStore {
     readonly runId: string,
     options: { maxTotalBytes?: number } = {},
   ) {
-    // Default 256MB per run — large enough to hold a few PDFs, far
-    // smaller than the cgroup limit so we fail predictably before OOM.
+    // Default 256 MiB — callers running under a memory cgroup MUST pass
+    // an explicit lower cap: the sidecar container's memory limit is
+    // exactly 256 MiB (SIDECAR_MEMORY_BYTES), so a full store at the
+    // default would trip the kernel OOM-killer before the store's own
+    // guard. Production passes 128 MiB in `buildSidecarRuntimeDeps`.
     this.maxTotalBytes = options.maxTotalBytes ?? 256 * 1024 * 1024;
   }
 
@@ -141,16 +150,28 @@ export class BlobStore {
   }
 
   /**
-   * Store bytes and return the URI. Throws when the cumulative store
-   * size would exceed `maxTotalBytes` — the caller should surface the
-   * failure as a tool-level error so the agent sees it.
+   * Store bytes and return the URI. When the cumulative store size would
+   * exceed `maxTotalBytes`, least-recently-used blobs are evicted until
+   * the incoming blob fits (see the header comment for why LRU is safe
+   * here). Throws only when the single incoming blob alone exceeds the
+   * cap — the caller surfaces that as a tool-level error so the agent
+   * sees it.
    */
   put(bytes: Uint8Array, options: PutOptions = {}): BlobRecord {
-    if (this.totalBytes + bytes.byteLength > this.maxTotalBytes) {
+    if (bytes.byteLength > this.maxTotalBytes) {
       throw new Error(
         `BlobStore: cumulative size would exceed ${this.maxTotalBytes} bytes ` +
           `(current=${this.totalBytes}, incoming=${bytes.byteLength})`,
       );
+    }
+    // LRU eviction: the Map is kept in recency order (reads re-insert),
+    // so the first key is always the least-recently-used blob.
+    while (this.totalBytes + bytes.byteLength > this.maxTotalBytes) {
+      const oldestId = this.blobs.keys().next().value;
+      if (oldestId === undefined) break;
+      const evicted = this.blobs.get(oldestId);
+      this.blobs.delete(oldestId);
+      if (evicted) this.totalBytes -= evicted.bytes.byteLength;
     }
     const id = generateUlid();
     const uri = blobUri(this.runId, id);
@@ -173,7 +194,13 @@ export class BlobStore {
     const parsed = parseBlobUri(uri);
     if (!parsed) return null;
     if (parsed.runId !== this.runId) return null;
-    return this.blobs.get(parsed.id) ?? null;
+    const record = this.blobs.get(parsed.id);
+    if (!record) return null;
+    // Refresh recency: re-insert so the Map's iteration order stays
+    // LRU-first for the eviction loop in `put()`.
+    this.blobs.delete(parsed.id);
+    this.blobs.set(parsed.id, record);
+    return record;
   }
 
   /** List every URI currently stored (for `resources/list`). */

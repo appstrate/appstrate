@@ -16,7 +16,12 @@ import {
 } from "../lib/api-versions.ts";
 import { ApiError } from "../lib/errors.ts";
 
-export function apiVersion(getOrgApiVersion?: (orgId: string) => Promise<string | null>) {
+export function apiVersion(
+  // The resolver receives the request context so callers can read values
+  // already stashed by earlier middleware (e.g. `orgSettings` loaded by
+  // `requireOrgContext`) instead of re-querying per request.
+  getOrgApiVersion?: (orgId: string, c: Context<AppEnv>) => Promise<string | null>,
+) {
   return async (c: Context<AppEnv>, next: Next) => {
     let version = c.req.header("Appstrate-Version");
 
@@ -43,7 +48,7 @@ export function apiVersion(getOrgApiVersion?: (orgId: string) => Promise<string 
       // Try org-pinned version
       const orgId = c.get("orgId");
       if (orgId && getOrgApiVersion) {
-        const pinned = await getOrgApiVersion(orgId);
+        const pinned = await getOrgApiVersion(orgId, c);
         if (pinned && isVersionSupported(pinned)) {
           version = pinned;
         }

@@ -8,7 +8,8 @@
  *   - URIs are unguessable (no sequential IDs).
  *   - Cross-run reads are silently rejected (run-scoped isolation).
  *   - Path-traversal attempts are rejected.
- *   - Cumulative size limit is enforced.
+ *   - Cumulative size limit is enforced via LRU eviction on insert;
+ *     only a single blob larger than the whole cap throws.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -107,10 +108,44 @@ describe("BlobStore", () => {
     expect(store.read("appstrate://api-response/run-1/01HZX0Q3ABCDEFGHJKMNPQRSTV")).toBeNull();
   });
 
-  it("enforces cumulative size cap", () => {
+  it("throws when a single blob alone exceeds the cap", () => {
     const store = new BlobStore("run-1", { maxTotalBytes: 100 });
-    store.put(new Uint8Array(60));
-    expect(() => store.put(new Uint8Array(50))).toThrow(/cumulative size/);
+    expect(() => store.put(new Uint8Array(101))).toThrow(/cumulative size/);
+    expect(store.size()).toBe(0);
+  });
+
+  it("evicts the least-recently-used blob when inserting over the cap", () => {
+    const store = new BlobStore("run-1", { maxTotalBytes: 100 });
+    const oldest = store.put(new Uint8Array(60));
+    const kept = store.put(new Uint8Array(30));
+    const incoming = store.put(new Uint8Array(50)); // forces eviction of `oldest`
+    expect(store.read(oldest.uri)).toBeNull();
+    expect(store.read(kept.uri)).not.toBeNull();
+    expect(store.read(incoming.uri)).not.toBeNull();
+    expect(store.bytesUsed()).toBe(80);
+  });
+
+  it("read() refreshes recency — the eviction victim is the LRU blob, not the oldest insert", () => {
+    const store = new BlobStore("run-1", { maxTotalBytes: 100 });
+    const first = store.put(new Uint8Array(45));
+    const second = store.put(new Uint8Array(45));
+    // Touch `first` so `second` becomes the LRU entry.
+    expect(store.read(first.uri)).not.toBeNull();
+    store.put(new Uint8Array(45)); // evicts `second`
+    expect(store.read(second.uri)).toBeNull();
+    expect(store.read(first.uri)).not.toBeNull();
+  });
+
+  it("evicts multiple LRU blobs until the incoming blob fits", () => {
+    const store = new BlobStore("run-1", { maxTotalBytes: 100 });
+    const a = store.put(new Uint8Array(40));
+    const b = store.put(new Uint8Array(40));
+    const c = store.put(new Uint8Array(90)); // evicts both a and b
+    expect(store.read(a.uri)).toBeNull();
+    expect(store.read(b.uri)).toBeNull();
+    expect(store.read(c.uri)).not.toBeNull();
+    expect(store.bytesUsed()).toBe(90);
+    expect(store.size()).toBe(1);
   });
 
   it("tracks bytesUsed accurately", () => {

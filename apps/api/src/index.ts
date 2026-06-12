@@ -206,9 +206,14 @@ app.use("*", async (c, next) => {
   return appContextMiddleware(c, next);
 });
 
-// API versioning: resolve Appstrate-Version header > org setting > default
-const apiVersionMiddleware = apiVersion(async (orgId) => {
-  const settings = await getOrgSettings(orgId);
+// API versioning: resolve Appstrate-Version header > org setting > default.
+// Session requests pass through `requireOrgContext`, which loads the org
+// settings in the same query as the membership check — read them from
+// context instead of hitting the organizations table again on every
+// request. Non-session auth (API key, module strategies) resolves orgId
+// inline without that middleware, so fall back to the direct lookup there.
+const apiVersionMiddleware = apiVersion(async (orgId, c) => {
+  const settings = c.get("orgSettings") ?? (await getOrgSettings(orgId));
   return settings.api_version ?? null;
 });
 app.use("*", async (c, next) => {

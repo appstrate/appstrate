@@ -38,6 +38,7 @@ import {
   type BundlePackage,
   type PackageCatalog,
   type PackageIdentity,
+  type ResolvedPackage,
 } from "./types.ts";
 
 export interface BuildBundleOptions {
@@ -99,13 +100,28 @@ export async function buildBundleFromCatalog(
     }
 
     const deps = extractDependencies(pkg.manifest, depTypes);
-    for (const { name, versionSpec } of deps) {
-      const resolved = await catalog.resolve(name, versionSpec);
+
+    // Resolve every direct dep in parallel — resolution is a read-only
+    // catalog lookup with no inter-dep ordering requirement. Results are
+    // folded back in declaration order so `missing` keeps a deterministic
+    // order regardless of resolution completion order.
+    const resolutions = await Promise.all(
+      deps.map(({ name, versionSpec }) => catalog.resolve(name, versionSpec)),
+    );
+
+    // Dedupe synchronously against the already-loaded set AND within this
+    // level (two siblings may declare the same dep), so the parallel fetch
+    // below never fetches one identity twice.
+    const toFetch: ResolvedPackage[] = [];
+    const claimedThisLevel = new Set<PackageIdentity>();
+    for (let i = 0; i < deps.length; i++) {
+      const { name, versionSpec } = deps[i]!;
+      const resolved = resolutions[i];
       if (!resolved) {
         missing.push({ from: pkg.identity, name, versionSpec });
         continue;
       }
-      if (packages.has(resolved.identity)) {
+      if (packages.has(resolved.identity) || claimedThisLevel.has(resolved.identity)) {
         // Already loaded — either a diamond or a cycle. If the target
         // is currently on the walk stack, it's a structural cycle.
         if (visiting.has(resolved.identity)) {
@@ -113,13 +129,37 @@ export async function buildBundleFromCatalog(
         }
         continue;
       }
-      const depPkg = await catalog.fetch(resolved.identity);
-      if (depPkg.identity !== resolved.identity) {
-        throw new BundleError(
-          "BUNDLE_JSON_INVALID",
-          `catalog.fetch returned identity ${depPkg.identity} but resolve returned ${resolved.identity}`,
-          { expected: resolved.identity, got: depPkg.identity },
-        );
+      claimedThisLevel.add(resolved.identity);
+      toFetch.push(resolved);
+    }
+
+    // Fetch the deduped level in parallel — fetch is read-only against the
+    // catalog; all shared-state mutation (packages/visiting/missing) stays
+    // in the sequential sections of this frame.
+    const fetched = await Promise.all(
+      toFetch.map(async (resolved) => {
+        const depPkg = await catalog.fetch(resolved.identity);
+        if (depPkg.identity !== resolved.identity) {
+          throw new BundleError(
+            "BUNDLE_JSON_INVALID",
+            `catalog.fetch returned identity ${depPkg.identity} but resolve returned ${resolved.identity}`,
+            { expected: resolved.identity, got: depPkg.identity },
+          );
+        }
+        return depPkg;
+      }),
+    );
+
+    // Recurse sequentially (DFS) — child walks mutate the shared maps, so
+    // they must not interleave. A deeper walk may have loaded a sibling's
+    // identity by the time we reach it; skip it silently (diamond), warning
+    // only when it is a structural cycle (still on the walk stack).
+    for (const depPkg of fetched) {
+      if (packages.has(depPkg.identity)) {
+        if (visiting.has(depPkg.identity)) {
+          onWarn(`cycle detected: ${pkg.identity} -> ${depPkg.identity}`);
+        }
+        continue;
       }
       await walk(depPkg);
     }

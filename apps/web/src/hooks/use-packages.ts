@@ -48,7 +48,11 @@ function usePackageList(type: PackageType, opts?: { activeOnly?: boolean }) {
   });
 }
 
-function usePackageDetail<T extends PackageType>(type: T, id: string | undefined) {
+function usePackageDetail<T extends PackageType>(
+  type: T,
+  id: string | undefined,
+  opts?: { enabled?: boolean },
+) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   const cfg = PACKAGE_CONFIG[type];
@@ -56,7 +60,7 @@ function usePackageDetail<T extends PackageType>(type: T, id: string | undefined
   return useQuery({
     queryKey: ["packages", cfg.path, orgId, applicationId, id],
     queryFn: () => api<PackageDetailMap[T]>(`/packages/${cfg.path}/${id}`),
-    enabled: !!orgId && !!applicationId && !!id,
+    enabled: !!orgId && !!applicationId && !!id && (opts?.enabled ?? true),
   });
 }
 

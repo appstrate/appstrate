@@ -64,6 +64,13 @@
       "when": 1781248722616,
       "tag": "0008_drop_oidc_encryption_key_version",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1781258681902,
+      "tag": "0009_perf_indexes",
+      "breakpoints": true
     }
   ]
 }
