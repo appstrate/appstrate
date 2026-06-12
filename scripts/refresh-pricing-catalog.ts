@@ -89,6 +89,43 @@ const LITELLM_TO_OURS: Record<string, string> = {
 const SUBSCRIPTION_WATCH: readonly string[] = ["chatgpt"];
 const WATCH_DIR = resolve(REPO_ROOT, "apps/api/src/data/subscription-watch");
 
+/**
+ * Auto-featured generation — second source: [models.dev](https://models.dev)
+ * (open data from the opencode project, no auth). LiteLLM carries no
+ * release dates, so "newest models per provider" is not derivable from
+ * it alone. models.dev carries `release_date` + `tool_call` per model.
+ *
+ * Featured = the {@link FEATURED_COUNT} newest models per provider in
+ * the **intersection** of the vendored LiteLLM snapshot (pricing must
+ * exist) and models.dev, filtered to `tool_call: true` (Appstrate
+ * agents require tool-calling — a hard compatibility criterion, not an
+ * editorial one). Output: `apps/api/src/data/featured-models.json`,
+ * consumed by `core-providers` at boot. Hardcoding a list on a
+ * provider definition still overrides (see core-providers/index.ts).
+ *
+ * Subscription-OAuth modules (codex, claude-code) keep manual curation
+ * — models.dev doesn't describe subscription backends.
+ */
+const MODELSDEV_URL = "https://models.dev/api.json";
+const FEATURED_PATH = resolve(REPO_ROOT, "apps/api/src/data/featured-models.json");
+const FEATURED_COUNT = 3;
+
+/** Our providerId → models.dev provider key (identity unless mapped). */
+const OURS_TO_MODELSDEV: Record<string, string> = {
+  openai: "openai",
+  anthropic: "anthropic",
+  mistral: "mistral",
+  "google-ai": "google",
+  cerebras: "cerebras",
+  groq: "groq",
+  xai: "xai",
+  deepseek: "deepseek",
+  moonshot: "moonshotai",
+  "together-ai": "togetherai",
+  "fireworks-ai": "fireworks-ai",
+  zai: "zai",
+};
+
 const PROVIDERS = Object.values(LITELLM_TO_OURS) as readonly string[];
 
 /** Compact projection of one LiteLLM entry — the shape we vendor. */
@@ -242,6 +279,41 @@ function buildProviderSnapshot(
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
+/** Subset of one models.dev model entry we consume. */
+interface ModelsDevModel {
+  release_date?: string;
+  tool_call?: boolean;
+}
+
+interface ModelsDevProvider {
+  models?: Record<string, ModelsDevModel>;
+}
+
+async function fetchModelsDev(): Promise<Record<string, ModelsDevProvider>> {
+  const res = await fetch(MODELSDEV_URL);
+  if (!res.ok) throw new Error(`fetch ${MODELSDEV_URL} → HTTP ${res.status}`);
+  return (await res.json()) as Record<string, ModelsDevProvider>;
+}
+
+/**
+ * Newest {@link FEATURED_COUNT} tool-calling models for one provider:
+ * vendored snapshot ∩ models.dev, sorted by `release_date` desc (id asc
+ * as deterministic tie-break).
+ */
+function buildFeatured(
+  snapshot: Record<string, CompactEntry>,
+  modelsDevModels: Record<string, ModelsDevModel>,
+): string[] {
+  return Object.entries(modelsDevModels)
+    .filter(([id, m]) => snapshot[id] && m.tool_call === true && typeof m.release_date === "string")
+    .sort(([idA, a], [idB, b]) => {
+      if (a.release_date !== b.release_date) return a.release_date! < b.release_date! ? 1 : -1;
+      return idA < idB ? -1 : 1;
+    })
+    .slice(0, FEATURED_COUNT)
+    .map(([id]) => id);
+}
+
 async function fetchUpstream(): Promise<Record<string, LiteLLMEntry>> {
   const res = await fetch(UPSTREAM_URL);
   if (!res.ok) throw new Error(`fetch ${UPSTREAM_URL} → HTTP ${res.status}`);
@@ -316,11 +388,13 @@ async function main(): Promise<void> {
     mkdirSync(DATA_DIR, { recursive: true });
   }
 
-  const upstream = await fetchUpstream();
+  const [upstream, modelsDev] = await Promise.all([fetchUpstream(), fetchModelsDev()]);
   const summaries: Summary[] = [];
+  const snapshots: Record<string, Record<string, CompactEntry>> = {};
 
   for (const [litellmProvider, ourName] of Object.entries(LITELLM_TO_OURS)) {
     const upstreamSnapshot = buildProviderSnapshot(upstream, litellmProvider);
+    snapshots[ourName] = upstreamSnapshot;
     const local = readLocal(ourName);
     const diff = diffSnapshots(local, upstreamSnapshot);
     const summary: Summary = {
@@ -339,6 +413,47 @@ async function main(): Promise<void> {
         "utf8",
       );
       console.log(`    → wrote ${DATA_DIR}/${ourName}.json`);
+    }
+  }
+
+  // Auto-featured — newest tool-calling models per provider (LiteLLM ∩
+  // models.dev). One JSON for all providers; regenerated atomically with
+  // the catalogs above so every featured id is guaranteed to exist in
+  // its provider's vendored file (the boot-time check relies on this).
+  {
+    const upstreamFeatured: Record<string, string[]> = {};
+    for (const ourName of Object.keys(OURS_TO_MODELSDEV).sort()) {
+      const mdModels = modelsDev[OURS_TO_MODELSDEV[ourName]]?.models ?? {};
+      upstreamFeatured[ourName] = buildFeatured(snapshots[ourName] ?? {}, mdModels);
+      if (upstreamFeatured[ourName].length === 0) {
+        console.log(`    ⚠ featured: empty intersection for ${ourName} (models.dev coverage gap)`);
+      }
+    }
+    const localFeatured = existsSync(FEATURED_PATH)
+      ? (JSON.parse(readFileSync(FEATURED_PATH, "utf8")) as Record<string, string[]>)
+      : {};
+    const changed = Object.keys(upstreamFeatured).filter(
+      (p) => JSON.stringify(localFeatured[p] ?? []) !== JSON.stringify(upstreamFeatured[p]),
+    );
+    const summary: Summary = {
+      provider: "featured",
+      localSize: Object.values(localFeatured).flat().length,
+      upstreamSize: Object.values(upstreamFeatured).flat().length,
+      added: [],
+      removed: [],
+      changed,
+      unchanged: changed.length === 0,
+    };
+    summaries.push(summary);
+    summarize(summary);
+    for (const p of changed) {
+      console.log(
+        `    ${p}: [${(localFeatured[p] ?? []).join(", ")}] → [${upstreamFeatured[p].join(", ")}]`,
+      );
+    }
+    if (apply && !summary.unchanged) {
+      writeFileSync(FEATURED_PATH, JSON.stringify(upstreamFeatured, null, 2) + "\n", "utf8");
+      console.log(`    → wrote ${FEATURED_PATH}`);
     }
   }
 

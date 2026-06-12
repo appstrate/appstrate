@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import xaiFeatured from "../../../src/data/featured-models.json" with { type: "json" };
 
 const app = getTestApp();
 
@@ -41,12 +42,11 @@ describe("Model Provider Keys API", () => {
       });
     });
 
-    it("marks featured catalog models with featured: true (xai grok-4)", async () => {
-      // Post phase 6: xAI is now in the LiteLLM catalog. `grok-4` is a
-      // featured id in core-providers, so it appears in the picker with
-      // catalog-derived cost AND `featured: true`. Non-featured xai
-      // models (grok-2, grok-2-latest, …) also surface but with
-      // `featured: false`.
+    it("marks featured catalog models with featured: true (xai)", async () => {
+      // xAI is in the LiteLLM catalog and its featured list is
+      // auto-generated (data/featured-models.json). The picker must flag
+      // exactly the generated ids `featured: true` and every other
+      // catalog model `featured: false`.
       const res = await app.request("/api/model-provider-credentials/registry", {
         headers: authHeaders(ctx),
       });
@@ -60,8 +60,13 @@ describe("Model Provider Keys API", () => {
       expect(xai).toBeDefined();
       // The catalog ships 30+ xai models — the picker now exposes them all.
       expect(xai!.models.length).toBeGreaterThan(5);
+      const generated = (xaiFeatured as Record<string, string[]>)["xai"] ?? [];
+      expect(generated.length).toBeGreaterThan(0);
+      for (const id of generated) {
+        expect(xai!.models.find((m) => m.id === id)?.featured).toBe(true);
+      }
+      // Catalog-derived cost still flows for non-featured models.
       const grok4 = xai!.models.find((m) => m.id === "grok-4");
-      expect(grok4?.featured).toBe(true);
       expect(grok4?.cost).toEqual({ input: 3, output: 15 });
       // A non-featured xai model surfaces too.
       const grok2 = xai!.models.find((m) => m.id === "grok-2");
