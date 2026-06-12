@@ -33,8 +33,9 @@ export function useRunLogs(runId: string | undefined) {
   const applicationId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["run-logs", orgId, applicationId, runId],
+    // The endpoint returns the standard list envelope — apiList unwraps it.
     queryFn: async () => {
-      return api<RunLog[]>(`/runs/${runId}/logs`);
+      return apiList<RunLog>(`/runs/${runId}/logs`);
     },
     enabled: !!runId && !!applicationId,
   });

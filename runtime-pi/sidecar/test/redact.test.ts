@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { filterSensitiveHeaders } from "../redact.ts";
+import { filterSensitiveHeaders, redactLocationHeader } from "../redact.ts";
 
 describe("filterSensitiveHeaders", () => {
   it("drops set-cookie from a Headers instance", () => {
@@ -62,5 +62,59 @@ describe("filterSensitiveHeaders", () => {
       authorization: "Bearer y",
     };
     expect(filterSensitiveHeaders(h)).toEqual({});
+  });
+
+  it("redacts Location to origin + path instead of dropping it (Headers instance)", () => {
+    const h = new Headers();
+    h.set("Location", "https://files.example.com/dl/report.pdf?X-Amz-Signature=SECRET&x=1");
+    h.set("content-type", "text/html");
+    const out = filterSensitiveHeaders(h);
+    // Headers normalises names to lowercase.
+    expect(out["location"]).toBe("https://files.example.com/dl/report.pdf");
+    expect(out["content-type"]).toBe("text/html");
+  });
+
+  it("redacts Location case-insensitively on a plain record, preserving casing", () => {
+    const h: Record<string, string> = {
+      LOCATION: "https://sso.example.com/cb?access_token=tok_leak#frag",
+    };
+    const out = filterSensitiveHeaders(h);
+    expect(out["LOCATION"]).toBe("https://sso.example.com/cb");
+  });
+});
+
+describe("redactLocationHeader", () => {
+  it("strips the query string from an absolute URL", () => {
+    expect(redactLocationHeader("https://h.example/p/a?token=secret")).toBe(
+      "https://h.example/p/a",
+    );
+  });
+
+  it("keeps an absolute URL without query untouched (origin + path)", () => {
+    expect(redactLocationHeader("https://h.example/p/a")).toBe("https://h.example/p/a");
+  });
+
+  it("strips userinfo from an absolute URL", () => {
+    expect(redactLocationHeader("https://user:pass@h.example/p?q=1")).toBe("https://h.example/p");
+  });
+
+  it("preserves a non-default port (diagnostic) while stripping the query", () => {
+    expect(redactLocationHeader("https://h.example:8443/p?sig=s")).toBe("https://h.example:8443/p");
+  });
+
+  it("strips the query from a relative Location and keeps the path", () => {
+    expect(redactLocationHeader("/oauth/cb?code=abc&state=xyz")).toBe("/oauth/cb");
+  });
+
+  it("keeps a plain relative path as-is", () => {
+    expect(redactLocationHeader("/next")).toBe("/next");
+  });
+
+  it("strips the fragment from a relative Location", () => {
+    expect(redactLocationHeader("/page#access_token=tok")).toBe("/page");
+  });
+
+  it("strips userinfo and query from a scheme-relative Location", () => {
+    expect(redactLocationHeader("//user:pass@h.example/p?sig=s")).toBe("//h.example/p");
   });
 });

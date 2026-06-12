@@ -950,7 +950,7 @@ export const integrationsPaths = {
       description:
         "The cross-agent governance baseline: one default connection per (application, " +
         "integration) used by every consuming agent. `enforce: true` locks every member; " +
-        "`enforce: false` is overridable by a member pin. Returns `{ default: null }` when unset.",
+        "`enforce: false` is overridable by a member pin. Returns 204 when unset.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -958,19 +958,17 @@ export const integrationsPaths = {
       ],
       responses: {
         "200": {
-          description: "Org default (or null)",
+          description: "Org default (bare resource — same shape as PUT)",
           headers: baseResponseHeaders,
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["default"],
-                properties: {
-                  default: { anyOf: [integrationOrgDefaultSchema, { type: "null" }] },
-                },
-              },
+              schema: integrationOrgDefaultSchema,
             },
           },
+        },
+        "204": {
+          description: "No org default is set for this integration",
+          headers: baseResponseHeaders,
         },
       },
     },

@@ -167,10 +167,11 @@ async function handleProxy(
       durationMs,
     });
 
+    // 4xx/5xx upstream replies are tagged `error.type` by the recorder
+    // (status-code string, OTel semconv); 2xx points carry no error attribute.
     recordLlmLatency(durationMs, {
       api_shape: adapter.apiShape,
       status: response.status,
-      outcome: response.ok ? "success" : "error",
     });
 
     return response;
@@ -184,9 +185,10 @@ async function handleProxy(
     if (err instanceof LlmProxyModelApiMismatchError) {
       throw invalidRequest(err.message, "model");
     }
+    // No `status`: the upstream attempt produced no response, which the
+    // recorder tags as `error.type: "_OTHER"` (semconv fallback value).
     recordLlmLatency(Date.now() - started, {
       api_shape: adapter.apiShape,
-      outcome: "error",
     });
     throw err;
   }

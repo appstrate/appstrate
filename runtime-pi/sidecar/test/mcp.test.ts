@@ -286,14 +286,14 @@ describe("POST /mcp — protocol errors", () => {
     expect(error.code).toBe(-32601);
   });
 
-  it("rejects unknown tool names with MethodNotFound", async () => {
+  it("rejects unknown tool names with InvalidParams (spec-canonical -32602)", async () => {
     const app = createApp(makeDeps());
     const res = await rpc(app, {
       method: "tools/call",
       params: { name: "totally-not-a-tool" },
     });
     const error = res.json.error as { code: number; message: string };
-    expect(error.code).toBe(-32601);
+    expect(error.code).toBe(-32602);
     expect(error.message).toContain("totally-not-a-tool");
   });
 });

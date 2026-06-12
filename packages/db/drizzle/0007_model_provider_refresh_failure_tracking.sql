@@ -1,0 +1,2 @@
+ALTER TABLE "model_provider_credentials" ADD COLUMN "refresh_failure_count" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "model_provider_credentials" ADD COLUMN "last_refresh_failure_at" timestamp with time zone;

@@ -28,7 +28,7 @@ import { and, eq, lt, isNull, isNotNull, inArray, or, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { uploads } from "@appstrate/db/schema";
 import {
-  uploadFile as storagePut,
+  uploadStream as storageUploadStream,
   downloadStream as storageDownloadStream,
   deleteFile as storageDelete,
   createUploadUrl,
@@ -196,6 +196,10 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
   const safeName = sanitizeFilename(params.name);
   const storagePath = `${params.applicationId}/${uploadId}/${safeName}`;
 
+  // `maxSize` carries the DECLARED size (`params.size <= maxSize` is enforced
+  // above, so the min is exactly `params.size`): S3 signs it as the presigned
+  // PUT's exact Content-Length; the FS sink enforces it as the streaming
+  // upper bound. Either way the client cannot upload more than it declared.
   const descriptor = await createUploadUrl(UPLOAD_BUCKET, storagePath, {
     mime: normalizedMime,
     maxSize: Math.min(params.size, maxSize),
@@ -477,9 +481,11 @@ export async function consumeUploadStream(
     // sniffed from the head — both are only known once the stream drains.
     const { bytes, sniffedMime } = await sink(source);
 
-    // Reject mismatched size outright — an attacker can declare 1KB in the
-    // pre-signed request and PUT 100MB if the storage adapter doesn't enforce
-    // ContentLength at sign time (S3 currently does not).
+    // Reject mismatched size outright. Both adapters now enforce the declared
+    // size at upload time (S3 signs ContentLength into the presigned PUT; the
+    // FS sink aborts mid-stream past the signed max) — this re-check is
+    // defence in depth, and the only place a SHORTER-than-declared FS upload
+    // is caught (the sink enforces an upper bound, not an exact count).
     if (bytes !== row.size) {
       logger.warn("upload size mismatch on consume", {
         uploadId,
@@ -581,8 +587,15 @@ export interface FsContentWriteResult {
 }
 
 /**
- * Write the body of a PUT to storage (FS adapter path). Token verification +
- * header checks happen in the route handler — this just streams to disk.
+ * Stream the body of a PUT to storage (FS adapter path). Token verification +
+ * header checks happen in the route handler — this pipes the request body to
+ * disk through a counting transform, never buffering the payload in memory.
+ *
+ * Size cap: `maxSize` (the token's signed limit; 0 = unlimited) is enforced
+ * WHILE streaming — the transform errors the pipe as soon as the byte count
+ * exceeds it, which aborts the write and removes the partial file (the
+ * storage adapter unlinks its own O_EXCL-created destination). A Content-
+ * Length pre-check alone would be bypassable via chunked transfer encoding.
  *
  * Atomic create-or-fail: refuses to overwrite an existing object at the same
  * storage key via O_EXCL. The signed token is valid for 15 min and could
@@ -591,20 +604,32 @@ export interface FsContentWriteResult {
  */
 export async function writeFsUploadContent(
   storageKey: string,
-  data: Uint8Array,
+  body: ReadableStream<Uint8Array>,
+  maxSize: number,
 ): Promise<FsContentWriteResult> {
   const [bucket, ...rest] = storageKey.split("/");
   if (!bucket || rest.length === 0) throw invalidRequest("invalid storage key");
   const path = rest.join("/");
+  let bytes = 0;
+  const counter = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      bytes += chunk.byteLength;
+      if (maxSize > 0 && bytes > maxSize) {
+        controller.error(invalidRequest(`body exceeds signed max ${maxSize} bytes`));
+        return;
+      }
+      controller.enqueue(chunk);
+    },
+  });
   try {
-    await storagePut(bucket, path, data, { exclusive: true });
+    await storageUploadStream(bucket, path, body.pipeThrough(counter), { exclusive: true });
   } catch (err) {
     if (err instanceof StorageAlreadyExistsError) {
       throw conflict("upload_already_written", "upload content has already been written");
     }
     throw err;
   }
-  return { storageKey, size: data.byteLength };
+  return { storageKey, size: bytes };
 }
 
 // ---------------------------------------------------------------------------

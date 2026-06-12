@@ -18,7 +18,7 @@
  *     service is concerned only with org-owned credentials.
  */
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
@@ -376,12 +376,14 @@ export interface UpdateOAuthCredentialTokensInput {
  * here, before `mutate` runs). The denormalized `expiresAt` column is mirrored
  * ONLY when the next blob's `expiresAt` differs from the existing one — so
  * callers that don't touch expiry (e.g. {@link markCredentialNeedsReconnection})
- * leave the column untouched.
+ * leave the column untouched. `extraColumns` lets a caller piggyback plain
+ * column writes (e.g. the refresh-failure streak reset) onto the same UPDATE.
  */
 async function updateOAuthBlob(
   orgId: string,
   id: string,
   mutate: (existing: OAuthBlob) => OAuthBlob,
+  extraColumns?: Partial<typeof modelProviderCredentials.$inferInsert>,
 ): Promise<void> {
   const [row] = await db
     .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
@@ -399,6 +401,7 @@ async function updateOAuthBlob(
 
   const next = mutate(existing);
   const set: Record<string, unknown> = {
+    ...extraColumns,
     credentialsEncrypted: encryptCredentials(next as unknown as Record<string, unknown>),
     updatedAt: new Date(),
   };
@@ -425,18 +428,91 @@ export async function updateOAuthCredentialTokens(
   id: string,
   fresh: UpdateOAuthCredentialTokensInput,
 ): Promise<void> {
-  await updateOAuthBlob(orgId, id, (existing) => ({
-    ...existing,
-    accessToken: fresh.accessToken,
-    refreshToken: fresh.refreshToken,
-    expiresAt: fresh.expiresAt,
-    needsReconnection: false,
-    ...(fresh.accountId ? { accountId: fresh.accountId } : {}),
-  }));
+  await updateOAuthBlob(
+    orgId,
+    id,
+    (existing) => ({
+      ...existing,
+      accessToken: fresh.accessToken,
+      refreshToken: fresh.refreshToken,
+      expiresAt: fresh.expiresAt,
+      needsReconnection: false,
+      ...(fresh.accountId ? { accountId: fresh.accountId } : {}),
+    }),
+    // Any successful token write clears the transient-refresh streak — a
+    // working refresh proves the credential is healthy again, so the
+    // escalation counter must not carry over. See
+    // `recordModelCredentialRefreshFailure`.
+    { refreshFailureCount: 0, lastRefreshFailureAt: null },
+  );
 }
 
 export async function markCredentialNeedsReconnection(orgId: string, id: string): Promise<void> {
   await updateOAuthBlob(orgId, id, (existing) => ({ ...existing, needsReconnection: true }));
+}
+
+/**
+ * Record a *transient* token-refresh failure (network / 5xx / parse — NOT
+ * `invalid_grant`, which flips `blob.needsReconnection` immediately via
+ * {@link markCredentialNeedsReconnection}). Mirrors
+ * `recordIntegrationRefreshFailure` for `integration_connections`.
+ *
+ * The counter increment is atomic (single SQL statement), so concurrent
+ * refreshes on the same row cannot lose a count. Unlike the integrations
+ * variant, the death flag lives inside the *encrypted blob* — it cannot be
+ * OR-flipped in the same statement. The escalation decision is therefore made
+ * on the RETURNING values and applied via {@link markCredentialNeedsReconnection},
+ * which is monotonic (only ever sets `true`), so the two-step write is
+ * race-safe: a concurrent flip is never cleared, and a duplicate flip is a
+ * no-op.
+ *
+ * Escalation gate — `needsReconnection` is set to `true` only when BOTH:
+ *   1. this failure brings the streak to `>= maxFailures`, AND
+ *   2. the token is genuinely dead: the denormalized `expires_at` column is
+ *      set AND already older than `graceSeconds` ago.
+ *
+ * The expiry gate is what makes this safe: a transient upstream outage while
+ * the cached token is still valid (future `expires_at`) increments the counter
+ * but never escalates — the credential keeps working and a later refresh
+ * recovers (clearing the streak via {@link updateOAuthCredentialTokens}). Only
+ * a token that is expired-past-grace AND repeatedly unrefreshable — the
+ * silent-death case — gets flipped.
+ */
+export async function recordModelCredentialRefreshFailure(
+  orgId: string,
+  id: string,
+  maxFailures: number,
+  graceSeconds: number,
+): Promise<void> {
+  const updated = await db
+    .update(modelProviderCredentials)
+    .set({
+      refreshFailureCount: sql`${modelProviderCredentials.refreshFailureCount} + 1`,
+      lastRefreshFailureAt: sql`now()`,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      scopedWhere(modelProviderCredentials, {
+        orgId,
+        extra: [eq(modelProviderCredentials.id, id)],
+      }),
+    )
+    .returning({
+      refreshFailureCount: modelProviderCredentials.refreshFailureCount,
+      expiresAt: modelProviderCredentials.expiresAt,
+    });
+  const row = updated[0];
+  if (!row) return;
+  const expiredPastGrace =
+    row.expiresAt !== null && row.expiresAt.getTime() < Date.now() - graceSeconds * 1000;
+  if (row.refreshFailureCount >= maxFailures && expiredPastGrace) {
+    logger.warn("oauth model provider: escalating to needsReconnection after repeated failures", {
+      credentialId: id,
+      refreshFailureCount: row.refreshFailureCount,
+      expiresAt: row.expiresAt?.toISOString() ?? null,
+    });
+    await markCredentialNeedsReconnection(orgId, id);
+  }
 }
 
 // ─── Delete ────────────────────────────────────────────────────────────────

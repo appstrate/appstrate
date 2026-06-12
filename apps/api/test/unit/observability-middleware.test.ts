@@ -36,6 +36,7 @@ import {
 } from "../../src/observability/otel.ts";
 import { observability } from "../../src/observability/middleware.ts";
 import { runTraceparent } from "../../src/routes/runs.ts";
+import { resetClientIpCache } from "../../src/lib/client-ip.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { parseTraceparent } from "@appstrate/afps-runtime/transport";
 import type { AppEnv } from "../../src/types/index.ts";
@@ -60,6 +61,9 @@ function buildApp() {
   app.get("/boom", () => {
     throw new Error("kaboom");
   });
+  // A handler that RETURNS a 5xx without throwing — no exception ever reaches
+  // app.onError, so `c.error` stays unset.
+  app.get("/fail", (c) => c.json({ error: "deliberate" }, 503));
   return app;
 }
 
@@ -104,7 +108,46 @@ describe("observability() middleware", () => {
     expect(findSpan(spanExporter, "GET /*")).toBeUndefined();
   });
 
-  it("sets ERROR span status on a 5xx swallowed by app.onError", async () => {
+  it("carries the OTel HTTP semconv request attributes", async () => {
+    const app = buildApp();
+    const res = await app.request("/x/123");
+    expect(res.status).toBe(200);
+    await _forceFlushForTesting();
+
+    const span = findSpan(spanExporter, "GET /x/:id");
+    expect(span).toBeDefined();
+    // `url.scheme` is Required by semconv; `server.address` is the Host the
+    // client targeted (Hono's test harness builds http://localhost/...).
+    expect(span!.attributes["url.scheme"]).toBe("http");
+    expect(span!.attributes["server.address"]).toBe("localhost");
+    // No conn info and TRUST_PROXY off → IP unresolvable → the attribute is
+    // OMITTED, never the "unknown" sentinel.
+    expect(span!.attributes["client.address"]).toBeUndefined();
+    // Success: no error.type.
+    expect(span!.attributes["error.type"]).toBeUndefined();
+  });
+
+  it("sets client.address from the trusted forwarded header", async () => {
+    process.env.TRUST_PROXY = "1";
+    _resetCacheForTesting();
+    resetClientIpCache();
+    try {
+      const app = buildApp();
+      const res = await app.request("/x/1", { headers: { "x-forwarded-for": "203.0.113.9" } });
+      expect(res.status).toBe(200);
+      await _forceFlushForTesting();
+
+      const span = findSpan(spanExporter, "GET /x/:id");
+      expect(span).toBeDefined();
+      expect(span!.attributes["client.address"]).toBe("203.0.113.9");
+    } finally {
+      delete process.env.TRUST_PROXY;
+      _resetCacheForTesting();
+      resetClientIpCache();
+    }
+  });
+
+  it("sets ERROR span status + exception-class error.type on a 5xx swallowed by app.onError", async () => {
     const app = buildApp();
     const res = await app.request("/boom");
     expect(res.status).toBe(500);
@@ -114,6 +157,22 @@ describe("observability() middleware", () => {
     expect(span).toBeDefined();
     expect(span!.attributes["http.response.status_code"]).toBe(500);
     expect(span!.status.code).toBe(SpanStatusCode.ERROR);
+    // The throw was caught by app.onError (Hono stashes it on c.error) — per
+    // semconv, error.type is the exception class name.
+    expect(span!.attributes["error.type"]).toBe("Error");
+  });
+
+  it("sets the status code as error.type on a returned (non-thrown) 5xx", async () => {
+    const app = buildApp();
+    const res = await app.request("/fail");
+    expect(res.status).toBe(503);
+    await _forceFlushForTesting();
+
+    const span = findSpan(spanExporter, "GET /fail");
+    expect(span).toBeDefined();
+    expect(span!.status.code).toBe(SpanStatusCode.ERROR);
+    // No exception escaped → semconv falls back to the status code as string.
+    expect(span!.attributes["error.type"]).toBe("503");
   });
 
   it("names an unmatched (404) span with the method alone, keeping url.path", async () => {

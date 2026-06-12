@@ -13,11 +13,14 @@
 // Env vars must be populated BEFORE any module-graph evaluation — the
 // connect/encryption module reads `CONNECTION_ENCRYPTION_KEY` on first
 // decrypt/encrypt call, and `@appstrate/env` validates the whole schema
-// on first `getEnv()`. Set every required var before imports run.
+// on first `getEnv()`. Fill only what's MISSING (`??=`): the suite preload
+// already sets these, and overwriting them here leaks into every later test
+// in the same process — the auth instance keeps the preload-time secret, so
+// any test that signs with the mutated env value gets rejected with 401.
 const VALID_KEY_BASE64 = Buffer.from(new Uint8Array(32).fill(7)).toString("base64");
-process.env.CONNECTION_ENCRYPTION_KEY = VALID_KEY_BASE64;
-process.env.BETTER_AUTH_SECRET = "test-better-auth-secret-16chars";
-process.env.UPLOAD_SIGNING_SECRET = "test-upload-signing-secret-16ch";
+process.env.CONNECTION_ENCRYPTION_KEY ??= VALID_KEY_BASE64;
+process.env.BETTER_AUTH_SECRET ??= "test-better-auth-secret-16chars";
+process.env.UPLOAD_SIGNING_SECRET ??= "test-upload-signing-secret-16ch";
 
 import { describe, expect, test } from "bun:test";
 import { sign } from "@appstrate/afps-runtime/events";

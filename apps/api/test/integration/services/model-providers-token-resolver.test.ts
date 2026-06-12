@@ -30,6 +30,7 @@ import { decryptCredentials } from "@appstrate/connect";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import {
   createOAuthCredential,
+  recordModelCredentialRefreshFailure,
   type OAuthBlob,
 } from "../../../src/services/model-providers/credentials.ts";
 import {
@@ -388,6 +389,197 @@ describe("OAuth model providers — token-resolver hardening", () => {
       }
       expect(caught).toBeInstanceOf(ApiError);
       expect((caught as ApiError).status).toBe(404);
+    });
+  });
+
+  /**
+   * Transient-refresh-failure escalation — mirrors the integration_connections
+   * escalation (#596). `recordModelCredentialRefreshFailure` increments a
+   * per-credential counter on every transient (non-`invalid_grant`) refresh
+   * failure and flips `blob.needsReconnection` ONLY when the streak crosses the
+   * threshold AND the token is already expired past the grace window. A
+   * successful token write resets the counter (via `updateOAuthCredentialTokens`).
+   */
+  describe("model-provider refresh-failure escalation", () => {
+    const HOUR_MS = 3_600_000;
+
+    async function readFailureRow(credentialId: string): Promise<{
+      refreshFailureCount: number;
+      lastRefreshFailureAt: Date | null;
+      needsReconnection: boolean;
+    }> {
+      const [row] = await db
+        .select({
+          refreshFailureCount: modelProviderCredentials.refreshFailureCount,
+          lastRefreshFailureAt: modelProviderCredentials.lastRefreshFailureAt,
+        })
+        .from(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.id, credentialId));
+      const blob = await readBlob(credentialId);
+      return { ...row!, needsReconnection: blob.needsReconnection };
+    }
+
+    it("increments the counter but does NOT escalate while the token is still valid", async () => {
+      // Token valid for another hour — a transient upstream blip must not brick it.
+      const id = await seedOAuthCredential({
+        orgId,
+        userId,
+        providerId: "test-oauth",
+        expiresAtMs: Date.now() + HOUR_MS,
+      });
+
+      // Drive the streak to (and past) the threshold.
+      for (let i = 0; i < 4; i++) await recordModelCredentialRefreshFailure(orgId, id, 3, 3600);
+
+      const row = await readFailureRow(id);
+      expect(row.refreshFailureCount).toBe(4);
+      expect(row.needsReconnection).toBe(false); // expiry gate blocks escalation
+      expect(row.lastRefreshFailureAt).not.toBeNull();
+    });
+
+    it("does NOT escalate while the token is expired but within the grace window", async () => {
+      // Expired 10 min ago; grace is 1h → not yet escalatable.
+      const id = await seedOAuthCredential({
+        orgId,
+        userId,
+        providerId: "test-oauth",
+        expiresAtMs: Date.now() - 10 * 60_000,
+      });
+
+      for (let i = 0; i < 5; i++) await recordModelCredentialRefreshFailure(orgId, id, 3, 3600);
+
+      const row = await readFailureRow(id);
+      expect(row.refreshFailureCount).toBe(5);
+      expect(row.needsReconnection).toBe(false);
+    });
+
+    it("escalates to needsReconnection once expired past grace AND streak hits threshold", async () => {
+      // Expired 2h ago, grace 1h → past grace.
+      const id = await seedOAuthCredential({
+        orgId,
+        userId,
+        providerId: "test-oauth",
+        expiresAtMs: Date.now() - 2 * HOUR_MS,
+      });
+
+      await recordModelCredentialRefreshFailure(orgId, id, 3, 3600); // 1 — below threshold
+      expect((await readFailureRow(id)).needsReconnection).toBe(false);
+      await recordModelCredentialRefreshFailure(orgId, id, 3, 3600); // 2 — below threshold
+      expect((await readFailureRow(id)).needsReconnection).toBe(false);
+      await recordModelCredentialRefreshFailure(orgId, id, 3, 3600); // 3 — hits threshold
+
+      const row = await readFailureRow(id);
+      expect(row.refreshFailureCount).toBe(3);
+      expect(row.needsReconnection).toBe(true);
+    });
+
+    it("never clears a pre-existing needsReconnection (monotonic flip)", async () => {
+      const id = await seedOAuthCredential({
+        orgId,
+        userId,
+        providerId: "test-oauth",
+        expiresAtMs: Date.now() + HOUR_MS, // valid token — gate would say false
+        needsReconnection: true, // but already flagged (e.g. revoke)
+      });
+
+      await recordModelCredentialRefreshFailure(orgId, id, 3, 3600);
+
+      expect((await readFailureRow(id)).needsReconnection).toBe(true);
+    });
+
+    it("a successful refresh resets the failure streak", async () => {
+      // Seed an expired token with an accumulated streak (not yet escalated).
+      const id = await seedOAuthCredential({
+        orgId,
+        userId,
+        providerId: "test-oauth",
+        expiresAtMs: Date.now() - 30 * 60_000,
+      });
+      await db
+        .update(modelProviderCredentials)
+        .set({ refreshFailureCount: 2, lastRefreshFailureAt: new Date() })
+        .where(eq(modelProviderCredentials.id, id));
+
+      mockFetch(
+        async () =>
+          new Response(
+            JSON.stringify({
+              access_token: "fresh-access",
+              refresh_token: "fresh-refresh",
+              token_type: "Bearer",
+              expires_in: 3600,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      );
+
+      await forceRefreshOAuthModelProviderToken(id);
+
+      const row = await readFailureRow(id);
+      expect(row.refreshFailureCount).toBe(0);
+      expect(row.lastRefreshFailureAt).toBeNull();
+      expect(row.needsReconnection).toBe(false);
+    });
+
+    it("a transient upstream failure during refresh increments the counter and rethrows", async () => {
+      const id = await seedOAuthCredential({
+        orgId,
+        userId,
+        providerId: "test-oauth",
+        expiresAtMs: Date.now() - HOUR_MS,
+      });
+
+      mockFetch(
+        async () =>
+          new Response(JSON.stringify({ error: "temporarily_unavailable" }), {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          }),
+      );
+
+      let caught: unknown;
+      try {
+        await forceRefreshOAuthModelProviderToken(id);
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(Error);
+
+      // One transient failure < default threshold (5) → counted, not escalated.
+      const row = await readFailureRow(id);
+      expect(row.refreshFailureCount).toBe(1);
+      expect(row.needsReconnection).toBe(false);
+    });
+
+    it("invalid_grant keeps its immediate flip — no streak required", async () => {
+      const id = await seedOAuthCredential({
+        orgId,
+        userId,
+        providerId: "test-oauth",
+        expiresAtMs: Date.now() - 10_000, // expired → reReadFreshness lets doRefresh run
+      });
+
+      mockFetch(
+        async () =>
+          new Response(JSON.stringify({ error: "invalid_grant" }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          }),
+      );
+
+      let caught: unknown;
+      try {
+        await forceRefreshOAuthModelProviderToken(id);
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(ApiError);
+      expect((caught as ApiError).code).toBe("OAUTH_REFRESH_REVOKED");
+
+      const row = await readFailureRow(id);
+      expect(row.needsReconnection).toBe(true);
+      // The revoked path does NOT touch the transient streak.
+      expect(row.refreshFailureCount).toBe(0);
     });
   });
 });

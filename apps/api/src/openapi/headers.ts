@@ -31,6 +31,14 @@ export const headers = {
     description: "Seconds to wait before retrying. Present on 429 responses.",
     schema: { type: "integer" },
   },
+  WWWAuthenticate: {
+    description:
+      'RFC 6750 Bearer challenge, present on every 401. `Bearer error="invalid_token"` ' +
+      "when a credential was presented but rejected, bare `Bearer` when no credential was " +
+      "presented. Resources registered for RFC 9728 discovery (e.g. MCP) answer with a " +
+      'richer challenge carrying `resource_metadata="…"`.',
+    schema: { type: "string", example: 'Bearer error="invalid_token"' },
+  },
   Link: {
     description:
       'RFC 5988 pagination link(s), e.g. `<https://…?since=42&limit=100>; rel="next"`. Present only when another page follows — absence means the listing is complete.',

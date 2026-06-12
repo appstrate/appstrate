@@ -313,7 +313,7 @@ test.describe("Cross-app resource isolation", () => {
       const res = await clientA.get("/api-keys");
       expect(res.status()).toBe(200);
       const body = await res.json();
-      const ids = (body.apiKeys ?? []).map((k: { id: string }) => k.id);
+      const ids = (body.data ?? []).map((k: { id: string }) => k.id);
       expect(ids).toContain(key.id);
     });
 
@@ -335,7 +335,7 @@ test.describe("Cross-app resource isolation", () => {
       const res = await clientB.get(`/api-keys?applicationId=${appB.id}`);
       expect(res.status()).toBe(200);
       const body = await res.json();
-      const ids = (body.apiKeys ?? []).map((k: { id: string }) => k.id);
+      const ids = (body.data ?? []).map((k: { id: string }) => k.id);
       expect(ids).not.toContain(key.id);
     });
   });

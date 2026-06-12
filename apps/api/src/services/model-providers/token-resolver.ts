@@ -23,9 +23,11 @@ import {
   loadCredentialRow,
   markCredentialNeedsReconnection,
   pickOAuthTokenResponse,
+  recordModelCredentialRefreshFailure,
   updateOAuthCredentialTokens,
   type OAuthBlob,
 } from "./credentials.ts";
+import { getEnv } from "@appstrate/env";
 import { gone, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { dedupedRefresh } from "../../lib/deduped-refresh.ts";
@@ -208,8 +210,7 @@ async function doRefresh(
     ));
   } catch (err) {
     // Flip needsReconnection + surface `gone(OAUTH_REFRESH_REVOKED)` on a
-    // revoked refresh token; transient failures rethrow as a generic Error
-    // (credential left untouched — may still be valid).
+    // revoked refresh token; transient failures rethrow as a generic Error.
     if (err instanceof RefreshError && err.kind === "revoked") {
       await markCredentialNeedsReconnection(state.orgId, credentialId);
       throw gone(
@@ -219,6 +220,23 @@ async function doRefresh(
         }`,
       );
     }
+    // Transient failure (network / 5xx / parse). A single transient error is
+    // NOT terminal — the cached token may still be valid. But a token that is
+    // already expired AND keeps failing refresh is silently dead while the
+    // row still looks healthy (same failure mode as the Gmail integration
+    // scheduled-run incident, #596). Record the failure;
+    // `recordModelCredentialRefreshFailure` escalates to needsReconnection
+    // only once the streak crosses the threshold AND the token is expired
+    // past the grace window, so a transient upstream blip on a still-valid
+    // token never bricks the credential. Same knobs as integrations — one
+    // platform-wide policy for "how dead does an OAuth credential have to be".
+    const env = getEnv();
+    await recordModelCredentialRefreshFailure(
+      state.orgId,
+      credentialId,
+      env.INTEGRATION_REFRESH_MAX_FAILURES,
+      env.INTEGRATION_REFRESH_GRACE_SECONDS,
+    );
     throw err instanceof Error
       ? err
       : new Error(`Token refresh failed for '${state.config.providerId}': ${String(err)}`);

@@ -17,8 +17,9 @@
  *    secret. Mutations invalidate the resolver cache.
  *
  * Rotation:
- *  - Each row carries `ENCRYPTION_KEY_VERSION`; mismatches surface as
- *    "not configured" to avoid throws on stale ciphertext.
+ *  - Ciphertexts are self-describing `v1:<kid>:` envelopes (`@appstrate/connect`).
+ *    Key rotation rides the connect keyring; a row whose kid is no longer in
+ *    the keyring fails decryption and surfaces as "not configured".
  */
 
 import { eq, and } from "drizzle-orm";
@@ -30,8 +31,6 @@ import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-
-const ENCRYPTION_KEY_VERSION = "v1";
 
 export type { SocialProviderId, SocialProviderView };
 
@@ -95,15 +94,6 @@ async function resolvePerApp(
       )
       .limit(1);
     if (!row) return null;
-    if (row.encryptionKeyVersion !== ENCRYPTION_KEY_VERSION) {
-      logger.warn("oidc social: stale encryption key version, treating as unconfigured", {
-        applicationId,
-        provider,
-        rowVersion: row.encryptionKeyVersion,
-        currentVersion: ENCRYPTION_KEY_VERSION,
-      });
-      return null;
-    }
     let decrypted: { clientSecret: string };
     try {
       decrypted = decryptCredentials<{ clientSecret: string }>(row.clientSecretEncrypted);
@@ -111,7 +101,6 @@ async function resolvePerApp(
       logger.error("oidc social: decryption failed for per-app creds, treating as unconfigured", {
         applicationId,
         provider,
-        rowVersion: row.encryptionKeyVersion,
         error: getErrorMessage(err),
       });
       return null;
@@ -188,7 +177,6 @@ export async function upsertSocialProvider(
     provider,
     clientId: input.clientId,
     clientSecretEncrypted,
-    encryptionKeyVersion: ENCRYPTION_KEY_VERSION,
     scopes: input.scopes ?? null,
     updatedAt: now,
   };

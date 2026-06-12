@@ -12,6 +12,12 @@
  * use the `*RequiresRedis|Docker|S3` guards below so they run in tier3/CI and
  * auto-skip in tier0 instead of failing against the in-memory fallbacks.
  *
+ * Docker (DinD) tests are additionally opt-in: they are heavy (~16s for the
+ * Docker Engine API suite alone), so a plain `bun test` on a dev machine skips
+ * them by default. Enable them locally with `TEST_DOCKER=1` (or the root
+ * `bun run test:docker` script). CI always runs them — GitHub Actions sets
+ * `CI=true` automatically. tier0 never runs them (no DinD is provisioned).
+ *
  * Resource presence is read from `process.env` (the preload mutates it before
  * any test imports run), matching how `apps/api/src/infra/mode.ts` decides
  * which adapter to load at runtime.
@@ -28,8 +34,9 @@ const hasS3 = !!process.env.S3_BUCKET;
 // spawn a subprocess that must share the DB (PGlite is single-process / a
 // throwaway temp dir, so a child process can't attach to it).
 const hasExternalDb = !!process.env.DATABASE_URL;
-// Docker (DinD) is only provisioned by the tier3 preload.
-const hasDocker = !isTier0;
+// Docker (DinD) is only provisioned by the tier3 preload, and the tests that
+// exercise it are slow — opt-in locally (TEST_DOCKER=1), always on in CI.
+const hasDocker = !isTier0 && (process.env.TEST_DOCKER === "1" || process.env.CI === "true");
 
 /** `describe`/`it` that skip unless a real Redis is configured. */
 export const describeRequiresRedis = describe.skipIf(!hasRedis);

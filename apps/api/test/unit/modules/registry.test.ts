@@ -1,21 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, afterEach } from "bun:test";
+import { _resetCacheForTesting } from "@appstrate/env";
 import { getModuleRegistry } from "../../../src/lib/modules/registry.ts";
+
+/**
+ * `getModuleRegistry` reads `MODULES` through the cached `getEnv()` snapshot
+ * (single source for the default — see #513), so every `process.env.MODULES`
+ * mutation must be followed by a cache flush to become visible.
+ */
+function setModulesEnv(value: string | undefined): void {
+  if (value === undefined) delete process.env.MODULES;
+  else process.env.MODULES = value;
+  _resetCacheForTesting();
+}
 
 describe("getModuleRegistry", () => {
   const originalValue = process.env.MODULES;
 
   afterEach(() => {
-    if (originalValue === undefined) {
-      delete process.env.MODULES;
-    } else {
-      process.env.MODULES = originalValue;
-    }
+    setModulesEnv(originalValue);
   });
 
   it("returns the default OSS modules when MODULES is unset", () => {
-    delete process.env.MODULES;
+    setModulesEnv(undefined);
     expect(getModuleRegistry()).toEqual([
       "oidc",
       "webhooks",
@@ -26,13 +34,26 @@ describe("getModuleRegistry", () => {
     ]);
   });
 
-  it("returns empty array when MODULES is empty string", () => {
-    process.env.MODULES = "";
+  it("returns empty array when MODULES is the empty string (legacy escape hatch)", () => {
+    // `""` is read from raw process.env (the env getter coalesces `""` →
+    // unset) so the historical "boot with zero modules" contract survives
+    // the move to getEnv() — see getModuleRegistry's doc comment.
+    setModulesEnv("");
+    expect(getModuleRegistry()).toEqual([]);
+  });
+
+  it("returns empty array for the MODULES=none sentinel", () => {
+    setModulesEnv("none");
+    expect(getModuleRegistry()).toEqual([]);
+  });
+
+  it("treats whitespace-padded none as the sentinel", () => {
+    setModulesEnv(" none ");
     expect(getModuleRegistry()).toEqual([]);
   });
 
   it("parses comma-separated specifiers, trims whitespace, drops empty segments", () => {
-    process.env.MODULES = " @scope/module , @acme/analytics ,,";
+    setModulesEnv(" @scope/module , @acme/analytics ,,");
     expect(getModuleRegistry()).toEqual(["@scope/module", "@acme/analytics"]);
   });
 });

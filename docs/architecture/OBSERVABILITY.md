@@ -95,6 +95,17 @@ the host (`bun run dev`) reads `.env` natively, no wiring needed.
 | `appstrate.run.container` | `run-launcher/pi.ts`                         | Container boundary/sidecar/agent/wait lifecycle. Forwards itself as the container's parent.                                                                                 |
 | `appstrate.run.finalize`  | `run-event-ingestion.ts` (`finalizeRun`)     | CAS-guarded terminal convergence.                                                                                                                                           |
 
+SERVER spans carry the OTel HTTP semconv request attributes:
+`http.request.method`, `url.path`, `url.scheme` (required), `server.address`
+(the Host the client targeted) and `client.address` (the resolved client IP,
+honoring `TRUST_PROXY`; omitted when unresolvable) — plus `http.route` /
+`http.response.status_code` after the chain runs. `network.protocol.version` is
+deliberately **not** emitted: Bun/Hono expose the request as a fetch `Request`,
+which carries no negotiated HTTP version, and semconv forbids guessing. On a
+5xx the span status flips to ERROR and `error.type` is set (semconv
+Conditionally Required): the escaped exception's class name when `app.onError`
+caught a throw, else the status code as a string.
+
 For unmatched requests (404) no low-cardinality template resolves: per OTel HTTP
 semconv the span name is the **method alone** (`GET`) — never the raw path,
 which would let a scanner spraying distinct paths explode the span-name
@@ -123,13 +134,13 @@ sub-second-aware boundaries via the OTel `advice.explicitBucketBoundaries` hint
 | `appstrate.run.container_spawn` | `[0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30]` | ~0.1–2s provision |
 | `appstrate.llm.latency`         | `[0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60]`    | ~0.3–5s upstream  |
 
-| Metric                            | Type             | Tags                                  | Source                                     |
-| --------------------------------- | ---------------- | ------------------------------------- | ------------------------------------------ |
-| `appstrate.run.duration`          | histogram (s)    | `status`                              | `finalizeRun` (CAS winner, exactly once)   |
-| `appstrate.run.terminal`          | counter          | `status`, `error_code`                | `finalizeRun` — failure-rate source        |
-| `appstrate.run.container_spawn`   | histogram (s)    | `sidecar`, `error.type` (failure)     | `runPlatformContainer` provisioning time   |
-| `appstrate.scheduler.queue_depth` | observable gauge | —                                     | BullMQ / local queue `count()`             |
-| `appstrate.llm.latency`           | histogram (s)    | `api_shape`, `outcome`, `status_code` | platform LLM proxy (`routes/llm-proxy.ts`) |
+| Metric                            | Type             | Tags                                                             | Source                                     |
+| --------------------------------- | ---------------- | ---------------------------------------------------------------- | ------------------------------------------ |
+| `appstrate.run.duration`          | histogram (s)    | `status`                                                         | `finalizeRun` (CAS winner, exactly once)   |
+| `appstrate.run.terminal`          | counter          | `status`, `error_code`                                           | `finalizeRun` — failure-rate source        |
+| `appstrate.run.container_spawn`   | histogram (s)    | `sidecar`, `error.type` (failure)                                | `runPlatformContainer` provisioning time   |
+| `appstrate.scheduler.queue_depth` | observable gauge | —                                                                | BullMQ / local queue `count()`             |
+| `appstrate.llm.latency`           | histogram (s)    | `api_shape`, `http.response.status_code`, `error.type` (failure) | platform LLM proxy (`routes/llm-proxy.ts`) |
 
 The `error_code` label on `appstrate.run.terminal` is clamped to a bounded
 allowlist so a runner-controlled string can never explode metric cardinality:
@@ -143,6 +154,16 @@ is filterable), while a failed one is tagged with the phase that failed —
 `boundary` (isolation-boundary create) or `workload` (sidecar/agent spawn),
 clamped to that allowlist (`other` otherwise). A `waitForWorkload` failure is an
 **execution** failure, not a spawn failure, and emits no spawn data point.
+
+`appstrate.llm.latency` follows the same Recording-errors pattern with OTel HTTP
+semconv attribute names: `http.response.status_code` carries the upstream status
+when a response was received, and `error.type` is present on **failure only** —
+the status code as a string for 4xx/5xx upstream replies, or the semconv
+fallback `_OTHER` when the call failed before producing any response (transport
+error). Success points carry no `error.type`, so clean latency and error rate
+both derive from the one histogram. (Earlier revisions used non-semconv
+`outcome`/`status_code` labels — renamed; update any dashboards built against
+them.)
 
 ## Service-level indicators (SLIs)
 

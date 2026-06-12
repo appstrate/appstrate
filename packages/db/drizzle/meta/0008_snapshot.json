@@ -1,6 +1,6 @@
 {
-  "id": "7ae54060-0002-4130-b2c3-ededa8f173da",
-  "prevId": "a034ec32-4c1c-49e1-925d-3dd311bd6186",
+  "id": "52299069-1a23-416d-9459-046a6ebc5799",
+  "prevId": "7ae54060-0002-4130-b2c3-ededa8f173da",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -5593,13 +5593,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "encryption_key_version": {
-          "name": "encryption_key_version",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'v1'"
-        },
         "from_address": {
           "name": "from_address",
           "type": "text",
@@ -5684,13 +5677,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "encryption_key_version": {
-          "name": "encryption_key_version",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'v1'"
         },
         "scopes": {
           "name": "scopes",

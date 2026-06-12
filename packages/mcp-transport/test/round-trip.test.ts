@@ -84,8 +84,10 @@ describe("createInProcessPair — round-trip via SDK Client/Server", () => {
     } finally {
       await pair.close();
     }
+    // Spec-canonical unknown-tool code: -32602 InvalidParams ("Unknown
+    // tool: …") — `tools/call` exists, the `name` param is what's wrong.
     expect(caught).toBeInstanceOf(McpError);
-    expect((caught as McpError).code).toBe(ErrorCode.MethodNotFound);
+    expect((caught as McpError).code).toBe(ErrorCode.InvalidParams);
     expect((caught as McpError).message).toContain("does-not-exist");
   });
 

@@ -321,6 +321,23 @@ function strippedDataUri(mime: string, docName: string): string {
 }
 
 /**
+ * Is this the payload-stripped marker {@link strippedDataUri} persisted in
+ * place of an inline `data:` URI (empty payload + `name` parameter)? Used by
+ * the `rerun_from` replay path to reject materialized inline inputs with a
+ * dedicated 409 instead of letting `parseDataUri` surface a misleading
+ * "payload is empty" 400. Pure — exported for unit tests.
+ */
+export function isStrippedInlineMarker(uri: string): boolean {
+  if (!isDataUri(uri)) return false;
+  const comma = uri.indexOf(",");
+  // Marker shape: `data:<mime>;name=<doc>;base64,` — the comma is the last
+  // character (empty payload) and the mediatype carries a `name` parameter.
+  if (comma === -1 || comma !== uri.length - 1) return false;
+  const params = uri.slice("data:".length, comma).split(";");
+  return params.includes("base64") && params.some((p) => p.startsWith("name="));
+}
+
+/**
  * Reject when the combined size of a run's input documents exceeds the
  * per-run ceiling. Pure so it can be unit-tested without a DB or request
  * context; callers pass `getEnv().WORKSPACE_MAX_DOCS_BYTES` as the limit.
@@ -451,6 +468,7 @@ export async function parseRequestInput(
   }
 
   let input = body.input ?? {};
+  const isRerun = body.rerun_from !== undefined;
   if (body.rerun_from !== undefined) {
     if (body.input !== undefined) {
       throw invalidRequest(
@@ -482,7 +500,24 @@ export async function parseRequestInput(
     // so a malformed or oversized inline file also fails before any streaming.
     const inline = refs
       .filter((ref) => ref.kind === "data")
-      .map((ref) => ({ ref, file: parseDataUri(ref.uri, ref.fieldName) }));
+      .map((ref) => {
+        // A replayed input carries the payload-stripped marker where the
+        // original inline bytes used to be (the bytes were materialized
+        // into the PRIOR run's workspace and stripped from the persisted
+        // input — see strippedDataUri). There is nothing to replay:
+        // surface a dedicated 409 instead of parseDataUri's misleading
+        // "payload is empty" 400.
+        if (isRerun && isStrippedInlineMarker(ref.uri)) {
+          throw conflict(
+            "rerun_inline_input_unavailable",
+            `Field '${ref.fieldName}' was provided as an inline data: URI on the original run — ` +
+              "inline inputs are materialized into the run workspace and stripped from the stored " +
+              "input, so they cannot be replayed via rerun_from. Re-send the file in `input` " +
+              "(staged upload:// references stay replayable for the retention window).",
+          );
+        }
+        return { ref, file: parseDataUri(ref.uri, ref.fieldName) };
+      });
 
     // Document object names — set once uploads are streamed, used to roll the
     // run workspace back if anything below the stream fails. Empty until we

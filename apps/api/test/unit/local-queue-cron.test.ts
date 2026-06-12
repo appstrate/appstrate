@@ -25,6 +25,22 @@ import type { QueueJob } from "../../src/infra/queue/interface.ts";
 const POLL_MS = 30_000;
 
 /**
+ * Wait until the queue has fully drained (no pending or active jobs) so
+ * `processed` reflects the final outcome of a poll. Deterministic
+ * replacement for fixed sleeps: `evaluateCron` enqueues synchronously and
+ * `activeJobs` stays > 0 until each handler settles, so `count() === 0`
+ * means every fired occurrence has been processed — including the
+ * negative cases, where nothing was enqueued and this returns immediately.
+ */
+async function drained(q: { count(): Promise<number> }): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while ((await q.count()) > 0) {
+    if (Date.now() > deadline) throw new Error("queue did not drain within 2s");
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
+/**
  * Drive one cron evaluation at a fixed wall-clock `now` and report how many
  * times the pattern fired. Models a poll whose window floor is `windowMs`
  * before `now` (default = the real 30s cadence).
@@ -64,7 +80,7 @@ async function firesCount(
     Date.now = realNow;
   }
 
-  await new Promise((r) => setTimeout(r, 200));
+  await drained(q);
   await q.shutdown();
   return processed.filter((v) => v === "fired").length;
 }
@@ -193,7 +209,7 @@ describe("LocalQueue cron scheduler", () => {
     q.lastCronPollAt = PREV_POLL.getTime();
     withPinnedNow(FIRING_NOW, () => q.evaluateCron());
 
-    await new Promise((r) => setTimeout(r, 300));
+    await drained(q);
     expect(processed).toContain("fired");
     await q.shutdown();
   });
@@ -216,7 +232,7 @@ describe("LocalQueue cron scheduler", () => {
       q.evaluateCron();
     });
 
-    await new Promise((r) => setTimeout(r, 300));
+    await drained(q);
     expect(processed).toEqual(["x"]);
     await q.shutdown();
   });
@@ -236,7 +252,7 @@ describe("LocalQueue cron scheduler", () => {
 
     q.lastCronPollAt = PREV_POLL.getTime();
     withPinnedNow(FIRING_NOW, () => q.evaluateCron());
-    await new Promise((r) => setTimeout(r, 300));
+    await drained(q);
     expect(processed).toEqual([]);
     await q.shutdown();
   });
@@ -260,13 +276,13 @@ describe("LocalQueue cron scheduler", () => {
     q.lastCronPollAt = registeredAt.getTime();
 
     withPinnedNow(new Date("2026-01-15T10:30:15Z"), () => q.evaluateCron());
-    await new Promise((r) => setTimeout(r, 300));
+    await drained(q);
     expect(processed).toEqual([]);
 
     // The next occurrence (10:31:00) DOES fire once its window arrives. The
     // floor has advanced to the first poll's time, no manual reset needed.
     withPinnedNow(new Date("2026-01-15T10:31:10Z"), () => q.evaluateCron());
-    await new Promise((r) => setTimeout(r, 300));
+    await drained(q);
     expect(processed).toEqual(["x"]);
 
     await q.shutdown();
@@ -289,7 +305,7 @@ describe("LocalQueue cron scheduler", () => {
 
     q.lastCronPollAt = PREV_POLL.getTime();
     withPinnedNow(FIRING_NOW, () => q.evaluateCron());
-    await new Promise((r) => setTimeout(r, 300));
+    await drained(q);
     expect(processed).toEqual(["new"]);
     await q.shutdown();
   });
@@ -311,14 +327,14 @@ describe("LocalQueue cron scheduler", () => {
     q.lastCronPollAt = floor.getTime();
 
     withPinnedNow(FIRING_NOW, () => q.evaluateCron());
-    await new Promise((r) => setTimeout(r, 400));
+    await drained(q);
     // Capped at 5, not the 7 that fell in the window.
     expect(processed.length).toBe(5);
 
     // Backlog was coalesced (lastFiredAt advanced to now) — a second poll at
     // the same clock replays nothing.
     withPinnedNow(FIRING_NOW, () => q.evaluateCron());
-    await new Promise((r) => setTimeout(r, 300));
+    await drained(q);
     expect(processed.length).toBe(5);
 
     await q.shutdown();

@@ -16,10 +16,13 @@
  *
  *   2. **Per-credential refresh**: calls
  *      {@link forceRefreshOAuthModelProviderToken}, which itself flips
- *      `needsReconnection=true` on `invalid_grant` (cf. token-resolver).
- *      Failures are logged structured but do NOT bubble — the worker
- *      treats every refresh as best-effort; the sidecar still has its
- *      reactive 401-retry path.
+ *      `needsReconnection=true` on `invalid_grant` and records *transient*
+ *      failures via `recordModelCredentialRefreshFailure` (cf. token-resolver)
+ *      — a streak of transient failures on an expired-past-grace token
+ *      escalates to `needsReconnection` so the dead credential becomes
+ *      user-visible instead of failing silently forever. Failures are logged
+ *      structured but do NOT bubble — the worker treats every refresh as
+ *      best-effort; the sidecar still has its reactive 401-retry path.
  *
  * Pairing-table cleanup lives in `pairing-cleanup-worker.ts` and runs
  * unconditionally — it has no relationship to the refresh hot path.
@@ -203,6 +206,10 @@ async function handleRefreshJob(job: QueueJob<RefreshJobData>): Promise<void> {
       });
       return;
     }
+    // Transient failure — `doRefresh` (token-resolver) has already recorded
+    // it via `recordModelCredentialRefreshFailure`, which escalates to
+    // `needsReconnection` once the streak crosses the threshold AND the token
+    // is expired past the grace window. Nothing more to do here than log.
     logger.error("oauth_model_refresh_failed", {
       credentialId,
       providerId,

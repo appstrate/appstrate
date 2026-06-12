@@ -12,8 +12,9 @@ export const uploadsPaths = {
         "(1) POST /api/uploads with the file's `name`, exact `size` in bytes, and `mime` — " +
         "the response carries a `uri` (e.g. `upload://upl_xxx`), a signed `url`, and `headers`. " +
         "(2) PUT the raw file bytes (not multipart) to `url`, sending exactly the returned " +
-        "`headers` (typically just `Content-Type`). No other headers are required — in " +
-        "particular no checksum headers; the signed URL does not bind one. " +
+        "`headers` (`Content-Type`, plus `Content-Length` when the storage signs the declared " +
+        "size — the body must then be exactly `size` bytes). No other headers are required — " +
+        "in particular no checksum headers; the signed URL does not bind one. " +
         "(3) Call `runAgent` with `uri` as the value of the file-typed input field. The actual " +
         "byte count must equal the declared `size`, and binary MIMEs are verified by magic-byte " +
         "sniffing. Consumed uploads are NOT single-use: the bytes stay retained — and the `uri` " +
@@ -93,8 +94,8 @@ export const uploadsPaths = {
                     additionalProperties: { type: "string" },
                     description:
                       "The complete set of headers the client MUST send verbatim on the PUT " +
-                      "request (typically just `Content-Type`). Nothing else is required — " +
-                      "no checksum headers.",
+                      "request (`Content-Type`, plus `Content-Length` bound to the declared " +
+                      "`size` in S3 mode). Nothing else is required — no checksum headers.",
                   },
                   expiresAt: { type: "string", format: "date-time" },
                 },
@@ -105,7 +106,7 @@ export const uploadsPaths = {
                 uri: "upload://upl_abc123",
                 url: "https://s3.example.com/uploads/app_1/upl_abc123/invoice.pdf?X-Amz-...",
                 method: "PUT",
-                headers: { "Content-Type": "application/pdf" },
+                headers: { "Content-Type": "application/pdf", "Content-Length": "24576" },
                 expiresAt: "2026-04-14T12:15:00Z",
               },
             },
@@ -126,7 +127,8 @@ export const uploadsPaths = {
       description:
         "Public endpoint used when the platform runs in filesystem storage mode. " +
         "Authenticated via HMAC-signed `token` query parameter returned in the upload " +
-        "descriptor. The token binds storage key, declared MIME, max size and expiry. " +
+        "descriptor. The token binds storage key, declared MIME, max size and expiry; the max " +
+        "size is enforced while the body streams to disk, so chunked uploads cannot exceed it. " +
         "In S3 mode the signed URL points directly at the bucket and this endpoint is not used. " +
         "Rate-limited per IP (60/min).",
       security: [],

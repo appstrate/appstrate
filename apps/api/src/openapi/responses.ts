@@ -6,6 +6,9 @@
 export const responses = {
   Unauthorized: {
     description: "Missing or invalid authentication",
+    headers: {
+      "WWW-Authenticate": { $ref: "#/components/headers/WWWAuthenticate" },
+    },
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },

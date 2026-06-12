@@ -57,7 +57,7 @@ export const runsPaths = {
                 rerun_from: {
                   type: "string",
                   description:
-                    "Run id whose `input` to replay verbatim on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). File fields keep their `upload://` URIs in the stored input, and consumed uploads stay re-consumable for `UPLOAD_RETENTION_HOURS` (default 24 h) after their first consume — so a cancelled or completed run can be re-triggered with the same documents and different overrides (`modelId`, `config`, `?version`, `connection_overrides`) in a single call, without re-uploading. Returns 410 `upload_expired` when a referenced upload's reuse window has elapsed (re-upload required).",
+                    "Run id whose `input` to replay verbatim on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). File fields keep their `upload://` URIs in the stored input, and consumed uploads stay re-consumable for `UPLOAD_RETENTION_HOURS` (default 24 h) after their first consume — so a cancelled or completed run can be re-triggered with the same documents and different overrides (`modelId`, `config`, `?version`, `connection_overrides`) in a single call, without re-uploading. Returns 410 `upload_expired` when a referenced upload's reuse window has elapsed (re-upload required). **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Use `upload://` references when the input must be replayable.",
                 },
                 modelId: {
                   type: "string",
@@ -105,9 +105,18 @@ export const runsPaths = {
               schema: { $ref: "#/components/schemas/Run" },
               example: {
                 id: "run_cm1abc123def456",
+                packageId: "@acme/email-sorter",
+                userId: "usr_k7x9m2p4q1",
+                orgId: "org_r3t5w8y1z6",
+                applicationId: "app_m4n5o6p7",
                 status: "pending",
+                input: { message: "Summarize my latest emails" },
+                version_label: "1.2.0",
+                version_dirty: false,
+                version_ref: "1.2.0",
                 model_label: "Claude Sonnet 4",
                 model_source: "org",
+                started_at: "2026-01-15T10:30:00Z",
               },
             },
           },
@@ -133,7 +142,7 @@ export const runsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "Concurrent request with the same Idempotency-Key still in flight, or the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`)",
+            "Concurrent request with the same Idempotency-Key still in flight, the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference)",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
           },
@@ -194,6 +203,7 @@ export const runsPaths = {
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            Link: { $ref: "#/components/headers/Link" },
           },
           content: {
             "application/json": {
@@ -351,8 +361,17 @@ export const runsPaths = {
               },
               example: {
                 id: "run_cm1abc123",
-                packageId: "@inline/r-abc12345-...",
+                packageId: "@inline/r-abc12345-6789-4cde-8f01-23456789abcd",
+                userId: "usr_k7x9m2p4q1",
+                orgId: "org_r3t5w8y1z6",
+                applicationId: "app_m4n5o6p7",
                 status: "pending",
+                input: { docId: "doc_123" },
+                version_dirty: true,
+                version_ref: "draft",
+                model_label: "Claude Sonnet 4",
+                model_source: "org",
+                started_at: "2026-01-15T10:30:00Z",
               },
             },
           },
@@ -396,7 +415,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Validate an inline manifest without firing a run",
       description:
-        "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, config + input against manifest schemas, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { ok: true }` on success, `400` problem+json otherwise. Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.",
+        "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, config + input against manifest schemas, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json (with the accumulated validation errors) otherwise. Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -435,10 +454,17 @@ export const runsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["ok"],
-                properties: { ok: { type: "boolean", enum: [true] } },
+                required: ["valid"],
+                properties: {
+                  valid: {
+                    type: "boolean",
+                    enum: [true],
+                    description:
+                      "Always `true` on 200 — validation failures are reported as `400` problem+json with the accumulated error list.",
+                  },
+                },
               },
-              example: { ok: true },
+              example: { valid: true },
             },
           },
         },
@@ -495,6 +521,7 @@ export const runsPaths = {
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            Link: { $ref: "#/components/headers/Link" },
           },
           content: {
             "application/json": {
@@ -532,7 +559,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Get run status/result (optionally long-poll until terminal)",
       description:
-        "Get run details including status, result, input, and duration.\n\nPass `?wait=<seconds>` (or `?wait=true` for the maximum) to long-poll: the server holds the request until the run reaches a terminal status (`success`, `failed`, `timeout`, `cancelled`) or the wait elapses, then returns the current run object exactly as the plain call does. The wait is capped at **55 seconds** — deliberately below the 60 s idle timeouts that ship as defaults in common reverse proxies (nginx `proxy_read_timeout`, ALB idle timeout) so the long poll always completes with a real response instead of a proxy 504; values above the cap are clamped. A response with a non-terminal `status` simply means the wait timed out — issue the same call again to keep waiting. One long poll replaces N sleep+getRun round-trips, which is the recommended completion-wait pattern for MCP clients (the SSE stream is not reachable through the MCP server).",
+        "Get run details including status, result, input, and duration.\n\nPass `?wait=<seconds>` (or `?wait=true` for the maximum) to long-poll: the server holds the request until the run reaches a terminal status (`success`, `failed`, `timeout`, `cancelled`) or the wait elapses, then returns the current run object exactly as the plain call does. The wait is capped at **55 seconds** — deliberately below the 60 s idle timeouts that ship as defaults in common reverse proxies (nginx `proxy_read_timeout`, ALB idle timeout) so the long poll always completes with a real response instead of a proxy 504; values above the cap are clamped. A response with a non-terminal `status` simply means the wait timed out — issue the same call again to keep waiting. One long poll replaces N sleep+getRun round-trips, which is the recommended completion-wait pattern for MCP clients (the SSE stream is not reachable through the MCP server).\n\n**Concurrency bound:** each identity (user or API key) may hold at most **10** concurrent waits across all runs. Beyond the cap the request degrades to the immediate no-wait response (`wait` is ignored) — a non-terminal `status` means poll again, and capacity self-heals as earlier waits resolve.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -552,7 +579,7 @@ export const runsPaths = {
             ],
           },
           description:
-            "Hold the request until the run reaches a terminal status or this many seconds elapse (capped at 55, see operation description), then return the run object. `0`/`false`/absent = return immediately (default). Negative, fractional, or non-numeric values return 400.",
+            "Hold the request until the run reaches a terminal status or this many seconds elapse (capped at 55, see operation description), then return the run object. `0`/`false`/absent = return immediately (default). Negative, fractional, or non-numeric values return 400. At most 10 concurrent waits per identity — beyond the cap the request returns immediately as if `wait` were 0 (degrade-to-immediate, see operation description).",
         },
       ],
       responses: {
@@ -601,6 +628,24 @@ export const runsPaths = {
             },
           },
         },
+        "400": {
+          description:
+            "Invalid `wait` parameter (negative, fractional, or non-numeric value — see the `wait` parameter description)",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Bad Request",
+                status: 400,
+                detail:
+                  "Invalid 'wait' value: expected true, false, or a non-negative integer number of seconds (max 55)",
+                code: "invalid_request",
+                requestId: "req_abc123",
+              },
+            },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -612,7 +657,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Get run logs",
       description:
-        'Get persisted log entries for a run. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI\'s polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). `limit` defaults to 1000 when omitted — the response is never unbounded; when more entries follow, an RFC 5988 `Link: <…?since=<lastId>>; rel="next"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the default rather than 400 so a stale cursor never breaks a polling tail. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.',
+        'Get persisted log entries for a run, wrapped in the standard list envelope `{ object: "list", data, hasMore }`. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI\'s polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). `limit` defaults to 1000 when omitted — the response is never unbounded; when more entries follow, `hasMore` is `true` and an RFC 5988 `Link: <…?since=<lastId>>; rel="next"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the default rather than 400 so a stale cursor never breaks a polling tail. Rate-limited to 120/min per identity. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -644,22 +689,38 @@ export const runsPaths = {
       ],
       responses: {
         "200": {
-          description: "Log entries",
+          description: "Log entries (list envelope)",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
             Link: { $ref: "#/components/headers/Link" },
+            RateLimit: { $ref: "#/components/headers/RateLimit" },
+            "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
           },
           content: {
             "application/json": {
               schema: {
-                type: "array",
-                items: { $ref: "#/components/schemas/RunLog" },
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/RunLog" },
+                  },
+                  hasMore: {
+                    type: "boolean",
+                    description:
+                      'True when `?limit=` was set and more entries follow — the `Link; rel="next"` header carries the next page\'s URL.',
+                  },
+                },
               },
             },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },
@@ -685,7 +746,24 @@ export const runsPaths = {
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Run" },
-              example: { id: "run_cm1abc123def456", status: "cancelled" },
+              example: {
+                id: "run_cm1abc123def456",
+                packageId: "@acme/email-sorter",
+                userId: "usr_k7x9m2p4q1",
+                orgId: "org_r3t5w8y1z6",
+                applicationId: "app_m4n5o6p7",
+                status: "cancelled",
+                error: "Cancelled by user",
+                version_label: "1.2.0",
+                version_dirty: false,
+                version_ref: "1.2.0",
+                model_label: "Claude Sonnet 4",
+                model_source: "org",
+                cost: 0.0012,
+                started_at: "2026-01-15T10:30:00Z",
+                completed_at: "2026-01-15T10:30:45Z",
+                duration: 45000,
+              },
             },
           },
         },

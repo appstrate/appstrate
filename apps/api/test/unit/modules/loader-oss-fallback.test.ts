@@ -19,9 +19,20 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { _resetCacheForTesting } from "@appstrate/env";
 import { loadModules, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import { getModuleRegistry } from "../../../src/lib/modules/registry.ts";
 import type { ModuleInitContext } from "@appstrate/core/module";
+
+/**
+ * `getModuleRegistry` reads `MODULES` through the cached `getEnv()` snapshot,
+ * so mutations of `process.env.MODULES` must flush the cache to be visible.
+ */
+function setModulesEnv(value: string | undefined): void {
+  if (value === undefined) delete process.env.MODULES;
+  else process.env.MODULES = value;
+  _resetCacheForTesting();
+}
 
 function mockCtx(): ModuleInitContext {
   return {
@@ -40,7 +51,7 @@ describe("OSS-mode module loading", () => {
 
   it("default registry is the OSS module set — cloud is never auto-loaded", () => {
     const previous = process.env.MODULES;
-    delete process.env.MODULES;
+    setModulesEnv(undefined);
     try {
       // Defaults: built-in OSS modules + the two reference OAuth-provider
       // modules (@appstrate/module-codex for ChatGPT/Codex,
@@ -54,13 +65,13 @@ describe("OSS-mode module loading", () => {
         "@appstrate/module-claude-code",
       ]);
     } finally {
-      if (previous !== undefined) process.env.MODULES = previous;
+      setModulesEnv(previous);
     }
   });
 
   it("a MODULES list containing only known builtins resolves and does not reach for any npm package", () => {
     const previous = process.env.MODULES;
-    process.env.MODULES = "oidc,webhooks,core-providers";
+    setModulesEnv("oidc,webhooks,core-providers");
     try {
       const registry = getModuleRegistry();
       expect(registry).toEqual(["oidc", "webhooks", "core-providers"]);
@@ -71,8 +82,7 @@ describe("OSS-mode module loading", () => {
         expect(id.startsWith("@")).toBe(false);
       }
     } finally {
-      if (previous === undefined) delete process.env.MODULES;
-      else process.env.MODULES = previous;
+      setModulesEnv(previous);
     }
   });
 

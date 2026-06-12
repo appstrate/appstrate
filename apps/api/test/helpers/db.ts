@@ -65,16 +65,31 @@ const extraTables: string[] = [];
  */
 export function registerTruncationTables(tables: readonly string[]): void {
   extraTables.push(...tables);
+  cachedTruncateSql = null; // invalidate — rebuilt on next truncateAll()
+}
+
+/** Cached DO-block SQL — rebuilt lazily after registerTruncationTables(). */
+let cachedTruncateSql: string | null = null;
+
+function buildTruncateSql(): string {
+  const deletes = [...extraTables, ...CORE_TABLES]
+    .map((table) => `DELETE FROM ${table};`)
+    .join("\n");
+  return `DO $$ BEGIN\n${deletes}\nEND $$;`;
 }
 
 /**
  * Delete all rows from all tables in the test database.
  *
- * Runs inside a single transaction so every DELETE observes the same
- * snapshot. This closes the window in which a previous test's fire-and-
- * forget async work (e.g. `executeAgentInBackground` from the inline-run
- * route writing to `runs`/`run_logs`) could insert a new row between two
- * DELETEs and trigger a FK violation — a concrete source of flaky
+ * All DELETEs are wrapped in a single plpgsql `DO $$ ... $$` block — one
+ * statement, one network roundtrip (vs ~26 sequential roundtrips before),
+ * which matters since this runs in beforeEach across the whole suite.
+ * A DO block executes atomically within a single implicit transaction, so
+ * every DELETE observes the same snapshot. This closes the window in which
+ * a previous test's fire-and-forget async work (e.g.
+ * `executeAgentInBackground` from the inline-run route writing to
+ * `runs`/`run_logs`) could insert a new row between two DELETEs and
+ * trigger a FK violation — a concrete source of flaky
  * "organizations_created_by_user_id_fk" / "profiles_pkey" errors we've
  * seen when the harness is under load.
  *
@@ -86,12 +101,6 @@ export function registerTruncationTables(tables: readonly string[]): void {
  * Call this in beforeEach() for full test isolation.
  */
 export async function truncateAll(): Promise<void> {
-  await db.transaction(async (tx) => {
-    for (const table of extraTables) {
-      await tx.execute(sql.raw(`DELETE FROM ${table}`));
-    }
-    for (const table of CORE_TABLES) {
-      await tx.execute(sql.raw(`DELETE FROM ${table}`));
-    }
-  });
+  cachedTruncateSql ??= buildTruncateSql();
+  await db.execute(sql.raw(cachedTruncateSql));
 }

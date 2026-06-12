@@ -928,12 +928,12 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     return row!.id;
   }
 
-  it("returns { default: null } when none is set", async () => {
+  it("returns 204 when none is set", async () => {
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       headers: authHeaders(ctx),
     });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ default: null });
+    expect(res.status).toBe(204);
+    expect(await res.text()).toBe("");
   });
 
   it("upserts a soft default and reads it back", async () => {
@@ -951,10 +951,9 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     const get = await app.request("/api/integrations/@myorg/gmail/default", {
       headers: authHeaders(ctx),
     });
-    const body = (await get.json()) as {
-      default: { connection_id: string; enforce: boolean } | null;
-    };
-    expect(body.default?.connection_id).toBe(connId);
+    expect(get.status).toBe(200);
+    const body = (await get.json()) as { connection_id: string; enforce: boolean };
+    expect(body.connection_id).toBe(connId);
   });
 
   it("upsert replaces the existing default (one row per integration) and honors enforce", async () => {
@@ -974,9 +973,9 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     const get = await app.request("/api/integrations/@myorg/gmail/default", {
       headers: authHeaders(ctx),
     });
-    const body = (await get.json()) as { default: { connection_id: string; enforce: boolean } };
-    expect(body.default.connection_id).toBe(b);
-    expect(body.default.enforce).toBe(true);
+    const body = (await get.json()) as { connection_id: string; enforce: boolean };
+    expect(body.connection_id).toBe(b);
+    expect(body.enforce).toBe(true);
   });
 
   it("refuses a connection that is not sharedWithOrg (400)", async () => {
@@ -1004,7 +1003,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     const get = await app.request("/api/integrations/@myorg/gmail/default", {
       headers: authHeaders(ctx),
     });
-    expect((await get.json()) as { default: null }).toEqual({ default: null });
+    expect(get.status).toBe(204);
   });
 
   it("forbids a non-admin member from setting the default (403)", async () => {

@@ -183,11 +183,12 @@ export function createMcpServer(
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const reg = registry.get(request.params.name);
     if (!reg) {
-      // MethodNotFound is the closest standard code for "this method
-      // exists, but the named tool does not". Per MCP convention, callers
-      // distinguish unknown-tool from unknown-method via the error message
-      // (the SDK does not reserve a separate code).
-      throw new McpError(ErrorCode.MethodNotFound, `Tool not found: ${request.params.name}`);
+      // Per the MCP spec, an unknown tool in `tools/call` is a protocol
+      // error -32602 (Invalid params) — the spec's canonical example is
+      // `Unknown tool: invalid_tool_name`. The method (`tools/call`)
+      // itself exists; it is the `name` parameter that is invalid, so
+      // MethodNotFound (-32601) would mislabel it.
+      throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${request.params.name}`);
     }
     return reg.handler(request.params.arguments ?? {}, extra);
   });

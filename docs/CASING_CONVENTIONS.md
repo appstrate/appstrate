@@ -8,17 +8,18 @@ This document captures every casing decision made during the AFPS snake_case + D
 
 ## TL;DR
 
-| Surface                                                                  | Convention                                    | Example                                            |
-| ------------------------------------------------------------------------ | --------------------------------------------- | -------------------------------------------------- |
-| Wire/JSON (HTTP responses, request bodies, AFPS manifests, OpenAPI)      | **snake_case**                                | `display_name`, `running_runs`, `cron_expression`  |
-| SQL columns                                                              | **snake_case**                                | `user_id`, `created_at`, `display_name`            |
-| Drizzle TS schema field names                                            | **camelCase** TS / **snake_case** SQL aliases | `userId: text("user_id")`                          |
-| TS internal (vars, function args, React props, Zustand state)            | **camelCase**                                 | `const userId = ...`                               |
-| Universal DB-convention fields (carve-out — stay camelCase EVERYWHERE)   | **camelCase**                                 | `id`, `createdAt`, `userId`, `packageId`           |
-| Better Auth tables + plugin tables (carve-out — HARD blocker)            | **camelCase** TS / **snake_case** SQL         | `user.emailVerified`                               |
-| Module hook contracts, logger fields, CloudEvents, Webhooks, BullMQ jobs | **camelCase**                                 | `logger.info({ runId })`                           |
-| JSONB internal `token_usage`                                             | **snake_case**                                | `{ input_tokens, output_tokens }` (SDK convention) |
-| JSONB internal `runs.metadata.creditsUsed`                               | **camelCase**                                 | (cloud's afterRun hook contract)                   |
+| Surface                                                                  | Convention                                    | Example                                                     |
+| ------------------------------------------------------------------------ | --------------------------------------------- | ----------------------------------------------------------- |
+| Wire/JSON (HTTP responses, request bodies, AFPS manifests, OpenAPI)      | **snake_case**                                | `display_name`, `running_runs`, `cron_expression`           |
+| Query-string parameters (same rule + carve-outs as wire JSON)            | **snake_case**                                | `actor_type`, `since`; carve-outs: `runId`, `startingAfter` |
+| SQL columns                                                              | **snake_case**                                | `user_id`, `created_at`, `display_name`                     |
+| Drizzle TS schema field names                                            | **camelCase** TS / **snake_case** SQL aliases | `userId: text("user_id")`                                   |
+| TS internal (vars, function args, React props, Zustand state)            | **camelCase**                                 | `const userId = ...`                                        |
+| Universal DB-convention fields (carve-out — stay camelCase EVERYWHERE)   | **camelCase**                                 | `id`, `createdAt`, `userId`, `packageId`                    |
+| Better Auth tables + plugin tables (carve-out — HARD blocker)            | **camelCase** TS / **snake_case** SQL         | `user.emailVerified`                                        |
+| Module hook contracts, logger fields, CloudEvents, Webhooks, BullMQ jobs | **camelCase**                                 | `logger.info({ runId })`                                    |
+| JSONB internal `token_usage`                                             | **snake_case**                                | `{ input_tokens, output_tokens }` (SDK convention)          |
+| JSONB internal `runs.metadata.creditsUsed`                               | **camelCase**                                 | (cloud's afterRun hook contract)                            |
 
 When in doubt: **wire = snake_case, internal = camelCase**, with explicit carve-outs below.
 
@@ -324,6 +325,41 @@ Treat any new management-CRUD route on a BA plugin table the same way (mirror th
 
 ---
 
+## Query-string parameters
+
+Query params are wire surface. They follow the **same rule as wire JSON (Zone 1): snake_case by default**, with the same carve-outs applied by literal name:
+
+- **Universal DB-convention names** (Carve-out 4b) stay camelCase — `id`-style references and `*At` timestamps from the exact Carve-out 4b list. In-tree examples: `?runId=`, `?orgId=`, `?applicationId=`.
+- **Pagination-envelope params** stay camelCase, matching the Carve-out 4n envelope fields: the cursor params `startingAfter` / `endingBefore` pair with the camelCase `hasMore` body field — `GET /api/end-users` (`routes/end-users.ts`).
+- **Headless-platform surface params** mirror their Carve-out 4n wire fields: `?externalId=` on `GET /api/end-users` matches the camelCase `externalId` DTO field.
+
+Conforming snake_case examples: `?actor_type=&actor_id=` on the persistence routes (`routes/agents.ts:360`); OAuth 2.0 wire params `?client_id=`, `?post_logout_redirect_uri=` (RFC 6749, Zone 1). Single bare tokens (`limit`, `kind`, `status`, `q`, `since`) are trivially conforming.
+
+### Legacy exceptions (closed list — converge at the next API-version date)
+
+Four camelCase domain query params predate this rule. They are **exceptions, not precedent** — this list MUST NOT grow. Rename them to snake_case behind the next dated API version (`Appstrate-Version`):
+
+| Param                  | Route                                           | Target name                                              |
+| ---------------------- | ----------------------------------------------- | -------------------------------------------------------- |
+| `startDate`            | global runs feed (`routes/notifications.ts:92`) | `start_date` (domain timestamp — Carve-out 4b flips)     |
+| `endDate`              | global runs feed (`routes/notifications.ts:93`) | `end_date`                                               |
+| `agentPackageId`       | `/me/integration-pins` (`routes/me.ts:178,218`) | `agent_package_id` (already the wire-DTO spelling)       |
+| `integrationPackageId` | `/me/integration-pins` (`routes/me.ts:219`)     | `integration_package_id` (already the wire-DTO spelling) |
+
+A new camelCase domain query param is a bug, same as a camelCase domain wire field.
+
+### Pagination styles (which one to use)
+
+Three pagination idioms exist; choose by collection shape, never mix styles on one endpoint. All three emit RFC 5988 `Link` headers via `apps/api/src/lib/pagination-link.ts`:
+
+| Style                 | Params                                            | Use for                                                           | Example                                                               |
+| --------------------- | ------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Cursor (Stripe-style) | `startingAfter` / `endingBefore` + `hasMore` body | Unbounded user-facing collections                                 | `GET /api/end-users` (`routes/end-users.ts`)                          |
+| Offset                | `limit` + `offset`                                | Bounded admin lists                                               | `GET /api/runs` (`routes/runs.ts:204`); also notifications, schedules |
+| Sequence cursor       | `since` (monotonic id)                            | Append-only log streams ONLY — doubles as the polling-tail cursor | `GET /api/runs/{id}/logs` (`routes/runs.ts:299`)                      |
+
+---
+
 ## Package identifiers in URL paths
 
 A package (`@scope/name`) appears in API paths in **two shapes**, by an explicit rule:
@@ -417,16 +453,17 @@ Rule of thumb: a field qualifies for the camelCase carve-out only if its literal
 4. **Is it a wire DTO field?**
    - On the universal DB carve-out list above? → camelCase
    - Otherwise → snake_case
-5. **Is it an OpenAPI component property?** → match the wire DTO (snake_case unless carve-out).
-6. **Is it on a Better Auth-managed table?** → camelCase (TS), snake_case (SQL alias).
-7. **Is it on a `ModelProviderDefinition` or provider DTO?** → camelCase (internal TS contract).
-8. **Is it on a module hook params interface?** → camelCase (TS function-arg convention).
-9. **Is it an internal TS variable, function arg, React prop, hook param?** → camelCase.
-10. **Is it a logger field, BullMQ job key, CloudEvent payload, Webhook delivery payload?** → camelCase.
-11. **Is it the interior of `runs.token_usage` JSONB?** → snake_case (SDK convention).
-12. **Is it `runs.metadata.creditsUsed`?** → camelCase (cloud hook contract).
-13. **Is it an audit log JSONB `after` payload?** → camelCase explicit keys (not raw snake_case body).
-14. **Otherwise** → wire = snake_case, internal = camelCase. When ambiguous, **wire is the safer default for any external-facing surface**.
+5. **Is it a query-string parameter?** → same rule as the wire DTO: snake_case unless its literal name is on the universal DB carve-out list or it's a pagination param (see "Query-string parameters").
+6. **Is it an OpenAPI component property?** → match the wire DTO (snake_case unless carve-out).
+7. **Is it on a Better Auth-managed table?** → camelCase (TS), snake_case (SQL alias).
+8. **Is it on a `ModelProviderDefinition` or provider DTO?** → camelCase (internal TS contract).
+9. **Is it on a module hook params interface?** → camelCase (TS function-arg convention).
+10. **Is it an internal TS variable, function arg, React prop, hook param?** → camelCase.
+11. **Is it a logger field, BullMQ job key, CloudEvent payload, Webhook delivery payload?** → camelCase.
+12. **Is it the interior of `runs.token_usage` JSONB?** → snake_case (SDK convention).
+13. **Is it `runs.metadata.creditsUsed`?** → camelCase (cloud hook contract).
+14. **Is it an audit log JSONB `after` payload?** → camelCase explicit keys (not raw snake_case body).
+15. **Otherwise** → wire = snake_case, internal = camelCase. When ambiguous, **wire is the safer default for any external-facing surface**.
 
 ---
 

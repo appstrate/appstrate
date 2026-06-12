@@ -36,15 +36,25 @@ type PiToolContent =
 
 interface PiToolResult {
   content: PiToolContent[];
-  details: undefined;
+  details: unknown;
 }
 
 /**
- * Adapt an MCP `CallToolResult` into Pi's `AgentToolResult.content`
- * shape. Pi accepts only `text` and `image` blocks; MCP can also return
+ * Adapt an MCP `CallToolResult` into Pi's `AgentToolResult` shape. Pi
+ * accepts only `text` and `image` content blocks; MCP can also return
  * `resource_link` and inline `resource` blocks, which we render as
  * text pointers (`[resource <uri>]`) so the LLM still sees the URI and
  * can fetch the resource via `resources/read` if it cares.
+ *
+ * Structured data: the MCP `structuredContent` is forwarded as Pi's
+ * `details`. Be aware of what that does and does not buy — per the Pi
+ * SDK, `AgentToolResult.details` is "arbitrary structured details for
+ * logs or UI rendering"; the pi-ai providers serialize ONLY the
+ * text/image `content` blocks into the LLM request, so nothing placed
+ * in `details` ever reaches the model. Any data the model must see
+ * (e.g. api_call's upstream status) must be rendered into a text block
+ * by the caller — that is why the api_call response shaper keeps its
+ * `[api_call status=…]` prefix and JSON-descriptor text block.
  */
 export function callToolResultToPi(result: CallToolResult): PiToolResult {
   const content: PiToolContent[] = result.content.map((c) => {
@@ -68,7 +78,7 @@ export function callToolResultToPi(result: CallToolResult): PiToolResult {
       text: `[unknown content type: ${(c as { type: string }).type}]`,
     };
   });
-  return { content, details: undefined };
+  return { content, details: result.structuredContent };
 }
 
 /**

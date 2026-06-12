@@ -4,25 +4,38 @@
  * Unit tests for streaming support in credential-proxy.
  *
  * Coverage:
- *  - Streaming request: 50 MB upload forwarded byte-perfect with Content-Length
- *  - Streaming request 100 MB+1 byte → 413 guard before bytes hit upstream
- *  - Streaming response: 50 MB download piped byte-perfect to client
- *  - Streaming response 100 MB+1 byte → transform stream errors mid-pipe
+ *  - Streaming request: multi-MB upload forwarded byte-perfect with Content-Length
+ *  - Streaming request above the declared-length guard → 413 before bytes hit upstream
+ *  - Streaming response: multi-MB download piped byte-perfect to client
+ *  - Streaming response cap+1 byte → transform stream errors mid-pipe
  *  - 401 on streaming body in proxyCall → authRefreshed set, no retry
  *  - 401 on buffered body in proxyCall → authRefreshed NOT set
- *  - Streaming upload no Content-Length, body > 100 MB → mid-stream reject + log
- *  - Streaming response > 100 MB → log emitted with context
+ *  - Streaming upload no Content-Length, body > cap → mid-stream reject + log
+ *  - Streaming response > cap → log emitted with context
  *  - Slow-drip response past wall-clock timeout → aborted + log
  *
  * These tests exercise the streaming helpers and the proxyCall body-handling
  * logic in isolation, without a real DB (route + integration tests cover full
  * end-to-end with DB — see credential-proxy-injection.test.ts).
+ *
+ * Sizes: `capStreamingBody` takes the cap as a parameter, so the
+ * exceed/exact/under semantics are identical at any size. The cap tests run
+ * against a 1 MiB cap and the byte-perfect piping tests use an 8 MiB payload
+ * (still ~128 × 64 KiB chunks) instead of the production 100 MB — generating
+ * and hashing hundreds of MB per run bought no extra coverage. The 100 MB
+ * production constant is still asserted by the declared-length guard tests.
  */
 
 import { describe, it, expect } from "bun:test";
 
 // ─── Constants mirrored from credential-proxy route ──────────────────────────
 const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
+
+// ─── Test sizes (see module doc) ─────────────────────────────────────────────
+/** Cap injected into the cap-behavior tests — many chunks, no 100 MB entropy. */
+const TEST_CAP = 1 * 1024 * 1024; // 1 MiB
+/** Payload for the byte-perfect piping tests (multi-chunk, hash-verified). */
+const PIPE_PAYLOAD_SIZE = 8 * 1024 * 1024; // 8 MiB
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
 
@@ -208,9 +221,9 @@ async function withStreamServer(
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("credential-proxy streaming — capStreamingResponse (Phase 3)", () => {
-  // ── 3. Streaming response: 50 MB piped byte-perfect ──────────────────────
-  it("pipes a 50 MB streaming response byte-perfect", async () => {
-    const payload = deterministicBytes(50 * 1024 * 1024, 0xdeadbeef);
+  // ── 3. Streaming response: multi-MB piped byte-perfect ───────────────────
+  it("pipes a multi-MB streaming response byte-perfect", async () => {
+    const payload = deterministicBytes(PIPE_PAYLOAD_SIZE, 0xdeadbeef);
     const expectedHash = sha256Hex(payload);
     const source = bytesToStream(payload);
 
@@ -221,13 +234,13 @@ describe("credential-proxy streaming — capStreamingResponse (Phase 3)", () => 
     expect(sha256Hex(received)).toBe(expectedHash);
   });
 
-  // ── 4. Streaming response: 100 MB+1 → transform stream errors ────────────
-  it("throws mid-pipe when streaming response exceeds MAX_STREAMED_BODY_SIZE", async () => {
-    const oversize = MAX_STREAMED_BODY_SIZE + 1;
+  // ── 4. Streaming response: cap+1 byte → transform stream errors ──────────
+  it("throws mid-pipe when streaming response exceeds the size cap", async () => {
+    const oversize = TEST_CAP + 1;
     const payload = deterministicBytes(oversize, 0xcafebabe);
     const source = bytesToStream(payload);
 
-    const capped = capStreamingResponse(source, MAX_STREAMED_BODY_SIZE);
+    const capped = capStreamingResponse(source, TEST_CAP);
     let threw = false;
     try {
       await drainStream(capped);
@@ -239,12 +252,12 @@ describe("credential-proxy streaming — capStreamingResponse (Phase 3)", () => 
   });
 
   // ── Edge: exactly at limit → passes through without error ────────────────
-  it("passes exactly MAX_STREAMED_BODY_SIZE bytes without error", async () => {
-    const payload = new Uint8Array(MAX_STREAMED_BODY_SIZE).fill(0x42);
+  it("passes exactly cap-many bytes without error", async () => {
+    const payload = new Uint8Array(TEST_CAP).fill(0x42);
     const source = bytesToStream(payload);
-    const capped = capStreamingResponse(source, MAX_STREAMED_BODY_SIZE);
+    const capped = capStreamingResponse(source, TEST_CAP);
     const received = await drainStream(capped);
-    expect(received.byteLength).toBe(MAX_STREAMED_BODY_SIZE);
+    expect(received.byteLength).toBe(TEST_CAP);
   });
 });
 
@@ -267,9 +280,9 @@ describe("credential-proxy streaming — request size guard (Phase 3)", () => {
 });
 
 describe("credential-proxy streaming — duplex forwarding (Phase 3)", () => {
-  // ── 1. 50 MB streaming upload forwarded byte-perfect ────────────────────
-  it("forwards a 50 MB stream body byte-perfect with duplex: half via Bun.serve", async () => {
-    const payload = deterministicBytes(50 * 1024 * 1024, 0x1234abcd);
+  // ── 1. Multi-MB streaming upload forwarded byte-perfect ─────────────────
+  it("forwards a multi-MB stream body byte-perfect with duplex: half via Bun.serve", async () => {
+    const payload = deterministicBytes(PIPE_PAYLOAD_SIZE, 0x1234abcd);
     const expectedHash = sha256Hex(payload);
 
     let receivedHash = "";
@@ -307,9 +320,9 @@ describe("credential-proxy streaming — duplex forwarding (Phase 3)", () => {
     expect(receivedHash).toBe(expectedHash);
   });
 
-  // ── 3. Streaming response: 50 MB piped via in-process server ─────────────
-  it("receives a 50 MB streaming response byte-perfect from Bun.serve", async () => {
-    const payload = deterministicBytes(50 * 1024 * 1024, 0xfa_ce_b0_0c);
+  // ── 3. Streaming response: multi-MB piped via in-process server ──────────
+  it("receives a multi-MB streaming response byte-perfect from Bun.serve", async () => {
+    const payload = deterministicBytes(PIPE_PAYLOAD_SIZE, 0xfa_ce_b0_0c);
     const expectedHash = sha256Hex(payload);
 
     await withStreamServer(
@@ -344,10 +357,10 @@ describe("credential-proxy streaming — duplex forwarding (Phase 3)", () => {
 // ─── Upload cap fires without Content-Length ────────────────────────────────
 
 describe("credential-proxy streaming — upload cap no Content-Length", () => {
-  // Streaming upload with no Content-Length header and body > 100 MB:
+  // Streaming upload with no Content-Length header and body > cap:
   // the capStreamingBody transform must reject mid-stream and emit a warn log.
   it("rejects mid-stream and emits warn log when upload exceeds cap (no CL)", async () => {
-    const oversize = MAX_STREAMED_BODY_SIZE + 1;
+    const oversize = TEST_CAP + 1;
     const payload = deterministicBytes(oversize, 0xabc123);
 
     const warnCalls: Array<{ msg: string; ctx: Record<string, unknown> }> = [];
@@ -360,15 +373,9 @@ describe("credential-proxy streaming — upload cap no Content-Length", () => {
     };
 
     const source = bytesToStream(payload);
-    const capped = capStreamingBody(
-      source,
-      MAX_STREAMED_BODY_SIZE,
-      logCtx,
-      undefined,
-      (msg, ctx) => {
-        warnCalls.push({ msg, ctx });
-      },
-    );
+    const capped = capStreamingBody(source, TEST_CAP, logCtx, undefined, (msg, ctx) => {
+      warnCalls.push({ msg, ctx });
+    });
 
     let threw = false;
     try {
@@ -386,15 +393,15 @@ describe("credential-proxy streaming — upload cap no Content-Length", () => {
     expect(warn.ctx.orgId).toBe("org-c1");
     expect(warn.ctx.providerId).toBe("p-c1");
     expect(warn.ctx.direction).toBe("upload");
-    expect(warn.ctx.bytesReceived as number).toBeGreaterThan(MAX_STREAMED_BODY_SIZE);
+    expect(warn.ctx.bytesReceived as number).toBeGreaterThan(TEST_CAP);
   });
 });
 
 // ─── Response cap logs context ──────────────────────────────────────────────
 
 describe("credential-proxy streaming — response cap emits warn log", () => {
-  it("emits warn log with context when response exceeds MAX_STREAMED_BODY_SIZE", async () => {
-    const oversize = MAX_STREAMED_BODY_SIZE + 1;
+  it("emits warn log with context when response exceeds the size cap", async () => {
+    const oversize = TEST_CAP + 1;
     const payload = deterministicBytes(oversize, 0xdeadc0de);
 
     const warnCalls: Array<{ msg: string; ctx: Record<string, unknown> }> = [];
@@ -407,15 +414,9 @@ describe("credential-proxy streaming — response cap emits warn log", () => {
     };
 
     const source = bytesToStream(payload);
-    const capped = capStreamingBody(
-      source,
-      MAX_STREAMED_BODY_SIZE,
-      logCtx,
-      undefined,
-      (msg, ctx) => {
-        warnCalls.push({ msg, ctx });
-      },
-    );
+    const capped = capStreamingBody(source, TEST_CAP, logCtx, undefined, (msg, ctx) => {
+      warnCalls.push({ msg, ctx });
+    });
 
     let threw = false;
     try {
@@ -431,7 +432,7 @@ describe("credential-proxy streaming — response cap emits warn log", () => {
     expect(warn.ctx.orgId).toBe("org-c2");
     expect(warn.ctx.providerId).toBe("p-c2");
     expect(warn.ctx.direction).toBe("download");
-    expect(warn.ctx.bytesReceived as number).toBeGreaterThan(MAX_STREAMED_BODY_SIZE);
+    expect(warn.ctx.bytesReceived as number).toBeGreaterThan(TEST_CAP);
   });
 });
 

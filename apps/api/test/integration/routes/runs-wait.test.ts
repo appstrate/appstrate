@@ -9,9 +9,10 @@
  *
  * The transition test exercises whichever wakeup path is live in this
  * process: the `run_update` PG NOTIFY fan-out when `initRealtime()` ran
- * (we call it explicitly, mirroring realtime-sse.test.ts), with the 2 s
- * fallback DB poll as a backstop — both complete well inside the asserted
- * bound.
+ * (we call it explicitly, mirroring realtime-sse.test.ts), with the
+ * fallback DB poll as a backstop (50 ms in tests via
+ * RUN_WAIT_POLL_INTERVAL_MS in the preload; 2 s in production) — both
+ * complete well inside the asserted bound.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -23,6 +24,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { initRealtime } from "../../../src/services/realtime.ts";
+import { activePollLoopCount } from "../../../src/services/run-wait.ts";
 
 const app = getTestApp();
 
@@ -125,10 +127,20 @@ describe("GET /api/runs/:id?wait — long-poll", () => {
       headers: authHeaders(ctx),
     });
 
+    // Wait until the long poll is actually HOLDING (its shared fallback
+    // poll loop is registered) before flipping the run — deterministic
+    // replacement for a fixed sleep. The run was non-terminal when the
+    // request started, so a `success` response below proves the request
+    // held across the transition instead of answering early.
+    const attachDeadline = Date.now() + 2_000;
+    while (activePollLoopCount() === 0) {
+      if (Date.now() > attachDeadline) throw new Error("long-poll waiter never attached");
+      await Bun.sleep(10);
+    }
+
     // Flip the run to terminal while the long poll is in flight. The
     // UPDATE fires the runs_notify_trigger → run_update NOTIFY → wait
-    // resolves (fallback: the 2 s DB re-check).
-    await Bun.sleep(200);
+    // resolves (fallback: the DB re-check — 50 ms in tests, see preload).
     await db
       .update(runs)
       .set({ status: "success", completedAt: new Date() })
@@ -140,10 +152,11 @@ describe("GET /api/runs/:id?wait — long-poll", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { id: string; status: string };
     expect(body.id).toBe(run.id);
+    // The hold-then-release proof: status is the value set AFTER the
+    // request attached, not the `running` it would have answered with had
+    // it returned immediately.
     expect(body.status).toBe("success");
-    // Returned on the transition, not the 30 s budget. Bound generous
-    // enough for the 2 s fallback-poll path on slow CI.
-    expect(elapsed).toBeGreaterThanOrEqual(200);
+    // Returned on the transition, not the 30 s budget.
     expect(elapsed).toBeLessThan(10_000);
   }, 15_000);
 

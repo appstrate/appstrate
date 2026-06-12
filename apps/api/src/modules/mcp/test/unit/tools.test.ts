@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { getCatalog, resetCatalog, type CatalogOperation } from "../../catalog.ts";
@@ -100,12 +101,29 @@ describe("describe_operation", () => {
     expect(body.path).toBe(op.pathTemplate);
   });
 
-  it("errors on an unknown operationId", async () => {
+  it("throws InvalidParams (-32602) on an unknown operationId — protocol error, not tool error", async () => {
     const { byName } = makeTools(["mcp:read"]);
-    const res = await byName
-      .get("describe_operation")!
-      .handler({ operation_id: "doesNotExist" }, noExtra);
-    expect(res.isError).toBe(true);
+    let caught: unknown;
+    try {
+      await byName.get("describe_operation")!.handler({ operation_id: "doesNotExist" }, noExtra);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(McpError);
+    expect((caught as McpError).code).toBe(ErrorCode.InvalidParams);
+    expect((caught as McpError).message).toContain("doesNotExist");
+  });
+
+  it("throws InvalidParams (-32602) when operation_id is missing", async () => {
+    const { byName } = makeTools(["mcp:read"]);
+    let caught: unknown;
+    try {
+      await byName.get("describe_operation")!.handler({}, noExtra);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(McpError);
+    expect((caught as McpError).code).toBe(ErrorCode.InvalidParams);
   });
 });
 
@@ -271,12 +289,44 @@ describe("invoke_operation", () => {
   });
 
   it("errors when required path params are missing", async () => {
+    // Deliberately an `isError` TOOL result, not a protocol error: which
+    // path params an operation needs is per-operation knowledge the model
+    // recovers via describe_operation — keep the failure model-visible.
     const op = firstOp((o) => o.pathParams.length > 0);
     const { byName, calls } = makeTools(["mcp:invoke"]);
     const res = await byName
       .get("invoke_operation")!
       .handler({ operation_id: op.operationId }, noExtra);
     expect(res.isError).toBe(true);
+    expect(calls.length).toBe(0);
+  });
+
+  it("throws InvalidParams (-32602) when operation_id is missing — protocol error", async () => {
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    let caught: unknown;
+    try {
+      await byName.get("invoke_operation")!.handler({}, noExtra);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(McpError);
+    expect((caught as McpError).code).toBe(ErrorCode.InvalidParams);
+    expect(calls.length).toBe(0);
+  });
+
+  it("throws InvalidParams (-32602) on an unknown operationId — protocol error", async () => {
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    let caught: unknown;
+    try {
+      await byName
+        .get("invoke_operation")!
+        .handler({ operation_id: "doesNotExistAnywhere" }, noExtra);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(McpError);
+    expect((caught as McpError).code).toBe(ErrorCode.InvalidParams);
+    expect((caught as McpError).message).toContain("doesNotExistAnywhere");
     expect(calls.length).toBe(0);
   });
 

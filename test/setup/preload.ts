@@ -77,6 +77,11 @@ process.env.AUTH_FAST_TEST_HASH = "1";
 // that wait on a non-terminal event flush would otherwise pay up to 5s each;
 // 50ms keeps ordering semantics intact while removing the dead wait.
 process.env.REMOTE_RUN_BUFFER_FLUSH_MS = process.env.REMOTE_RUN_BUFFER_FLUSH_MS ?? "50";
+// Shrink the run-wait fallback DB poll cadence (prod default 2s). Long-poll
+// tests that flip a run mid-wait would otherwise pay up to 2s per wakeup when
+// the NOTIFY path doesn't deliver; 50ms keeps the hold-then-release semantics
+// intact while removing the dead wait.
+process.env.RUN_WAIT_POLL_INTERVAL_MS = process.env.RUN_WAIT_POLL_INTERVAL_MS ?? "50";
 
 if (TIER0) {
   // tier0: clear DATABASE_URL / REDIS_URL / S3_* (Bun auto-loads them from the
