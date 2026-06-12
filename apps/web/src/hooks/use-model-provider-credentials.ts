@@ -99,6 +99,32 @@ export function useTestModelProviderCredential() {
   });
 }
 
+export interface RefreshModelsResponse {
+  outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates";
+  probed_count: number;
+  available_model_ids: string[] | null;
+  models_verified_at: string | null;
+}
+
+/**
+ * Empirical model discovery — probes which models the credential's
+ * account/plan actually serves and persists them server-side.
+ * Invalidates both the credentials list (badge) and the registry
+ * (widened foreign-catalog model picker).
+ */
+export function useRefreshCredentialModels() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<RefreshModelsResponse>(`/model-provider-credentials/${id}/refresh-models`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["model-provider-credentials"] });
+    },
+  });
+}
+
 export function deduplicateLabel(
   label: string,
   existingKeys: ModelProviderCredentialInfo[],

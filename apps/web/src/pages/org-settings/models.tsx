@@ -22,6 +22,7 @@ import {
   useUpdateModelProviderCredential,
   useDeleteModelProviderCredential,
   useTestModelProviderCredential,
+  useRefreshCredentialModels,
   useProvidersRegistry,
   deduplicateLabel,
 } from "../../hooks/use-model-provider-credentials";
@@ -248,7 +249,14 @@ function CredentialsSection({
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModelProviderCredential();
   const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
+  const refreshModels = useRefreshCredentialModels();
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const { data: registry } = useProvidersRegistry();
+
+  const handleRefreshModels = (id: string) => {
+    setRefreshingId(id);
+    refreshModels.mutate(id, { onSettled: () => setRefreshingId(null) });
+  };
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
@@ -307,6 +315,16 @@ function CredentialsSection({
                         <span>{t("credentials.oauth.connectedAs", { email: pk.oauth_email })}</span>
                       </>
                     )}
+                    {isOauth && pk.available_model_ids && pk.available_model_ids.length > 0 && (
+                      <>
+                        <span>&middot;</span>
+                        <span>
+                          {t("credentials.oauth.verifiedModels", {
+                            count: pk.available_model_ids.length,
+                          })}
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -339,6 +357,20 @@ function CredentialsSection({
                   )}
                   {isOauth && (
                     <>
+                      {!pk.needs_reconnection && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleRefreshModels(pk.id)}
+                          disabled={refreshingId === pk.id}
+                        >
+                          {refreshingId === pk.id ? (
+                            <Spinner />
+                          ) : (
+                            t("credentials.oauth.refreshModels")
+                          )}
+                        </Button>
+                      )}
                       {pk.needs_reconnection && pk.providerId && (
                         <Button
                           variant="outline"

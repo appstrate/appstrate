@@ -24,6 +24,7 @@ import {
   updateModelProviderCredential,
 } from "../services/model-providers/credentials.ts";
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
+import { discoverAvailableModels } from "../services/model-providers/model-discovery.ts";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ProviderRegistryEntry, ProviderRegistryModelEntry } from "@appstrate/shared-types";
@@ -98,24 +99,34 @@ export const testInlineSchema = z.object({
  *     google-ai/cerebras/groq/xai): expose every catalog entry; ids in
  *     `featuredModels` get `featured: true`.
  *   - **Foreign catalog** (`catalogProviderId` set — codex → openai,
- *     claude-code → anthropic): expose ONLY `featuredModels`, all
- *     marked `featured: true`. The underlying catalog has more models
- *     than the OAuth product exposes.
+ *     claude-code → anthropic): expose `featuredModels` (all marked
+ *     `featured: true`) plus any model the org's discovery probes have
+ *     verified against a credential of this provider
+ *     (`available_model_ids`, union across the org's credentials). The
+ *     underlying catalog has more models than the OAuth product exposes,
+ *     so the static list is the floor and the probe widens it. The
+ *     per-credential seeding gate (`routes/models.ts`) re-checks against
+ *     the exact credential, so the union here can't over-grant.
  *   - **No catalog** (`featuredModels` empty — openrouter live-search,
  *     openai-compatible Custom): empty list. The picker falls back to
  *     "Custom" or its own live-search UI.
  */
-function serializeProviderModels(p: ModelProviderDefinition): ProviderRegistryModelEntry[] {
+function serializeProviderModels(
+  p: ModelProviderDefinition,
+  orgVerifiedIds?: ReadonlySet<string>,
+): ProviderRegistryModelEntry[] {
   const catalogKey = p.catalogProviderId ?? p.providerId;
   const catalog = listCatalogModels(catalogKey);
   if (catalog.length === 0) return [];
 
   const featuredSet = new Set(p.featuredModels);
 
-  // Foreign-catalog providers expose featuredModels only (the underlying
-  // catalog is wider than the OAuth surface). Own-catalog providers
-  // expose everything.
-  const surfaced = p.catalogProviderId ? catalog.filter((m) => featuredSet.has(m.id)) : catalog;
+  // Foreign-catalog providers expose featuredModels ∪ org-verified ids
+  // (the underlying catalog is wider than the OAuth surface). Own-catalog
+  // providers expose everything.
+  const surfaced = p.catalogProviderId
+    ? catalog.filter((m) => featuredSet.has(m.id) || orgVerifiedIds?.has(m.id))
+    : catalog;
 
   return surfaced.map((m) => ({ ...m, featured: featuredSet.has(m.id) }));
 }
@@ -147,12 +158,27 @@ export function createModelProviderCredentialsRouter() {
     "models",
   ] as const;
 
-  router.get("/registry", requirePermission("model-provider-credentials", "read"), (c) => {
+  router.get("/registry", requirePermission("model-provider-credentials", "read"), async (c) => {
+    const orgId = c.get("orgId");
     const fields = parseFieldSelection(c, REGISTRY_FIELDS);
     const pagination = parseListPagination(c, { defaultLimit: 100 });
     // Only pay the catalog serialization cost when `models` is actually
     // requested (absent `fields` = full shape = include it).
     const includeModels = fields === null || fields.has("models");
+
+    // Discovery-verified ids per provider, unioned across the org's
+    // credentials — widens foreign-catalog (subscription OAuth) model
+    // lists beyond the static featured floor. Only fetched when the
+    // heavy `models` field is being serialized anyway.
+    const verifiedByProvider = new Map<string, Set<string>>();
+    if (includeModels) {
+      for (const cred of await listOrgModelProviderCredentials(orgId)) {
+        if (!cred.providerId || !cred.available_model_ids?.length) continue;
+        const set = verifiedByProvider.get(cred.providerId) ?? new Set<string>();
+        for (const id of cred.available_model_ids) set.add(id);
+        verifiedByProvider.set(cred.providerId, set);
+      }
+    }
 
     const all: ProviderRegistryEntry[] = listModelProviders().map((p) => ({
       providerId: p.providerId,
@@ -165,7 +191,7 @@ export function createModelProviderCredentialsRouter() {
       baseUrlOverridable: p.baseUrlOverridable,
       authMode: p.authMode,
       featured: p.featured ?? false,
-      models: includeModels ? serializeProviderModels(p) : [],
+      models: includeModels ? serializeProviderModels(p, verifiedByProvider.get(p.providerId)) : [],
     }));
 
     const { page, total, hasMore } = paginate(all, pagination);
@@ -297,6 +323,42 @@ export function createModelProviderCredentialsRouter() {
           id,
           error: getErrorMessage(err),
         });
+        throw internalError();
+      }
+    },
+  );
+
+  // POST /api/model-provider-credentials/:id/refresh-models — empirical
+  // model discovery. Probes every discovery candidate against the live
+  // credential (1-token requests) and persists the ids that answered as
+  // `available_model_ids`. Synchronous — the caller gets the verified
+  // list back. Rate-limited hard: each call burns a handful of requests
+  // on the user's own quota.
+  router.post(
+    "/:id/refresh-models",
+    rateLimit(2),
+    requirePermission("model-provider-credentials", "write"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const id = c.req.param("id")!;
+      if (isSystemModelProviderKey(id)) {
+        throw systemEntityForbidden("model provider credential", id);
+      }
+      try {
+        const result = await discoverAvailableModels(orgId, id);
+        if (result.outcome === "credential_not_found") {
+          throw notFound("Model provider credential not found");
+        }
+        const credential = await getOrgModelProviderCredential(orgId, id);
+        return c.json({
+          outcome: result.outcome,
+          probed_count: result.probedCount,
+          available_model_ids: credential?.available_model_ids ?? null,
+          models_verified_at: credential?.models_verified_at ?? null,
+        });
+      } catch (err) {
+        if (err instanceof ApiError) throw err;
+        logger.error("Model discovery failed", { id, error: getErrorMessage(err) });
         throw internalError();
       }
     },

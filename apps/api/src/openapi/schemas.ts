@@ -823,6 +823,17 @@ export const schemas = {
       },
       oauth_email: { type: ["string", "null"] },
       needs_reconnection: { type: "boolean" },
+      available_model_ids: {
+        type: ["array", "null"],
+        items: { type: "string" },
+        description:
+          "Model ids empirically verified against this credential by the discovery probe (POST /:id/refresh-models, also fired after OAuth import). Null = never probed — clients fall back to the provider's static featured list. Per-credential because availability depends on the account's plan.",
+      },
+      models_verified_at: {
+        type: ["string", "null"],
+        format: "date-time",
+        description: "Timestamp of the last successful discovery probe.",
+      },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -883,6 +894,11 @@ export const schemas = {
       latency: { type: "number", description: "Response time in milliseconds" },
       error: { type: "string", description: "Error code if test failed" },
       message: { type: "string", description: "Human-readable error message" },
+      status: {
+        type: "integer",
+        description:
+          "Upstream HTTP status when the provider answered at all — distinguishes 429 (retry later) from 404 (model not served).",
+      },
     },
   },
   OAuthTokenResponse: {
