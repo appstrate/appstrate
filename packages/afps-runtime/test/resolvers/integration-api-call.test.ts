@@ -369,6 +369,7 @@ describe("LocalIntegrationResolver", () => {
     });
     const bundle = makeBundle(root, [integ]);
     const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
       creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
       fetch: ((url: string, init: RequestInit) => {
         calls.push({ url, init });
@@ -413,6 +414,7 @@ describe("LocalIntegrationResolver", () => {
     });
     const bundle = makeBundle(root, [integ]);
     const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
       creds: {
         version: 1,
         integrations: {
@@ -439,6 +441,7 @@ describe("LocalIntegrationResolver", () => {
     });
     const bundle = makeBundle(root, [integ]);
     const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
       creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
       fetch: (() =>
         Promise.resolve(new Response("{}", { status: 200 }))) as unknown as typeof fetch,
@@ -458,6 +461,7 @@ describe("LocalIntegrationResolver", () => {
     });
     const bundle = makeBundle(root, [integ]);
     const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
       creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "real" } } } },
       fetch: ((url: string, init: RequestInit) => {
         calls.push({ url, init });
@@ -485,6 +489,7 @@ describe("LocalIntegrationResolver", () => {
     });
     const bundle = makeBundle(root, [integ]);
     const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
       creds: {
         version: 1,
         integrations: {
@@ -512,7 +517,10 @@ describe("LocalIntegrationResolver", () => {
       "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
     });
     const bundle = makeBundle(root, [integ]);
-    const resolver = new LocalIntegrationResolver({ creds: { version: 1, integrations: {} } });
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
+      creds: { version: 1, integrations: {} },
+    });
     await expect(resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle)).rejects.toThrow(
       /no credentials found/,
     );
@@ -557,6 +565,7 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
       const root = makePackage("@acme/agent", "1.0.0", "agent", {});
       const bundle = makeBundle(root, [allowAllManifest("@acme/api")]);
       const resolver = new LocalIntegrationResolver({
+        resolveHost: async () => ["203.0.113.7"],
         creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
         fetch: (() => {
           fetched = true;
@@ -580,6 +589,7 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
       narrowAllowlistManifest("@acme/api", ["https://api.acme.com/**"]),
     ]);
     const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
       creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
       fetch: ((url: string) => {
         seen.push(url);
@@ -618,6 +628,7 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
       narrowAllowlistManifest("@acme/api", ["https://api.acme.com/**"]),
     ]);
     const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
       creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
       fetch: ((url: string) => {
         seen.push(url);
@@ -645,6 +656,7 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const bundle = makeBundle(root, [allowAllManifest("@acme/api")]);
     const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
       creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
       fetch: ((url: string) => {
         seen.push(url);
@@ -671,6 +683,7 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const bundle = makeBundle(root, [allowAllManifest("@acme/api")]);
     const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
       creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
       fetch: ((url: string, init: RequestInit) => {
         inits.push({ url, headers: { ...((init.headers as Record<string, string>) ?? {}) } });

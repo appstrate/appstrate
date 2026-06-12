@@ -10,10 +10,5 @@
  * existing sidecar imports (`./ssrf.ts`) continue to resolve.
  */
 
-export {
-  isBlockedHost,
-  isBlockedUrl,
-  resolveAndCheckHost,
-  defaultHostResolver,
-} from "@appstrate/core/ssrf";
-export type { HostResolver, ResolvedHostCheck } from "@appstrate/core/ssrf";
+export { isBlockedHost, isBlockedUrl, resolveAndCheckHost } from "@appstrate/core/ssrf";
+export type { HostResolver } from "@appstrate/core/ssrf";

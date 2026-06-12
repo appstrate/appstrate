@@ -34,12 +34,11 @@ describe("getModuleRegistry", () => {
     ]);
   });
 
-  it("returns empty array when MODULES is the empty string (legacy escape hatch)", () => {
-    // `""` is read from raw process.env (the env getter coalesces `""` →
-    // unset) so the historical "boot with zero modules" contract survives
-    // the move to getEnv() — see getModuleRegistry's doc comment.
+  it("treats the empty string as unset (env getter coalesces — default set)", () => {
+    // The env getter coalesces `""` → unset (compose `${VAR:-}` pattern);
+    // `MODULES=none` is the only zero-module sentinel.
     setModulesEnv("");
-    expect(getModuleRegistry()).toEqual([]);
+    expect(getModuleRegistry()).toContain("oidc");
   });
 
   it("returns empty array for the MODULES=none sentinel", () => {
