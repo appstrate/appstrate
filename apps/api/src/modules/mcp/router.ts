@@ -101,13 +101,23 @@ export function createMcpRouter(): Hono<AppEnv> {
   // it must match the AS `validAudiences` (also APP_URL-derived) and the
   // resource-server audience check. Behind a reverse proxy where the public
   // origin differs from an internal request host, an origin-derived value would
-  // silently break audience binding. `authorization_servers` / doc URLs derive
-  // from the same APP_URL base so discovery stays consistent.
+  // silently break audience binding. Doc URLs derive from the same APP_URL base
+  // so discovery stays consistent.
+  //
+  // `authorization_servers` MUST be the AS *issuer identifier*, not the bare
+  // origin. Better Auth mounts the OAuth AS at `basePath: "/api/auth"` (see
+  // `packages/db/src/auth.ts`), so every metadata document it serves
+  // (`/.well-known/oauth-authorization-server`, `/api/auth/.well-known/openid-
+  // configuration`) advertises `issuer = APP_URL/api/auth`. RFC 8414 §3.3
+  // requires the `issuer` a client reads back to be byte-identical to the AS
+  // identifier it started from; advertising the bare origin here made strict
+  // clients (the claude.ai connector) reject discovery on issuer mismatch and
+  // fail the whole OAuth handshake. Point at the real issuer.
   const protectedResourceMetadata = (c: Context<AppEnv>) => {
     const appBase = getEnv().APP_URL.replace(/\/+$/, "");
     return c.json({
       resource: getMcpResourceUri(),
-      authorization_servers: [appBase],
+      authorization_servers: [`${appBase}/api/auth`],
       scopes_supported: [...MCP_SCOPES],
       bearer_methods_supported: ["header"],
       resource_documentation: `${appBase}/api/docs`,

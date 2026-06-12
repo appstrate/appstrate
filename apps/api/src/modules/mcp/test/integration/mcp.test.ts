@@ -84,6 +84,10 @@ describe("mcp discovery + auth gate", () => {
       const body = (await res.json()) as Record<string, unknown>;
       expect((body.resource as string).endsWith("/api/mcp")).toBe(true);
       expect(Array.isArray(body.authorization_servers)).toBe(true);
+      // Must be the AS *issuer identifier* (`APP_URL/api/auth`), not the bare
+      // origin — otherwise RFC 8414 §3.3 issuer matching fails and strict
+      // OAuth clients (the claude.ai connector) reject discovery. See router.ts.
+      expect((body.authorization_servers as string[])[0]?.endsWith("/api/auth")).toBe(true);
       expect(body.scopes_supported).toEqual(["mcp:read", "mcp:invoke"]);
     }
   });
