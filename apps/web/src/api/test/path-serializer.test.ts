@@ -19,4 +19,17 @@ describe("pathSerializer", () => {
   it("leaves unmatched params in place", () => {
     expect(pathSerializer("/api/runs/{id}", {})).toBe("/api/runs/{id}");
   });
+
+  it("keeps the / separator literal in scoped package ids", () => {
+    expect(
+      pathSerializer("/api/integrations/{packageId}/agent-resolution/{agentPackageId}", {
+        packageId: "@official/gmail",
+        agentPackageId: "@acme/my agent",
+      }),
+    ).toBe("/api/integrations/@official/gmail/agent-resolution/@acme/my%20agent");
+  });
+
+  it("does not split / in values that are not scoped package ids", () => {
+    expect(pathSerializer("/api/end-users/{id}", { id: "a/b" })).toBe("/api/end-users/a%2Fb");
+  });
 });

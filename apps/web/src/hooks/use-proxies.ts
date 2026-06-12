@@ -1,30 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
-import { $api, type components } from "../api/client";
+import { $api, client, type components } from "../api/client";
+import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
+import { useOrgOnlyScope } from "./use-org-scope";
 
 /** Wire shape from the OpenAPI spec (components.schemas.OrgProxy). */
 export type OrgProxyInfo = components["schemas"]["OrgProxy"];
 
-/**
- * Org context for queries. The header is a spec-declared param passed
- * explicitly (instead of relying on the client middleware alone) so it is
- * part of the React Query key — switching org refetches instead of serving
- * another org's cached page.
- */
-function useOrgScope() {
-  const orgId = useCurrentOrgId();
-  return {
-    enabled: !!orgId,
-    header: { "X-Org-Id": orgId ?? undefined },
-  };
-}
-
 export function useProxies() {
-  const scope = useOrgScope();
+  const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/proxies",
@@ -65,20 +52,19 @@ export function useTestProxy() {
   return $api.useMutation("post", "/api/proxies/{id}/test");
 }
 
-// NOTE: the agent-scoped hooks below stay on the legacy `api()` helper. The
-// typed client percent-encodes path params (`@scope` → `%40scope`) and the
-// API's `:scope{@[^/]+}` route patterns match the raw path, so encoded
-// scopes 404. Migrate once the client gains a reserved-safe path serializer.
-
 export function useAgentProxy(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
+    // Key kept legacy-shaped: invalidated by useSetAgentProxy below and
+    // app-switch resets.
     queryKey: ["agent-proxy", orgId, applicationId, packageId],
-    queryFn: () =>
-      api<{ proxyId: string | null; proxyLabel?: string; resolved: boolean }>(
-        `/agents/${packageId}/proxy`,
-      ),
+    queryFn: async () => {
+      const { data } = await client.GET("/api/agents/{scope}/{name}/proxy", {
+        params: { path: splitPackageRef(packageId!) },
+      });
+      return data!;
+    },
     enabled: !!orgId && !!applicationId && !!packageId,
   });
 }
@@ -87,10 +73,11 @@ export function useSetAgentProxy(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (proxyId: string | null) => {
-      return api(`/agents/${packageId}/proxy`, {
-        method: "PUT",
-        body: JSON.stringify({ proxyId }),
+      const { data } = await client.PUT("/api/agents/{scope}/{name}/proxy", {
+        params: { path: splitPackageRef(packageId) },
+        body: { proxyId },
       });
+      return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["agent-proxy"] });

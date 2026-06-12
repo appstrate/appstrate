@@ -3,12 +3,14 @@
 /**
  * React Query hooks for the AFPS integration marketplace (Phase 1.3).
  *
- * Hooks backed by `/api/integrations/*`. Query keys are app-scoped
- * (`[..., orgId, applicationId]`) so an org switch wipes the cache via
- * the standard `queryClient.removeQueries` flow in app.tsx.
+ * Hooks backed by `/api/integrations/*` through the typed OpenAPI client.
+ * Query keys are the openapi-react-query `[method, path, init]` triples; the
+ * spec-declared `X-Org-Id`/`X-Application-Id` headers ride in `init` so the
+ * keys stay org/app-scoped — switching org or application refetches instead
+ * of serving another scope's cached page.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type {
@@ -21,10 +23,10 @@ import type {
   IntegrationPin,
   IntegrationSummary,
 } from "@appstrate/shared-types";
-import { encodePackageIdPath } from "@appstrate/core/naming";
-import { api, apiList, type ListEnvelope } from "../api";
+import { $api, client, ApiError } from "../api/client";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
+import { useOrgScope } from "./use-org-scope";
 
 // Re-export wire types for component consumers — canonical definitions
 // live in `@appstrate/shared-types/integrations.ts`.
@@ -42,95 +44,117 @@ export type {
 } from "@appstrate/shared-types";
 
 // ─────────────────────────────────────────────
+// Typed-client plumbing
+// ─────────────────────────────────────────────
+// Scoped package ids (`@scope/name`) in path params keep their raw `@` and
+// `/` on the wire — handled globally by the client's pathSerializer.
+
+/**
+ * Invalidate every cached integrations read (list, detail, connections,
+ * pins, org default, agent resolutions, OAuth clients). Typed keys are
+ * `[method, "/api/integrations…", init]` — a key-prefix invalidation can't
+ * span sibling path strings, so match on the path element instead. The
+ * legacy `["integrations", …]` prefix is invalidated too while neighbouring
+ * hook files are still mid-migration.
+ */
+export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
+  return Promise.all([
+    qc.invalidateQueries({
+      predicate: (query) => {
+        const path = query.queryKey[1];
+        return typeof path === "string" && path.startsWith("/api/integrations");
+      },
+    }),
+    qc.invalidateQueries({ queryKey: ["integrations"] }),
+  ]).then(() => undefined);
+}
+
+// ─────────────────────────────────────────────
 // Hooks
 // ─────────────────────────────────────────────
 
-const KEY = (orgId: string | null | undefined, applicationId: string | null | undefined) =>
-  ["integrations", orgId ?? undefined, applicationId ?? undefined] as const;
+export function useIntegrations() {
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/integrations",
+    { params: { header: scope.header } },
+    {
+      enabled: scope.enabled,
+      // The spec types `manifest` as an open JSON object (AFPS manifests are
+      // dynamic); the shared wire types narrow it to IntegrationManifestView.
+      // Same trust boundary the legacy `api<IntegrationSummary>` cast drew.
+      select: (envelope) => envelope.data as IntegrationSummary[],
+    },
+  );
+}
+
+export function useIntegrationDetail(packageId: string | undefined) {
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/integrations/{packageId}",
+    {
+      params: { path: { packageId: packageId ?? "" }, header: scope.header },
+    },
+    {
+      enabled: scope.enabled && !!packageId,
+      // Spec `manifest` is an open JSON object — see useIntegrations.
+      select: (data) => data as IntegrationDetail,
+    },
+  );
+}
+
+export function useIntegrationConnections(packageId: string | undefined) {
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/integrations/{packageId}/connections",
+    {
+      params: { path: { packageId: packageId ?? "" }, header: scope.header },
+    },
+    {
+      enabled: scope.enabled && !!packageId,
+      select: (envelope): IntegrationConnection[] => envelope.data,
+    },
+  );
+}
 
 /**
- * React Query key for a (integration, agent) resolution verdict. Exported so
- * every consumer — the picker hook ({@link useIntegrationAgentResolution}) and
- * the launch-badge readiness hook (`useAgentIntegrationsReadiness`) — builds it
- * from ONE place and shares the cache. Hand-copying the key risked a silent
- * cache split where the badge and the Connexions tab fetch the same verdict
- * twice and disagree.
+ * Shared query options for a (integration, agent) resolution verdict.
+ * Exported so every consumer — the picker hook
+ * ({@link useIntegrationAgentResolution}) and the launch-badge readiness hook
+ * (`useAgentIntegrationsReadiness`) — builds the SAME `[method, path, init]`
+ * key from ONE place and shares the cache. Hand-copying the key risked a
+ * silent cache split where the badge and the Connexions tab fetch the same
+ * verdict twice and disagree.
  */
-export const agentResolutionQueryKey = (
+export function agentResolutionQueryOptions(
   orgId: string | null | undefined,
   applicationId: string | null | undefined,
   integrationId: string | undefined,
   agentPackageId: string | undefined,
-) => [...KEY(orgId, applicationId), "agent-resolution", integrationId, agentPackageId] as const;
-
-/**
- * Shared request builder for `PATCH /integrations/{packageId}/connections/{id}`.
- *
- * Both the agent-context update (`useUpdateIntegrationConnection`) and the
- * user-scope update (`useUpdateMeIntegrationConnection`) PATCH the same
- * endpoint with the same conditional `{ label?, sharedWithOrg? }` body. They
- * differ only in extra headers (the user-scope variant pins org/app) and which
- * React Query keys they invalidate — both of which stay in the calling hook.
- * The caller passes the result straight to `api<T>(path, init)`, keeping its
- * own response type.
- */
-export function buildUpdateConnectionRequest(args: {
-  packageId: string;
-  connectionId: string;
-  label?: string | null;
-  sharedWithOrg?: boolean;
-  extraHeaders?: Record<string, string>;
-}): [string, RequestInit] {
-  const { packageId, connectionId, label, sharedWithOrg, extraHeaders } = args;
-  return [
-    `/integrations/${encodePackageIdPath(packageId)}/connections/${connectionId}`,
+) {
+  return $api.queryOptions(
+    "get",
+    "/api/integrations/{packageId}/agent-resolution/{agentPackageId}",
     {
-      method: "PATCH",
-      body: JSON.stringify({
-        ...(label !== undefined ? { label } : {}),
-        ...(sharedWithOrg !== undefined ? { shared_with_org: sharedWithOrg } : {}),
-      }),
-      headers: {
-        "Content-Type": "application/json",
-        ...extraHeaders,
+      params: {
+        path: { packageId: integrationId ?? "", agentPackageId: agentPackageId ?? "" },
+        header: {
+          "X-Org-Id": orgId ?? undefined,
+          "X-Application-Id": applicationId ?? undefined,
+        },
       },
     },
-  ];
-}
-
-export function useIntegrations() {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: [...KEY(orgId, applicationId), "all"] as const,
-    enabled: Boolean(orgId && applicationId),
-    queryFn: () => apiList<IntegrationSummary>("/integrations"),
-  });
-}
-
-export function useIntegrationDetail(packageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: [...KEY(orgId, applicationId), "detail", packageId] as const,
-    enabled: Boolean(orgId && applicationId && packageId),
-    queryFn: () => api<IntegrationDetail>(`/integrations/${encodePackageIdPath(packageId!)}`),
-  });
-}
-
-export function useIntegrationConnections(packageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: [...KEY(orgId, applicationId), "connections", packageId] as const,
-    enabled: Boolean(orgId && applicationId && packageId),
-    queryFn: async () => {
-      const envelope = await api<ListEnvelope<IntegrationConnection>>(
-        `/integrations/${encodePackageIdPath(packageId!)}/connections`,
-      );
-      return envelope.data;
+    {
+      enabled: Boolean(orgId && applicationId && integrationId && agentPackageId),
+      // The spec marks the org-default fields optional; the shared wire type
+      // is the backend resolver's source of truth (always present). Same
+      // assertion the legacy `api<IntegrationAgentResolution>` call made.
+      select: (data) => data as IntegrationAgentResolution,
     },
-  });
+  );
 }
 
 /**
@@ -145,32 +169,25 @@ export function useIntegrationAgentResolution(
 ) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: agentResolutionQueryKey(orgId, applicationId, integrationId, agentPackageId),
-    enabled: Boolean(orgId && applicationId && integrationId && agentPackageId),
-    queryFn: () =>
-      api<IntegrationAgentResolution>(
-        `/integrations/${encodePackageIdPath(integrationId!)}/agent-resolution/${encodePackageIdPath(agentPackageId!)}`,
-      ),
-  });
+  return useQuery(agentResolutionQueryOptions(orgId, applicationId, integrationId, agentPackageId));
 }
 
 export function useActivateIntegration() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: (packageId: string) =>
-      // 201 + the bare integration detail resource (#657) — activation
-      // state is the resource's `active` field.
-      api<IntegrationDetail>(`/integrations/${encodePackageIdPath(packageId)}/activate`, {
-        method: "POST",
-        body: "{}",
-      }),
+    // 201 + the bare integration detail resource (#657) — activation
+    // state is the resource's `active` field.
+    mutationFn: async (vars: { params: { path: { packageId: string } } }) => {
+      const { data } = await client.POST("/api/integrations/{packageId}/activate", {
+        ...vars,
+        body: {},
+      });
+      return data;
+    },
     onSuccess: () => {
       toast.success(t("integrations.activate.success"));
-      qc.invalidateQueries({ queryKey: KEY(orgId, applicationId) });
+      void invalidateIntegrationQueries(qc);
     },
     onError: () => toast.error(t("integrations.activate.error")),
   });
@@ -179,18 +196,17 @@ export function useActivateIntegration() {
 export function useDeactivateIntegration() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: (packageId: string) =>
-      // DELETE → 204 empty (#657): deactivation removes the
-      // application_packages row; the detail stays GET-able.
-      api<void>(`/integrations/${encodePackageIdPath(packageId)}/deactivate`, {
-        method: "DELETE",
-      }),
+    // DELETE → 204 empty (#657): deactivation removes the
+    // application_packages row; the detail stays GET-able.
+    mutationFn: async (vars: { params: { path: { packageId: string } } }) => {
+      await client.DELETE("/api/integrations/{packageId}/deactivate", {
+        ...vars,
+      });
+    },
     onSuccess: () => {
       toast.success(t("integrations.deactivate.success"));
-      qc.invalidateQueries({ queryKey: KEY(orgId, applicationId) });
+      void invalidateIntegrationQueries(qc);
     },
     onError: () => toast.error(t("integrations.deactivate.error")),
   });
@@ -199,39 +215,28 @@ export function useDeactivateIntegration() {
 export function useConnectIntegrationFields() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: ({
-      packageId,
-      authKey,
-      credentials,
-      connectionId,
-    }: {
-      packageId: string;
-      authKey: string;
-      credentials: Record<string, string>;
-      connectionId?: string;
-    }) =>
-      api<IntegrationConnection>(
-        `/integrations/${encodePackageIdPath(packageId)}/auths/${encodeURI(authKey)}/connect/fields`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            credentials,
-            ...(connectionId ? { connection_id: connectionId } : {}),
-          }),
-        },
-      ),
-    onSuccess: (_data, vars) => {
+    mutationFn: async (vars: {
+      params: { path: { packageId: string; authKey: string } };
+      body: { credentials: Record<string, string>; connection_id?: string };
+    }) => {
+      const { data } = await client.POST(
+        "/api/integrations/{packageId}/auths/{authKey}/connect/fields",
+        vars,
+      );
+      // Non-2xx throws in the client middleware, so a missing body on a 200
+      // is a broken server contract — surface it instead of returning undefined.
+      if (!data) throw new Error("empty response");
+      return data;
+    },
+    onSuccess: () => {
       toast.success(t("integration.connect.success"));
-      qc.invalidateQueries({ queryKey: KEY(orgId, applicationId) });
-      qc.invalidateQueries({
-        queryKey: [...KEY(orgId, applicationId), "detail", vars.packageId],
-      });
+      void invalidateIntegrationQueries(qc);
       // Cross-app connections page (/preferences/connections) — keep parity with
       // the OAuth popup path so a fields connect/renew refreshes that list too.
-      qc.invalidateQueries({ queryKey: ["me-connections"] });
+      // Both keys while use-me-connections migrates concurrently.
+      void qc.invalidateQueries({ queryKey: ["me-connections"] });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
     },
     onError: () => toast.error(t("integration.connect.error")),
   });
@@ -240,30 +245,17 @@ export function useConnectIntegrationFields() {
 export function useInitiateIntegrationOAuth() {
   const { t } = useTranslation("settings");
   return useMutation({
-    mutationFn: ({
-      packageId,
-      authKey,
-      scopes,
-      forceAccountSelect,
-      connectionId,
-    }: {
-      packageId: string;
-      authKey: string;
-      scopes?: string[];
-      forceAccountSelect?: boolean;
-      connectionId?: string;
-    }) =>
-      api<{ auth_url: string; state: string }>(
-        `/integrations/${encodePackageIdPath(packageId)}/auths/${encodeURI(authKey)}/connect/oauth2`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            scopes: scopes ?? [],
-            ...(forceAccountSelect ? { force_account_select: true } : {}),
-            ...(connectionId ? { connection_id: connectionId } : {}),
-          }),
-        },
-      ),
+    mutationFn: async (vars: {
+      params: { path: { packageId: string; authKey: string } };
+      body: { scopes?: string[]; force_account_select?: boolean; connection_id?: string };
+    }) => {
+      const { data } = await client.POST(
+        "/api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
+        vars,
+      );
+      if (!data) throw new Error("empty response");
+      return data;
+    },
     onError: () => toast.error(t("integration.connect.error")),
   });
 }
@@ -272,27 +264,26 @@ export function useIntegrationOAuthClient(
   packageId: string | undefined,
   authKey: string | undefined,
 ) {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const scope = useOrgScope();
   return useQuery({
-    queryKey: [...KEY(orgId, applicationId), "oauth-client", packageId, authKey] as const,
-    enabled: Boolean(orgId && applicationId && packageId && authKey),
+    // Same [method, path, init] shape as the $api hooks so the path-string
+    // invalidations below hit this query too.
+    queryKey: [
+      "get",
+      "/api/integrations/{packageId}/oauth-clients/{authKey}",
+      { params: { path: { packageId, authKey }, header: scope.header } },
+    ] as const,
+    enabled: scope.enabled && !!packageId && !!authKey,
     queryFn: async (): Promise<IntegrationOAuthClient | null> => {
       try {
-        return await api<IntegrationOAuthClient>(
-          `/integrations/${encodePackageIdPath(packageId!)}/oauth-clients/${encodeURI(authKey!)}`,
-        );
+        const { data } = await client.GET("/api/integrations/{packageId}/oauth-clients/{authKey}", {
+          params: { path: { packageId: packageId!, authKey: authKey! }, header: scope.header },
+        });
+        return data ?? null;
       } catch (err: unknown) {
         // 404 = not configured yet; treat as null so the UI can render
         // the registration form.
-        if (
-          err &&
-          typeof err === "object" &&
-          "status" in err &&
-          (err as { status: number }).status === 404
-        ) {
-          return null;
-        }
+        if (err instanceof ApiError && err.status === 404) return null;
         throw err;
       }
     },
@@ -302,41 +293,22 @@ export function useIntegrationOAuthClient(
 export function useUpsertIntegrationOAuthClient() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: ({
-      packageId,
-      authKey,
-      clientId,
-      clientSecret,
-      redirectUri,
-    }: {
-      packageId: string;
-      authKey: string;
-      clientId: string;
-      clientSecret: string;
-      redirectUri?: string;
-    }) =>
-      api<IntegrationOAuthClient>(
-        `/integrations/${encodePackageIdPath(packageId)}/oauth-clients/${encodeURI(authKey)}`,
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            client_id: clientId,
-            client_secret: clientSecret,
-            ...(redirectUri ? { redirect_uri: redirectUri } : {}),
-          }),
-        },
-      ),
-    onSuccess: (_data, vars) => {
+    mutationFn: async (vars: {
+      params: { path: { packageId: string; authKey: string } };
+      body: { client_id: string; client_secret: string; redirect_uri?: string };
+    }) => {
+      const { data } = await client.PUT("/api/integrations/{packageId}/oauth-clients/{authKey}", {
+        ...vars,
+      });
+      return data;
+    },
+    onSuccess: () => {
       toast.success(t("integration.oauthClient.save.success"));
-      qc.invalidateQueries({
-        queryKey: [...KEY(orgId, applicationId), "oauth-client", vars.packageId, vars.authKey],
+      void qc.invalidateQueries({
+        queryKey: ["get", "/api/integrations/{packageId}/oauth-clients/{authKey}"],
       });
-      qc.invalidateQueries({
-        queryKey: [...KEY(orgId, applicationId), "detail", vars.packageId],
-      });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
     },
   });
 }
@@ -346,13 +318,18 @@ export function useUpsertIntegrationOAuthClient() {
 // ─────────────────────────────────────────────
 
 export function useIntegrationPins(packageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: [...KEY(orgId, applicationId), "pins", packageId] as const,
-    queryFn: () => apiList<IntegrationPin>(`/integrations/${encodePackageIdPath(packageId!)}/pins`),
-    enabled: !!packageId && !!orgId && !!applicationId,
-  });
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/integrations/{packageId}/pins",
+    {
+      params: { path: { packageId: packageId ?? "" }, header: scope.header },
+    },
+    {
+      enabled: scope.enabled && !!packageId,
+      select: (envelope): IntegrationPin[] => envelope.data,
+    },
+  );
 }
 
 /**
@@ -361,43 +338,38 @@ export function useIntegrationPins(packageId: string | undefined) {
  * picker.
  */
 export function useAgentsConsumingIntegration(packageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: [...KEY(orgId, applicationId), "consuming-agents", packageId] as const,
-    queryFn: () =>
-      apiList<ConsumingAgentSummary>(
-        `/integrations/${encodePackageIdPath(packageId!)}/consuming-agents`,
-      ),
-    enabled: !!packageId && !!orgId && !!applicationId,
-  });
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/integrations/{packageId}/consuming-agents",
+    {
+      params: { path: { packageId: packageId ?? "" }, header: scope.header },
+    },
+    {
+      enabled: scope.enabled && !!packageId,
+      select: (envelope): ConsumingAgentSummary[] => envelope.data,
+    },
+  );
 }
 
 export function useUpdateIntegrationSettings() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: ({
-      packageId,
-      blockUserConnections,
-    }: {
-      packageId: string;
-      blockUserConnections: boolean;
-    }) =>
-      // 200 + the bare integration detail resource (#657) — the toggled
-      // gate is the resource's `block_user_connections` field.
-      api<IntegrationDetail>(`/integrations/${encodePackageIdPath(packageId)}/settings`, {
-        method: "PATCH",
-        body: JSON.stringify({ block_user_connections: blockUserConnections }),
-        headers: { "Content-Type": "application/json" },
-      }),
-    onSuccess: (_data, vars) => {
-      toast.success(t("integration.admin.blockUserConnections.updated"));
-      qc.invalidateQueries({
-        queryKey: [...KEY(orgId, applicationId), "detail", vars.packageId],
+    // 200 + the bare integration detail resource (#657) — the toggled
+    // gate is the resource's `block_user_connections` field.
+    mutationFn: async (vars: {
+      params: { path: { packageId: string } };
+      body: { block_user_connections: boolean };
+    }) => {
+      const { data } = await client.PATCH("/api/integrations/{packageId}/settings", {
+        ...vars,
       });
+      return data;
+    },
+    onSuccess: () => {
+      toast.success(t("integration.admin.blockUserConnections.updated"));
+      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
     },
   });
 }
@@ -405,31 +377,19 @@ export function useUpdateIntegrationSettings() {
 export function useUpsertIntegrationPin() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: ({
-      packageId,
-      agentPackageId,
-      connectionId,
-    }: {
-      packageId: string;
-      agentPackageId: string;
-      connectionId: string;
-    }) =>
-      api<IntegrationPin>(
-        `/integrations/${encodePackageIdPath(packageId)}/pins/${encodePackageIdPath(agentPackageId)}`,
-        {
-          method: "PUT",
-          body: JSON.stringify({ connection_id: connectionId }),
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-    onSuccess: (_data, vars) => {
-      toast.success(t("integration.admin.pin.upserted"));
-      qc.invalidateQueries({
-        queryKey: [...KEY(orgId, applicationId), "pins", vars.packageId],
+    mutationFn: async (vars: {
+      params: { path: { packageId: string; agentPackageId: string } };
+      body: { connection_id: string };
+    }) => {
+      const { data } = await client.PUT("/api/integrations/{packageId}/pins/{agentPackageId}", {
+        ...vars,
       });
+      return data;
+    },
+    onSuccess: () => {
+      toast.success(t("integration.admin.pin.upserted"));
+      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}/pins"] });
     },
   });
 }
@@ -437,19 +397,17 @@ export function useUpsertIntegrationPin() {
 export function useDeleteIntegrationPin() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: ({ packageId, agentPackageId }: { packageId: string; agentPackageId: string }) =>
-      api<void>(
-        `/integrations/${encodePackageIdPath(packageId)}/pins/${encodePackageIdPath(agentPackageId)}`,
-        { method: "DELETE" },
-      ),
-    onSuccess: (_data, vars) => {
-      toast.success(t("integration.admin.pin.deleted"));
-      qc.invalidateQueries({
-        queryKey: [...KEY(orgId, applicationId), "pins", vars.packageId],
+    mutationFn: async (vars: {
+      params: { path: { packageId: string; agentPackageId: string } };
+    }) => {
+      await client.DELETE("/api/integrations/{packageId}/pins/{agentPackageId}", {
+        ...vars,
       });
+    },
+    onSuccess: () => {
+      toast.success(t("integration.admin.pin.deleted"));
+      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}/pins"] });
     },
   });
 }
@@ -457,47 +415,40 @@ export function useDeleteIntegrationPin() {
 // ─── Org default connection (cross-agent governance) ───────────────────────
 
 export function useIntegrationOrgDefault(packageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: [...KEY(orgId, applicationId), "org-default", packageId] as const,
-    queryFn: () =>
-      // Bare resource, or undefined when no default is set (204) — mapped
-      // back to null for the existing null-means-unset consumers.
-      api<IntegrationOrgDefault | undefined>(
-        `/integrations/${encodePackageIdPath(packageId!)}/default`,
-      ).then((r) => r ?? null),
-    enabled: !!packageId && !!orgId && !!applicationId,
-  });
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/integrations/{packageId}/default",
+    {
+      params: { path: { packageId: packageId ?? "" }, header: scope.header },
+    },
+    {
+      enabled: scope.enabled && !!packageId,
+      // Bare resource, or a 204 when no default is set — openapi-react-query
+      // maps the empty body to null for the existing null-means-unset consumers.
+      select: (data): IntegrationOrgDefault | null => data ?? null,
+    },
+  );
 }
 
 export function useUpsertIntegrationOrgDefault() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: ({
-      packageId,
-      connectionId,
-      enforce,
-    }: {
-      packageId: string;
-      connectionId: string;
-      enforce: boolean;
-    }) =>
-      api<IntegrationOrgDefault>(`/integrations/${encodePackageIdPath(packageId)}/default`, {
-        method: "PUT",
-        body: JSON.stringify({ connection_id: connectionId, enforce }),
-        headers: { "Content-Type": "application/json" },
-      }),
-    onSuccess: (_data, vars) => {
-      toast.success(t("integration.admin.orgDefault.updated"));
-      qc.invalidateQueries({
-        queryKey: [...KEY(orgId, applicationId), "org-default", vars.packageId],
+    mutationFn: async (vars: {
+      params: { path: { packageId: string } };
+      body: { connection_id: string; enforce: boolean };
+    }) => {
+      const { data } = await client.PUT("/api/integrations/{packageId}/default", {
+        ...vars,
       });
-      // Picker verdicts on agent pages depend on the org default.
-      qc.invalidateQueries({ queryKey: ["integrations"] });
+      return data;
+    },
+    onSuccess: () => {
+      toast.success(t("integration.admin.orgDefault.updated"));
+      // Picker verdicts on agent pages depend on the org default —
+      // invalidate every integrations read, not just the default itself.
+      void invalidateIntegrationQueries(qc);
     },
   });
 }
@@ -505,19 +456,15 @@ export function useUpsertIntegrationOrgDefault() {
 export function useDeleteIntegrationOrgDefault() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: ({ packageId }: { packageId: string }) =>
-      api<void>(`/integrations/${encodePackageIdPath(packageId)}/default`, {
-        method: "DELETE",
-      }),
-    onSuccess: (_data, vars) => {
-      toast.success(t("integration.admin.orgDefault.deleted"));
-      qc.invalidateQueries({
-        queryKey: [...KEY(orgId, applicationId), "org-default", vars.packageId],
+    mutationFn: async (vars: { params: { path: { packageId: string } } }) => {
+      await client.DELETE("/api/integrations/{packageId}/default", {
+        ...vars,
       });
-      qc.invalidateQueries({ queryKey: ["integrations"] });
+    },
+    onSuccess: () => {
+      toast.success(t("integration.admin.orgDefault.deleted"));
+      void invalidateIntegrationQueries(qc);
     },
   });
 }
@@ -525,33 +472,25 @@ export function useDeleteIntegrationOrgDefault() {
 export function useUpdateIntegrationConnection() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: ({
-      packageId,
-      connectionId,
-      label,
-      sharedWithOrg,
-    }: {
-      packageId: string;
-      connectionId: string;
-      label?: string | null;
-      sharedWithOrg?: boolean;
-    }) =>
-      // 200 + the bare connection resource (#657) — same serializer as the
-      // connections list.
-      api<IntegrationConnection>(
-        ...buildUpdateConnectionRequest({ packageId, connectionId, label, sharedWithOrg }),
-      ),
-    onSuccess: (_data, vars) => {
+    // 200 + the bare connection resource (#657) — same serializer as the
+    // connections list.
+    mutationFn: async (vars: {
+      params: { path: { packageId: string; connectionId: string } };
+      body: { label?: string | null; shared_with_org?: boolean };
+    }) => {
+      const { data } = await client.PATCH(
+        "/api/integrations/{packageId}/connections/{connectionId}",
+        vars,
+      );
+      return data;
+    },
+    onSuccess: () => {
       toast.success(t("integration.connection.updated"));
-      qc.invalidateQueries({
-        queryKey: [...KEY(orgId, applicationId), "connections", vars.packageId],
+      void qc.invalidateQueries({
+        queryKey: ["get", "/api/integrations/{packageId}/connections"],
       });
-      qc.invalidateQueries({
-        queryKey: [...KEY(orgId, applicationId), "detail", vars.packageId],
-      });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
     },
   });
 }
@@ -559,22 +498,18 @@ export function useUpdateIntegrationConnection() {
 export function useDeleteIntegrationOAuthClient() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: ({ packageId, authKey }: { packageId: string; authKey: string }) =>
-      api<void>(
-        `/integrations/${encodePackageIdPath(packageId)}/oauth-clients/${encodeURI(authKey)}`,
-        { method: "DELETE" },
-      ),
-    onSuccess: (_data, vars) => {
+    mutationFn: async (vars: { params: { path: { packageId: string; authKey: string } } }) => {
+      await client.DELETE("/api/integrations/{packageId}/oauth-clients/{authKey}", {
+        ...vars,
+      });
+    },
+    onSuccess: () => {
       toast.success(t("integration.oauthClient.delete.success"));
-      qc.invalidateQueries({
-        queryKey: [...KEY(orgId, applicationId), "oauth-client", vars.packageId, vars.authKey],
+      void qc.invalidateQueries({
+        queryKey: ["get", "/api/integrations/{packageId}/oauth-clients/{authKey}"],
       });
-      qc.invalidateQueries({
-        queryKey: [...KEY(orgId, applicationId), "detail", vars.packageId],
-      });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
     },
   });
 }

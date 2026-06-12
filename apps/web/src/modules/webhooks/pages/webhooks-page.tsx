@@ -11,6 +11,7 @@ import { useWebhooks } from "../hooks/use-webhooks";
 import { PageHeader } from "@/components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
 import { WebhookCreateModal } from "../components/webhook-create-modal";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 export function WebhooksPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -21,7 +22,7 @@ export function WebhooksPage() {
 
   if (!isAdmin) return null;
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   return (
     <div className="p-6">

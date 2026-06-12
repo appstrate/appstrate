@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useImportPackage, useImportFromGithub } from "../hooks/use-mutations";
 import { toast } from "sonner";
-import { ApiError } from "../api";
+import { ApiError } from "../api/errors";
 import i18n from "../i18n";
 
 interface ImportModalProps {

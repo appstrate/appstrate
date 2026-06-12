@@ -18,7 +18,7 @@
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { client } from "../api/client";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 
@@ -40,22 +40,20 @@ export function useUpsertMemberIntegrationPin() {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: (input: UpsertMemberPinInput) =>
-      api<{
-        packageId: string;
-        integrationId: string;
-        connectionId: string;
-      }>("/me/integration-pins", {
-        method: "PUT",
-        body: JSON.stringify({
+    mutationFn: async (input: UpsertMemberPinInput) => {
+      const { data } = await client.PUT("/api/me/integration-pins", {
+        body: {
           agent_package_id: input.agentPackageId,
           integration_package_id: input.integrationId,
           connection_id: input.connectionId,
-        }),
-        headers: { "Content-Type": "application/json" },
-      }),
+        },
+      });
+      return data;
+    },
     onSuccess: (_data, vars) => {
-      qc.invalidateQueries({
+      void qc.invalidateQueries({ queryKey: ["get", "/api/me/integration-pins"] });
+      // Legacy key — the picker still caches pins under this scheme.
+      void qc.invalidateQueries({
         queryKey: KEY(orgId, applicationId, vars.agentPackageId),
       });
     },
@@ -72,15 +70,20 @@ export function useDeleteMemberIntegrationPin() {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: (input: DeleteMemberPinInput) => {
-      const qs = new URLSearchParams({
-        agentPackageId: input.agentPackageId,
-        integrationPackageId: input.integrationId,
-      }).toString();
-      return api<void>(`/me/integration-pins?${qs}`, { method: "DELETE" });
+    mutationFn: async (input: DeleteMemberPinInput) => {
+      await client.DELETE("/api/me/integration-pins", {
+        params: {
+          query: {
+            agentPackageId: input.agentPackageId,
+            integrationPackageId: input.integrationId,
+          },
+        },
+      });
     },
     onSuccess: (_data, vars) => {
-      qc.invalidateQueries({
+      void qc.invalidateQueries({ queryKey: ["get", "/api/me/integration-pins"] });
+      // Legacy key — the picker still caches pins under this scheme.
+      void qc.invalidateQueries({
         queryKey: KEY(orgId, applicationId, vars.agentPackageId),
       });
     },

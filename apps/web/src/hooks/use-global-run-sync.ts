@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
+import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateNotificationQueries } from "./use-notifications";
 import { parseSSEFrames } from "../lib/sse-parser";
 import { type EnrichedRun, type RunStatus, TERMINAL_RUN_STATUSES } from "@appstrate/shared-types";
@@ -21,19 +22,18 @@ import { type EnrichedRun, type RunStatus, TERMINAL_RUN_STATUSES } from "@appstr
  * which is acceptable because the run-time resolver gate enforces the
  * server-side truth anyway.
  */
-function handleConnectionUpdate(qc: QueryClient, orgId: string, applicationId: string) {
+function handleConnectionUpdate(qc: QueryClient) {
   // Connections page (`/preferences/connections`) — the orange
-  // "Reconnection required" badge reads off this key. The hook
-  // (`use-me-connections.ts`) keys flat, so we invalidate flat.
+  // "Reconnection required" badge reads off these keys (legacy flat key +
+  // typed path key while use-me-connections migrates).
   qc.invalidateQueries({ queryKey: ["me-connections"] });
+  qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
   // Integration list (sidebar status, integrations page count) +
   // detail subtree (auth statuses, connection lists, agent-resolution
-  // verdicts). Subtree-invalidate by ["integrations", orgId, appId] —
-  // the per-integration key shape is
-  // `[...KEY(orgId, appId), "detail" | "connections" | "agent-resolution", …]`
-  // so the prefix match cascades to every sub-key, including the
-  // resolution verdict that powers the agent picker dropdown.
-  qc.invalidateQueries({ queryKey: ["integrations", orgId, applicationId] });
+  // verdicts, the resolution verdict that powers the agent picker
+  // dropdown). The typed keys are `[method, "/api/integrations…", init]`,
+  // so the shared helper matches on the path element.
+  void invalidateIntegrationQueries(qc);
 }
 
 /**
@@ -178,7 +178,7 @@ export function useGlobalRunSync() {
             if (event === "run_update" && data) {
               handleSSEMessage(qcRef.current, broad, orgId, applicationId, data);
             } else if (event === "connection_update" && data) {
-              handleConnectionUpdate(qcRef.current, orgId, applicationId);
+              handleConnectionUpdate(qcRef.current);
             }
           }
         }

@@ -241,13 +241,11 @@ function SmtpSection() {
         isPending={test.isPending}
         onSend={(to) =>
           test.mutate(to, {
-            onSuccess: (r) => {
-              if (r.ok) {
-                toast.success(t("settings:appAuth.smtpTestOk"));
-                setTestOpen(false);
-              } else {
-                toast.error(r.error ?? "SMTP test failed");
-              }
+            // A failed SMTP send is a non-2xx response (the server surfaces
+            // the SMTP error verbatim), so it lands in onError.
+            onSuccess: () => {
+              toast.success(t("settings:appAuth.smtpTestOk"));
+              setTestOpen(false);
             },
             onError: (err) => toast.error((err as Error).message),
           })

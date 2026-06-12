@@ -2,8 +2,47 @@
 
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Sparkles, Zap, Crown, type LucideIcon } from "lucide-react";
-import { api } from "../api";
+import { ApiError } from "../api/errors";
+import { getCurrentOrgId } from "../stores/org-store";
+import { getCurrentApplicationId } from "../stores/app-store";
 import { useCurrentOrgId } from "./use-org";
+
+/**
+ * The `/api/billing/*` routes are contributed at runtime by the private
+ * cloud module — they are deliberately ABSENT from the OSS OpenAPI spec
+ * (Apache-2.0 core carries no billing vocabulary), so the typed client
+ * cannot express them. This file-local fetch mirrors the typed client's
+ * middleware (org/app headers, credentials, RFC 9457 → ApiError) and is the
+ * single sanctioned untyped call site in the SPA.
+ */
+async function cloudApi<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const orgId = getCurrentOrgId();
+  if (orgId) headers["X-Org-Id"] = orgId;
+  const applicationId = getCurrentApplicationId();
+  if (applicationId) headers["X-Application-Id"] = applicationId;
+
+  const res = await fetch(`/api${path}`, {
+    ...options,
+    credentials: "include",
+    headers: { ...headers, ...options.headers },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    if (body.code) {
+      throw new ApiError(
+        body.code,
+        body.detail || `API Error: ${res.status}`,
+        res.status,
+        body.errors,
+        body.requestId,
+      );
+    }
+    throw new Error(body.detail || `API Error: ${res.status}`);
+  }
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
+}
 
 export const PLAN_ICONS: Record<string, LucideIcon> = {
   free: Sparkles,
@@ -60,7 +99,7 @@ export function useBilling(options?: { enabled?: boolean }) {
   const enabled = (options?.enabled ?? true) && !!orgId;
   return useQuery({
     queryKey: ["billing", orgId],
-    queryFn: () => api<BillingInfo>("/billing"),
+    queryFn: () => cloudApi<BillingInfo>("/billing"),
     enabled,
     staleTime: 60_000,
   });
@@ -69,7 +108,7 @@ export function useBilling(options?: { enabled?: boolean }) {
 export function useCheckout() {
   return useMutation({
     mutationFn: async ({ planId, returnUrl }: { planId: string; returnUrl?: string }) => {
-      const res = await api<{ url: string }>("/billing/checkout", {
+      const res = await cloudApi<{ url: string }>("/billing/checkout", {
         method: "POST",
         body: JSON.stringify({ plan_id: planId, ...(returnUrl && { return_url: returnUrl }) }),
       });
@@ -81,7 +120,7 @@ export function useCheckout() {
 export function usePortal() {
   return useMutation({
     mutationFn: async () => {
-      const res = await api<{ url: string }>("/billing/portal", {
+      const res = await cloudApi<{ url: string }>("/billing/portal", {
         method: "POST",
       });
       return res.url;

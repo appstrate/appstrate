@@ -2,37 +2,20 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { $api } from "../api/client";
-import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-
-/**
- * Org/app context for queries. The headers are spec-declared params passed
- * explicitly (instead of relying on the client middleware alone) so they are
- * part of the React Query key — switching org or application refetches
- * instead of serving another scope's cached counters.
- */
-function useOrgScope() {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return {
-    // Badge counters only need an application context (legacy behavior).
-    enabled: !!applicationId,
-    header: {
-      "X-Org-Id": orgId ?? undefined,
-      "X-Application-Id": applicationId ?? undefined,
-    },
-  };
-}
+import { useOrgScope } from "./use-org-scope";
 
 export function useUnreadCount() {
   const scope = useOrgScope();
+  // Badge counters only need an application context (legacy behavior).
+  const applicationId = useCurrentApplicationId();
   return $api.useQuery(
     "get",
     "/api/notifications/unread-count",
     { params: { header: scope.header } },
     {
       refetchInterval: 30_000,
-      enabled: scope.enabled,
+      enabled: !!applicationId,
       select: (d) => d.count,
     },
   );
@@ -40,13 +23,15 @@ export function useUnreadCount() {
 
 export function useUnreadCountsByAgent() {
   const scope = useOrgScope();
+  // Badge counters only need an application context (legacy behavior).
+  const applicationId = useCurrentApplicationId();
   return $api.useQuery(
     "get",
     "/api/notifications/unread-counts-by-agent",
     { params: { header: scope.header } },
     {
       refetchInterval: 30_000,
-      enabled: scope.enabled,
+      enabled: !!applicationId,
       select: (d) => d.counts,
     },
   );

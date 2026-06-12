@@ -11,24 +11,21 @@
  * SPA's currently-active context for that single request.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { getErrorMessage } from "@appstrate/core/errors";
 import i18n from "../i18n";
-import { api, apiList } from "../api";
-import type { IntegrationConnection, MeConnectionSourceGroup } from "@appstrate/shared-types";
+import { $api, client } from "../api/client";
 import { onMutationError } from "./use-mutations";
-import { buildUpdateConnectionRequest } from "./use-integrations";
 
 /**
  * Unified user-scope connection list (integration connections), grouped by
  * source package. Backs the `/preferences/connections` page. Crosses
- * orgs/applications: no header context required.
+ * orgs/applications: no header context required (the `/api/me/*` routes are
+ * deliberately org-context-free).
  */
 export function useMyConnections() {
-  return useQuery({
-    queryKey: ["me-connections"],
-    queryFn: () => apiList<MeConnectionSourceGroup>("/me/connections"),
-  });
+  return $api.useQuery("get", "/api/me/connections", {}, { select: (e) => e.data });
 }
 
 interface OrgAppHeaders {
@@ -54,30 +51,34 @@ function scopedHeaders({ orgId, applicationId }: OrgAppHeaders) {
  */
 export function useDisconnectIntegrationConnection() {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ connectionId }: { connectionId: string }) =>
-      api<void>(`/me/connections/${connectionId}`, { method: "DELETE" }),
+  return $api.useMutation("delete", "/api/me/connections/{connectionId}", {
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["me-connections"] });
-      // Invalidate the app-scoped per-integration cache too — the agent
-      // page's reuse hints + accessible-connection lists need a refresh.
-      qc.invalidateQueries({ queryKey: ["integrations"] });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
       // Member pins anywhere referencing the deleted connection cascaded
       // server-side; refresh their cache so the picker re-fetches.
-      qc.invalidateQueries({ queryKey: ["me-integration-pins"] });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/me/integration-pins"] });
+      // Legacy keys: the app-scoped per-integration cache (use-integrations)
+      // and the member-pin picker cache are still on the legacy key scheme —
+      // the agent page's reuse hints + accessible-connection lists need a
+      // refresh too.
+      void qc.invalidateQueries({ queryKey: ["integrations"] });
+      void qc.invalidateQueries({ queryKey: ["me-integration-pins"] });
     },
-    onError: onMutationError,
+    onError: (err: unknown) =>
+      toast.error(i18n.t("error.prefix", { message: getErrorMessage(err) })),
   });
 }
 
 /**
  * Update an integration connection's label and/or `sharedWithOrg` flag from
- * the user-scope page.
+ * the user-scope page. The entry's own org/app context is passed as explicit
+ * headers, overriding the SPA's active context for this single request.
  */
 export function useUpdateMeIntegrationConnection() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
+    // 200 + the bare connection resource (#657).
+    mutationFn: async ({
       packageId,
       connectionId,
       orgId,
@@ -89,21 +90,25 @@ export function useUpdateMeIntegrationConnection() {
       connectionId: string;
       label?: string | null;
       sharedWithOrg?: boolean;
-    }) =>
-      // 200 + the bare connection resource (#657) — same serializer as the
-      // connections list.
-      api<IntegrationConnection>(
-        ...buildUpdateConnectionRequest({
-          packageId,
-          connectionId,
-          label,
-          sharedWithOrg,
-          extraHeaders: scopedHeaders({ orgId, applicationId }),
-        }),
-      ),
+    }) => {
+      const { data } = await client.PATCH(
+        "/api/integrations/{packageId}/connections/{connectionId}",
+        {
+          params: {
+            path: { packageId, connectionId },
+            header: scopedHeaders({ orgId, applicationId }),
+          },
+          body: {
+            ...(label !== undefined ? { label } : {}),
+            ...(sharedWithOrg !== undefined ? { shared_with_org: sharedWithOrg } : {}),
+          },
+        },
+      );
+      return data;
+    },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["me-connections"] });
-      qc.invalidateQueries({ queryKey: ["integrations"] });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
+      void qc.invalidateQueries({ queryKey: ["integrations"] });
       toast.success(i18n.t("settings:integration.connection.updated"));
     },
     onError: onMutationError,

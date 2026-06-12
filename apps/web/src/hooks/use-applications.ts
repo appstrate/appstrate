@@ -2,27 +2,13 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../api/client";
-import { useCurrentOrgId } from "./use-org";
+import { useOrgOnlyScope } from "./use-org-scope";
 
 /** Wire shape from the OpenAPI spec (components.schemas.ApplicationObject). */
 export type ApplicationInfo = components["schemas"]["ApplicationObject"];
 
-/**
- * Org context for queries. The header is a spec-declared param passed
- * explicitly (instead of relying on the client middleware alone) so it is
- * part of the React Query key — switching org refetches instead of serving
- * another org's cached page.
- */
-function useOrgScope() {
-  const orgId = useCurrentOrgId();
-  return {
-    enabled: !!orgId,
-    header: { "X-Org-Id": orgId ?? undefined },
-  };
-}
-
 export function useApplications() {
-  const scope = useOrgScope();
+  const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/applications",
@@ -32,7 +18,7 @@ export function useApplications() {
 }
 
 export function useApplication(applicationId: string) {
-  const scope = useOrgScope();
+  const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/applications/{id}",

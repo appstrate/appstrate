@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
-import { $api, type components } from "../api/client";
+import { $api, client, type components } from "../api/client";
+import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
+import { useOrgOnlyScope } from "./use-org-scope";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelFormData } from "../components/model-form-modal";
 import {
@@ -15,22 +16,8 @@ import {
 /** Wire shape from the OpenAPI spec (components.schemas.OrgModel). */
 export type OrgModelInfo = components["schemas"]["OrgModel"];
 
-/**
- * Org context for queries. The header is a spec-declared param passed
- * explicitly (instead of relying on the client middleware alone) so it is
- * part of the React Query key — switching org refetches instead of serving
- * another org's cached page.
- */
-function useOrgScope() {
-  const orgId = useCurrentOrgId();
-  return {
-    enabled: !!orgId,
-    header: { "X-Org-Id": orgId ?? undefined },
-  };
-}
-
 export function useModels() {
-  const scope = useOrgScope();
+  const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/models",
@@ -114,17 +101,19 @@ export function useOpenRouterModels(search: string | undefined) {
   );
 }
 
-// NOTE: the agent-scoped hooks below stay on the legacy `api()` helper. The
-// typed client percent-encodes path params (`@scope` → `%40scope`) and the
-// API's `:scope{@[^/]+}` route patterns match the raw path, so encoded
-// scopes 404. Migrate once the client gains a reserved-safe path serializer.
-
 export function useAgentModel(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
+    // Key kept legacy-shaped: invalidated by useSetAgentModel below and
+    // app-switch resets.
     queryKey: ["agent-model", orgId, applicationId, packageId],
-    queryFn: () => api<{ modelId: string | null }>(`/agents/${packageId}/model`),
+    queryFn: async () => {
+      const { data } = await client.GET("/api/agents/{scope}/{name}/model", {
+        params: { path: splitPackageRef(packageId!) },
+      });
+      return data!;
+    },
     enabled: !!orgId && !!applicationId && !!packageId,
   });
 }
@@ -133,10 +122,11 @@ export function useSetAgentModel(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (modelId: string | null) => {
-      return api(`/agents/${packageId}/model`, {
-        method: "PUT",
-        body: JSON.stringify({ modelId }),
+      const { data } = await client.PUT("/api/agents/{scope}/{name}/model", {
+        params: { path: splitPackageRef(packageId) },
+        body: { modelId },
       });
+      return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["agent-model"] });

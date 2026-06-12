@@ -3,7 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { $api, type components, type paths } from "../api/client";
-import { useCurrentOrgId } from "./use-org";
+import { useOrgOnlyScope } from "./use-org-scope";
 
 /** Wire shape from the OpenAPI spec (components.schemas.ModelProviderCredential). */
 export type ModelProviderCredentialInfo = components["schemas"]["ModelProviderCredential"];
@@ -12,22 +12,8 @@ export type ModelProviderCredentialInfo = components["schemas"]["ModelProviderCr
 export type ProviderRegistryEntry =
   paths["/api/model-provider-credentials/registry"]["get"]["responses"][200]["content"]["application/json"]["data"][number];
 
-/**
- * Org context for queries. The header is a spec-declared param passed
- * explicitly (instead of relying on the client middleware alone) so it is
- * part of the React Query key — switching org refetches instead of serving
- * another org's cached page.
- */
-function useOrgScope() {
-  const orgId = useCurrentOrgId();
-  return {
-    enabled: !!orgId,
-    header: { "X-Org-Id": orgId ?? undefined },
-  };
-}
-
 export function useModelProviderCredentials() {
-  const scope = useOrgScope();
+  const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/model-provider-credentials",
@@ -37,7 +23,7 @@ export function useModelProviderCredentials() {
 }
 
 export function useProvidersRegistry() {
-  const scope = useOrgScope();
+  const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/model-provider-credentials/registry",

@@ -171,8 +171,8 @@ function OAuthClientFormBody({
     if (isEditing) {
       updateMutation.mutate(
         {
-          clientId: client!.clientId,
-          data: {
+          params: { path: { clientId: client!.clientId } },
+          body: {
             redirectUris: cleaned,
             postLogoutRedirectUris: cleanedPostLogout,
             scopes: Array.from(selectedScopes),

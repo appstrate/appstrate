@@ -2,7 +2,8 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { schemaHasFileFields, type JSONSchemaObject } from "@appstrate/core/form";
-import { api, apiList } from "../api";
+import { client, type paths } from "../api/client";
+import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { usePackageDetail } from "./use-packages";
@@ -11,12 +12,23 @@ import { useAgentProxy } from "./use-proxies";
 import { onMutationError } from "./use-mutations";
 import type { ScheduleWireDto, EnrichedSchedule, EnrichedRun } from "@appstrate/shared-types";
 
+// The spec `Run`/`Schedule` schemas under-declare requiredness vs the
+// enriched wire DTOs the server returns (the legacy helper blind-cast the
+// same payloads), hence the single-step casts to the shared-types DTOs below.
+
 export function useScheduleRuns(scheduleId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
+    // Key pinned to the legacy shape: use-global-run-sync invalidates
+    // ["schedule-runs", orgId, applicationId, scheduleId] on SSE events.
     queryKey: ["schedule-runs", orgId, applicationId, scheduleId],
-    queryFn: () => apiList<EnrichedRun>(`/schedules/${scheduleId}/runs`),
+    queryFn: async () => {
+      const { data } = await client.GET("/api/schedules/{id}/runs", {
+        params: { path: { id: scheduleId! } },
+      });
+      return (data?.data ?? []) as EnrichedRun[];
+    },
     enabled: !!scheduleId && !!applicationId,
   });
 }
@@ -25,9 +37,12 @@ export function useAllSchedules() {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
+    // Key pinned to the legacy shape: use-global-run-sync invalidates by the
+    // ["schedules", orgId, applicationId] prefix on SSE events.
     queryKey: ["schedules", orgId, applicationId],
     queryFn: async () => {
-      return api<EnrichedSchedule[]>("/schedules");
+      const { data } = await client.GET("/api/schedules");
+      return (data ?? []) as EnrichedSchedule[];
     },
     enabled: !!orgId && !!applicationId,
   });
@@ -37,9 +52,15 @@ export function useScheduleById(id: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
+    // Key pinned to the legacy shape: use-global-run-sync invalidates
+    // ["schedule", orgId, applicationId, scheduleId] on SSE events.
     queryKey: ["schedule", orgId, applicationId, id],
     queryFn: async () => {
-      return api<EnrichedSchedule>(`/schedules/${id}`);
+      const { data } = await client.GET("/api/schedules/{id}", {
+        params: { path: { id: id! } },
+      });
+      // Non-2xx throws via the client middleware, so `data` is defined here.
+      return data as EnrichedSchedule;
     },
     enabled: !!id && !!applicationId,
   });
@@ -49,9 +70,15 @@ export function useSchedules(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
+    // Key pinned to the legacy shape (under the ["schedules", orgId,
+    // applicationId] prefix invalidated by use-global-run-sync).
     queryKey: ["schedules", orgId, applicationId, packageId],
     queryFn: async () => {
-      return api<EnrichedSchedule[]>(`/agents/${packageId}/schedules`);
+      const { scope, name } = splitPackageRef(packageId!);
+      const { data } = await client.GET("/api/agents/{scope}/{name}/schedules", {
+        params: { path: { scope, name } },
+      });
+      return (data ?? []) as EnrichedSchedule[];
     },
     enabled: !!packageId && !!applicationId,
   });
@@ -61,6 +88,11 @@ function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["schedules"] });
   qc.invalidateQueries({ queryKey: ["schedule"] });
 }
+
+type CreateScheduleBody =
+  paths["/api/agents/{scope}/{name}/schedules"]["post"]["requestBody"]["content"]["application/json"];
+type UpdateScheduleBody =
+  paths["/api/schedules/{id}"]["put"]["requestBody"]["content"]["application/json"];
 
 export function useCreateSchedule(packageId: string) {
   const qc = useQueryClient();
@@ -76,10 +108,13 @@ export function useCreateSchedule(packageId: string) {
       version_override?: string | null;
       connection_overrides?: Record<string, string> | null;
     }) => {
-      return api<ScheduleWireDto>(`/agents/${packageId}/schedules`, {
-        method: "POST",
-        body: JSON.stringify(data),
+      const { scope, name } = splitPackageRef(packageId);
+      const { data: created } = await client.POST("/api/agents/{scope}/{name}/schedules", {
+        params: { path: { scope, name } },
+        // Spec body types `input`/`config_override` as bare objects.
+        body: data as CreateScheduleBody,
       });
+      return created as ScheduleWireDto;
     },
     onSuccess: () => invalidateSchedules(qc),
     onError: onMutationError,
@@ -105,10 +140,12 @@ export function useUpdateSchedule() {
       version_override?: string | null;
       connection_overrides?: Record<string, string> | null;
     }) => {
-      return api<ScheduleWireDto>(`/schedules/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(data),
+      const { data: updated } = await client.PUT("/api/schedules/{id}", {
+        params: { path: { id } },
+        // Spec body types `input`/`config_override` as bare objects.
+        body: data as UpdateScheduleBody,
       });
+      return updated as ScheduleWireDto;
     },
     onSuccess: () => invalidateSchedules(qc),
     onError: onMutationError,
@@ -119,7 +156,7 @@ export function useDeleteSchedule() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      return api(`/schedules/${id}`, { method: "DELETE" });
+      await client.DELETE("/api/schedules/{id}", { params: { path: { id } } });
     },
     onSuccess: () => invalidateSchedules(qc),
     onError: onMutationError,

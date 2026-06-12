@@ -139,49 +139,24 @@ export default tseslint.config(
     },
   },
   {
-    // Typed-client migration ratchet: new web code must use the typed OpenAPI
-    // client (src/api/client.ts — `$api`/`client`) instead of the legacy
-    // unchecked fetch helpers in src/api.ts. Files listed in `ignores` are the
-    // not-yet-migrated importers — remove entries as they migrate; never add.
+    // Typed-client guard: all web API calls go through the typed OpenAPI
+    // client (src/api/client.ts — `$api`/`client`). The legacy fetch barrel
+    // (src/api.ts) is deleted; this rule keeps it from coming back under the
+    // old import specifiers (relative or aliased).
     files: ["apps/web/src/**/*.{ts,tsx}"],
-    ignores: [
-      "apps/web/src/components/fork-package-modal.tsx",
-      "apps/web/src/components/import-modal.tsx",
-      "apps/web/src/components/integration-connect/integration-connection-picker.tsx",
-      "apps/web/src/components/package-detail/agent-configuration-tab.tsx",
-      "apps/web/src/components/run-agent-button.tsx",
-      "apps/web/src/components/run-modal.tsx",
-      "apps/web/src/components/run-overrides-panel.tsx",
-      "apps/web/src/components/schedule-form.tsx",
-      "apps/web/src/hooks/use-agent-integrations-readiness.ts",
-      "apps/web/src/hooks/use-billing.ts",
-      "apps/web/src/hooks/use-editor-state.ts",
-      "apps/web/src/hooks/use-integrations.ts",
-      "apps/web/src/hooks/use-library.ts",
-      "apps/web/src/hooks/use-me-connections.ts",
-      "apps/web/src/hooks/use-member-integration-pins.ts",
-      "apps/web/src/hooks/use-models.ts",
-      "apps/web/src/hooks/use-mutations.ts",
-      "apps/web/src/hooks/use-packages.ts",
-      "apps/web/src/hooks/use-paginated-runs.ts",
-      "apps/web/src/hooks/use-persistence.ts",
-      "apps/web/src/hooks/use-proxies.ts",
-      "apps/web/src/hooks/use-runs.ts",
-      "apps/web/src/hooks/use-schedules.ts",
-    ],
     rules: {
       "no-restricted-imports": [
         "error",
         {
           patterns: [
             {
-              // Ban the legacy barrel ("./api", "../api") while keeping the
-              // typed-client modules ("./api/client", "./api/errors") allowed.
+              // Matches "./api", "../api" (any depth) and "@/api" — but not
+              // the typed-client modules ("./api/client", "@/api/errors", …).
               // gitignore-style `group` can't re-include children of an
               // excluded directory, so use a regex on the specifier instead.
-              regex: "^(?:\\.{1,2}/)+api$",
+              regex: "^(?:(?:\\.{1,2}/)+|@/)api$",
               message:
-                "Use the typed OpenAPI client from src/api/client.ts ($api / client) instead of the legacy fetch helpers in src/api.ts.",
+                "Use the typed OpenAPI client from src/api/client.ts ($api / client) — the legacy fetch helpers are gone.",
             },
           ],
         },

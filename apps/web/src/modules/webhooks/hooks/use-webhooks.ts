@@ -1,13 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Dispatch, SetStateAction } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "@appstrate/shared-types";
-import { api, apiList } from "@/api";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { WebhookCreateResponse, WebhookDelivery } from "@appstrate/shared-types";
+import { $api, client, type components, type paths } from "@/api/client";
 import { useCurrentOrgId } from "@/hooks/use-org";
 import { useCurrentApplicationId } from "@/hooks/use-current-application";
 
-export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery };
+/** Wire shape from the OpenAPI spec (components.schemas.WebhookObject). */
+export type WebhookInfo = components["schemas"]["WebhookObject"];
+export type { WebhookCreateResponse, WebhookDelivery };
+
+type CreateWebhookBody =
+  paths["/api/webhooks"]["post"]["requestBody"]["content"]["application/json"];
+
+/** Wire enum for webhook events, derived from the create body. */
+export type WebhookEvent = Extract<CreateWebhookBody, { level: "application" }>["events"][number];
 
 /** Toggle an event in a state setter — shared by create and edit forms. */
 export function toggleEvent(event: string, setter: Dispatch<SetStateAction<string[]>>) {
@@ -23,31 +31,67 @@ export const WEBHOOK_EVENTS = [
 ] as const;
 
 /**
- * List webhooks for the current application.
- * All webhooks are now application-scoped (X-Application-Id sent automatically by api.ts).
+ * Org/app context for queries. The spec-declared `X-Org-Id` header is passed
+ * explicitly so it is part of the React Query key — switching org refetches
+ * instead of serving another org's cached page.
  */
-export function useWebhooks() {
+function useWebhookScope() {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: ["webhooks", orgId, applicationId],
-    queryFn: () => apiList<WebhookInfo>("/webhooks"),
+  return {
     enabled: !!orgId && !!applicationId,
-  });
+    header: { "X-Org-Id": orgId ?? undefined },
+    applicationId,
+  };
+}
+
+/**
+ * List webhooks for the current application — org-level webhooks plus those
+ * pinned to the current application (the only kind this UI creates), via the
+ * spec-declared `applicationId` filter.
+ */
+export function useWebhooks() {
+  const scope = useWebhookScope();
+  return $api.useQuery(
+    "get",
+    "/api/webhooks",
+    {
+      params: {
+        query: { applicationId: scope.applicationId ?? undefined },
+        header: scope.header,
+      },
+    },
+    { enabled: scope.enabled, select: (e) => e.data ?? [] },
+  );
 }
 
 export function useWebhook(webhookId: string) {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: ["webhooks", orgId, applicationId, webhookId],
-    queryFn: () => api<WebhookInfo>(`/webhooks/${webhookId}`),
-    enabled: !!orgId && !!applicationId && !!webhookId,
-  });
+  const scope = useWebhookScope();
+  return $api.useQuery(
+    "get",
+    "/api/webhooks/{id}",
+    { params: { path: { id: webhookId }, header: scope.header } },
+    { enabled: scope.enabled && !!webhookId },
+  );
+}
+
+/**
+ * openapi-react-query keys are [method, path, init] with the literal spec
+ * path — list, detail, and deliveries live under different path strings, so
+ * all need invalidating after a write.
+ */
+function useInvalidateWebhooks() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: ["get", "/api/webhooks"] });
+    void qc.invalidateQueries({ queryKey: ["get", "/api/webhooks/{id}"] });
+    void qc.invalidateQueries({ queryKey: ["get", "/api/webhooks/{id}/deliveries"] });
+  };
 }
 
 export function useCreateWebhook() {
-  const qc = useQueryClient();
+  const invalidate = useInvalidateWebhooks();
+  const applicationId = useCurrentApplicationId();
   return useMutation({
     mutationFn: async (data: {
       url: string;
@@ -56,87 +100,57 @@ export function useCreateWebhook() {
       payloadMode?: "full" | "summary";
       enabled?: boolean;
     }) => {
-      return api<WebhookCreateResponse>("/webhooks", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
+      // Webhooks created from this UI are always pinned to the current
+      // application — the level discriminator comes from context, not the
+      // call site. Form state holds plain strings; the wire enum cast is the
+      // same trust boundary as the legacy untyped helper.
+      const body: CreateWebhookBody = {
+        level: "application",
+        applicationId: applicationId!,
+        ...data,
+        events: data.events as WebhookEvent[],
+      };
+      const { data: created } = await client.POST("/api/webhooks", { body });
+      if (!created) throw new Error("empty response");
+      // The server always returns `secret` on create; the spec marks it
+      // optional only because the response reuses WebhookObject.
+      return created as WebhookCreateResponse;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["webhooks"] });
-    },
+    onSuccess: invalidate,
   });
 }
 
 export function useUpdateWebhook() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      id,
-      data,
-    }: {
-      id: string;
-      data: {
-        url?: string;
-        events?: string[];
-        packageId?: string | null;
-        payloadMode?: "full" | "summary";
-        enabled?: boolean;
-      };
-    }) => {
-      return api<WebhookInfo>(`/webhooks/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(data),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["webhooks"] });
-    },
-  });
+  const invalidate = useInvalidateWebhooks();
+  return $api.useMutation("put", "/api/webhooks/{id}", { onSuccess: invalidate });
 }
 
 export function useDeleteWebhook() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      return api(`/webhooks/${id}`, { method: "DELETE" });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["webhooks"] });
-    },
-  });
+  const invalidate = useInvalidateWebhooks();
+  return $api.useMutation("delete", "/api/webhooks/{id}", { onSuccess: invalidate });
 }
 
 export function useTestWebhook() {
-  return useMutation({
-    mutationFn: async (id: string) => {
-      return api<{ eventId: string; payload: unknown }>(`/webhooks/${id}/test`, {
-        method: "POST",
-      });
-    },
-  });
+  return $api.useMutation("post", "/api/webhooks/{id}/test");
 }
 
 export function useRotateWebhookSecret() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      return api<{ secret: string; secretPrevious: string; rotationWindowEndsAt: string }>(
-        `/webhooks/${id}/rotate`,
-        { method: "POST" },
-      );
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["webhooks"] });
-    },
-  });
+  const invalidate = useInvalidateWebhooks();
+  return $api.useMutation("post", "/api/webhooks/{id}/rotate", { onSuccess: invalidate });
 }
 
 export function useWebhookDeliveries(webhookId: string) {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: ["webhooks", orgId, applicationId, webhookId, "deliveries"],
-    queryFn: () => apiList<WebhookDelivery>(`/webhooks/${webhookId}/deliveries`),
-    enabled: !!orgId && !!applicationId && !!webhookId,
-  });
+  const scope = useWebhookScope();
+  return $api.useQuery(
+    "get",
+    "/api/webhooks/{id}/deliveries",
+    { params: { path: { id: webhookId }, header: scope.header } },
+    {
+      enabled: scope.enabled && !!webhookId,
+      // The generated delivery type is all-optional; the server always sends
+      // full rows, so keep the legacy shape (same trust boundary as the
+      // legacy `apiList<WebhookDelivery>`).
+      select: (e) => (e.data ?? []) as WebhookDelivery[],
+    },
+  );
 }

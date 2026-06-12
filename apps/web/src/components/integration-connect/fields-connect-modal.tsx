@@ -78,7 +78,10 @@ export function FieldsConnectModal({
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     mutation.mutate(
-      { packageId, authKey, credentials: values, ...(connectionId ? { connectionId } : {}) },
+      {
+        params: { path: { packageId, authKey } },
+        body: { credentials: values, ...(connectionId ? { connection_id: connectionId } : {}) },
+      },
       {
         onSuccess: (connection) => {
           onConnected?.(connection);

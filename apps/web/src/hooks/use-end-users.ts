@@ -2,8 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../api/client";
-import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
+import { useOrgScope } from "./use-org-scope";
 
 /** Wire shape from the OpenAPI spec (components.schemas.EndUserObject). */
 export type EndUserInfo = components["schemas"]["EndUserObject"];
@@ -11,24 +10,6 @@ export type EndUserInfo = components["schemas"]["EndUserObject"];
 export interface EndUserListParams {
   limit?: number;
   startingAfter?: string;
-}
-
-/**
- * Org/app context for queries. The headers are spec-declared params passed
- * explicitly (instead of relying on the client middleware alone) so they are
- * part of the React Query key — switching org or application refetches
- * instead of serving another scope's cached page.
- */
-function useOrgScope() {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return {
-    enabled: !!orgId && !!applicationId,
-    header: {
-      "X-Org-Id": orgId ?? undefined,
-      "X-Application-Id": applicationId ?? undefined,
-    },
-  };
 }
 
 export function useEndUsers(params?: EndUserListParams) {

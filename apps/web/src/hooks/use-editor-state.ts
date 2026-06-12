@@ -2,7 +2,8 @@
 
 import { useState, useMemo, useCallback, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { client } from "../api/client";
+import { splitPackageRef } from "../lib/package-paths";
 import { PACKAGE_CONFIG } from "./use-packages";
 import type { PackageType } from "@appstrate/shared-types";
 import { useCreatePackage, useUpdatePackage } from "./use-mutations";
@@ -104,14 +105,18 @@ export function useEditorState<S extends EditorStateBase>(
     const cfg = PACKAGE_CONFIG[packageType];
     // PUT returns the updated package resource bare (issue #657) — read back
     // the NEW `lock_version` so a subsequent save doesn't go stale.
-    const updated = await api<{ lock_version: number }>(`/packages/${cfg.path}/${packageId}`, {
-      method: "PUT",
-      body: JSON.stringify({
+    const { data: updated } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {
+      params: { path: splitPackageRef(packageId) },
+      // Same spec gap as useUpdatePackage (use-mutations.ts): update bodies
+      // under-declare `manifest`/`lock_version`, and the agent variant embeds
+      // the recursive JSON-Schema meta-schema (TS2590). Wire unchanged; the
+      // server validates.
+      body: {
         ...toWireBody(state),
         lock_version: state.lock_version!,
-      }),
+      } as never,
     });
-    setState((s) => ({ ...s, lock_version: updated.lock_version }));
+    setState((s) => ({ ...s, lock_version: updated!.lock_version ?? 0 }));
     qc.invalidateQueries({ queryKey: ["packages"] });
     qc.invalidateQueries({ queryKey: ["version-info"] });
     if (packageType === "agent") {

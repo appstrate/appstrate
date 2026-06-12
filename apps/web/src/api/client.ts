@@ -26,22 +26,36 @@ import { getCurrentApplicationId } from "../stores/app-store";
 type ProblemDetail = components["schemas"]["ProblemDetail"];
 
 const PATH_PARAM_RE = /\{[^{}]+\}/g;
+const SCOPED_PACKAGE_ID_RE = /^@[^/]+\/[^/]+$/;
 
 /**
  * Path serializer mirroring openapi-fetch's default (simple style, the only
- * style this spec uses) except `@` stays literal: Hono's regex routes
- * (`:scope{@[^/]+}`) match the raw path, so `%40scope` 404s every
- * `@scope/{name}` agent/package route. `@` is a valid pchar per RFC 3986 —
- * safe unencoded; everything else (including `/`) stays percent-encoded.
+ * style this spec uses) with two API-mandated deviations — Hono's regex
+ * routes match the RAW path, so percent-encoding these 404s:
+ * - `@` stays literal (`:scope{@[^/]+}` routes; `%40scope` never matches).
+ *   Valid pchar per RFC 3986, safe unencoded.
+ * - a value shaped like a scoped package id (`@scope/name`) keeps its `/` as
+ *   a real separator (`:packageId{@[^/]+/[^/]+}` routes; `%2F` never
+ *   matches); each segment is encoded individually. No other ID type starts
+ *   with `@`, so the shape test is unambiguous.
+ * Everything else stays percent-encoded.
  */
 export function pathSerializer(pathname: string, pathParams: Record<string, unknown>): string {
   let next = pathname;
   for (const match of pathname.match(PATH_PARAM_RE) ?? []) {
     const value = pathParams[match.slice(1, -1)];
     if (value === undefined || value === null) continue;
-    next = next.replace(match, encodeURIComponent(String(value)).split("%40").join("@"));
+    const raw = String(value);
+    const encoded = SCOPED_PACKAGE_ID_RE.test(raw)
+      ? raw.split("/").map(encodeSegment).join("/")
+      : encodeSegment(raw);
+    next = next.replace(match, encoded);
   }
   return next;
+}
+
+function encodeSegment(segment: string): string {
+  return encodeURIComponent(segment).split("%40").join("@");
 }
 
 const orgContext: Middleware = {

@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/select";
 import { LazySchemaForm as SchemaForm } from "../lazy-schema-form";
 import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
-import { uploadClient } from "../../api";
+import { uploadClient } from "../../api/uploads";
 import { getProviderIcon } from "../icons";
 import { findProviderByApiShapeAndBaseUrl } from "@/lib/provider-registry-helpers";
 import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
