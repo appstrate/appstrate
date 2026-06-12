@@ -17,6 +17,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import i18n from "../i18n";
 import { $api, client } from "../api/client";
 import { onMutationError } from "./use-mutations";
+import { invalidateIntegrationQueries } from "./use-integrations";
 
 /**
  * Unified user-scope connection list (integration connections), grouped by
@@ -57,11 +58,9 @@ export function useDisconnectIntegrationConnection() {
       // Member pins anywhere referencing the deleted connection cascaded
       // server-side; refresh their cache so the picker re-fetches.
       void qc.invalidateQueries({ queryKey: ["get", "/api/me/integration-pins"] });
-      // Legacy keys: the app-scoped per-integration cache (use-integrations)
-      // and the member-pin picker cache are still on the legacy key scheme —
-      // the agent page's reuse hints + accessible-connection lists need a
-      // refresh too.
-      void qc.invalidateQueries({ queryKey: ["integrations"] });
+      // The agent page's reuse hints + accessible-connection lists live under
+      // the typed `/api/integrations…` keys — refresh the whole subtree.
+      void invalidateIntegrationQueries(qc);
       void qc.invalidateQueries({ queryKey: ["me-integration-pins"] });
     },
     onError: (err: unknown) =>
@@ -108,7 +107,7 @@ export function useUpdateMeIntegrationConnection() {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
-      void qc.invalidateQueries({ queryKey: ["integrations"] });
+      void invalidateIntegrationQueries(qc);
       toast.success(i18n.t("settings:integration.connection.updated"));
     },
     onError: onMutationError,

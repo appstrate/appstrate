@@ -7,6 +7,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import i18n from "../i18n";
 import { ApiError, client } from "../api/client";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
+import { invalidateIntegrationQueries } from "./use-integrations";
 import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
 
 // NOTE on query keys: run-cache keys (["runs"], ["paginated-runs"], ["run"])
@@ -123,8 +124,11 @@ export function useImportPackage() {
           body: { file } as never,
           bodySerializer: () => fd,
         });
-        // The bundle endpoint does not surface install warnings (spec).
-        return { packageId: data!.root_package_id, type: "agent" as const };
+        return {
+          packageId: data!.root_package_id,
+          type: "agent" as const,
+          warnings: data!.warnings,
+        };
       }
       const { data } = await client.POST("/api/packages/import", {
         params: { query: force ? { force: true } : undefined },
@@ -300,7 +304,7 @@ export function useCreatePackage(type: PackageType) {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["packages"] });
       if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
-      if (type === "integration") qc.invalidateQueries({ queryKey: ["integrations"] });
+      if (type === "integration") void invalidateIntegrationQueries(qc);
       if (data.id) {
         navigate(packageDetailPath(type, data.id));
       }
@@ -343,7 +347,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       // integrations subtree on agent edits too, not only integration edits, so
       // the Connections tab verdict + badges refresh without a page reload.
       if (type === "agent" || type === "integration") {
-        qc.invalidateQueries({ queryKey: ["integrations"] });
+        void invalidateIntegrationQueries(qc);
       }
       qc.invalidateQueries({ queryKey: ["version-info"] });
       navigate(packageDetailPath(type, packageId));

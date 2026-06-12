@@ -53,20 +53,15 @@ export type {
  * Invalidate every cached integrations read (list, detail, connections,
  * pins, org default, agent resolutions, OAuth clients). Typed keys are
  * `[method, "/api/integrations…", init]` — a key-prefix invalidation can't
- * span sibling path strings, so match on the path element instead. The
- * legacy `["integrations", …]` prefix is invalidated too while neighbouring
- * hook files are still mid-migration.
+ * span sibling path strings, so match on the path element instead.
  */
 export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
-  return Promise.all([
-    qc.invalidateQueries({
-      predicate: (query) => {
-        const path = query.queryKey[1];
-        return typeof path === "string" && path.startsWith("/api/integrations");
-      },
-    }),
-    qc.invalidateQueries({ queryKey: ["integrations"] }),
-  ]).then(() => undefined);
+  return qc.invalidateQueries({
+    predicate: (query) => {
+      const path = query.queryKey[1];
+      return typeof path === "string" && path.startsWith("/api/integrations");
+    },
+  });
 }
 
 // ─────────────────────────────────────────────

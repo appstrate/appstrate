@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { client } from "../api/client";
 import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
 import { AuthLayout } from "../components/auth-layout";
@@ -35,17 +36,10 @@ export function WelcomePage() {
 
     try {
       if (displayName.trim()) {
-        const res = await fetch("/api/welcome/setup", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ displayName: displayName.trim() }),
+        // Non-2xx throws ApiError (RFC 9457 detail) via the client middleware.
+        await client.POST("/api/welcome/setup", {
+          body: { displayName: displayName.trim() },
         });
-
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.message || "Erreur");
-        }
       }
 
       finishAndRedirect();

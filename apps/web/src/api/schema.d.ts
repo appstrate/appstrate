@@ -12214,6 +12214,8 @@ export interface operations {
                         root_installed: boolean;
                         root_package_id: string;
                         root_version: string;
+                        /** @description Non-blocking install-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate. Empty when nothing is degraded. */
+                        warnings: string[];
                     };
                 };
             };

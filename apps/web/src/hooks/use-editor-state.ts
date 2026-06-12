@@ -7,6 +7,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { PACKAGE_CONFIG } from "./use-packages";
 import type { PackageType } from "@appstrate/shared-types";
 import { useCreatePackage, useUpdatePackage } from "./use-mutations";
+import { invalidateIntegrationQueries } from "./use-integrations";
 import { useUnsavedChanges } from "./use-unsaved-changes";
 
 /**
@@ -124,7 +125,7 @@ export function useEditorState<S extends EditorStateBase>(
       // Tools → required scopes → per-integration agent-resolution verdict.
       // Refresh the integrations subtree so the Connections tab reflects a
       // newly-required reconnection/upgrade without a page reload.
-      qc.invalidateQueries({ queryKey: ["integrations"] });
+      void invalidateIntegrationQueries(qc);
     }
   }, [state, isEdit, packageId, packageType, qc, toWireBody]);
 

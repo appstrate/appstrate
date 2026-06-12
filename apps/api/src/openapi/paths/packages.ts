@@ -93,7 +93,13 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["imported", "root_installed", "root_package_id", "root_version"],
+                required: [
+                  "imported",
+                  "root_installed",
+                  "root_package_id",
+                  "root_version",
+                  "warnings",
+                ],
                 properties: {
                   imported: {
                     type: "array",
@@ -130,6 +136,12 @@ export const packagesPaths = {
                   },
                   root_package_id: { type: "string" },
                   root_version: { type: "string" },
+                  warnings: {
+                    type: "array",
+                    items: { type: "string" },
+                    description:
+                      "Non-blocking install-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate. Empty when nothing is degraded.",
+                  },
                 },
               },
             },
