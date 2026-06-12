@@ -12,6 +12,7 @@ import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { handleImportBundle } from "../services/bundle-import.ts";
+import { parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
 import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
@@ -1436,6 +1437,7 @@ export function createPackagesRouter() {
     parsed: ReturnType<typeof parsePackageZip>,
     buffer: Buffer,
     force: boolean,
+    source: "zip" | "github",
   ) {
     const user = c.get("user");
     const orgId = c.get("orgId");
@@ -1600,6 +1602,17 @@ export function createPackagesRouter() {
 
     logger.info("Package imported", { packageId, type: packageType, orgId });
     const importedVersion = (manifest as Record<string, unknown>).version as string | undefined;
+    await recordAuditFromContext(c, {
+      action: existing ? "package.updated" : "package.created",
+      resourceType: "package",
+      resourceId: packageId,
+      after: {
+        type: packageType,
+        version: importedVersion ?? null,
+        via: `import:${source}`,
+        force,
+      },
+    });
     // Surface engine-subset limitations for integration manifests as
     // non-blocking warnings (AFPS §7.7). Publishers learn
     // about unsupported `connect.login` selectors / criteria at install
@@ -1661,6 +1674,22 @@ export function createPackagesRouter() {
         detail: message,
       });
     }
+    // One audit event per package version actually written — "reused"
+    // entries changed no state. `recordAudit*` never throws.
+    for (const entry of result.imported) {
+      if (entry.status !== "inserted") continue;
+      const identity = parsePackageIdentity(entry.identity);
+      await recordAuditFromContext(c, {
+        action: "package.version_created",
+        resourceType: "package",
+        resourceId: identity?.packageId ?? entry.identity,
+        after: {
+          version: identity?.version ?? null,
+          via: "import:bundle",
+          root: entry.identity === `${result.root_package_id}@${result.root_version}`,
+        },
+      });
+    }
     return c.json(result, 201);
   });
 
@@ -1680,7 +1709,7 @@ export function createPackagesRouter() {
 
     const parsed = await parseZipWithSkillFallback(zipBytes, c.get("orgSlug"));
 
-    return handleImport(c, parsed, buffer, c.req.query("force") === "true");
+    return handleImport(c, parsed, buffer, c.req.query("force") === "true", "zip");
   });
 
   // POST /api/packages/import-github — import a package from a GitHub URL
@@ -1707,7 +1736,7 @@ export function createPackagesRouter() {
 
     const parsed = await parseZipWithSkillFallback(zipBytes, c.get("orgSlug"));
 
-    return handleImport(c, parsed, buffer, false);
+    return handleImport(c, parsed, buffer, false, "github");
   });
 
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP

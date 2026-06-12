@@ -35,9 +35,11 @@ import {
   normalizeAuthScheme,
   substituteVars,
   findUnresolvedPlaceholders,
+  resolveAndCheckHost,
   OUTBOUND_TIMEOUT_MS,
   INTEGRATION_ID_RE,
   type CredentialsResponse,
+  type HostResolver,
   type SidecarConfig,
 } from "./helpers.ts";
 import {
@@ -146,6 +148,11 @@ export interface ApiCallDeps {
    * 401-retry path skips the refresh after the first failure.
    */
   reportedAuthFailures: Set<string>;
+  /**
+   * DNS resolver for the SSRF rebind check — injectable for tests.
+   * Production callers omit it (system resolver via `node:dns`).
+   */
+  resolveHost?: HostResolver;
 }
 
 /**
@@ -191,11 +198,15 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   }
 
   // 4. Validate URL against authorizedUris (or block internal
-  //    targets when allowAllUris is set).
+  //    targets when allowAllUris is set). The SSRF branches add the
+  //    DNS-resolving rebind layer over the literal blocklist (see
+  //    `refuseSsrfTarget`); the allowlist branch stays literal-only —
+  //    `authorizedUris` is the operator-declared trust boundary, and a
+  //    matched allowlist host resolving internally is that operator's
+  //    own network topology, not an agent-reachable pivot.
   if (creds.allowAllUris) {
-    if (isBlockedUrl(resolvedUrl)) {
-      return { ok: false, status: 403, error: "URL targets a blocked network range" };
-    }
+    const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
+    if (refusal) return refusal;
   } else if (creds.authorizedUris && creds.authorizedUris.length) {
     if (!matchesAuthorizedUri(resolvedUrl, creds.authorizedUris)) {
       return {
@@ -206,9 +217,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     }
   } else {
     // No authorizedUris and no allowAllUris — apply the SSRF safety net.
-    if (isBlockedUrl(resolvedUrl)) {
-      return { ok: false, status: 403, error: "URL targets a blocked network range" };
-    }
+    const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
+    if (refusal) return refusal;
   }
 
   // 5b. Pre-substitute headers with the *initial* creds so we can
@@ -464,6 +474,54 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   });
 
   return { ok: true, response: upstream, finalUrl: upstreamFinalUrl, authRefreshed };
+}
+
+/**
+ * SSRF gate for the non-allowlisted branches: the literal blocklist
+ * first (IP literals, known-internal names), then resolve every A/AAAA
+ * record and refuse if ANY lands in a blocked range. A DNS name whose
+ * record points inside (10.x, 169.254.169.254, …) passes `isBlockedUrl`
+ * alone — this closes the rebind-to-internal vector.
+ *
+ * The outbound connection is delegated to `fetch`, which re-resolves —
+ * so this is fail-closed defence-in-depth with a documented residual
+ * TOCTOU, not a full resolve-and-pin (same posture as the MITM upstream
+ * fetch and the platform CIMD guard; only the raw-socket egress
+ * listeners can pin). Resolution failure maps to 502 — the same outcome
+ * the subsequent fetch would have produced for an unresolvable host —
+ * while a blocked answer is the policy 403.
+ *
+ * Returns the structured failure, or `null` when the target is clear.
+ */
+async function refuseSsrfTarget(
+  url: string,
+  resolveHost?: HostResolver,
+): Promise<ApiCallFailure | null> {
+  const blockedFailure: ApiCallFailure = {
+    ok: false,
+    status: 403,
+    error: "URL targets a blocked network range",
+  };
+  if (isBlockedUrl(url)) return blockedFailure;
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return blockedFailure;
+  }
+  const check = await resolveAndCheckHost(hostname, { resolve: resolveHost });
+  if (!check.blocked) return null;
+  if (check.reason === "resolution-failed") {
+    return {
+      ok: false,
+      status: 502,
+      error: `Target host could not be resolved (${redactHost(url)})`,
+    };
+  }
+  logger.warn("api_call refused: target resolves into a blocked network range", {
+    host: redactHost(url),
+  });
+  return blockedFailure;
 }
 
 function wrapFetchError(err: unknown, label: string, url: string): ApiCallFailure {
