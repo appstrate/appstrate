@@ -36,17 +36,8 @@ export const uploadClient: UploadFn = async (file, signal) => {
   return desc.uri;
 };
 
-export class ApiError extends Error {
-  constructor(
-    public code: string,
-    message: string,
-    public status: number,
-    public details?: Record<string, unknown>,
-  ) {
-    super(message);
-    this.name = "ApiError";
-  }
-}
+export { ApiError } from "./api/errors";
+import { ApiError } from "./api/errors";
 
 async function throwIfNotOk(res: Response): Promise<void> {
   if (!res.ok) {

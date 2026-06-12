@@ -1020,7 +1020,19 @@ export const schemas = {
   },
   EndUserObject: {
     type: "object",
-    required: ["id", "object", "applicationId", "createdAt", "updatedAt"],
+    // Every field is always serialized (toEndUserResponse in services/end-users.ts);
+    // nullable fields are required-but-null on the wire, not omitted.
+    required: [
+      "id",
+      "object",
+      "applicationId",
+      "name",
+      "email",
+      "externalId",
+      "metadata",
+      "createdAt",
+      "updatedAt",
+    ],
     properties: {
       id: { type: "string", description: "End-user ID (eu_ prefix)" },
       object: { type: "string", enum: ["end_user"], description: "Object type" },
@@ -1028,7 +1040,11 @@ export const schemas = {
       name: { type: ["string", "null"], description: "Display name" },
       email: { type: ["string", "null"], format: "email", description: "Email address" },
       externalId: { type: ["string", "null"], description: "External system identifier" },
-      metadata: { type: ["object", "null"], description: "Arbitrary key-value metadata" },
+      metadata: {
+        type: ["object", "null"],
+        additionalProperties: true,
+        description: "Arbitrary key-value metadata",
+      },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },

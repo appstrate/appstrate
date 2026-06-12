@@ -4742,16 +4742,18 @@ export interface components {
             /** @description ID of the parent application */
             applicationId: string;
             /** @description Display name */
-            name?: string | null;
+            name: string | null;
             /**
              * Format: email
              * @description Email address
              */
-            email?: string | null;
+            email: string | null;
             /** @description External system identifier */
-            externalId?: string | null;
+            externalId: string | null;
             /** @description Arbitrary key-value metadata */
-            metadata?: Record<string, never> | null;
+            metadata: {
+                [key: string]: unknown;
+            } | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -15281,10 +15283,10 @@ export interface operations {
                      */
                     "application/json": {
                         /** @enum {string} */
-                        object?: "list";
-                        data?: components["schemas"]["EndUserObject"][];
+                        object: "list";
+                        data: components["schemas"]["EndUserObject"][];
                         /** @description Whether more results exist beyond this page */
-                        hasMore?: boolean;
+                        hasMore: boolean;
                         /** @description The limit that was applied to this query */
                         limit?: number;
                     };
@@ -15333,7 +15335,9 @@ export interface operations {
                     /** @description Your system's unique identifier for this end-user */
                     externalId?: string | null;
                     /** @description Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null. */
-                    metadata?: Record<string, never>;
+                    metadata?: {
+                        [key: string]: string | number | boolean | null;
+                    };
                 };
             };
         };
@@ -15488,7 +15492,9 @@ export interface operations {
                     /** @description Your system's unique identifier for this end-user */
                     externalId?: string | null;
                     /** @description Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null. */
-                    metadata?: Record<string, never>;
+                    metadata?: {
+                        [key: string]: string | number | boolean | null;
+                    };
                 };
             };
         };
