@@ -175,7 +175,7 @@ router.get("/integration-pins", requireAppContext(), async (c) => {
     // than 403 so the picker can render without special-casing the actor.
     return c.json(listResponse([]));
   }
-  const agentPackageId = c.req.query("agentPackageId");
+  const agentPackageId = c.req.query("agent_package_id");
   if (!agentPackageId) {
     return c.json(listResponse([]));
   }
@@ -215,10 +215,10 @@ router.delete("/integration-pins", requireAppContext(), async (c) => {
     throw unauthorized("End-user cannot clear a member-scope pin");
   }
   const scope = getAppScope(c);
-  const agentPackageId = c.req.query("agentPackageId");
-  const integrationId = c.req.query("integrationPackageId");
+  const agentPackageId = c.req.query("agent_package_id");
+  const integrationId = c.req.query("integration_package_id");
   if (!agentPackageId || !integrationId) {
-    throw invalidRequest("agentPackageId and integrationPackageId query params are required");
+    throw invalidRequest("agent_package_id and integration_package_id query params are required");
   }
   const result = await deleteMemberPin(scope, agentPackageId, integrationId, user.id);
   if (result.deleted) {

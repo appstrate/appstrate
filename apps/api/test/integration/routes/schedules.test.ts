@@ -29,8 +29,9 @@ describe("Schedules API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body).toBeArray();
-      expect(body).toHaveLength(0);
+      expect(body.object).toBe("list");
+      expect(body.data).toBeArray();
+      expect(body.data).toHaveLength(0);
     });
 
     it("returns schedules for the org", async () => {
@@ -51,8 +52,9 @@ describe("Schedules API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.length).toBeGreaterThanOrEqual(1);
-      expect(body[0].name).toBe("Hourly");
+      expect(body.object).toBe("list");
+      expect(body.data.length).toBeGreaterThanOrEqual(1);
+      expect(body.data[0].name).toBe("Hourly");
     });
   });
 

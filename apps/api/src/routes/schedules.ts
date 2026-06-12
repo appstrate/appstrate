@@ -24,6 +24,7 @@ import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/runs.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
+import { listResponse } from "../lib/list-response.ts";
 import { runConfigOverrideSchema, scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 
 // Per-integration connection picks frozen on the schedule row (cascade
@@ -68,7 +69,7 @@ export function createSchedulesRouter() {
   router.get("/schedules", async (c) => {
     const scope = getAppScope(c);
     const schedules = await listSchedules(scope);
-    return c.json(schedules);
+    return c.json(listResponse(schedules));
   });
 
   // GET /api/agents/:scope/:name/schedules — list schedules for an agent
@@ -76,7 +77,7 @@ export function createSchedulesRouter() {
     const scope = getAppScope(c);
     const agent = c.get("package");
     const schedules = await listPackageSchedules(scope, agent.id);
-    return c.json(schedules);
+    return c.json(listResponse(schedules));
   });
 
   // POST /api/agents/:scope/:name/schedules — create a schedule

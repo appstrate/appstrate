@@ -26,9 +26,7 @@ export function useAllSchedules() {
   const applicationId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["schedules", orgId, applicationId],
-    queryFn: async () => {
-      return api<EnrichedSchedule[]>("/schedules");
-    },
+    queryFn: () => apiList<EnrichedSchedule>("/schedules"),
     enabled: !!orgId && !!applicationId,
   });
 }
@@ -50,9 +48,7 @@ export function useSchedules(packageId: string | undefined) {
   const applicationId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["schedules", orgId, applicationId, packageId],
-    queryFn: async () => {
-      return api<EnrichedSchedule[]>(`/agents/${packageId}/schedules`);
-    },
+    queryFn: () => apiList<EnrichedSchedule>(`/agents/${packageId}/schedules`),
     enabled: !!packageId && !!applicationId,
   });
 }
