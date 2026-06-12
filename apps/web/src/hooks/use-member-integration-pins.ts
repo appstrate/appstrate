@@ -74,8 +74,8 @@ export function useDeleteMemberIntegrationPin() {
   return useMutation({
     mutationFn: (input: DeleteMemberPinInput) => {
       const qs = new URLSearchParams({
-        agentPackageId: input.agentPackageId,
-        integrationPackageId: input.integrationId,
+        agent_package_id: input.agentPackageId,
+        integration_package_id: input.integrationId,
       }).toString();
       return api<void>(`/me/integration-pins?${qs}`, { method: "DELETE" });
     },

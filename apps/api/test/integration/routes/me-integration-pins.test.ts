@@ -208,7 +208,7 @@ describe("/api/me/integration-pins", () => {
       expect(putRes.status).toBe(200);
 
       const res = await app.request(
-        `/api/me/integration-pins?agentPackageId=${encodeURIComponent(AGENT)}`,
+        `/api/me/integration-pins?agent_package_id=${encodeURIComponent(AGENT)}`,
         { headers: authHeaders(ctx) },
       );
 
@@ -251,8 +251,8 @@ describe("/api/me/integration-pins", () => {
       });
 
       const qs = new URLSearchParams({
-        agentPackageId: AGENT,
-        integrationPackageId: INTEGRATION,
+        agent_package_id: AGENT,
+        integration_package_id: INTEGRATION,
       });
       const res = await app.request(`/api/me/integration-pins?${qs.toString()}`, {
         method: "DELETE",
@@ -263,7 +263,7 @@ describe("/api/me/integration-pins", () => {
 
       // Subsequent GET returns empty list.
       const list = await app.request(
-        `/api/me/integration-pins?agentPackageId=${encodeURIComponent(AGENT)}`,
+        `/api/me/integration-pins?agent_package_id=${encodeURIComponent(AGENT)}`,
         { headers: authHeaders(ctx) },
       );
       const body = (await list.json()) as { data: unknown[] };
@@ -332,8 +332,8 @@ describe("/api/me/integration-pins", () => {
       });
 
       const qs = new URLSearchParams({
-        agentPackageId: AGENT,
-        integrationPackageId: INTEGRATION,
+        agent_package_id: AGENT,
+        integration_package_id: INTEGRATION,
       });
       const res = await app.request(`/api/me/integration-pins?${qs.toString()}`, {
         method: "DELETE",
@@ -361,7 +361,7 @@ describe("/api/me/integration-pins", () => {
       });
 
       const res = await app.request(
-        `/api/me/integration-pins?agentPackageId=${encodeURIComponent(AGENT)}`,
+        `/api/me/integration-pins?agent_package_id=${encodeURIComponent(AGENT)}`,
         {
           headers: {
             Authorization: `Bearer ${apiKey.rawKey}`,

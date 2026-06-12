@@ -512,8 +512,8 @@ export const runsPaths = {
           schema: { type: "string", enum: ["all", "package", "inline"] },
         },
         { name: "status", in: "query", schema: { type: "string" } },
-        { name: "startDate", in: "query", schema: { type: "string", format: "date-time" } },
-        { name: "endDate", in: "query", schema: { type: "string", format: "date-time" } },
+        { name: "start_date", in: "query", schema: { type: "string", format: "date-time" } },
+        { name: "end_date", in: "query", schema: { type: "string", format: "date-time" } },
       ],
       responses: {
         "200": {

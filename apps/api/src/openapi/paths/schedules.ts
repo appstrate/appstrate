@@ -21,8 +21,16 @@ export const schedulesPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "array",
-                items: { $ref: "#/components/schemas/Schedule" },
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/Schedule" },
+                  },
+                  hasMore: { type: "boolean" },
+                },
               },
             },
           },
@@ -53,8 +61,16 @@ export const schedulesPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "array",
-                items: { $ref: "#/components/schemas/Schedule" },
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/Schedule" },
+                  },
+                  hasMore: { type: "boolean" },
+                },
               },
             },
           },
