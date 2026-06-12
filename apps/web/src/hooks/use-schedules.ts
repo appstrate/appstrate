@@ -42,7 +42,7 @@ export function useAllSchedules() {
     queryKey: ["schedules", orgId, applicationId],
     queryFn: async () => {
       const { data } = await client.GET("/api/schedules");
-      return (data ?? []) as EnrichedSchedule[];
+      return (data?.data ?? []) as EnrichedSchedule[];
     },
     enabled: !!orgId && !!applicationId,
   });
@@ -78,7 +78,7 @@ export function useSchedules(packageId: string | undefined) {
       const { data } = await client.GET("/api/agents/{scope}/{name}/schedules", {
         params: { path: { scope, name } },
       });
-      return (data ?? []) as EnrichedSchedule[];
+      return (data?.data ?? []) as EnrichedSchedule[];
     },
     enabled: !!packageId && !!applicationId,
   });

@@ -6804,8 +6804,8 @@ export interface operations {
                 offset?: number;
                 kind?: "all" | "package" | "inline";
                 status?: string;
-                startDate?: string;
-                endDate?: string;
+                start_date?: string;
+                end_date?: string;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -7698,7 +7698,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Schedule"][];
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["Schedule"][];
+                        hasMore: boolean;
+                    };
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -7731,7 +7736,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Schedule"][];
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["Schedule"][];
+                        hasMore: boolean;
+                    };
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -11273,7 +11283,7 @@ export interface operations {
         parameters: {
             query: {
                 /** @description Agent package id whose pins to list. */
-                agentPackageId: string;
+                agent_package_id: string;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -11357,8 +11367,8 @@ export interface operations {
     deleteMyIntegrationPin: {
         parameters: {
             query: {
-                agentPackageId: string;
-                integrationPackageId: string;
+                agent_package_id: string;
+                integration_package_id: string;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -11378,7 +11388,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Missing required query param (agentPackageId or integrationPackageId). */
+            /** @description Missing required query param (agent_package_id or integration_package_id). */
             400: {
                 headers: {
                     [name: string]: unknown;

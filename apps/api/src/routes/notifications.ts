@@ -56,7 +56,7 @@ export function createNotificationsRouter() {
 
   // GET /api/runs — global paginated run list across the application.
   // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
-  // for inline-run filtering, ?status, ?startDate/?endDate.
+  // for inline-run filtering, ?status, ?start_date/?end_date.
   router.get("/runs", async (c) => {
     const actor = getActor(c);
     const scope = getAppScope(c);
@@ -89,15 +89,15 @@ export function createNotificationsRouter() {
         ? (rawKind as GlobalRunKind)
         : undefined;
     const status = c.req.query("status");
-    const startDateRaw = c.req.query("startDate");
-    const endDateRaw = c.req.query("endDate");
+    const startDateRaw = c.req.query("start_date");
+    const endDateRaw = c.req.query("end_date");
     const startDate = startDateRaw ? new Date(startDateRaw) : undefined;
     const endDate = endDateRaw ? new Date(endDateRaw) : undefined;
     if (startDate && Number.isNaN(startDate.getTime())) {
-      throw invalidRequest("startDate is not a valid ISO date", "startDate");
+      throw invalidRequest("start_date is not a valid ISO date", "start_date");
     }
     if (endDate && Number.isNaN(endDate.getTime())) {
-      throw invalidRequest("endDate is not a valid ISO date", "endDate");
+      throw invalidRequest("end_date is not a valid ISO date", "end_date");
     }
 
     const result = await listGlobalRuns(scope, {

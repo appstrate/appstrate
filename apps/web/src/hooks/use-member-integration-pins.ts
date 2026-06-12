@@ -74,8 +74,8 @@ export function useDeleteMemberIntegrationPin() {
       await client.DELETE("/api/me/integration-pins", {
         params: {
           query: {
-            agentPackageId: input.agentPackageId,
-            integrationPackageId: input.integrationId,
+            agent_package_id: input.agentPackageId,
+            integration_package_id: input.integrationId,
           },
         },
       });

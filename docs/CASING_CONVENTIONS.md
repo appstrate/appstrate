@@ -335,17 +335,6 @@ Query params are wire surface. They follow the **same rule as wire JSON (Zone 1)
 
 Conforming snake_case examples: `?actor_type=&actor_id=` on the persistence routes (`routes/agents.ts:360`); OAuth 2.0 wire params `?client_id=`, `?post_logout_redirect_uri=` (RFC 6749, Zone 1). Single bare tokens (`limit`, `kind`, `status`, `q`, `since`) are trivially conforming.
 
-### Legacy exceptions (closed list — converge at the next API-version date)
-
-Four camelCase domain query params predate this rule. They are **exceptions, not precedent** — this list MUST NOT grow. Rename them to snake_case behind the next dated API version (`Appstrate-Version`):
-
-| Param                  | Route                                           | Target name                                              |
-| ---------------------- | ----------------------------------------------- | -------------------------------------------------------- |
-| `startDate`            | global runs feed (`routes/notifications.ts:92`) | `start_date` (domain timestamp — Carve-out 4b flips)     |
-| `endDate`              | global runs feed (`routes/notifications.ts:93`) | `end_date`                                               |
-| `agentPackageId`       | `/me/integration-pins` (`routes/me.ts:178,218`) | `agent_package_id` (already the wire-DTO spelling)       |
-| `integrationPackageId` | `/me/integration-pins` (`routes/me.ts:219`)     | `integration_package_id` (already the wire-DTO spelling) |
-
 A new camelCase domain query param is a bug, same as a camelCase domain wire field.
 
 ### Pagination styles (which one to use)

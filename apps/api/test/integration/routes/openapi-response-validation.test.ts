@@ -476,7 +476,8 @@ describe("OpenAPI response validation", () => {
 
       expect(result.valid).toBe(true);
       expect(result.extraFields).toEqual([]);
-      expect(body).toBeArray();
+      expect((body as any).object).toBe("list");
+      expect((body as any).data).toBeArray();
     });
   });
 
