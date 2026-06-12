@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { auditEvents, runs } from "@appstrate/db/schema";
+import { auditEvents, runLogs, runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -986,6 +986,106 @@ describe("Runs API", () => {
       expect(body.data).toHaveLength(3);
       expect(body.hasMore).toBe(false);
       expect(res.headers.get("Link")).toBeNull();
+    });
+
+    describe("default ?limit= cap of 1000", () => {
+      it("caps an unqualified GET at the oldest 1000 rows and pages on via the since cursor", async () => {
+        await seedAgent({ id: "@runorg/cap-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+        const run = await seedRun({
+          packageId: "@runorg/cap-agent",
+          orgId: ctx.orgId,
+          applicationId: ctx.defaultAppId,
+          userId: ctx.user.id,
+          status: "running",
+        });
+
+        // Bulk-insert 1001 rows in a single statement — serial ids are
+        // assigned in VALUES order, so sorted ids mirror seeding order.
+        const seeded = await db
+          .insert(runLogs)
+          .values(
+            Array.from({ length: 1001 }, (_, i) => ({
+              runId: run.id,
+              orgId: ctx.orgId,
+              type: "progress",
+              level: "info" as const,
+              message: `log ${i}`,
+            })),
+          )
+          .returning({ id: runLogs.id });
+        const ids = seeded.map((r) => r.id).sort((a, b) => a - b);
+        const thousandthId = ids[999]!;
+        const lastSeededId = ids[1000]!;
+
+        // Page 1: no query params → exactly the OLDEST 1000 rows, ascending.
+        const res = await app.request(`/api/runs/${run.id}/logs`, {
+          headers: authHeaders(ctx),
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: Array<{ id: number }>; hasMore: boolean };
+        expect(body.data).toHaveLength(1000);
+        expect(body.hasMore).toBe(true);
+        expect(body.data[0]!.id).toBeLessThan(body.data.at(-1)!.id);
+        expect(body.data[0]!.id).toBe(ids[0]!);
+        expect(body.data.at(-1)!.id).toBe(thousandthId);
+
+        const link = res.headers.get("Link");
+        expect(link).not.toBeNull();
+        expect(link).toContain(`since=${thousandthId}`);
+        expect(link).toContain('rel="next"');
+
+        // Page 2: follow the cursor → the single remaining row, no Link.
+        const res2 = await app.request(`/api/runs/${run.id}/logs?since=${thousandthId}`, {
+          headers: authHeaders(ctx),
+        });
+        expect(res2.status).toBe(200);
+        const body2 = (await res2.json()) as { data: Array<{ id: number }>; hasMore: boolean };
+        expect(body2.data.map((l) => l.id)).toEqual([lastSeededId]);
+        expect(body2.hasMore).toBe(false);
+        expect(res2.headers.get("Link")).toBeNull();
+      });
+
+      it("honours an explicit ?limit= and falls back to 1000 on a malformed one", async () => {
+        await seedAgent({
+          id: "@runorg/caplimit-agent",
+          orgId: ctx.orgId,
+          createdBy: ctx.user.id,
+        });
+        const run = await seedRun({
+          packageId: "@runorg/caplimit-agent",
+          orgId: ctx.orgId,
+          applicationId: ctx.defaultAppId,
+          userId: ctx.user.id,
+          status: "running",
+        });
+        await db.insert(runLogs).values(
+          Array.from({ length: 6 }, (_, i) => ({
+            runId: run.id,
+            orgId: ctx.orgId,
+            type: "progress",
+            level: "info" as const,
+            message: `log ${i}`,
+          })),
+        );
+
+        const res = await app.request(`/api/runs/${run.id}/logs?limit=5`, {
+          headers: authHeaders(ctx),
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: unknown[]; hasMore: boolean };
+        expect(body.data).toHaveLength(5);
+        expect(body.hasMore).toBe(true);
+
+        // Lenient posture: a malformed limit falls back to the default
+        // 1000 (returning everything here) instead of a 400.
+        const resBad = await app.request(`/api/runs/${run.id}/logs?limit=abc`, {
+          headers: authHeaders(ctx),
+        });
+        expect(resBad.status).toBe(200);
+        const bodyBad = (await resBad.json()) as { data: unknown[]; hasMore: boolean };
+        expect(bodyBad.data).toHaveLength(6);
+        expect(bodyBad.hasMore).toBe(false);
+      });
     });
   });
 

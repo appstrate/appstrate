@@ -3,6 +3,7 @@
 import { Component, type ReactNode, type ErrorInfo } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import { isChunkLoadError, reloadOnceForChunkError } from "@/lib/chunk-reload";
 
 interface Props {
   children: ReactNode;
@@ -11,6 +12,14 @@ interface Props {
 interface State {
   hasError: boolean;
   error: Error | null;
+  /**
+   * Chunk-load recovery status. `null` = chunk error caught, reload decision
+   * pending in componentDidCatch (render nothing to avoid a fallback flash);
+   * `true` = one-shot reload underway (keep rendering nothing); `false` =
+   * not a chunk error, or the reload guard already fired this session —
+   * render the normal retry fallback.
+   */
+  reloading: boolean | null;
 }
 
 function ErrorFallback({ error, onRetry }: { error: Error | null; onRetry: () => void }) {
@@ -27,22 +36,35 @@ function ErrorFallback({ error, onRetry }: { error: Error | null; onRetry: () =>
 }
 
 export class ErrorBoundary extends Component<Props, State> {
-  override state: State = { hasError: false, error: null };
+  override state: State = { hasError: false, error: null, reloading: false };
 
   static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error };
+    return { hasError: true, error, reloading: isChunkLoadError(error) ? null : false };
   }
 
-  override componentDidCatch(_error: Error, _info: ErrorInfo) {
-    // Errors are already surfaced via getDerivedStateFromError → ErrorFallback
+  override componentDidCatch(error: Error, _info: ErrorInfo) {
+    // Stale-chunk failures after a redeploy are unrecoverable from inside
+    // React — the rejected lazy() payload is cached, so the Retry button
+    // would re-throw forever. Hard-reload once instead; the shared
+    // sessionStorage guard (chunk-reload.ts) prevents reload loops, and when
+    // it has already fired we fall back to the normal error UI.
+    if (isChunkLoadError(error)) {
+      this.setState({ reloading: reloadOnceForChunkError() });
+    }
+    // Non-chunk errors are already surfaced via getDerivedStateFromError → ErrorFallback.
   }
 
   override render() {
     if (this.state.hasError) {
+      // Chunk error pending decision or reload in flight — render nothing so
+      // the retry UI never flashes before the page reloads.
+      if (this.state.reloading !== false) {
+        return null;
+      }
       return (
         <ErrorFallback
           error={this.state.error}
-          onRetry={() => this.setState({ hasError: false, error: null })}
+          onRetry={() => this.setState({ hasError: false, error: null, reloading: false })}
         />
       );
     }
