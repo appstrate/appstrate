@@ -79,18 +79,24 @@ export function RunAgentButton({
     }
   };
 
-  // Skip the lazy fetch when the parent already provided the detail.
-  const { data: fetchedDetail, isFetching } = usePackageDetail(
-    "agent",
-    providedDetail ? undefined : packageId,
-  );
+  // Skip the fetch when the parent already provided the detail (detail page
+  // case). Otherwise the query stays DISABLED — list pages render N of these
+  // buttons and eagerly fetching full agent detail per card caused an N+1
+  // request burst on mount. The detail is fetched on demand via `refetch()`
+  // in `handleClick` instead (and cached by React Query for the next click).
+  const {
+    data: fetchedDetail,
+    isFetching,
+    refetch,
+  } = usePackageDetail("agent", providedDetail ? undefined : packageId, { enabled: false });
 
   const detail: AgentDetail | undefined = providedDetail ?? fetchedDetail;
 
   /** Start the run: open the input modal when the agent declares input, else fire directly. */
-  const startRun = () => {
+  const startRun = (agentDetail: AgentDetail) => {
     const agentHasInput =
-      !!detail?.input?.schema?.properties && Object.keys(detail.input.schema.properties).length > 0;
+      !!agentDetail.input?.schema?.properties &&
+      Object.keys(agentDetail.input.schema.properties).length > 0;
     if (!agentHasInput) {
       runAgent.mutate({ version }, { onError: onRunError });
       return;
@@ -102,14 +108,20 @@ export function RunAgentButton({
     e.preventDefault();
     e.stopPropagation();
 
-    // Detail already available (provided or fetched via React Query)
+    // Detail already available (provided, or cached from a previous click)
     if (detail) {
-      startRun();
+      startRun(detail);
       return;
     }
 
-    // Fetch hasn't completed yet — surface a generic error rather than racing
-    toast.error(t("error.generic", { ns: "common" }));
+    // Deferred fetch — `isFetching` drives the pending spinner meanwhile.
+    void refetch().then((res) => {
+      if (res.data) {
+        startRun(res.data);
+      } else {
+        toast.error(t("error.generic", { ns: "common" }));
+      }
+    });
   };
 
   const isPending = isFetching || runAgent.isPending;

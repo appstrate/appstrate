@@ -42,10 +42,27 @@ export type IntegrationManifestLoadResult =
   | { ok: false; failure: IntegrationManifestLoadFailure };
 
 /**
+ * Per-call-graph memo for {@link fetchIntegrationManifest}. The run kickoff
+ * path loads the SAME integration manifests several times (readiness check →
+ * connection-resolution snapshot → spawn resolver); threading one Map through
+ * those call sites dedupes the SELECT + Zod parse within a single run trigger.
+ *
+ * Deliberately NOT a global/TTL cache — the memo's lifetime is one call graph
+ * (one run trigger), so a manifest edit is always visible to the next request
+ * (no staleness window). Values are promises so concurrent callers within the
+ * same graph share one in-flight query instead of racing duplicates.
+ */
+export type IntegrationManifestCache = Map<string, Promise<IntegrationManifestLoadResult>>;
+
+/**
  * Fetch + validate an integration manifest from `packages.draft_manifest`,
  * unscoped (no orgId filter — internal callers already have an authentication
  * context: a run token, a service-internal call, …). Returns a discriminated
  * union so each caller can map the failure mode to its preferred response.
+ *
+ * `cache` (optional) memoizes results per packageId for the caller's call
+ * graph — see {@link IntegrationManifestCache}. Omitting it preserves the
+ * uncached behaviour exactly.
  *
  * Org-scoped reads (marketplace listing/detail) keep their own SELECT in
  * `getIntegration` / `listIntegrations` because they pull additional columns
@@ -53,6 +70,18 @@ export type IntegrationManifestLoadResult =
  * would force a redundant second roundtrip or leak its SELECT shape.
  */
 export async function fetchIntegrationManifest(
+  packageId: string,
+  cache?: IntegrationManifestCache,
+): Promise<IntegrationManifestLoadResult> {
+  if (!cache) return fetchIntegrationManifestUncached(packageId);
+  const hit = cache.get(packageId);
+  if (hit) return hit;
+  const promise = fetchIntegrationManifestUncached(packageId);
+  cache.set(packageId, promise);
+  return promise;
+}
+
+async function fetchIntegrationManifestUncached(
   packageId: string,
 ): Promise<IntegrationManifestLoadResult> {
   const [pkgRow] = await db

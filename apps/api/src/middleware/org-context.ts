@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Context, Next } from "hono";
+import type { OrgSettings } from "@appstrate/shared-types";
 import type { AppEnv, OrgRole } from "../types/index.ts";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -40,7 +41,14 @@ export function requireOrgContext() {
     }
 
     const rows = await db
-      .select({ role: organizationMembers.role, slug: organizations.slug })
+      .select({
+        role: organizationMembers.role,
+        slug: organizations.slug,
+        // Piggyback the settings JSONB on the membership join so downstream
+        // per-request consumers (API-version middleware) don't issue a
+        // second organizations query on every authenticated request.
+        orgSettings: organizations.orgSettings,
+      })
       .from(organizationMembers)
       .innerJoin(organizations, eq(organizations.id, organizationMembers.orgId))
       .where(
@@ -58,6 +66,7 @@ export function requireOrgContext() {
     c.set("orgId", orgId);
     c.set("orgRole", rows[0].role as OrgRole);
     c.set("orgSlug", rows[0].slug);
+    c.set("orgSettings", (rows[0].orgSettings ?? {}) as OrgSettings);
     return next();
   };
 }

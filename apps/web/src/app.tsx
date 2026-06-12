@@ -11,48 +11,8 @@ import {
   Link,
 } from "react-router-dom";
 import { PackageList } from "./pages/package-list";
-import { UnifiedPackageDetailPage } from "./pages/unified-package-detail";
-import { PackageEditorPage } from "./pages/package-editor";
-import { RunDetailPage } from "./pages/run-detail";
-import { SchedulesListPage } from "./pages/schedules-list";
-import { RunsPage } from "./pages/runs-page";
 import { DashboardPage } from "./pages/dashboard";
 import { InviteAcceptPage } from "./pages/invite-accept";
-import { WelcomePage } from "./pages/welcome";
-import { OnboardingCreateStep } from "./pages/onboarding/create-step";
-import { OnboardingPlanStep } from "./pages/onboarding/plan-step";
-import { OnboardingModelStep } from "./pages/onboarding/model-step";
-import { OnboardingMembersStep } from "./pages/onboarding/members-step";
-import { OnboardingDoneStep } from "./pages/onboarding/done-step";
-import { OnboardingWaitingStep } from "./pages/onboarding/waiting-step";
-import { OrgSettingsLayout } from "./pages/org-settings/layout";
-import { OrgSettingsGeneralPage } from "./pages/org-settings/general";
-import { OrgSettingsMembersPage } from "./pages/org-settings/members";
-import { OrgSettingsModelsPage } from "./pages/org-settings/models";
-import { OrgSettingsProxiesPage } from "./pages/org-settings/proxies";
-import { OrgSettingsOAuthPage } from "./pages/org-settings/oauth";
-import { OrgSettingsBillingPage } from "./pages/org-settings/billing";
-import { OrgSettingsCliSessionsPage } from "./pages/org-settings/cli-sessions";
-import { OrgSettingsApplicationsPage } from "./pages/org-settings/applications";
-import { OrgSettingsAppGeneralPage } from "./pages/org-settings/app/general";
-import { OrgSettingsAppAuthPage } from "./pages/org-settings/app/auth";
-import { OrgSettingsAppOauthPage } from "./pages/org-settings/app/oauth";
-import { ApiKeysPage } from "./pages/api-keys-page";
-import { EndUsersPage } from "./pages/end-users-page";
-import { SkillsPage } from "./pages/skills-page";
-import { McpServersPage } from "./pages/mcp-servers-page";
-import { IntegrationsPage } from "./pages/integrations-page";
-import { IntegrationDetailPage } from "./pages/integration-detail";
-import { ScheduleDetailPage } from "./pages/schedule-detail";
-import { ScheduleCreatePage } from "./pages/schedule-create";
-import { ScheduleEditPage } from "./pages/schedule-edit";
-import { PreferencesLayout } from "./pages/preferences/layout";
-import { PreferencesGeneralPage } from "./pages/preferences/general";
-import { PreferencesAppearancePage } from "./pages/preferences/appearance";
-import { PreferencesSecurityPage } from "./pages/preferences/security";
-import { PreferencesConnectionsPage } from "./pages/preferences/connections";
-import { PreferencesDevicesPage } from "./pages/preferences/devices";
-import { LibraryPage } from "./pages/library-page";
 import { LoginPage } from "./pages/login";
 import { RegisterPage } from "./pages/register";
 import { ClaimPage } from "./pages/claim";
@@ -91,6 +51,139 @@ const WebhookDetailPage = lazy(() =>
 const AuthCallbackPage = lazy(() =>
   import("./modules/oidc/pages/auth-callback").then((m) => ({ default: m.AuthCallbackPage })),
 );
+
+// Route-level code splitting — heavy authenticated pages are lazy-loaded so
+// the entry chunk only carries the login/dashboard shell. Same Suspense +
+// LoadingState fallback pattern as the module pages above.
+const UnifiedPackageDetailPage = lazy(() =>
+  import("./pages/unified-package-detail").then((m) => ({ default: m.UnifiedPackageDetailPage })),
+);
+const PackageEditorPage = lazy(() =>
+  import("./pages/package-editor").then((m) => ({ default: m.PackageEditorPage })),
+);
+const RunDetailPage = lazy(() =>
+  import("./pages/run-detail").then((m) => ({ default: m.RunDetailPage })),
+);
+const RunsPage = lazy(() => import("./pages/runs-page").then((m) => ({ default: m.RunsPage })));
+const SchedulesListPage = lazy(() =>
+  import("./pages/schedules-list").then((m) => ({ default: m.SchedulesListPage })),
+);
+const ScheduleDetailPage = lazy(() =>
+  import("./pages/schedule-detail").then((m) => ({ default: m.ScheduleDetailPage })),
+);
+const ScheduleCreatePage = lazy(() =>
+  import("./pages/schedule-create").then((m) => ({ default: m.ScheduleCreatePage })),
+);
+const ScheduleEditPage = lazy(() =>
+  import("./pages/schedule-edit").then((m) => ({ default: m.ScheduleEditPage })),
+);
+const SkillsPage = lazy(() =>
+  import("./pages/skills-page").then((m) => ({ default: m.SkillsPage })),
+);
+const McpServersPage = lazy(() =>
+  import("./pages/mcp-servers-page").then((m) => ({ default: m.McpServersPage })),
+);
+const IntegrationsPage = lazy(() =>
+  import("./pages/integrations-page").then((m) => ({ default: m.IntegrationsPage })),
+);
+const IntegrationDetailPage = lazy(() =>
+  import("./pages/integration-detail").then((m) => ({ default: m.IntegrationDetailPage })),
+);
+const LibraryPage = lazy(() =>
+  import("./pages/library-page").then((m) => ({ default: m.LibraryPage })),
+);
+const EndUsersPage = lazy(() =>
+  import("./pages/end-users-page").then((m) => ({ default: m.EndUsersPage })),
+);
+const ApiKeysPage = lazy(() =>
+  import("./pages/api-keys-page").then((m) => ({ default: m.ApiKeysPage })),
+);
+const WelcomePage = lazy(() => import("./pages/welcome").then((m) => ({ default: m.WelcomePage })));
+const OnboardingCreateStep = lazy(() =>
+  import("./pages/onboarding/create-step").then((m) => ({ default: m.OnboardingCreateStep })),
+);
+const OnboardingPlanStep = lazy(() =>
+  import("./pages/onboarding/plan-step").then((m) => ({ default: m.OnboardingPlanStep })),
+);
+const OnboardingModelStep = lazy(() =>
+  import("./pages/onboarding/model-step").then((m) => ({ default: m.OnboardingModelStep })),
+);
+const OnboardingMembersStep = lazy(() =>
+  import("./pages/onboarding/members-step").then((m) => ({ default: m.OnboardingMembersStep })),
+);
+const OnboardingDoneStep = lazy(() =>
+  import("./pages/onboarding/done-step").then((m) => ({ default: m.OnboardingDoneStep })),
+);
+const OnboardingWaitingStep = lazy(() =>
+  import("./pages/onboarding/waiting-step").then((m) => ({ default: m.OnboardingWaitingStep })),
+);
+const OrgSettingsLayout = lazy(() =>
+  import("./pages/org-settings/layout").then((m) => ({ default: m.OrgSettingsLayout })),
+);
+const OrgSettingsGeneralPage = lazy(() =>
+  import("./pages/org-settings/general").then((m) => ({ default: m.OrgSettingsGeneralPage })),
+);
+const OrgSettingsMembersPage = lazy(() =>
+  import("./pages/org-settings/members").then((m) => ({ default: m.OrgSettingsMembersPage })),
+);
+const OrgSettingsModelsPage = lazy(() =>
+  import("./pages/org-settings/models").then((m) => ({ default: m.OrgSettingsModelsPage })),
+);
+const OrgSettingsProxiesPage = lazy(() =>
+  import("./pages/org-settings/proxies").then((m) => ({ default: m.OrgSettingsProxiesPage })),
+);
+const OrgSettingsOAuthPage = lazy(() =>
+  import("./pages/org-settings/oauth").then((m) => ({ default: m.OrgSettingsOAuthPage })),
+);
+const OrgSettingsBillingPage = lazy(() =>
+  import("./pages/org-settings/billing").then((m) => ({ default: m.OrgSettingsBillingPage })),
+);
+const OrgSettingsCliSessionsPage = lazy(() =>
+  import("./pages/org-settings/cli-sessions").then((m) => ({
+    default: m.OrgSettingsCliSessionsPage,
+  })),
+);
+const OrgSettingsApplicationsPage = lazy(() =>
+  import("./pages/org-settings/applications").then((m) => ({
+    default: m.OrgSettingsApplicationsPage,
+  })),
+);
+const OrgSettingsAppGeneralPage = lazy(() =>
+  import("./pages/org-settings/app/general").then((m) => ({
+    default: m.OrgSettingsAppGeneralPage,
+  })),
+);
+const OrgSettingsAppAuthPage = lazy(() =>
+  import("./pages/org-settings/app/auth").then((m) => ({ default: m.OrgSettingsAppAuthPage })),
+);
+const OrgSettingsAppOauthPage = lazy(() =>
+  import("./pages/org-settings/app/oauth").then((m) => ({ default: m.OrgSettingsAppOauthPage })),
+);
+const PreferencesLayout = lazy(() =>
+  import("./pages/preferences/layout").then((m) => ({ default: m.PreferencesLayout })),
+);
+const PreferencesGeneralPage = lazy(() =>
+  import("./pages/preferences/general").then((m) => ({ default: m.PreferencesGeneralPage })),
+);
+const PreferencesAppearancePage = lazy(() =>
+  import("./pages/preferences/appearance").then((m) => ({ default: m.PreferencesAppearancePage })),
+);
+const PreferencesSecurityPage = lazy(() =>
+  import("./pages/preferences/security").then((m) => ({ default: m.PreferencesSecurityPage })),
+);
+const PreferencesConnectionsPage = lazy(() =>
+  import("./pages/preferences/connections").then((m) => ({
+    default: m.PreferencesConnectionsPage,
+  })),
+);
+const PreferencesDevicesPage = lazy(() =>
+  import("./pages/preferences/devices").then((m) => ({ default: m.PreferencesDevicesPage })),
+);
+
+/** Suspense boundary for lazy route elements — same fallback as module pages. */
+function LazyRoute({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<LoadingState />}>{children}</Suspense>;
+}
 
 function MainLayout() {
   const { resolvedTheme } = useTheme();
@@ -344,13 +437,62 @@ export function App() {
           )}
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="/invite/:token/accept" element={<InviteAcceptPage />} />
-          <Route path="/welcome" element={<WelcomePage />} />
-          <Route path="/onboarding/waiting" element={<OnboardingWaitingStep />} />
-          <Route path="/onboarding/create" element={<OnboardingCreateStep />} />
-          <Route path="/onboarding/plan" element={<OnboardingPlanStep />} />
-          <Route path="/onboarding/model" element={<OnboardingModelStep />} />
-          <Route path="/onboarding/members" element={<OnboardingMembersStep />} />
-          <Route path="/onboarding/complete" element={<OnboardingDoneStep />} />
+          <Route
+            path="/welcome"
+            element={
+              <LazyRoute>
+                <WelcomePage />
+              </LazyRoute>
+            }
+          />
+          <Route
+            path="/onboarding/waiting"
+            element={
+              <LazyRoute>
+                <OnboardingWaitingStep />
+              </LazyRoute>
+            }
+          />
+          <Route
+            path="/onboarding/create"
+            element={
+              <LazyRoute>
+                <OnboardingCreateStep />
+              </LazyRoute>
+            }
+          />
+          <Route
+            path="/onboarding/plan"
+            element={
+              <LazyRoute>
+                <OnboardingPlanStep />
+              </LazyRoute>
+            }
+          />
+          <Route
+            path="/onboarding/model"
+            element={
+              <LazyRoute>
+                <OnboardingModelStep />
+              </LazyRoute>
+            }
+          />
+          <Route
+            path="/onboarding/members"
+            element={
+              <LazyRoute>
+                <OnboardingMembersStep />
+              </LazyRoute>
+            }
+          />
+          <Route
+            path="/onboarding/complete"
+            element={
+              <LazyRoute>
+                <OnboardingDoneStep />
+              </LazyRoute>
+            }
+          />
           <Route
             element={
               <GlobalRealtimeSync>
@@ -360,55 +502,202 @@ export function App() {
           >
             <Route path="/" element={<DashboardPage />} />
             <Route path="/agents" element={<PackageList />} />
-            <Route path="/agents/new" element={<PackageEditorPage type="agent" />} />
-            <Route path="/agents/:scope/:name/edit" element={<PackageEditorPage type="agent" />} />
+            <Route
+              path="/agents/new"
+              element={
+                <LazyRoute>
+                  <PackageEditorPage type="agent" />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/agents/:scope/:name/edit"
+              element={
+                <LazyRoute>
+                  <PackageEditorPage type="agent" />
+                </LazyRoute>
+              }
+            />
             <Route
               path="/agents/:scope/:name"
-              element={<UnifiedPackageDetailPage type="agent" />}
+              element={
+                <LazyRoute>
+                  <UnifiedPackageDetailPage type="agent" />
+                </LazyRoute>
+              }
             />
             <Route
               path="/agents/:scope/:name/:version"
-              element={<UnifiedPackageDetailPage type="agent" />}
+              element={
+                <LazyRoute>
+                  <UnifiedPackageDetailPage type="agent" />
+                </LazyRoute>
+              }
             />
-            <Route path="/agents/:scope/:name/runs/:runId" element={<RunDetailPage />} />
-            <Route path="/runs" element={<RunsPage />} />
-            <Route path="/schedules" element={<SchedulesListPage />} />
-            <Route path="/schedules/new" element={<ScheduleCreatePage />} />
-            <Route path="/schedules/:id" element={<ScheduleDetailPage />} />
-            <Route path="/schedules/:id/edit" element={<ScheduleEditPage />} />
-            <Route path="/skills" element={<SkillsPage />} />
-            <Route path="/integrations" element={<IntegrationsPage />} />
-            <Route path="/integrations/new" element={<PackageEditorPage type="integration" />} />
+            <Route
+              path="/agents/:scope/:name/runs/:runId"
+              element={
+                <LazyRoute>
+                  <RunDetailPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/runs"
+              element={
+                <LazyRoute>
+                  <RunsPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/schedules"
+              element={
+                <LazyRoute>
+                  <SchedulesListPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/schedules/new"
+              element={
+                <LazyRoute>
+                  <ScheduleCreatePage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/schedules/:id"
+              element={
+                <LazyRoute>
+                  <ScheduleDetailPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/schedules/:id/edit"
+              element={
+                <LazyRoute>
+                  <ScheduleEditPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/skills"
+              element={
+                <LazyRoute>
+                  <SkillsPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/integrations"
+              element={
+                <LazyRoute>
+                  <IntegrationsPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/integrations/new"
+              element={
+                <LazyRoute>
+                  <PackageEditorPage type="integration" />
+                </LazyRoute>
+              }
+            />
             <Route
               path="/integrations/:scope/:name/edit"
-              element={<PackageEditorPage type="integration" />}
+              element={
+                <LazyRoute>
+                  <PackageEditorPage type="integration" />
+                </LazyRoute>
+              }
             />
-            <Route path="/integrations/:scope/:name" element={<IntegrationDetailPage />} />
-            <Route path="/skills/new" element={<PackageEditorPage type="skill" />} />
-            <Route path="/skills/:scope/:name/edit" element={<PackageEditorPage type="skill" />} />
+            <Route
+              path="/integrations/:scope/:name"
+              element={
+                <LazyRoute>
+                  <IntegrationDetailPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/skills/new"
+              element={
+                <LazyRoute>
+                  <PackageEditorPage type="skill" />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/skills/:scope/:name/edit"
+              element={
+                <LazyRoute>
+                  <PackageEditorPage type="skill" />
+                </LazyRoute>
+              }
+            />
             <Route
               path="/skills/:scope/:name"
-              element={<UnifiedPackageDetailPage type="skill" />}
+              element={
+                <LazyRoute>
+                  <UnifiedPackageDetailPage type="skill" />
+                </LazyRoute>
+              }
             />
             <Route
               path="/skills/:scope/:name/:version"
-              element={<UnifiedPackageDetailPage type="skill" />}
+              element={
+                <LazyRoute>
+                  <UnifiedPackageDetailPage type="skill" />
+                </LazyRoute>
+              }
             />
-            <Route path="/mcp-servers" element={<McpServersPage />} />
+            <Route
+              path="/mcp-servers"
+              element={
+                <LazyRoute>
+                  <McpServersPage />
+                </LazyRoute>
+              }
+            />
             <Route
               path="/mcp-servers/:scope/:name"
-              element={<UnifiedPackageDetailPage type="mcp-server" />}
+              element={
+                <LazyRoute>
+                  <UnifiedPackageDetailPage type="mcp-server" />
+                </LazyRoute>
+              }
             />
             <Route
               path="/mcp-servers/:scope/:name/:version"
-              element={<UnifiedPackageDetailPage type="mcp-server" />}
+              element={
+                <LazyRoute>
+                  <UnifiedPackageDetailPage type="mcp-server" />
+                </LazyRoute>
+              }
             />
-            <Route path="/library" element={<LibraryPage />} />
+            <Route
+              path="/library"
+              element={
+                <LazyRoute>
+                  <LibraryPage />
+                </LazyRoute>
+              }
+            />
             <Route
               path="/applications"
               element={<Navigate to="/org-settings/applications" replace />}
             />
-            <Route path="/preferences" element={<PreferencesLayout />}>
+            <Route
+              path="/preferences"
+              element={
+                <LazyRoute>
+                  <PreferencesLayout />
+                </LazyRoute>
+              }
+            >
               <Route index element={<Navigate to="general" replace />} />
               <Route path="general" element={<PreferencesGeneralPage />} />
               <Route path="appearance" element={<PreferencesAppearancePage />} />
@@ -437,12 +726,26 @@ export function App() {
               </>
             )}
             {/* App-scoped routes (read applicationId from store, like orgId) */}
-            <Route path="/end-users" element={<EndUsersPage />} />
+            <Route
+              path="/end-users"
+              element={
+                <LazyRoute>
+                  <EndUsersPage />
+                </LazyRoute>
+              }
+            />
             <Route
               path="/app-settings"
               element={<Navigate to="/org-settings/app/general" replace />}
             />
-            <Route path="/org-settings" element={<OrgSettingsLayout />}>
+            <Route
+              path="/org-settings"
+              element={
+                <LazyRoute>
+                  <OrgSettingsLayout />
+                </LazyRoute>
+              }
+            >
               <Route index element={<Navigate to="general" replace />} />
               <Route path="general" element={<OrgSettingsGeneralPage />} />
               <Route path="members" element={<OrgSettingsMembersPage />} />

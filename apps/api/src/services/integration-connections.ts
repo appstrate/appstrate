@@ -20,7 +20,7 @@
  * module is the write side that populates it.
  */
 
-import { and, asc, eq, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   applicationPackages,
@@ -347,6 +347,32 @@ export async function isIntegrationActive(
     )
     .limit(1);
   return row !== undefined;
+}
+
+/**
+ * Batched variant of {@link isIntegrationActive} — one SELECT over
+ * `application_packages` for the whole set instead of N serial queries.
+ * Returns the subset of `packageIds` that are installed AND enabled in
+ * the application ("active" — same definition as the single-row helper).
+ * Used on the run-kickoff hot path (agent readiness) where an agent may
+ * declare several integrations.
+ */
+export async function listActiveIntegrationIds(
+  packageIds: readonly string[],
+  applicationId: string,
+): Promise<Set<string>> {
+  if (packageIds.length === 0) return new Set();
+  const rows = await db
+    .select({ packageId: applicationPackages.packageId })
+    .from(applicationPackages)
+    .where(
+      and(
+        eq(applicationPackages.applicationId, applicationId),
+        inArray(applicationPackages.packageId, packageIds as string[]),
+        eq(applicationPackages.enabled, true),
+      ),
+    );
+  return new Set(rows.map((r) => r.packageId));
 }
 
 /** Throw `notFound` unless the integration is active in the application. */

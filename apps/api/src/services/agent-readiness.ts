@@ -10,7 +10,8 @@ import {
   resolveConnectionsForRun,
   translateResolutionError,
 } from "./integration-connection-resolver.ts";
-import { isIntegrationActive } from "./integration-connections.ts";
+import { listActiveIntegrationIds } from "./integration-connections.ts";
+import type { IntegrationManifestCache } from "./integration-service.ts";
 import { validateConfig } from "./schema.ts";
 import { extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
@@ -47,6 +48,12 @@ export interface AgentReadinessParams {
    * their overrides once at fire time, and readiness should honour them.
    */
   scheduleOverrides?: ConnectionOverrides | null;
+  /**
+   * Per-call-graph memo for integration manifest fetches. The run kickoff
+   * path threads one Map so this readiness pass, the resolver snapshot pass,
+   * and the spawn resolver dedupe the SELECT + Zod parse per integration.
+   */
+  manifestCache?: IntegrationManifestCache;
 }
 
 /**
@@ -95,15 +102,23 @@ export async function collectAgentReadinessErrors(
   // integration can still have lingering connections that resolve cleanly.
   // Checked before connections so an inactive integration fails fast with a
   // clear cause rather than a downstream `not_connected`.
+  // Batched: one SELECT over `application_packages` for every declared
+  // integration instead of N serial single-row queries (run-kickoff hot path).
   const declaredIntegrations = parseManifestIntegrations(manifest as Record<string, unknown>);
-  for (const entry of declaredIntegrations) {
-    if (!(await isIntegrationActive(entry.id, applicationId))) {
-      errors.push({
-        field: `integrations.${entry.id}`,
-        code: "integration_not_active",
-        title: "Integration Not Enabled",
-        message: `Integration '${entry.id}' is not installed or is disabled in this application.`,
-      });
+  if (declaredIntegrations.length > 0) {
+    const activeIds = await listActiveIntegrationIds(
+      declaredIntegrations.map((entry) => entry.id),
+      applicationId,
+    );
+    for (const entry of declaredIntegrations) {
+      if (!activeIds.has(entry.id)) {
+        errors.push({
+          field: `integrations.${entry.id}`,
+          code: "integration_not_active",
+          title: "Integration Not Enabled",
+          message: `Integration '${entry.id}' is not installed or is disabled in this application.`,
+        });
+      }
     }
   }
 
@@ -127,6 +142,7 @@ export async function collectAgentReadinessErrors(
       scope: { orgId, applicationId },
       ...(runOverrides ? { runOverrides } : {}),
       ...(scheduleOverrides ? { scheduleOverrides } : {}),
+      ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
     });
     for (const e of resolution.errors) {
       errors.push(translateResolutionError(e));

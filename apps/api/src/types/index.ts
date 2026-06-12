@@ -54,6 +54,15 @@ export type AppEnv = {
     app?: import("../middleware/app-context.ts").AppContextRow;
     requestId: string;
     apiVersion: string;
+    /**
+     * Org settings JSONB loaded by `requireOrgContext()` in the same query
+     * as the membership check, so per-request consumers (API-version
+     * middleware) read settings from context instead of issuing a second
+     * organizations query. Absent when org context was resolved inline by
+     * non-session auth (API key, module strategies) or skipped entirely —
+     * consumers must fall back to `getOrgSettings()` in that case.
+     */
+    orgSettings?: import("@appstrate/shared-types").OrgSettings;
     /** Set by auth strategies that defer org resolution to X-Org-Id middleware. */
     deferOrgResolution?: boolean;
     /**

@@ -16,6 +16,7 @@ import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
 import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
+import type { IntegrationManifestCache } from "./integration-service.ts";
 import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
 import { parseScopedName } from "@appstrate/core/naming";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
@@ -106,6 +107,15 @@ export interface RunPipelineParams {
   /** Resolved by `lib/runner-context.ts` from request headers + auth context. */
   runnerName?: string | null;
   runnerKind?: string | null;
+  /**
+   * Per-call-graph memo for integration manifest fetches. The run route
+   * creates one Map and passes it to BOTH `resolveRunPreflight` and
+   * `prepareAndExecuteRun` so the readiness pass, the connection-snapshot
+   * pass, and the spawn resolver share one SELECT + Zod parse per
+   * integration. Callers that omit it (scheduler, inline runs) still get
+   * intra-pipeline dedupe via the default Map created below.
+   */
+  manifestCache?: IntegrationManifestCache;
 }
 
 export interface RunPipelineSuccess {
@@ -146,6 +156,12 @@ export async function resolveRunPreflight(params: {
   actor: Actor | null;
   connectionOverrides?: ConnectionOverrides | null;
   scheduleConnectionOverrides?: ConnectionOverrides | null;
+  /**
+   * Per-call-graph memo for integration manifest fetches — pass the same Map
+   * given to `prepareAndExecuteRun` so the readiness pass shares its manifest
+   * loads with the pipeline's snapshot + spawn passes.
+   */
+  manifestCache?: IntegrationManifestCache;
 }): Promise<PreflightResult> {
   const { agent, applicationId, orgId, actor } = params;
 
@@ -161,6 +177,7 @@ export async function resolveRunPreflight(params: {
     ...(params.scheduleConnectionOverrides
       ? { scheduleOverrides: params.scheduleConnectionOverrides }
       : {}),
+    ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
   });
 
   return {
@@ -197,6 +214,11 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     applicationId,
     apiKeyId,
   } = params;
+  // Per-call-graph manifest memo: reuse the caller's Map (run route — shares
+  // loads with its earlier `resolveRunPreflight` call) or create one scoped
+  // to this pipeline invocation (scheduler / inline runs) so Step 2's
+  // snapshot pass and Step 3's spawn resolver still dedupe between them.
+  const manifestCache: IntegrationManifestCache = params.manifestCache ?? new Map();
   // --- Step 1: Shared preflight gates (rate, concurrency, timeout cap,
   //     beforeRun hook). Shared with the remote origin in run-creation.ts so
   //     drift across the two paths is impossible — one change surface.
@@ -237,6 +259,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       scope: { orgId, applicationId },
       runOverrides: params.connectionOverrides ?? null,
       scheduleOverrides: params.scheduleConnectionOverrides ?? null,
+      manifestCache,
     });
     if (!outcome.ok) {
       throw new ApiError({
@@ -283,6 +306,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       overrideVersionLabel,
       traceparent: params.traceparent,
       resolvedConnections,
+      manifestCache,
     }));
   } catch (err) {
     if (err instanceof ModelNotConfiguredError) {

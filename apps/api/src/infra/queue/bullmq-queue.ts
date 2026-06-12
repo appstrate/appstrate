@@ -28,16 +28,18 @@ export class BullMQQueue<T> implements JobQueue<T> {
   ) {
     this.queue = new Queue<Record<string, unknown>, unknown, string>(name, {
       connection: getRedisConnection() as unknown as ConnectionOptions,
-      ...(defaultJobOptions
-        ? {
-            defaultJobOptions: {
-              attempts: defaultJobOptions.attempts,
-              backoff: defaultJobOptions.backoff,
-              removeOnComplete: defaultJobOptions.removeOnComplete,
-              removeOnFail: defaultJobOptions.removeOnFail,
-            },
-          }
-        : {}),
+      defaultJobOptions: {
+        // Bounded retention by default — without it BullMQ keeps every
+        // completed/failed job forever and the Redis footprint grows
+        // unbounded under sustained throughput. Callers passing explicit
+        // options keep precedence.
+        removeOnComplete: defaultJobOptions?.removeOnComplete ?? { count: 1000 },
+        removeOnFail: defaultJobOptions?.removeOnFail ?? { count: 5000 },
+        ...(defaultJobOptions?.attempts !== undefined
+          ? { attempts: defaultJobOptions.attempts }
+          : {}),
+        ...(defaultJobOptions?.backoff !== undefined ? { backoff: defaultJobOptions.backoff } : {}),
+      },
     });
     // QueueBase routes `connection.on("error")` to `queue.emit("error", ...)`
     // (queue-base.js:40). Without a listener, Node EventEmitter rethrows.
@@ -47,11 +49,15 @@ export class BullMQQueue<T> implements JobQueue<T> {
   }
 
   async add(name: string, data: T, opts?: JobAddOptions): Promise<string> {
+    // Conditional spreads: BullMQ merges per-job opts over defaultJobOptions
+    // with a plain object spread, so an explicit `removeOnComplete: undefined`
+    // key would shadow the queue-level retention default back to "keep
+    // forever". Only include keys the caller actually set.
     const job = await this.queue.add(name, data as Record<string, unknown>, {
-      attempts: opts?.attempts,
-      backoff: opts?.backoff,
-      removeOnComplete: opts?.removeOnComplete,
-      removeOnFail: opts?.removeOnFail,
+      ...(opts?.attempts !== undefined ? { attempts: opts.attempts } : {}),
+      ...(opts?.backoff !== undefined ? { backoff: opts.backoff } : {}),
+      ...(opts?.removeOnComplete !== undefined ? { removeOnComplete: opts.removeOnComplete } : {}),
+      ...(opts?.removeOnFail !== undefined ? { removeOnFail: opts.removeOnFail } : {}),
     });
     return job.id ?? name;
   }

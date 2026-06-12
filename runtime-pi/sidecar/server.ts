@@ -4,6 +4,7 @@ import { createApp, buildSidecarRuntimeDeps, SIDECAR_IDLE_TIMEOUT_SECONDS } from
 import { createForwardProxy } from "./forward-proxy.ts";
 import type { CredentialsResponse, LlmProxyConfig } from "./helpers.ts";
 import { logger } from "./logger.ts";
+import { CredentialsCache } from "./credentials-cache.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
 import {
   bootIntegrations,
@@ -112,7 +113,7 @@ if (process.env.CONNECT_LOGIN_JSON) {
 
 const cookieJar = new Map<string, string[]>();
 
-async function fetchCredentials(integrationId: string): Promise<CredentialsResponse> {
+async function fetchCredentialsUncached(integrationId: string): Promise<CredentialsResponse> {
   const res = await fetch(`${config.platformApiUrl}/internal/credentials/${integrationId}`, {
     headers: { Authorization: `Bearer ${config.runToken}` },
   });
@@ -129,6 +130,15 @@ async function fetchCredentials(integrationId: string): Promise<CredentialsRespo
   return res.json() as Promise<CredentialsResponse>;
 }
 
+// 30s TTL + singleflight cache in front of the platform read endpoint —
+// mirrors the OAuth token cache below. Without it every legacy `api_call`
+// paid one platform round-trip just to re-read a stable credential bag.
+const credentialsCache = new CredentialsCache(fetchCredentialsUncached);
+
+async function fetchCredentials(integrationId: string): Promise<CredentialsResponse> {
+  return credentialsCache.get(integrationId);
+}
+
 async function refreshCredentials(integrationId: string): Promise<CredentialsResponse | null> {
   const res = await fetch(
     `${config.platformApiUrl}/internal/credentials/${integrationId}/refresh`,
@@ -139,8 +149,19 @@ async function refreshCredentials(integrationId: string): Promise<CredentialsRes
   );
   // Legacy BYOI path. Any non-OK (incl. 410) → not rotated → the proxy skips
   // the retry. This path has no AFPS connection row, so flagging is a no-op here.
-  if (!res.ok) return null;
-  return res.json() as Promise<CredentialsResponse>;
+  if (!res.ok) {
+    // Stop serving the (likely dead) cached credential; the next
+    // fetchCredentials round-trips to the platform.
+    credentialsCache.invalidate(integrationId);
+    return null;
+  }
+  const fresh = (await res.json()) as CredentialsResponse;
+  // The 401-retry in credential-proxy.ts replays with `fresh` directly,
+  // but subsequent api_calls within the cache TTL must also see the
+  // rotated token — otherwise they'd 401 again and (with the
+  // one-refresh-per-run gate) stay broken for the rest of the run.
+  credentialsCache.set(integrationId, fresh);
+  return fresh;
 }
 
 const port = parseInt(process.env.PORT || "8080", 10);

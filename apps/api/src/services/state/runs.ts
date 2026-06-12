@@ -1000,12 +1000,17 @@ export type RunLogLevel = (typeof RUN_LOG_LEVELS)[number];
 export async function listRunLogs(args: {
   runId: string;
   orgId: string;
+  /**
+   * Page-size cap — ALWAYS applied. Defaults to 1000 when omitted so no
+   * caller can accidentally pull an unbounded log history; page with
+   * `sinceId` for longer runs.
+   */
   limit?: number;
   order?: "asc" | "desc";
   sinceId?: number;
   minLevel?: RunLogLevel;
 }) {
-  const { runId, orgId, limit, order = "asc", sinceId, minLevel } = args;
+  const { runId, orgId, limit = 1000, order = "asc", sinceId, minLevel } = args;
   if (sinceId !== undefined && order === "desc") {
     throw new Error("listRunLogs: sinceId is not supported with order=desc");
   }
@@ -1019,7 +1024,7 @@ export async function listRunLogs(args: {
     .from(runLogs)
     .where(and(...filters))
     .orderBy(order === "desc" ? desc(runLogs.id) : runLogs.id);
-  const rows = limit ? await q.limit(limit) : await q;
+  const rows = await q.limit(limit);
   return order === "desc" ? rows.reverse() : rows;
 }
 

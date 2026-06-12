@@ -27,6 +27,7 @@ import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
+import type { IntegrationManifestCache } from "../services/integration-service.ts";
 import { assertExplicitModelExists } from "../services/org-models.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
@@ -119,6 +120,13 @@ export function createRunsRouter() {
         // caller's pick and skips the must_choose error on >1 candidates.
         // Pre-fix, the readiness gate fired must_choose regardless of the
         // override, so the picker UX loop never exited.
+        // One manifest memo for the whole trigger — readiness (preflight),
+        // the connection-snapshot pass, and the spawn resolver inside
+        // `prepareAndExecuteRun` all load the same integration manifests;
+        // sharing the Map collapses those repeats into one SELECT + Zod
+        // parse per integration. Request-scoped: dies with this handler.
+        const manifestCache: IntegrationManifestCache = new Map();
+
         const {
           config,
           modelId: preflightModelId,
@@ -129,6 +137,7 @@ export function createRunsRouter() {
           orgId,
           actor,
           connectionOverrides: connectionOverrides ?? null,
+          manifestCache,
         });
 
         // Deep-merge any per-run `config` override on top of the persisted
@@ -158,6 +167,7 @@ export function createRunsRouter() {
           traceparent: runTraceparent(c),
           runnerName: runner.name,
           runnerKind: runner.kind,
+          manifestCache,
         });
 
         // 201 + the bare created run resource — same DTO and serializer as
@@ -276,14 +286,15 @@ export function createRunsRouter() {
   //
   // Optional `?level=<debug|info|warn|error>` filters by MINIMUM severity
   // (`level=info` skips debug breadcrumbs). Optional `?limit=<1..1000>`
-  // caps the page size; when more rows follow, an RFC 5988
+  // caps the page size — DEFAULT 1000 when omitted, so the endpoint is
+  // never unbounded (a long run used to ship its entire history in one
+  // response); when more rows follow, an RFC 5988
   // `Link: <…?since=<lastId>>; rel="next"` header points at the next page
   // — `since` doubles as both the polling-tail cursor and the pagination
   // cursor, so the two contracts cannot drift. All three params follow
   // the endpoint's lenient posture: malformed values fall back to the
-  // unfiltered default rather than 400, because a stale cursor or a
-  // typo'd filter on a re-fetch must never break the tail. Default
-  // behavior (no params) is unchanged: the full chronological history.
+  // default (for `limit`: 1000) rather than 400, because a stale cursor
+  // or a typo'd filter on a re-fetch must never break the tail.
   router.get("/runs/:id/logs", async (c) => {
     const runId = c.req.param("id");
     const scope = getAppScope(c);
@@ -310,22 +321,22 @@ export function createRunsRouter() {
       .int()
       .min(1)
       .max(1000)
-      .optional()
-      .catch(undefined)
+      .default(1000)
+      .catch(1000)
       .parse(c.req.query("limit"));
 
     // Ownership was just verified via getRun(scope) above — we can hand
-    // off to the org-scoped log reader safely. Over-fetch by one row when
-    // a limit is set so `hasMore` is known without a COUNT round-trip.
+    // off to the org-scoped log reader safely. Over-fetch by one row so
+    // `hasMore` is known without a COUNT round-trip.
     const rows = await listRunLogs({
       runId,
       orgId: scope.orgId,
       ...(sinceId !== undefined ? { sinceId } : {}),
       ...(minLevel !== undefined ? { minLevel } : {}),
-      ...(limit !== undefined ? { limit: limit + 1 } : {}),
+      limit: limit + 1,
     });
 
-    const hasMore = limit !== undefined && rows.length > limit;
+    const hasMore = rows.length > limit;
     const logs = hasMore ? rows.slice(0, limit) : rows;
     setSinceLinkHeader({ c, hasMore, lastId: logs.at(-1)?.id });
 

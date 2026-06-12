@@ -209,8 +209,31 @@ export const runs = pgTable(
     // served by the leftmost prefix of idx_runs_app_status_started — no
     // separate single-column applicationId index needed.
     index("idx_runs_app_status_started").on(table.applicationId, table.status, table.startedAt),
+    // Global runs list with NO status filter: WHERE application_id = ?
+    // ORDER BY started_at DESC. The three-column index above needs a
+    // status equality to serve the sort, so the unfiltered path keeps a
+    // two-column twin.
+    index("idx_runs_app_started").on(table.applicationId, table.startedAt),
+    // MAX(run_number) per package (nextRunNumber) becomes a 1-row
+    // backward index probe instead of an aggregate scan.
+    index("idx_runs_package_run_number").on(table.packageId, table.runNumber),
+    // FK cascade scans: api_keys / model_provider_credentials deletes
+    // SET NULL on runs by these columns. Partial — most runs carry
+    // neither, so the indexes stay tiny.
+    index("idx_runs_api_key_id")
+      .on(table.apiKeyId)
+      .where(sql`${table.apiKeyId} IS NOT NULL`),
+    index("idx_runs_model_credential_id")
+      .on(table.modelCredentialId)
+      .where(sql`${table.modelCredentialId} IS NOT NULL`),
     index("idx_runs_org_id").on(table.orgId),
     index("idx_runs_notification").on(table.userId, table.orgId, table.notifiedAt, table.readAt),
+    // Unread-notification badge (services/state/notifications.ts):
+    // notified but not yet read. Partial index covers exactly that
+    // predicate so the badge count never scans read/never-notified rows.
+    index("idx_runs_unread")
+      .on(table.applicationId, table.userId)
+      .where(sql`${table.notifiedAt} IS NOT NULL AND ${table.readAt} IS NULL`),
     // Reaper scans only active sinks — cheap partial index.
     index("idx_runs_sink_expires_at")
       .on(table.sinkExpiresAt)
@@ -327,6 +350,11 @@ export const packagePersistence = pgTable(
       table.pinned,
     ),
     index("pkp_org").on(table.orgId),
+    // FK cascade scan: run delete SET NULLs package_persistence.run_id.
+    // Partial — most rows have no run attribution.
+    index("pkp_run_id")
+      .on(table.runId)
+      .where(sql`${table.runId} IS NOT NULL`),
     check("pkp_actor_type_valid", sql`actor_type IN ('user', 'end_user', 'shared')`),
     check(
       "pkp_actor_id_shape",
@@ -485,6 +513,12 @@ export const credentialProxyUsage = pgTable(
     index("idx_credential_proxy_usage_org_id").on(table.orgId),
     index("idx_credential_proxy_usage_run_id").on(table.runId),
     index("idx_credential_proxy_usage_org_created").on(table.orgId, table.createdAt),
+    // FK cascade targets: api_keys / user / applications deletes SET NULL
+    // rows by these columns — without indexes each delete seq-scans the
+    // audit log.
+    index("idx_credential_proxy_usage_api_key_id").on(table.apiKeyId),
+    index("idx_credential_proxy_usage_user_id").on(table.userId),
+    index("idx_credential_proxy_usage_application_id").on(table.applicationId),
     check("credential_proxy_usage_principal_single", sql`api_key_id IS NULL OR user_id IS NULL`),
   ],
 );

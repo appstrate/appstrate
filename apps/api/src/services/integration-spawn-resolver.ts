@@ -52,7 +52,11 @@ import type { IntegrationSpawnSpec, ApiCallSpec } from "@appstrate/core/sidecar-
 import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
 import { isIntegrationActive, selectAccessibleConnection } from "./integration-connections.ts";
-import { fetchIntegrationManifest, resolveMcpServerForSpawn } from "./integration-service.ts";
+import {
+  fetchIntegrationManifest,
+  resolveMcpServerForSpawn,
+  type IntegrationManifestCache,
+} from "./integration-service.ts";
 import {
   getIntegrationSourceKind,
   getLocalServerRef,
@@ -86,6 +90,12 @@ export interface ResolveIntegrationsInput {
    * (auto-pick when the actor has exactly one accessible connection).
    */
   resolvedConnections?: ResolvedConnectionMap | null;
+  /**
+   * Per-call-graph memo for integration manifest fetches — threaded from the
+   * run kickoff path (readiness → snapshot → here) so each integration's
+   * manifest is SELECTed + Zod-parsed once per run trigger.
+   */
+  manifestCache?: IntegrationManifestCache;
 }
 
 /**
@@ -111,6 +121,7 @@ export async function resolveIntegrationSpawns(
         entry.tools,
         resolvedConnections?.[entry.id] ?? null,
         entry.auth_key,
+        input.manifestCache,
       );
       if (spec) out.push(spec);
     } catch (err) {
@@ -131,6 +142,7 @@ async function resolveOne(
   agentToolSelection: readonly string[] | "*" | undefined,
   resolvedConnection: ResolvedConnection | null,
   requiredAuthKey: string | undefined,
+  manifestCache?: IntegrationManifestCache,
 ): Promise<IntegrationSpawnSpec | null> {
   // (a) Package exists + integration type — read the latest manifest
   // straight off `packages.draft_manifest`. System integrations have
@@ -138,7 +150,7 @@ async function resolveOne(
   // run's org. The runtime never resolves against a yanked version —
   // we always use the package's draft manifest, which the publish path
   // keeps pinned to the live "latest" snapshot.
-  const res = await fetchIntegrationManifest(integrationId);
+  const res = await fetchIntegrationManifest(integrationId, manifestCache);
   if (!res.ok) {
     switch (res.failure.kind) {
       case "not_found":

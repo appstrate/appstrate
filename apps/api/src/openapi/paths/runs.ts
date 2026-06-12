@@ -612,7 +612,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Get run logs",
       description:
-        'Get persisted log entries for a run. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI\'s polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). When `limit` is set and more entries follow, an RFC 5988 `Link: <…?since=<lastId>>; rel="next"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the unfiltered default rather than 400 so a stale cursor never breaks a polling tail. Without query parameters the full chronological history is returned (backward-compatible default). Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.',
+        'Get persisted log entries for a run. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI\'s polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). `limit` defaults to 1000 when omitted — the response is never unbounded; when more entries follow, an RFC 5988 `Link: <…?since=<lastId>>; rel="next"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the default rather than 400 so a stale cursor never breaks a polling tail. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -637,9 +637,9 @@ export const runsPaths = {
           name: "limit",
           in: "query",
           required: false,
-          schema: { type: "integer", minimum: 1, maximum: 1000 },
+          schema: { type: "integer", minimum: 1, maximum: 1000, default: 1000 },
           description:
-            'Maximum number of entries to return. When more entries follow, the response carries a `Link; rel="next"` header whose URL re-uses `since` as the cursor. Absent means no cap (full history).',
+            'Maximum number of entries to return. Defaults to 1000 when omitted. When more entries follow, the response carries a `Link; rel="next"` header whose URL re-uses `since` as the cursor — page with it to read longer histories.',
         },
       ],
       responses: {

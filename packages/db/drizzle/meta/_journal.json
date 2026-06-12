@@ -50,6 +50,13 @@
       "when": 1780844239357,
       "tag": "0006_mcp_oauth_resources",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781249851612,
+      "tag": "0007_violet_gamma_corps",
+      "breakpoints": true
     }
   ]
 }

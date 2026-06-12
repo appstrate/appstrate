@@ -190,9 +190,11 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     return appContextMiddleware(c, next);
   });
 
-  // API versioning
-  const apiVersionMiddleware = apiVersion(async (orgId) => {
-    const settings = await getOrgSettings(orgId);
+  // API versioning — mirrors production: read settings stashed on context
+  // by `requireOrgContext` (session auth), fall back to a direct lookup for
+  // auth paths that resolve orgId inline (API key, module strategies).
+  const apiVersionMiddleware = apiVersion(async (orgId, c) => {
+    const settings = c.get("orgSettings") ?? (await getOrgSettings(orgId));
     return settings.api_version ?? null;
   });
   app.use("*", async (c, next) => {

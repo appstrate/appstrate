@@ -18,6 +18,7 @@ import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
 import { extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns } from "./integration-spawn-resolver.ts";
+import type { IntegrationManifestCache } from "./integration-service.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 
 export class ModelNotConfiguredError extends Error {
@@ -90,6 +91,12 @@ export async function buildRunContext(params: {
    * overrides survive the kickoff handoff into the live runtime.
    */
   resolvedConnections?: ResolvedConnectionMap | null;
+  /**
+   * Per-call-graph memo for integration manifest fetches — threaded into the
+   * spawn resolver so it reuses the manifests already loaded by the readiness
+   * and connection-snapshot passes within the same run trigger.
+   */
+  manifestCache?: IntegrationManifestCache;
 }): Promise<{
   context: ExecutionContext;
   plan: AppstrateRunPlan;
@@ -203,6 +210,7 @@ export async function buildRunContext(params: {
     actor,
     agentManifest: agent.manifest as Record<string, unknown>,
     resolvedConnections: params.resolvedConnections ?? null,
+    ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
   });
 
   // AFPS: snake_case. The editor writes `runtime_tools`; reading the wrong key
