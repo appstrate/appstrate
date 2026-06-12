@@ -61,6 +61,9 @@
     "//#detect:breaking": {
       "cache": false
     },
+    "//#verify:api-types": {
+      "cache": false
+    },
     "//#build:system-packages:check": {
       "cache": false
     },

@@ -6,7 +6,16 @@ import tseslint from "typescript-eslint";
 import eslintConfigPrettier from "eslint-config-prettier";
 
 export default tseslint.config(
-  { ignores: ["**/dist", "**/node_modules", ".claude/", "apps/web/src/components/ui"] },
+  {
+    ignores: [
+      "**/dist",
+      "**/node_modules",
+      ".claude/",
+      "apps/web/src/components/ui",
+      // Generated OpenAPI types — managed by scripts/generate-api-types.ts
+      "apps/web/src/api/schema.d.ts",
+    ],
+  },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts"],
