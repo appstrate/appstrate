@@ -36,13 +36,18 @@ afterAll(() => {
 const CORE_PROVIDER_IDS = [
   "anthropic",
   "cerebras",
+  "deepseek",
+  "fireworks-ai",
   "google-ai",
   "groq",
   "mistral",
+  "moonshot",
   "openai",
   "openai-compatible",
   "openrouter",
+  "together-ai",
   "xai",
+  "zai",
 ] as const;
 
 describe("runtime registry composition", () => {

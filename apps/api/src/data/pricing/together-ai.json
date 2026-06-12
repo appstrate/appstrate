@@ -1,0 +1,224 @@
+{
+  "Qwen/Qwen3-235B-A22B-Instruct-2507-tput": {
+    "label": "Qwen/Qwen3 235B A22B Instruct 2507 Tput",
+    "contextWindow": 262000,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 0.2,
+      "output": 6
+    }
+  },
+  "Qwen/Qwen3-235B-A22B-Thinking-2507": {
+    "label": "Qwen/Qwen3 235B A22B Thinking 2507",
+    "contextWindow": 256000,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 0.65,
+      "output": 3
+    }
+  },
+  "Qwen/Qwen3-235B-A22B-fp8-tput": {
+    "label": "Qwen/Qwen3 235B A22B Fp8 Tput",
+    "contextWindow": 40000,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 0.2,
+      "output": 0.6
+    }
+  },
+  "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8": {
+    "label": "Qwen/Qwen3 Coder 480B A35B Instruct FP8",
+    "contextWindow": 256000,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 2,
+      "output": 2
+    }
+  },
+  "Qwen/Qwen3-Next-80B-A3B-Instruct": {
+    "label": "Qwen/Qwen3 Next 80B A3B Instruct",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 0.15,
+      "output": 1.5
+    }
+  },
+  "Qwen/Qwen3-Next-80B-A3B-Thinking": {
+    "label": "Qwen/Qwen3 Next 80B A3B Thinking",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 0.15,
+      "output": 1.5
+    }
+  },
+  "Qwen/Qwen3.5-397B-A17B": {
+    "label": "Qwen/Qwen3.5 397B A17B",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 0.6,
+      "output": 3.6
+    }
+  },
+  "deepseek-ai/DeepSeek-R1": {
+    "label": "Deepseek Ai/DeepSeek R1",
+    "contextWindow": 128000,
+    "maxTokens": 20480,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 3,
+      "output": 7
+    }
+  },
+  "deepseek-ai/DeepSeek-R1-0528-tput": {
+    "label": "Deepseek Ai/DeepSeek R1 0528 Tput",
+    "contextWindow": 128000,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 0.55,
+      "output": 2.19
+    }
+  },
+  "deepseek-ai/DeepSeek-V3": {
+    "label": "Deepseek Ai/DeepSeek V3",
+    "contextWindow": 65536,
+    "maxTokens": 8192,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 1.25,
+      "output": 1.25
+    }
+  },
+  "deepseek-ai/DeepSeek-V3.1": {
+    "label": "Deepseek Ai/DeepSeek V3.1",
+    "contextWindow": 128000,
+    "maxTokens": 16384,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.6,
+      "output": 1.7
+    }
+  },
+  "moonshotai/Kimi-K2-Instruct-0905": {
+    "label": "Moonshotai/Kimi K2 Instruct 0905",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 1,
+      "output": 3
+    }
+  },
+  "moonshotai/Kimi-K2.5": {
+    "label": "Moonshotai/Kimi K2.5",
+    "contextWindow": 256000,
+    "maxTokens": 256000,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.5,
+      "output": 2.8
+    }
+  },
+  "openai/gpt-oss-120b": {
+    "label": "Openai/gpt Oss 120b",
+    "contextWindow": 131072,
+    "maxTokens": 131072,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.15,
+      "output": 0.6
+    }
+  },
+  "openai/gpt-oss-20b": {
+    "label": "Openai/gpt Oss 20b",
+    "contextWindow": 128000,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 0.05,
+      "output": 0.2
+    }
+  },
+  "zai-org/GLM-4.5-Air-FP8": {
+    "label": "Zai Org/GLM 4.5 Air FP8",
+    "contextWindow": 128000,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 0.2,
+      "output": 1.1
+    }
+  },
+  "zai-org/GLM-4.6": {
+    "label": "Zai Org/GLM 4.6",
+    "contextWindow": 200000,
+    "maxTokens": 200000,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.6,
+      "output": 2.2
+    }
+  },
+  "zai-org/GLM-4.7": {
+    "label": "Zai Org/GLM 4.7",
+    "contextWindow": 200000,
+    "maxTokens": 200000,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.45,
+      "output": 2
+    }
+  }
+}

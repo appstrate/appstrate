@@ -63,6 +63,36 @@ const cerebras: ModelProviderDefinition = {
   featuredModels: ["llama-3.3-70b", "gpt-oss-120b"],
 };
 
+const deepseek: ModelProviderDefinition = {
+  providerId: "deepseek",
+  displayName: "DeepSeek",
+  iconUrl: "deepseek",
+  description: "Bring your own DeepSeek API key.",
+  docsUrl: "https://api-docs.deepseek.com/",
+  apiShape: "openai-completions",
+  defaultBaseUrl: "https://api.deepseek.com/v1",
+  baseUrlOverridable: false,
+  authMode: "api_key",
+  featuredModels: ["deepseek-chat", "deepseek-reasoner"],
+};
+
+const fireworksAi: ModelProviderDefinition = {
+  providerId: "fireworks-ai",
+  displayName: "Fireworks AI",
+  iconUrl: "fireworks-ai",
+  description: "Bring your own Fireworks AI API key.",
+  docsUrl: "https://docs.fireworks.ai/api-reference/post-chatcompletions",
+  apiShape: "openai-completions",
+  defaultBaseUrl: "https://api.fireworks.ai/inference/v1",
+  baseUrlOverridable: false,
+  authMode: "api_key",
+  featuredModels: [
+    "accounts/fireworks/models/deepseek-v3p2",
+    "accounts/fireworks/models/glm-4p6",
+    "accounts/fireworks/models/gpt-oss-120b",
+  ],
+};
+
 const googleAi: ModelProviderDefinition = {
   providerId: "google-ai",
   displayName: "Google AI",
@@ -87,7 +117,9 @@ const groq: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.groq.com/openai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  featuredModels: ["llama-3.3-70b-versatile", "kimi-k2-instruct-0905"],
+  // Groq serves several models under namespaced ids (`openai/gpt-oss-120b`,
+  // `moonshotai/kimi-k2-instruct-0905`) — the catalog vendors them verbatim.
+  featuredModels: ["llama-3.3-70b-versatile", "moonshotai/kimi-k2-instruct-0905"],
 };
 
 const mistral: ModelProviderDefinition = {
@@ -108,6 +140,19 @@ const mistral: ModelProviderDefinition = {
     "mistral-medium-latest",
     "mistral-small-latest",
   ],
+};
+
+const moonshot: ModelProviderDefinition = {
+  providerId: "moonshot",
+  displayName: "Moonshot AI",
+  iconUrl: "moonshot",
+  description: "Bring your own Moonshot AI (Kimi) API key.",
+  docsUrl: "https://platform.moonshot.ai/docs",
+  apiShape: "openai-completions",
+  defaultBaseUrl: "https://api.moonshot.ai/v1",
+  baseUrlOverridable: false,
+  authMode: "api_key",
+  featuredModels: ["kimi-k2.6", "kimi-k2-thinking"],
 };
 
 const openai: ModelProviderDefinition = {
@@ -138,6 +183,23 @@ const openrouter: ModelProviderDefinition = {
   featuredModels: [],
 };
 
+const togetherAi: ModelProviderDefinition = {
+  providerId: "together-ai",
+  displayName: "Together AI",
+  iconUrl: "together-ai",
+  description: "Bring your own Together AI API key.",
+  docsUrl: "https://docs.together.ai/reference/chat-completions-1",
+  apiShape: "openai-completions",
+  defaultBaseUrl: "https://api.together.xyz/v1",
+  baseUrlOverridable: false,
+  authMode: "api_key",
+  featuredModels: [
+    "deepseek-ai/DeepSeek-V3.1",
+    "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8",
+    "moonshotai/Kimi-K2.5",
+  ],
+};
+
 const xai: ModelProviderDefinition = {
   providerId: "xai",
   displayName: "xAI",
@@ -149,6 +211,19 @@ const xai: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featuredModels: ["grok-3", "grok-3-mini", "grok-4"],
+};
+
+const zai: ModelProviderDefinition = {
+  providerId: "zai",
+  displayName: "Z.ai",
+  iconUrl: "zai",
+  description: "Bring your own Z.ai (GLM) API key.",
+  docsUrl: "https://docs.z.ai/api-reference",
+  apiShape: "openai-completions",
+  defaultBaseUrl: "https://api.z.ai/api/paas/v4",
+  baseUrlOverridable: false,
+  authMode: "api_key",
+  featuredModels: ["glm-5", "glm-5-code", "glm-4.7"],
 };
 
 const openaiCompatible: ModelProviderDefinition = {
@@ -175,12 +250,17 @@ const coreProvidersModule: AppstrateModule = {
     return [
       anthropic,
       cerebras,
+      deepseek,
+      fireworksAi,
       googleAi,
       groq,
       mistral,
+      moonshot,
       openai,
       openrouter,
+      togetherAi,
       xai,
+      zai,
       openaiCompatible,
     ];
   },

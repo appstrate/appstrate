@@ -212,8 +212,12 @@ const codexProvider: ModelProviderDefinition = {
   },
   // ChatGPT Codex tokens authenticate against the OpenAI catalog —
   // metadata (cost, context, capabilities) flows through openai.json.
-  // `gpt-5.3-codex` is intentionally absent: not vendored by LiteLLM,
-  // operators add it manually via the UI if needed.
+  // The subscription backend serves a restricted, moving set of models
+  // (no `/models` endpoint to discover it), so this curated list stays
+  // the source of truth. The weekly pricing-refresh CI diffs LiteLLM's
+  // `chatgpt` provider snapshot
+  // (`apps/api/src/data/subscription-watch/chatgpt.json`) — review this
+  // list when that snapshot drifts.
   catalogProviderId: "openai",
   featuredModels: ["gpt-5.5", "gpt-5.4-mini", "gpt-5.4-nano"],
   hooks: codexHooks,

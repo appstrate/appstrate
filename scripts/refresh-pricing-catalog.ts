@@ -64,7 +64,30 @@ const LITELLM_TO_OURS: Record<string, string> = {
   cerebras: "cerebras",
   groq: "groq",
   xai: "xai",
+  deepseek: "deepseek",
+  moonshot: "moonshot",
+  together_ai: "together-ai",
+  fireworks_ai: "fireworks-ai",
+  zai: "zai",
 };
+
+/**
+ * LiteLLM providers we snapshot WITHOUT vendoring into the pricing
+ * catalog. `chatgpt` is the ChatGPT subscription backend (flat-fee — no
+ * per-token pricing, entries carry no cost fields). The codex module is
+ * a foreign-catalog provider exposing a curated `featuredModels` list,
+ * never a full catalog, because the subscription serves a restricted,
+ * moving set of models. The weekly diff on this snapshot is the review
+ * signal for that curation (new subscription models, deprecations).
+ * No Anthropic equivalent exists — LiteLLM carries no claude-
+ * subscription provider, so the claude-code module's curation stays
+ * manual.
+ *
+ * Snapshots land in `apps/api/src/data/subscription-watch/<name>.json`
+ * as a sorted id array. Nothing imports them at runtime.
+ */
+const SUBSCRIPTION_WATCH: readonly string[] = ["chatgpt"];
+const WATCH_DIR = resolve(REPO_ROOT, "apps/api/src/data/subscription-watch");
 
 const PROVIDERS = Object.values(LITELLM_TO_OURS) as readonly string[];
 
@@ -110,8 +133,19 @@ interface Summary {
  * Strip the routing namespace prefix LiteLLM uses for some entries
  * (`mistral/codestral-latest`, `azure/gpt-4o`, …). Our pricing lookup
  * keys on the canonical model id only.
+ *
+ * Only the `<litellm_provider>/` prefix is stripped — the remainder IS
+ * the model id. Several providers use multi-segment ids their API
+ * actually expects (`together_ai/meta-llama/Llama-3.3-70B…` →
+ * `meta-llama/Llama-3.3-70B…`, `fireworks_ai/accounts/fireworks/models/x`
+ * → `accounts/fireworks/models/x`); collapsing to the last segment
+ * would vendor ids the upstream API rejects. Keys namespaced under a
+ * different prefix keep the last-segment fallback (identical output
+ * for every single-segment-namespace provider).
  */
-function canonicalId(rawKey: string): string {
+function canonicalId(rawKey: string, litellmProvider: string): string {
+  const prefix = `${litellmProvider}/`;
+  if (rawKey.startsWith(prefix)) return rawKey.slice(prefix.length);
   const slash = rawKey.lastIndexOf("/");
   return slash === -1 ? rawKey : rawKey.slice(slash + 1);
 }
@@ -199,7 +233,7 @@ function buildProviderSnapshot(
     if (entry.litellm_provider !== litellmProvider) continue;
     if (entry.mode !== "chat") continue;
     if (!key.includes("/")) continue;
-    const id = canonicalId(key);
+    const id = canonicalId(key, litellmProvider);
     if (out[id]) continue;
     const projected = projectEntry(id, entry);
     if (projected) out[id] = projected;
@@ -308,9 +342,47 @@ async function main(): Promise<void> {
     }
   }
 
+  // Subscription-backend watch — ids only, never vendored as pricing.
+  for (const litellmProvider of SUBSCRIPTION_WATCH) {
+    const upstreamIds = [
+      ...new Set(
+        Object.entries(upstream)
+          .filter(([, entry]) => entry.litellm_provider === litellmProvider)
+          .map(([key]) => canonicalId(key, litellmProvider)),
+      ),
+    ].sort();
+    const path = `${WATCH_DIR}/${litellmProvider}.json`;
+    const localIds = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as string[]) : [];
+    const localSet = new Set(localIds);
+    const upstreamSet = new Set(upstreamIds);
+    const added = upstreamIds.filter((id) => !localSet.has(id));
+    const removed = localIds.filter((id) => !upstreamSet.has(id));
+    const summary: Summary = {
+      provider: `watch:${litellmProvider}`,
+      localSize: localIds.length,
+      upstreamSize: upstreamIds.length,
+      added,
+      removed,
+      changed: [],
+      unchanged: added.length === 0 && removed.length === 0,
+    };
+    summaries.push(summary);
+    summarize(summary);
+    if (!summary.unchanged) {
+      console.log(
+        `    ↳ subscription backend changed — review the curated featuredModels of the matching OAuth module(s)`,
+      );
+      if (apply) {
+        if (!existsSync(WATCH_DIR)) mkdirSync(WATCH_DIR, { recursive: true });
+        writeFileSync(path, JSON.stringify(upstreamIds, null, 2) + "\n", "utf8");
+        console.log(`    → wrote ${path}`);
+      }
+    }
+  }
+
   const drift = summaries.some((s) => !s.unchanged);
   console.log(
-    `\n${drift ? "DRIFT" : "OK"} — ${summaries.filter((s) => !s.unchanged).length}/${PROVIDERS.length} provider(s) changed`,
+    `\n${drift ? "DRIFT" : "OK"} — ${summaries.filter((s) => !s.unchanged).length}/${summaries.length} snapshot(s) changed`,
   );
 
   if (drift && !apply) {
