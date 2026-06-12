@@ -35,9 +35,11 @@ import {
   normalizeAuthScheme,
   substituteVars,
   findUnresolvedPlaceholders,
+  resolveAndCheckHost,
   OUTBOUND_TIMEOUT_MS,
   INTEGRATION_ID_RE,
   type CredentialsResponse,
+  type HostResolver,
   type SidecarConfig,
 } from "./helpers.ts";
 import {
@@ -146,6 +148,11 @@ export interface ApiCallDeps {
    * 401-retry path skips the refresh after the first failure.
    */
   reportedAuthFailures: Set<string>;
+  /**
+   * DNS resolver for the SSRF rebind check — injectable for tests.
+   * Production callers omit it (system resolver via `node:dns`).
+   */
+  resolveHost?: HostResolver;
 }
 
 /**
@@ -191,11 +198,19 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   }
 
   // 4. Validate URL against authorizedUris (or block internal
-  //    targets when allowAllUris is set).
+  //    targets when allowAllUris is set). The SSRF branches add the
+  //    DNS-resolving rebind layer over the literal blocklist (see
+  //    `refuseSsrfTarget`). On the allowlist branch, the SSRF gate
+  //    applies UNLESS some entry pins this exact host literally —
+  //    a named host resolving internally is the operator's declared
+  //    topology (on-prem APIs are legitimate allowlist targets), but
+  //    the AFPS glob grammar lets `**` span the host (`https://**`),
+  //    and a glob-matched host is agent-chosen, not operator-chosen —
+  //    without the gate that branch would be strictly weaker than
+  //    allow_all.
   if (creds.allowAllUris) {
-    if (isBlockedUrl(resolvedUrl)) {
-      return { ok: false, status: 403, error: "URL targets a blocked network range" };
-    }
+    const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
+    if (refusal) return refusal;
   } else if (creds.authorizedUris && creds.authorizedUris.length) {
     if (!matchesAuthorizedUri(resolvedUrl, creds.authorizedUris)) {
       return {
@@ -204,11 +219,14 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
         error: `URL not authorized for integration "${integrationId}". Allowed: ${creds.authorizedUris.join(", ")}`,
       };
     }
+    if (!hostLiterallyAllowlisted(resolvedUrl, creds.authorizedUris)) {
+      const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
+      if (refusal) return refusal;
+    }
   } else {
     // No authorizedUris and no allowAllUris — apply the SSRF safety net.
-    if (isBlockedUrl(resolvedUrl)) {
-      return { ok: false, status: 403, error: "URL targets a blocked network range" };
-    }
+    const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
+    if (refusal) return refusal;
   }
 
   // 5b. Pre-substitute headers with the *initial* creds so we can
@@ -464,6 +482,86 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   });
 
   return { ok: true, response: upstream, finalUrl: upstreamFinalUrl, authRefreshed };
+}
+
+/**
+ * True when some allowlist entry names the URL's host with a literal
+ * (wildcard-free) host component. Only then is the allowlist a
+ * host-level trust declaration that exempts the target from the SSRF
+ * gate: the operator wrote that exact host down, so an internal
+ * address behind it is their declared topology. Entries whose host
+ * segment contains a glob (`https://**`, `https://*.example.com/…`)
+ * never pin — the concrete host is then chosen by the agent at call
+ * time, and the SSRF gate must still apply.
+ *
+ * The host comparison is authority-only (userinfo and port stripped),
+ * case-insensitive, matching how `matchesAuthorizedUriSpec` treats the
+ * pattern as an opaque string while WHATWG URL lowercases hostnames.
+ */
+function hostLiterallyAllowlisted(url: string, specs: string[]): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  for (const spec of specs) {
+    const m = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/([^/?#]+)/.exec(spec.trim());
+    if (!m) continue;
+    const hostPart = m[1]!.replace(/^[^@]*@/, "").replace(/:\d+$/, "");
+    if (hostPart.includes("*")) continue;
+    if (hostPart.toLowerCase() === host) return true;
+  }
+  return false;
+}
+
+/**
+ * SSRF gate for every branch without a literal operator host pin
+ * (allow_all, no allowlist, glob-matched allowlist): the literal
+ * blocklist first (IP literals, known-internal names), then resolve every A/AAAA
+ * record and refuse if ANY lands in a blocked range. A DNS name whose
+ * record points inside (10.x, 169.254.169.254, …) passes `isBlockedUrl`
+ * alone — this closes the rebind-to-internal vector.
+ *
+ * The outbound connection is delegated to `fetch`, which re-resolves —
+ * so this is fail-closed defence-in-depth with a documented residual
+ * TOCTOU, not a full resolve-and-pin (same posture as the MITM upstream
+ * fetch and the platform CIMD guard; only the raw-socket egress
+ * listeners can pin). Resolution failure maps to 502 — the same outcome
+ * the subsequent fetch would have produced for an unresolvable host —
+ * while a blocked answer is the policy 403.
+ *
+ * Returns the structured failure, or `null` when the target is clear.
+ */
+async function refuseSsrfTarget(
+  url: string,
+  resolveHost?: HostResolver,
+): Promise<ApiCallFailure | null> {
+  const blockedFailure: ApiCallFailure = {
+    ok: false,
+    status: 403,
+    error: "URL targets a blocked network range",
+  };
+  if (isBlockedUrl(url)) return blockedFailure;
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return blockedFailure;
+  }
+  const check = await resolveAndCheckHost(hostname, { resolve: resolveHost });
+  if (!check.blocked) return null;
+  if (check.reason === "resolution-failed") {
+    return {
+      ok: false,
+      status: 502,
+      error: `Target host could not be resolved (${redactHost(url)})`,
+    };
+  }
+  logger.warn("api_call refused: target resolves into a blocked network range", {
+    host: redactHost(url),
+  });
+  return blockedFailure;
 }
 
 function wrapFetchError(err: unknown, label: string, url: string): ApiCallFailure {

@@ -38,6 +38,26 @@ const hasExternalDb = !!process.env.DATABASE_URL;
 // exercise it are slow — opt-in locally (TEST_DOCKER=1), always on in CI.
 const hasDocker = !isTier0 && (process.env.TEST_DOCKER === "1" || process.env.CI === "true");
 
+// Third-party CI systems often set `CI=1` (or another truthy value) where
+// GitHub Actions sets `CI=true` — under those, DinD tests silently skip and
+// the run looks green while exercising less. Surface the gap once so a fork's
+// CI maintainer knows to set TEST_DOCKER=1 (console is fine here: this is
+// test-harness diagnostics for a human terminal, not platform runtime code).
+// `CI=false`/`CI=0`/empty mean "explicitly NOT CI" (CRA-style opt-out) — no warn.
+const ciDisabledValues = ["", "0", "false"];
+if (
+  !isTier0 &&
+  !hasDocker &&
+  process.env.CI !== undefined &&
+  process.env.CI !== "true" &&
+  !ciDisabledValues.includes(process.env.CI.toLowerCase())
+) {
+  console.warn(
+    `⚠ CI=${process.env.CI} detected (not "true") — Docker/DinD tests will be SKIPPED. ` +
+      "Set TEST_DOCKER=1 to run them in this CI system.",
+  );
+}
+
 /** `describe`/`it` that skip unless a real Redis is configured. */
 export const describeRequiresRedis = describe.skipIf(!hasRedis);
 export const itRequiresRedis = it.skipIf(!hasRedis);

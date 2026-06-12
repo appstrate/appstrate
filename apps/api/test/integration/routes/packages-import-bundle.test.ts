@@ -22,6 +22,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import {
   applicationPackages,
+  auditEvents,
   packageDistTags,
   packageVersions,
   packages,
@@ -279,6 +280,23 @@ describe("POST /api/packages/import-bundle — import", () => {
       )
       .limit(1);
     expect(installed).toBeDefined();
+
+    // Each inserted package version leaves an audit trail.
+    const auditRows = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "package.version_created"));
+    expect(auditRows).toHaveLength(3);
+    for (const row of auditRows) {
+      expect(row.orgId).toBe(ctx.orgId);
+      expect(row.resourceType).toBe("package");
+      expect(row.actorType).toBe("user");
+      expect(row.after).toMatchObject({ via: "import:bundle" });
+    }
+    const rootRow = auditRows.find((r) => r.resourceId === "@srcorg/agent-root");
+    expect(rootRow?.after).toMatchObject({ type: "agent", version: "1.0.0", root: true });
+    const skillRow = auditRows.find((r) => r.resourceId === "@srcorg/skill-a");
+    expect(skillRow?.after).toMatchObject({ type: "skill", root: false });
   });
 
   it("accepts a raw .afps and promotes it to a bundle-of-one", async () => {
@@ -364,6 +382,13 @@ describe("POST /api/packages/import-bundle — import", () => {
     };
     expect(body2.imported).toHaveLength(3);
     expect(body2.imported.every((i) => i.status === "reused")).toBe(true);
+
+    // Reused entries changed no state — only the first import audited.
+    const auditRows = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "package.version_created"));
+    expect(auditRows).toHaveLength(3);
   });
 
   it("reports a bundle_conflict 409 when a version exists with different content", async () => {

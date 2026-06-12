@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { zipSync } from "fflate";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -1101,6 +1102,53 @@ describe("Packages API", () => {
   // ═══════════════════════════════════════════════
 
   describe("POST /api/packages/import", () => {
+    it("imports a valid .afps and records an audit event", async () => {
+      const enc = (s: string) => new TextEncoder().encode(s);
+      const afps = zipSync({
+        "manifest.json": enc(
+          JSON.stringify({
+            name: "@pkgorg/imported-agent",
+            version: "1.0.0",
+            type: "agent",
+            schema_version: "0.1",
+            display_name: "Imported Agent",
+            description: "Imported via ZIP",
+          }),
+        ),
+        "prompt.md": enc("You are an imported agent."),
+      });
+      const formData = new FormData();
+      formData.append("file", new File([new Uint8Array(afps)], "agent.afps"));
+
+      const res = await app.request("/api/packages/import", {
+        method: "POST",
+        headers: authHeaders(ctx),
+        body: formData,
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.packageId).toBe("@pkgorg/imported-agent");
+
+      const auditRows = await db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.action, "package.created"),
+            eq(auditEvents.resourceId, "@pkgorg/imported-agent"),
+          ),
+        );
+      expect(auditRows).toHaveLength(1);
+      expect(auditRows[0]!.orgId).toBe(ctx.orgId);
+      expect(auditRows[0]!.actorType).toBe("user");
+      expect(auditRows[0]!.after).toMatchObject({
+        type: "agent",
+        version: "1.0.0",
+        via: "import:zip",
+        force: false,
+      });
+    });
+
     it("returns 400 when no file is provided", async () => {
       const formData = new FormData();
 

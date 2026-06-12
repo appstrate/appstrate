@@ -115,6 +115,11 @@ export const packagesPaths = {
                           type: ["integer", "null"],
                           description: "DB row id for the version; null for system packages.",
                         },
+                        type: {
+                          type: "string",
+                          description:
+                            "Package type (agent, skill, mcp-server, integration). Present on `inserted` entries only.",
+                        },
                       },
                     },
                   },
