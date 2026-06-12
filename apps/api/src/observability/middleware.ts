@@ -27,6 +27,7 @@ import { routePath } from "hono/route";
 import { SpanKind, SpanStatusCode } from "@opentelemetry/api";
 import { getEnv } from "@appstrate/env";
 import { isObservabilityEnabled, runWithSpan, currentSpan } from "./otel.ts";
+import { getClientIp } from "../lib/client-ip.ts";
 import type { AppEnv } from "../types/index.ts";
 
 /** Resolve the matched route template, defensively — never throw post-response. */
@@ -47,7 +48,14 @@ export function observability() {
     if (!isObservabilityEnabled()) return next();
 
     const method = c.req.method;
-    const pathname = new URL(c.req.url).pathname;
+    const url = new URL(c.req.url);
+    // Resolved socket/forwarded client IP (honors TRUST_PROXY). `getClientIp`
+    // returns the "unknown" sentinel when nothing resolves (e.g. the test
+    // harness has no conn info) — omit the attribute rather than record it.
+    // NOTE: `network.protocol.version` is deliberately absent — Bun/Hono hand
+    // the handler a fetch `Request`, which does not expose the negotiated HTTP
+    // version, and semconv forbids guessing it.
+    const clientAddress = getClientIp(c);
 
     return runWithSpan(
       // Provisional, low-cardinality name — overwritten with `<METHOD> <template>`
@@ -60,7 +68,14 @@ export function observability() {
         traceparent: trustInbound ? c.req.header("traceparent") : undefined,
         attributes: {
           "http.request.method": method,
-          "url.path": pathname,
+          "url.path": url.pathname,
+          // Required by OTel HTTP server semconv. Derived from the request URL
+          // (the scheme the server saw — no forwarded-proto guessing).
+          "url.scheme": url.protocol.replace(/:$/, ""),
+          // Recommended: the Host the client targeted (no port — that's
+          // `server.port`, which we don't emit). Low-cardinality.
+          ...(url.hostname !== "" ? { "server.address": url.hostname } : {}),
+          ...(clientAddress !== "unknown" ? { "client.address": clientAddress } : {}),
         },
       },
       async () => {
@@ -83,8 +98,19 @@ export function observability() {
 
         // `app.onError` resolves thrown route errors before runWithSpan's
         // exception path sees them, so a 500 would otherwise leave the SERVER
-        // span UNSET. Map any 5xx response to an ERROR span status.
-        if (c.res.status >= 500) span.setStatus({ code: SpanStatusCode.ERROR });
+        // span UNSET. Map any 5xx response to an ERROR span status, and set
+        // `error.type` (semconv: Conditionally Required on error) — the escaped
+        // exception's class name when one was caught by `app.onError` (Hono
+        // stashes it on `c.error`), else the status code as a string (the
+        // semconv-sanctioned value for non-exception HTTP errors). Both are
+        // low-cardinality (error classes are bounded by the codebase).
+        if (c.res.status >= 500) {
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          span.setAttribute(
+            "error.type",
+            c.error ? c.error.constructor.name || c.error.name : String(c.res.status),
+          );
+        }
 
         // SSE / streaming responses: the span ends when the handler RETURNS its
         // streaming Response (time-to-first-byte), not when the stream closes.

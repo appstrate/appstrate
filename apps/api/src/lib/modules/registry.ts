@@ -32,10 +32,11 @@ import { listLlmUsageForRun } from "../../services/state/runs.ts";
 /**
  * Returns the list of module entries to load at boot.
  *
- * Reads `MODULES` (comma-separated specifiers) directly from
- * `process.env` rather than the cached `getEnv()`, so callers can mutate
- * the env in tests without flushing the whole env cache. The field is a
- * plain comma-separated string — no validation beyond trim/filter is useful.
+ * Reads `MODULES` (comma-separated specifiers) via `getEnv()` so the
+ * default string lives in exactly one place — the `@appstrate/env` Zod
+ * schema (duplicating it here is the #513 drift failure mode). Tests that
+ * mutate `process.env.MODULES` must call `_resetCacheForTesting()` from
+ * `@appstrate/env` to flush the cached snapshot.
  *
  * Defaults to the built-in OSS modules plus the two reference
  * OAuth-provider modules (`@appstrate/module-codex`,
@@ -59,12 +60,9 @@ import { listLlmUsageForRun } from "../../services/state/runs.ts";
  * All declared modules are required — if a module is in the list, it must
  * load and init successfully or the platform crashes.
  */
-const DEFAULT_MODULES =
-  "oidc,webhooks,mcp,core-providers,@appstrate/module-codex,@appstrate/module-claude-code";
-
 export function getModuleRegistry(): string[] {
-  return (process.env.MODULES ?? DEFAULT_MODULES)
-    .split(",")
+  return getEnv()
+    .MODULES.split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 }

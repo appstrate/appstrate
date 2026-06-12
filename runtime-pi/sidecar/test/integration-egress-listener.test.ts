@@ -134,6 +134,60 @@ describe("integration-egress-listener (#543)", () => {
     expect(res.statusCode).toBe(403);
   });
 
+  it("refuses a DNS name that RESOLVES to a blocked address (rebind) with the real SSRF floor", async () => {
+    // `rebind.example` passes the literal blocklist, but its A record points
+    // inside — the resolve-and-pin layer must refuse before any tunnel opens.
+    const { handle, events } = await makeListener({
+      isBlockedHostFn: undefined,
+      resolveHostFn: async () => ["10.0.0.5"],
+    });
+    const port = handle.address().port;
+    const res = await connectAndProbe(port, "rebind.example:443");
+    expect(res.statusCode).toBe(403);
+    expect(events.some((e) => e.kind === "tunnel-refused" && e.reason === "ssrf")).toBe(true);
+  });
+
+  it("refuses when ANY resolved record is blocked (mixed A records)", async () => {
+    const { handle } = await makeListener({
+      isBlockedHostFn: undefined,
+      resolveHostFn: async () => ["93.184.216.34", "169.254.169.254"],
+    });
+    const port = handle.address().port;
+    const res = await connectAndProbe(port, "rebind.example:443");
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("refuses (fails closed) when DNS resolution fails", async () => {
+    const { handle, events } = await makeListener({
+      isBlockedHostFn: undefined,
+      resolveHostFn: async () => {
+        throw new Error("NXDOMAIN");
+      },
+    });
+    const port = handle.address().port;
+    const res = await connectAndProbe(port, "nxdomain.example:443");
+    expect(res.statusCode).toBe(403);
+    expect(
+      events.some((e) => e.kind === "tunnel-refused" && e.reason === "dns-resolution-failed"),
+    ).toBe(true);
+  });
+
+  it("connects to the PINNED resolved IP for an allowed DNS name", async () => {
+    const echo = await startTcpEcho();
+    // `pinned.example` does NOT resolve in real DNS — the tunnel can only
+    // open if the listener connects to the injected resolver's answer, which
+    // proves the pin (a name-based connect would fail resolution).
+    const { handle, events } = await makeListener({
+      resolveHostFn: async () => ["127.0.0.1"],
+    });
+    const port = handle.address().port;
+
+    const res = await connectAndProbe(port, `pinned.example:${echo.port}`, "ping");
+    expect(res.statusCode).toBe(200);
+    expect(res.echoed).toBe("ping");
+    expect(events.some((e) => e.kind === "tunnel-opened")).toBe(true);
+  });
+
   it("rejects non-CONNECT verbs with 405", async () => {
     const { handle } = await makeListener();
     const port = handle.address().port;

@@ -116,6 +116,9 @@ describe("MITM listener — subprocess end-to-end", () => {
         caBundle: bundle,
         minter,
         credentials: creds,
+        // `api.e2e.local` doesn't resolve in real DNS — stub the rebind-guard
+        // resolver to a public TEST-NET-3 address so the tunnel opens.
+        resolveHostFn: async () => ["203.0.113.10"],
         fetch: stubFetch,
       });
       await listener.ready;

@@ -1,7 +1,7 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdir, unlink, realpath, writeFile } from "node:fs/promises";
+import { mkdir, unlink, realpath, writeFile, open } from "node:fs/promises";
 import { join, dirname, normalize, resolve as resolvePath } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Storage, CreateUploadUrlOptions, UploadUrlDescriptor } from "./storage.ts";
@@ -153,12 +153,44 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
     },
 
     async uploadStream(bucket, path, stream, opts) {
-      if (opts?.exclusive) {
-        throw new Error("uploadStream does not support exclusive uploads");
-      }
       const fullPath = resolve(bucket, path);
       await mkdir(dirname(fullPath), { recursive: true });
       await verifyContainment(dirname(fullPath));
+      if (opts?.exclusive) {
+        // "wx" = O_CREAT | O_EXCL — same atomic create-new-or-fail primitive as
+        // uploadFile, but the body is pulled from the stream chunk-by-chunk
+        // through the filehandle, never buffered whole. Used by the FS
+        // direct-upload sink: replay protection (single-use signed token) plus
+        // bounded memory for bodies up to the signed max.
+        let fh: Awaited<ReturnType<typeof open>>;
+        try {
+          fh = await open(fullPath, "wx");
+        } catch (err: unknown) {
+          if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+            throw new StorageAlreadyExistsError();
+          }
+          throw err;
+        }
+        const reader = stream.getReader();
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            await fh.write(value);
+          }
+          await fh.close();
+        } catch (err) {
+          await fh.close().catch(() => {});
+          await reader.cancel(err).catch(() => {});
+          // O_EXCL guarantees THIS call created the file, so a failed write
+          // must remove the partial — a leftover would make every retry with
+          // the still-valid token 409 until GC sweeps it.
+          await unlink(fullPath).catch(() => {});
+          throw err;
+        }
+        await verifyContainment(fullPath);
+        return makeKey(bucket, path);
+      }
       // Pull the web ReadableStream chunk-by-chunk into a FileSink — never
       // buffering the whole payload in memory.
       //

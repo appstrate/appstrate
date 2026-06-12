@@ -90,6 +90,31 @@ describe("auth pipeline — stale cookie cleanup", () => {
     expect(res.headers.get("clear-site-data")).toBe('"cookies"');
   });
 
+  it("answers the credential-less 401 with the bare RFC 6750 Bearer challenge", async () => {
+    // RFC 6750 §3 — every 401 from the bearer-protected API surface MUST
+    // carry WWW-Authenticate. No Authorization header was presented (a
+    // cookie is not a Bearer credential), so the error code is omitted
+    // (§3.1) and the challenge is the bare scheme.
+    const res = await app.request("/api/agents", {
+      headers: { "X-Org-Id": "00000000-0000-0000-0000-000000000000" },
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("WWW-Authenticate")).toBe("Bearer");
+  });
+
+  it('answers an invalid API key 401 with WWW-Authenticate: Bearer error="invalid_token"', async () => {
+    // A credential WAS presented (Authorization: Bearer ask_…) and failed
+    // validation — RFC 6750 §3.1 says the challenge names the error.
+    const res = await app.request("/api/agents", {
+      headers: {
+        Authorization: "Bearer ask_definitely-not-a-valid-key",
+        "X-Org-Id": "00000000-0000-0000-0000-000000000000",
+      },
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("WWW-Authenticate")).toBe('Bearer error="invalid_token"');
+  });
+
   it("does not emit a session_token clearing cookie on routes that succeed without auth", async () => {
     // `/health` is a public route mounted before the auth middleware.
     // The pipeline must not gratuitously clear cookies on every request —

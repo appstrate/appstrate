@@ -540,15 +540,22 @@ describe("writeFsUploadContent (FS sink)", () => {
     await truncateAll();
   });
 
+  /** Body stream from raw bytes — mirrors `c.req.raw.body` in the route. */
+  const bodyStream = (bytes: Uint8Array): ReadableStream<Uint8Array> => new Response(bytes).body!;
+
+  /** Unique path per test run — `truncateAll()` only resets the DB, not storage. */
+  const uniqueKey = (label: string): { key: string; storagePath: string } => {
+    const unique = `upl_${label}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const storagePath = `sink-test/${unique}/file.bin`;
+    return { key: `${UPLOAD_BUCKET}/${storagePath}`, storagePath };
+  };
+
   it("refuses to overwrite an existing object at the same storage key", async () => {
-    // Unique path per test run — `truncateAll()` only resets the DB, not the FS.
-    const unique = `upl_replay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const storagePath = `replay-test/${unique}/file.bin`;
-    const key = `${UPLOAD_BUCKET}/${storagePath}`;
-    await writeFsUploadContent(key, new Uint8Array([1, 2, 3]));
+    const { key, storagePath } = uniqueKey("replay");
+    await writeFsUploadContent(key, bodyStream(new Uint8Array([1, 2, 3])), 0);
     // Second PUT with the same (still-valid) token must be rejected.
     try {
-      await writeFsUploadContent(key, new Uint8Array([4, 5, 6]));
+      await writeFsUploadContent(key, bodyStream(new Uint8Array([4, 5, 6])), 0);
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -557,5 +564,46 @@ describe("writeFsUploadContent (FS sink)", () => {
     // Original bytes preserved.
     const stored = await storageGet(UPLOAD_BUCKET, storagePath);
     expect(stored).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it("accepts a body at exactly the signed max and reports its size", async () => {
+    const { key, storagePath } = uniqueKey("exact");
+    const bytes = new Uint8Array(64).fill(7);
+    const result = await writeFsUploadContent(key, bodyStream(bytes), 64);
+    expect(result.size).toBe(64);
+    expect(await storageGet(UPLOAD_BUCKET, storagePath)).toEqual(bytes);
+  });
+
+  it("aborts mid-stream once the byte count exceeds the signed max (chunked — no Content-Length)", async () => {
+    const { key, storagePath } = uniqueKey("oversize");
+    // Multi-chunk source with no length known up front — the shape of a
+    // chunked-transfer-encoding request that bypasses Content-Length checks.
+    const chunk = new Uint8Array(1024).fill(1);
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let i = 0; i < 8; i++) controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+    try {
+      await writeFsUploadContent(key, source, 4 * 1024);
+      throw new Error("expected to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).status).toBe(400);
+      expect((e as ApiError).message).toContain("exceeds signed max");
+    }
+    // No partial object left behind — the token stays usable for a clean retry.
+    expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(false);
+    const retry = new Uint8Array([9, 9, 9]);
+    await writeFsUploadContent(key, bodyStream(retry), 4 * 1024);
+    expect(await storageGet(UPLOAD_BUCKET, storagePath)).toEqual(retry);
+  });
+
+  it("treats a signed max of 0 as unlimited (legacy tokens)", async () => {
+    const { key, storagePath } = uniqueKey("nolimit");
+    const bytes = new Uint8Array(2048).fill(3);
+    await writeFsUploadContent(key, bodyStream(bytes), 0);
+    expect(await storageGet(UPLOAD_BUCKET, storagePath)).toEqual(bytes);
   });
 });

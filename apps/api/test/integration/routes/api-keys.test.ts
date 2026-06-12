@@ -32,8 +32,9 @@ describe("API Keys API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.apiKeys).toBeArray();
-      expect(body.apiKeys).toHaveLength(0);
+      expect(body.object).toBe("list");
+      expect(body.data).toBeArray();
+      expect(body.data).toHaveLength(0);
     });
 
     it("returns keys after creation", async () => {
@@ -53,8 +54,9 @@ describe("API Keys API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.apiKeys).toHaveLength(1);
-      expect(body.apiKeys[0].name).toBe("Test Key");
+      expect(body.object).toBe("list");
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0].name).toBe("Test Key");
     });
 
     it("returns 401 without authentication", async () => {
@@ -143,7 +145,7 @@ describe("API Keys API", () => {
         headers: authHeaders(ctx),
       });
       const body = (await listRes.json()) as any;
-      const found = body.apiKeys.find((k: { id: string }) => k.id === id);
+      const found = body.data.find((k: { id: string }) => k.id === id);
       expect(found).toBeUndefined();
     });
   });
@@ -233,8 +235,8 @@ describe("API Keys API", () => {
         headers: authHeaders(ctx),
       });
       const body = (await listRes.json()) as any;
-      expect(body.apiKeys[0].scopes).toContain("agents:read");
-      expect(body.apiKeys[0].scopes).toContain("agents:run");
+      expect(body.data[0].scopes).toContain("agents:read");
+      expect(body.data[0].scopes).toContain("agents:run");
     });
   });
 
@@ -246,14 +248,15 @@ describe("API Keys API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.scopes).toBeArray();
-      expect(body.scopes.length).toBeGreaterThan(20);
-      expect(body.scopes).toContain("agents:read");
-      expect(body.scopes).toContain("agents:write");
-      expect(body.scopes).toContain("runs:read");
+      expect(body.object).toBe("list");
+      expect(body.data).toBeArray();
+      expect(body.data.length).toBeGreaterThan(20);
+      expect(body.data).toContain("agents:read");
+      expect(body.data).toContain("agents:write");
+      expect(body.data).toContain("runs:read");
       // Session-only scopes should NOT be present
-      expect(body.scopes).not.toContain("org:delete");
-      expect(body.scopes).not.toContain("billing:manage");
+      expect(body.data).not.toContain("org:delete");
+      expect(body.data).not.toContain("billing:manage");
     });
 
     it("returns 403 for member (api-keys:read is admin-only)", async () => {

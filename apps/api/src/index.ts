@@ -96,7 +96,8 @@ app.use("*", cors({ origin: trustedOrigins, credentials: true }));
 
 // Global body-size cap. Skipped for the public FS upload sink — that route
 // authenticates via a signed token whose payload encodes its own size limit
-// and uses streaming I/O up to 100 MB by design.
+// (up to 100 MB by design), enforced while the body streams to disk: the
+// signed max replaces this cap and chunked encoding cannot bypass it.
 const globalBodyLimit = bodyLimit(env.API_BODY_LIMIT_BYTES);
 app.use("*", async (c, next) => {
   if (c.req.path === "/api/uploads/_content") return next();

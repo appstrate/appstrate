@@ -16,8 +16,12 @@
  * on a matching path. Any future protected resource reuses this with one
  * `registerAuthChallenge` call — no edits to the auth pipeline.
  *
- * Zero footprint when unused: an empty registry makes the responder a
- * pass-through, so a disabled module that never registers leaves no trace.
+ * Independently of the registry, the responder also guarantees the RFC 6750
+ * §3 baseline: every 401 it sees carries at least a generic
+ * `WWW-Authenticate: Bearer` challenge (with `error="invalid_token"` when a
+ * credential was presented but rejected). A disabled module that never
+ * registers leaves no richer trace — its paths simply get the generic
+ * challenge like everything else.
  */
 
 import type { Context, MiddlewareHandler } from "hono";
@@ -86,11 +90,23 @@ export function resolveAuthChallenge(path: string): AuthChallengeBuilder | undef
 }
 
 /**
- * Middleware that, after the downstream chain runs, attaches a registered
- * `WWW-Authenticate` challenge to a 401/403 response on a matching path. Never
- * overwrites a challenge a handler already set. Mounted once, near the top of
- * the pipeline, so it wraps both the auth middleware (401) and route handlers
+ * Middleware that, after the downstream chain runs, attaches a
+ * `WWW-Authenticate` challenge to a 401/403 response. Never overwrites a
+ * challenge a handler already set. Mounted once, near the top of the
+ * pipeline, so it wraps both the auth middleware (401) and route handlers
  * (403).
+ *
+ * Precedence:
+ *   1. A handler-set `WWW-Authenticate` is left untouched.
+ *   2. A registered (RFC 9728) challenge on a matching path prefix —
+ *      e.g. the MCP resource-metadata challenge — wins next.
+ *   3. Otherwise every 401 falls back to the generic RFC 6750 §3 Bearer
+ *      challenge: `Bearer error="invalid_token"` when the request carried
+ *      an `Authorization` header that failed validation, bare `Bearer`
+ *      when no credential was presented at all (§3.1 says the error code
+ *      SHOULD be omitted in that case). 403s get no generic fallback —
+ *      an `insufficient_scope` challenge needs scope knowledge only a
+ *      registered resource has.
  */
 export function authChallengeResponder(): MiddlewareHandler<AppEnv> {
   return async (c: Context<AppEnv>, next) => {
@@ -99,13 +115,16 @@ export function authChallengeResponder(): MiddlewareHandler<AppEnv> {
     if (status !== 401 && status !== 403) return;
     if (c.res.headers.has("WWW-Authenticate")) return;
     const build = resolveAuthChallenge(c.req.path);
-    if (!build) return;
+    let challenge: string | undefined;
+    if (build) {
+      challenge = build({ origin: new URL(c.req.url).origin, path: c.req.path, status });
+    } else if (status === 401) {
+      challenge = c.req.header("Authorization") ? 'Bearer error="invalid_token"' : "Bearer";
+    }
+    if (!challenge) return;
 
     const headers = new Headers(c.res.headers);
-    headers.set(
-      "WWW-Authenticate",
-      build({ origin: new URL(c.req.url).origin, path: c.req.path, status }),
-    );
+    headers.set("WWW-Authenticate", challenge);
     c.res = new Response(c.res.body, {
       status: c.res.status,
       statusText: c.res.statusText,

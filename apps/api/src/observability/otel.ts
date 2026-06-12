@@ -332,6 +332,13 @@ export function runWithSpan<T>(name: string, opts: SpanOptions, fn: () => T): T 
 
 function recordSpanError(span: Span, err: unknown): void {
   span.recordException(err instanceof Error ? err : { message: getErrorMessage(err) });
+  // semconv `error.type` (Conditionally Required when the operation errors):
+  // the exception class name — low-cardinality, bounded by the codebase's
+  // error classes. Non-Error throwables map to the semconv fallback `_OTHER`.
+  span.setAttribute(
+    "error.type",
+    err instanceof Error ? err.constructor.name || err.name : "_OTHER",
+  );
   span.setStatus({ code: SpanStatusCode.ERROR, message: getErrorMessage(err) });
 }
 
@@ -446,15 +453,32 @@ export function recordContainerSpawn(
   });
 }
 
+/**
+ * Record one upstream LLM call observed at the platform proxy seam. Attributes
+ * follow OTel HTTP semconv (mirroring {@link recordContainerSpawn}'s use of
+ * `error.type`-on-failure-only):
+ *
+ *   - `http.response.status_code` — the upstream status, when a response was
+ *     received. An ABSENT `status` means the call failed before producing a
+ *     response (transport error / thrown fetch).
+ *   - `error.type` — present on FAILURE only: the status code as a string for
+ *     4xx/5xx upstream replies (semconv-sanctioned for non-exception errors),
+ *     or the semconv fallback `_OTHER` when no response arrived. Success
+ *     points carry neither, so clean latency stays filterable and error rate
+ *     is derivable from one histogram. Both values are bounded by construction
+ *     (status codes / a single sentinel) — no cardinality clamp needed.
+ */
 export function recordLlmLatency(
   durationMs: number,
-  attrs: { api_shape?: string; status?: number; outcome: "success" | "error" },
+  attrs: { api_shape?: string; status?: number },
 ): void {
   if (!enabled) return;
+  const status = attrs.status;
+  const errorType = status === undefined ? "_OTHER" : status >= 400 ? String(status) : undefined;
   llmLatency?.record(durationMs / MS_PER_S, {
     api_shape: attrs.api_shape ?? "unknown",
-    outcome: attrs.outcome,
-    ...(attrs.status !== undefined ? { status_code: attrs.status } : {}),
+    ...(status !== undefined ? { "http.response.status_code": status } : {}),
+    ...(errorType !== undefined ? { "error.type": errorType } : {}),
   });
 }
 

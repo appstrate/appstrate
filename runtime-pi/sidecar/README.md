@@ -84,7 +84,7 @@ Each text-path tool result carries a `dev.appstrate/token-budget` `_meta` payloa
 
 `reason` is one of:
 
-- `under_inline_cap` / `exceeds_inline_cap` / `exceeds_run_budget` — what the budget tracker decided.
+- `under_inline_cap` / `exceeds_inline_cap` / `exceeds_run_budget` / `exceeds_context_window` — what the budget tracker decided (the last only when `contextWindowTokens` is wired — guards parallel fan-outs that individually fit but collectively blow the model's hard limit, #464).
 - `blob_store_full` — the budget said spill but the blob store rejected the put (cumulative cap reached); the agent gets the content inline as a last resort and the override is recorded in the meta.
 - `no_blob_store_configured` — the budget said spill but no blob store was wired (tests / embedders); same forced-inline outcome, but a distinct reason so operators can tell misconfiguration from saturation.
 
@@ -108,13 +108,13 @@ The download counterpart, `responseMode.toFile`, is supported on **both** runtim
 
 ## Upstream response-header propagation
 
-`{ns}__api_call` ships upstream HTTP `status`, an allowlist of response headers, and the post-redirect terminal URL back to the agent-side resolver via the MCP `_meta` field, namespaced as `appstrate/upstream`:
+`{ns}__api_call` ships upstream HTTP `status`, an allowlist of response headers, and the post-redirect terminal URL back to the agent-side resolver via the MCP `_meta` field, namespaced as `dev.appstrate/upstream` (`UPSTREAM_META_KEY` in `@appstrate/mcp-transport`):
 
 ```jsonc
 {
   "content": [{ "type": "text", "text": "<upstream body>" }],
   "_meta": {
-    "appstrate/upstream": {
+    "dev.appstrate/upstream": {
       "status": 200,
       "headers": { "content-type": "application/json" },
       "finalUrl": "https://api.example.com/callback?code=ABC123",
@@ -123,9 +123,11 @@ The download counterpart, `responseMode.toFile`, is supported on **both** runtim
 }
 ```
 
-The allowlist is defined in [`runtime-pi/sidecar/upstream-meta.ts`](./upstream-meta.ts) and includes every header the four chunked-upload protocols depend on (`Location`, `ETag`, `Content-Range`, `Upload-Offset`, `Upload-Length`, `Tus-Resumable`, …) plus standard caching headers (`Cache-Control`, `Last-Modified`, `Vary`, `Retry-After`). Credential-bearing headers (`Set-Cookie`, `Authorization`, `WWW-Authenticate`) are deliberately excluded.
+The key and allowlist are shared constants in `@appstrate/mcp-transport` (`UPSTREAM_META_KEY` / `UPSTREAM_HEADER_ALLOWLIST` in [`packages/mcp-transport/src/upstream-meta.ts`](../../packages/mcp-transport/src/upstream-meta.ts), re-exported by [`runtime-pi/sidecar/upstream-meta.ts`](./upstream-meta.ts)). The allowlist includes every header the four chunked-upload protocols depend on (`Location`, `ETag`, `Content-Range`, `Upload-Offset`, `Upload-Length`, `Tus-Resumable`, …) plus standard caching headers (`Cache-Control`, `Last-Modified`, `Vary`, `Retry-After`). Credential-bearing headers (`Set-Cookie`, `Authorization`, `WWW-Authenticate`) are deliberately excluded.
 
 `finalUrl` is the URL the response was eventually served from after the sidecar's redirect follower terminated. Distinct from `headers.location` (which is the _next hop_ on a non-terminal 30x — undefined on the terminal 200/4xx). Sanitised per WHATWG Fetch: userinfo (`user:pass@`) and fragment (`#…`) are stripped before serialisation. Use for OAuth Authorization Code / CAS `?ticket=…` / magic-link flows where the agent needs to extract callback query params from the terminal hop. Omitted on preflight failures (no upstream contact).
+
+The payload is present on **every** `api_call` result, not just successes: sidecar pre-flight failures (credential fetch failure, URL not in `authorizedUris`, body too large — no upstream contact) ship `status: 0`, `headers: {}`. The runtime-side parser treats a missing payload as a sidecar protocol violation and throws.
 
 Old MCP clients ignore unknown `_meta` keys per spec — the propagation is wire-compatible.
 
@@ -170,5 +172,6 @@ Cancellation honours `ctx.signal` between chunks; on abort, the resolver issues 
 
 - The resolver-side contract — file resolution, `responseMode` logic, `byteLength` thresholds — is documented next to the code in [`packages/afps-runtime/src/resolvers/http-call-core.ts`](../../packages/afps-runtime/src/resolvers/http-call-core.ts).
 - The `api_upload` adapter contracts, chunker semantics, and per-protocol error surfaces are documented next to the code in [`runtime-pi/mcp/api-upload-resolver.ts`](../mcp/api-upload-resolver.ts) and [`runtime-pi/mcp/upload-adapters/`](../mcp/upload-adapters/).
+- The full reserved `dev.appstrate/*` `_meta` vocabulary — tool-descriptor routing markers, the `upstream` / `token-budget` result keys, the `events` channel, who sets and consumes each — is documented in [`docs/architecture/SIDECAR.md`](../../docs/architecture/SIDECAR.md) under "Reserved `_meta` vocabulary".
 - Sidecar lifecycle, network isolation, parallel container startup, and credential reporting paths are documented in the platform-level [`CLAUDE.md`](../../CLAUDE.md) under "Sidecar Protocol".
 - Integration auth modes (`oauth2` / `api_key` / `basic` / `mtls` / `custom` — AFPS §7.2) and the `auths.{key}.delivery.{http | env | files}` injection contract live in `@appstrate/connect`.

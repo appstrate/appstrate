@@ -699,7 +699,10 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const scope = getAppScope(c);
       const item = await getOrgDefault(scope, packageId);
-      return c.json({ default: item });
+      // Bare resource, or 204 when no default is set — same contract as
+      // PUT (bare resource) and the models/proxies default endpoints (#657).
+      if (!item) return c.body(null, 204);
+      return c.json(item);
     },
   );
 

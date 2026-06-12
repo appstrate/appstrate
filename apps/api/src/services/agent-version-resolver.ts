@@ -42,6 +42,10 @@ import { ApiError, notFound } from "../lib/errors.ts";
 import { getLatestVersionInfo, getVersionDetail } from "./package-versions.ts";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 
+// Both keywords are reserved dist-tag names (`isProtectedTag` in
+// `@appstrate/core/dist-tags`): they resolve here BEFORE dist-tag lookup,
+// so a dist-tag named "draft" or "published" would be permanently shadowed —
+// tag creation rejects them.
 /** Keyword selecting the live draft definition. */
 export const VERSION_SELECTOR_DRAFT = "draft";
 /** Keyword selecting the latest published version. */

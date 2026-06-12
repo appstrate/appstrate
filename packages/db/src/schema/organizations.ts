@@ -174,6 +174,19 @@ export const modelProviderCredentials = pgTable(
      * decrypt-and-rewrite migration.
      */
     expiresAt: timestamp("expires_at", { withTimezone: true }),
+    // Consecutive token-refresh failures classified as *transient* (network /
+    // 5xx / parse — NOT `invalid_grant`, which flips `blob.needsReconnection`
+    // immediately). A transient failure on a still-valid token is a no-op for
+    // the credential's usability (cached token keeps working), but a token that
+    // is expired AND has failed refresh repeatedly is effectively dead while
+    // looking healthy. This counter, gated on `expiresAt < now() - grace`,
+    // escalates such a credential to `needsReconnection` so the dashboard and
+    // the inference read path surface an actionable re-connect prompt instead
+    // of every run dying opaquely. Reset to 0 on any successful token write
+    // (`updateOAuthCredentialTokens`). Mirrors
+    // `integration_connections.refresh_failure_count`.
+    refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
+    lastRefreshFailureAt: timestamp("last_refresh_failure_at", { withTimezone: true }),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

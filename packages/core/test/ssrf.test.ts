@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { isBlockedHost, isBlockedUrl } from "../src/ssrf.ts";
+import {
+  isBlockedHost,
+  isBlockedUrl,
+  resolveAndCheckHost,
+  type HostResolver,
+} from "../src/ssrf.ts";
 
 describe("isBlockedHost", () => {
   it("blocks localhost", () => {
@@ -118,5 +123,106 @@ describe("isBlockedUrl", () => {
 
   it("blocks malformed URLs", () => {
     expect(isBlockedUrl("not-a-url")).toBe(true);
+  });
+});
+
+describe("resolveAndCheckHost", () => {
+  const resolvesTo =
+    (...addrs: string[]): HostResolver =>
+    async () =>
+      addrs;
+  const throws: HostResolver = async () => {
+    throw new Error("resolution failed");
+  };
+
+  it("blocks an internal IP literal without consulting DNS", async () => {
+    let called = false;
+    const spy: HostResolver = async (h) => {
+      called = true;
+      return [h];
+    };
+    const res = await resolveAndCheckHost("169.254.169.254", { resolve: spy });
+    expect(res).toEqual({ blocked: true, reason: "blocked-literal" });
+    expect(called).toBe(false);
+  });
+
+  it("pins a public IP literal to itself without consulting DNS", async () => {
+    let called = false;
+    const spy: HostResolver = async (h) => {
+      called = true;
+      return [h];
+    };
+    const res = await resolveAndCheckHost("8.8.8.8", { resolve: spy });
+    expect(res).toEqual({ blocked: false, pinnedAddress: "8.8.8.8" });
+    expect(called).toBe(false);
+  });
+
+  it("strips IPv6 brackets and pins the bare address", async () => {
+    const res = await resolveAndCheckHost("[2001:db8::1]", { resolve: throws });
+    expect(res).toEqual({ blocked: false, pinnedAddress: "2001:db8::1" });
+  });
+
+  it("blocks a known-internal hostname without consulting DNS", async () => {
+    const res = await resolveAndCheckHost("metadata.google.internal", { resolve: throws });
+    expect(res).toEqual({ blocked: true, reason: "blocked-literal" });
+  });
+
+  it("blocks a public name that RESOLVES to a private address (rebind)", async () => {
+    const res = await resolveAndCheckHost("evil.example", {
+      resolve: resolvesTo("169.254.169.254"),
+    });
+    expect(res).toEqual({ blocked: true, reason: "blocked-resolved" });
+  });
+
+  it("blocks when ANY resolved address is private (mixed records)", async () => {
+    const res = await resolveAndCheckHost("evil.example", {
+      resolve: resolvesTo("93.184.216.34", "10.0.0.5"),
+    });
+    expect(res).toEqual({ blocked: true, reason: "blocked-resolved" });
+  });
+
+  it("blocks an IPv4-mapped-IPv6 resolution to loopback", async () => {
+    const res = await resolveAndCheckHost("evil.example", {
+      resolve: resolvesTo("::ffff:127.0.0.1"),
+    });
+    expect(res).toEqual({ blocked: true, reason: "blocked-resolved" });
+  });
+
+  it("pins an allowed name to a resolved address, preferring IPv4", async () => {
+    const res = await resolveAndCheckHost("api.example.com", {
+      resolve: resolvesTo("2606:2800:220:1::1", "93.184.216.34"),
+    });
+    expect(res).toEqual({ blocked: false, pinnedAddress: "93.184.216.34" });
+  });
+
+  it("pins to the first address when only AAAA records resolve", async () => {
+    const res = await resolveAndCheckHost("api.example.com", {
+      resolve: resolvesTo("2606:2800:220:1::1"),
+    });
+    expect(res).toEqual({ blocked: false, pinnedAddress: "2606:2800:220:1::1" });
+  });
+
+  it("fails closed when resolution returns no addresses", async () => {
+    const res = await resolveAndCheckHost("nxdomain.example", { resolve: resolvesTo() });
+    expect(res.blocked).toBe(true);
+    if (res.blocked) expect(res.reason).toBe("resolution-failed");
+  });
+
+  it("fails closed when resolution throws, carrying the error detail", async () => {
+    const res = await resolveAndCheckHost("flaky.example", { resolve: throws });
+    expect(res).toEqual({
+      blocked: true,
+      reason: "resolution-failed",
+      detail: "resolution failed",
+    });
+  });
+
+  it("threads an injected isBlockedHostFn through both layers", async () => {
+    // Permissive stub: loopback passes both the literal and resolved checks.
+    const res = await resolveAndCheckHost("local.example", {
+      resolve: resolvesTo("127.0.0.1"),
+      isBlockedHostFn: () => false,
+    });
+    expect(res).toEqual({ blocked: false, pinnedAddress: "127.0.0.1" });
   });
 });

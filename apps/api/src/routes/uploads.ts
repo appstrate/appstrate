@@ -91,6 +91,10 @@ export function createUploadContentRouter() {
       throw invalidRequest(`Content-Type '${declaredType}' does not match signed '${payload.m}'`);
     }
 
+    // Fast-fail on an honest oversized Content-Length. Advisory only — a
+    // chunked request carries no length up front, so the binding check is the
+    // counting transform inside writeFsUploadContent, which aborts the
+    // streaming write (and removes the partial file) past the signed max.
     const lenHdr = c.req.header("content-length");
     if (lenHdr) {
       const len = Number(lenHdr);
@@ -99,13 +103,10 @@ export function createUploadContentRouter() {
       }
     }
 
-    const arrayBuf = await c.req.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuf);
-    if (payload.s > 0 && bytes.byteLength > payload.s) {
-      throw invalidRequest(`body (${bytes.byteLength} bytes) exceeds signed max ${payload.s}`);
-    }
-
-    await writeFsUploadContent(payload.k, bytes);
+    // Stream the body straight to disk — never buffered in memory (this route
+    // is exempt from the global bodyLimit; the token's signed max replaces it).
+    const body = c.req.raw.body ?? new Blob([]).stream();
+    await writeFsUploadContent(payload.k, body, payload.s);
     return c.body(null, 204);
   });
 

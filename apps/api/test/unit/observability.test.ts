@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { InMemorySpanExporter, type ReadableSpan } from "@opentelemetry/sdk-trace-base";
 import {
   InMemoryMetricExporter,
@@ -30,6 +31,7 @@ import {
   recordRunDuration,
   recordRunTerminal,
   recordContainerSpawn,
+  recordLlmLatency,
   setQueueDepthProvider,
   _resetObservabilityForTesting,
   _forceFlushForTesting,
@@ -86,6 +88,7 @@ describe("observability — disabled (no-op)", () => {
     expect(() => recordRunDuration(5, { status: "success" })).not.toThrow();
     expect(() => recordRunTerminal({ status: "failed", errorCode: "timeout" })).not.toThrow();
     expect(() => recordContainerSpawn(10, { sidecar: true })).not.toThrow();
+    expect(() => recordLlmLatency(5, { api_shape: "openai", status: 200 })).not.toThrow();
     expect(currentTraceparent()).toBeUndefined();
   });
 });
@@ -197,6 +200,55 @@ describe("observability — enabled (in-memory exporters)", () => {
     // An out-of-allowlist phase collapses to "other" — cardinality stays bounded.
     expect(errTypes.has("other")).toBe(true);
     expect(errTypes.has("totally-made-up")).toBe(false);
+  });
+
+  it("records llm.latency with semconv attrs — error.type on failure only", async () => {
+    recordLlmLatency(300, { api_shape: "openai", status: 200 }); // success
+    recordLlmLatency(150, { api_shape: "openai", status: 429 }); // upstream error reply
+    recordLlmLatency(80, { api_shape: "anthropic" }); // no response → transport failure
+    await _forceFlushForTesting();
+
+    const llm = findMetric(metricExporter.getMetrics(), "appstrate.llm.latency");
+    expect(llm).toBeDefined();
+    const dps = llm!.dataPoints;
+
+    // Success: status code recorded, NO error.type (clean latency filterable).
+    const success = dps.find((p) => p.attributes["http.response.status_code"] === 200);
+    expect(success).toBeDefined();
+    expect(success!.attributes["error.type"]).toBeUndefined();
+    expect(success!.attributes.api_shape).toBe("openai");
+
+    // Upstream 4xx/5xx: error.type is the status code as a string (semconv
+    // value for non-exception HTTP errors).
+    const upstreamErr = dps.find((p) => p.attributes["http.response.status_code"] === 429);
+    expect(upstreamErr).toBeDefined();
+    expect(upstreamErr!.attributes["error.type"]).toBe("429");
+
+    // Transport failure (no upstream response): semconv fallback `_OTHER`,
+    // and no status-code attribute to fake.
+    const transport = dps.find((p) => p.attributes["error.type"] === "_OTHER");
+    expect(transport).toBeDefined();
+    expect(transport!.attributes["http.response.status_code"]).toBeUndefined();
+
+    // The legacy non-semconv labels are gone.
+    for (const p of dps) {
+      expect(p.attributes.outcome).toBeUndefined();
+      expect(p.attributes.status_code).toBeUndefined();
+    }
+  });
+
+  it("tags a span that ends in a throw with error.type = exception class name", async () => {
+    class FlakyUpstreamError extends Error {}
+    await expect(
+      runWithSpan("llm.call", {}, async () => {
+        throw new FlakyUpstreamError("upstream reset");
+      }),
+    ).rejects.toThrow("upstream reset");
+
+    const span = spanExporter.getFinishedSpans().find((s) => s.name === "llm.call");
+    expect(span).toBeDefined();
+    expect(span!.status.code).toBe(SpanStatusCode.ERROR);
+    expect(span!.attributes["error.type"]).toBe("FlakyUpstreamError");
   });
 
   it("clamps the terminal error_code label to the bounded allowlist", async () => {

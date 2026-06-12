@@ -462,9 +462,11 @@ export function useIntegrationOrgDefault(packageId: string | undefined) {
   return useQuery({
     queryKey: [...KEY(orgId, applicationId), "org-default", packageId] as const,
     queryFn: () =>
-      api<{ default: IntegrationOrgDefault | null }>(
+      // Bare resource, or undefined when no default is set (204) — mapped
+      // back to null for the existing null-means-unset consumers.
+      api<IntegrationOrgDefault | undefined>(
         `/integrations/${encodePackageIdPath(packageId!)}/default`,
-      ).then((r) => r.default),
+      ).then((r) => r ?? null),
     enabled: !!packageId && !!orgId && !!applicationId,
   });
 }

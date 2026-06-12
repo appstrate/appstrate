@@ -9,7 +9,8 @@
  * sidecar automatically.
  */
 
-export { isBlockedHost, isBlockedUrl } from "./ssrf.ts";
+export { isBlockedHost, isBlockedUrl, resolveAndCheckHost, defaultHostResolver } from "./ssrf.ts";
+export type { HostResolver, ResolvedHostCheck } from "./ssrf.ts";
 
 // Accepts both simple IDs (gmail) and scoped IDs (@appstrate/gmail)
 export const INTEGRATION_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;

@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createFileSystemStorage } from "../src/storage-fs.ts";
+import { StorageAlreadyExistsError } from "../src/storage.ts";
 
 let basePath: string;
 let storage: ReturnType<typeof createFileSystemStorage>;
@@ -102,10 +103,44 @@ describe("createFileSystemStorage", () => {
       expect(key).toBe(join("b", "p", "f.bin"));
     });
 
-    it("rejects exclusive uploads (unsupported on the stream path)", async () => {
+    it("exclusive: streams to disk and refuses a second write at the same key", async () => {
+      await storage.uploadStream("b", "excl.bin", new Response("first").body!, {
+        exclusive: true,
+      });
+      expect(new TextDecoder().decode((await storage.downloadFile("b", "excl.bin"))!)).toBe(
+        "first",
+      );
+      // Replay with the same key must fail atomically (O_EXCL) and preserve
+      // the original bytes.
       await expect(
-        storage.uploadStream("b", "excl.bin", new Response("x").body!, { exclusive: true }),
-      ).rejects.toThrow(/exclusive/);
+        storage.uploadStream("b", "excl.bin", new Response("second").body!, { exclusive: true }),
+      ).rejects.toThrow(StorageAlreadyExistsError);
+      expect(new TextDecoder().decode((await storage.downloadFile("b", "excl.bin"))!)).toBe(
+        "first",
+      );
+    });
+
+    it("exclusive: removes the partial file on a mid-stream error so a retry succeeds", async () => {
+      // First chunk lands, then the source errors — mirrors the FS upload
+      // sink's counting transform aborting past the signed max size.
+      const source = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("partial"));
+          controller.error(new Error("size cap exceeded"));
+        },
+      });
+      await expect(
+        storage.uploadStream("b", "excl-err.bin", source, { exclusive: true }),
+      ).rejects.toThrow(/size cap exceeded/);
+      // The partial file must be gone — a leftover would 409 every retry.
+      expect(await storage.downloadFile("b", "excl-err.bin")).toBeNull();
+      // A clean retry with the same key succeeds.
+      await storage.uploadStream("b", "excl-err.bin", new Response("retry").body!, {
+        exclusive: true,
+      });
+      expect(new TextDecoder().decode((await storage.downloadFile("b", "excl-err.bin"))!)).toBe(
+        "retry",
+      );
     });
 
     // Regression: a pre-buffered `new Response("string").body` stream resolves

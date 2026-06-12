@@ -101,10 +101,13 @@ describe("auth-challenge responder", () => {
     expect(res.headers.get("WWW-Authenticate")).toBeNull();
   });
 
-  it("does nothing on an unmatched path", async () => {
+  it("falls back to the generic Bearer challenge on an unmatched 401 path", async () => {
+    // RFC 6750 §3 — a 401 from a bearer-protected API MUST carry a
+    // WWW-Authenticate challenge even when no resource registered a richer
+    // one. The registered builder still wins on its own prefix.
     registerAuthChallenge("/api/mcp", () => "Bearer x");
     const res = await appWith(401).request("http://inst.test/api/other");
-    expect(res.headers.get("WWW-Authenticate")).toBeNull();
+    expect(res.headers.get("WWW-Authenticate")).toBe("Bearer");
   });
 
   it("never overwrites a challenge a handler already set", async () => {
@@ -113,8 +116,25 @@ describe("auth-challenge responder", () => {
     expect(res.headers.get("WWW-Authenticate")).toBe("Bearer handler-set");
   });
 
-  it("is a no-op when the registry is empty", async () => {
+  it("emits the bare generic Bearer challenge on 401 when the registry is empty", async () => {
     const res = await appWith(401).request("http://inst.test/api/mcp");
+    expect(res.headers.get("WWW-Authenticate")).toBe("Bearer");
+  });
+
+  it('generic fallback uses error="invalid_token" when a credential was presented', async () => {
+    // RFC 6750 §3.1 — when the request carried a credential that failed
+    // validation, the challenge names the error; a credential-less request
+    // gets the bare scheme (error codes SHOULD be omitted in that case).
+    const res = await appWith(401).request("http://inst.test/api/other", {
+      headers: { Authorization: "Bearer ask_invalid" },
+    });
+    expect(res.headers.get("WWW-Authenticate")).toBe('Bearer error="invalid_token"');
+  });
+
+  it("does not apply the generic fallback to a 403 on an unmatched path", async () => {
+    // insufficient_scope challenges need scope knowledge only a registered
+    // resource has — a generic 403 stays challenge-less.
+    const res = await appWith(403).request("http://inst.test/api/other");
     expect(res.headers.get("WWW-Authenticate")).toBeNull();
   });
 });

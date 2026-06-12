@@ -122,9 +122,6 @@ export function createS3Storage(config: S3StorageConfig): Storage {
     },
 
     async uploadStream(bucket, path, stream, opts) {
-      if (opts?.exclusive) {
-        throw new Error("uploadStream does not support exclusive uploads");
-      }
       const key = makeKey(bucket, path);
       // `@aws-sdk/lib-storage` Upload runs a multipart upload that consumes the
       // source stream chunk-by-chunk with backpressure — no full buffering and
@@ -136,13 +133,37 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       // predictable when many documents stream concurrently; the trade-off is no
       // parallel part upload per object, which is fine for input documents
       // (modest sizes, latency dominated by the copy itself, not part fan-out).
+      //
+      // `exclusive` maps to `If-None-Match: *` — lib-storage forwards the param
+      // to PutObject (bodies ≤ one part) and CompleteMultipartUpload (larger
+      // bodies), both of which support conditional writes on S3 (since 2024)
+      // and MinIO. Same atomic create-new-or-fail primitive as uploadFile.
       const upload = new Upload({
         client,
-        params: { Bucket: config.bucket, Key: key, Body: stream },
+        params: {
+          Bucket: config.bucket,
+          Key: key,
+          Body: stream,
+          ...(opts?.exclusive ? { IfNoneMatch: "*" } : {}),
+        },
         partSize: 5 * 1024 * 1024,
         queueSize: 1,
       });
-      await upload.done();
+      try {
+        await upload.done();
+      } catch (err: unknown) {
+        if (opts?.exclusive) {
+          const s3err = err as S3Error;
+          if (
+            s3err.name === "PreconditionFailed" ||
+            s3err.$metadata?.httpStatusCode === 412 ||
+            s3err.$metadata?.httpStatusCode === 409
+          ) {
+            throw new StorageAlreadyExistsError();
+          }
+        }
+        throw err;
+      }
       return key;
     },
 
@@ -218,18 +239,26 @@ export function createS3Storage(config: S3StorageConfig): Storage {
     ): Promise<UploadUrlDescriptor> {
       const expiresIn = opts?.expiresIn ?? 900;
       const key = makeKey(bucket, path);
-      // ContentLength is intentionally NOT signed — S3 would then require the
-      // PUT to send exactly that many bytes, breaking any client-declared vs.
-      // actual size mismatch. Size is enforced server-side on consume instead.
+      // ContentLength IS signed when the caller declares a size (`maxSize`):
+      // `content-length` lands in X-Amz-SignedHeaders, so S3 rejects any PUT
+      // whose Content-Length differs from the declared byte count. That makes
+      // the declared size an upload-time contract — a client cannot reserve a
+      // 1 KB slot and PUT 100 MB — instead of relying solely on the
+      // server-side size check at consume time.
       const cmd = new PutObjectCommand({
         Bucket: config.bucket,
         Key: key,
         ...(opts?.mime ? { ContentType: opts.mime } : {}),
+        ...(opts?.maxSize && opts.maxSize > 0 ? { ContentLength: opts.maxSize } : {}),
       });
       const url = await getSignedUrl(presignClient, cmd, { expiresIn });
-      // Client must echo the same Content-Type declared in the signature.
+      // Clients must echo the headers bound into the signature. Content-Length
+      // is a forbidden header in browsers — fetch()/XHR set it automatically
+      // from the body, so echoing the descriptor verbatim stays safe there;
+      // listing it documents the exact byte count the signature requires.
       const headers: Record<string, string> = {};
       if (opts?.mime) headers["Content-Type"] = opts.mime;
+      if (opts?.maxSize && opts.maxSize > 0) headers["Content-Length"] = String(opts.maxSize);
       return { url, method: "PUT", headers, expiresIn };
     },
   };

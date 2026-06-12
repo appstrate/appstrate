@@ -381,6 +381,13 @@ const envSchema = z
     // Run — execution backend: "docker" (isolated containers) or "process" (default, Bun subprocesses, no isolation)
     RUN_ADAPTER: z.enum(["docker", "process"]).default("process"),
 
+    // Integration runtime backend the Docker orchestrator pins onto the
+    // sidecar (operator override; same value set as RUN_ADAPTER). The
+    // process orchestrator deliberately reads the raw environment instead —
+    // it must distinguish "unset" (pin to "process") from an explicit
+    // operator override, which a schema default would erase.
+    INTEGRATION_RUNTIME_ADAPTER: z.enum(["docker", "process"]).default("docker"),
+
     // Docker images (override for GHCR / custom registries)
     PI_IMAGE: z.string().default("appstrate-pi:latest"),
     SIDECAR_IMAGE: z.string().default("appstrate-sidecar:latest"),
