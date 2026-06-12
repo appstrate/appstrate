@@ -237,6 +237,11 @@ const envSchema = z
     // events (run.success/failed/timeout/cancelled) flush immediately
     // regardless of gaps.
     REMOTE_RUN_BUFFER_FLUSH_MS: z.coerce.number().int().positive().default(5000),
+    // Fallback DB-poll cadence for `GET /runs/:id?wait=` long-polls — the
+    // safety net when the realtime NOTIFY path doesn't deliver. Tuning
+    // knob only; the test preload shrinks it to 50ms so route tests don't
+    // pay a real 2s tick per wakeup.
+    RUN_WAIT_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
 
     // Standard Webhooks `webhook-timestamp` tolerance window (seconds).
     // Inbound run-event signatures with a timestamp drifting more than
@@ -302,7 +307,10 @@ const envSchema = z
     // built-in OSS modules plus the two reference OAuth-provider modules:
     // `@appstrate/module-codex` (ChatGPT/Codex) and
     // `@appstrate/module-claude-code` (Claude Pro/Max/Team) — remove
-    // either to drop that provider surface.
+    // either to drop that provider surface. `MODULES=none` boots with
+    // zero modules; `MODULES=""` is a legacy alias for the same thing,
+    // handled in getModuleRegistry() (the getter coalesces "" → unset,
+    // so it can't be expressed here).
     MODULES: z
       .string()
       .default(

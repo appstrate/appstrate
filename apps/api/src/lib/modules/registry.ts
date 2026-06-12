@@ -59,10 +59,22 @@ import { listLlmUsageForRun } from "../../services/state/runs.ts";
  *
  * All declared modules are required — if a module is in the list, it must
  * load and init successfully or the platform crashes.
+ *
+ * Booting with ZERO modules: `MODULES=none` is the documented sentinel.
+ * `MODULES=""` (present but empty) is kept as a backward-compatible alias
+ * for the same thing — it was the original documented escape hatch, and
+ * silently re-enabling disabled module surfaces on upgrade would be the
+ * worse failure mode. The empty-string case must be read from raw
+ * `process.env` because the env getter coalesces `""` → unset (compose
+ * `${VAR:-}` pattern), which would otherwise resolve to the default set.
  */
 export function getModuleRegistry(): string[] {
-  return getEnv()
-    .MODULES.split(",")
+  const raw = process.env["MODULES"];
+  if (raw !== undefined && raw.trim() === "") return [];
+  const value = getEnv().MODULES;
+  if (value.trim() === "none") return [];
+  return value
+    .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 }

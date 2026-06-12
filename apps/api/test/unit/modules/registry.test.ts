@@ -34,19 +34,22 @@ describe("getModuleRegistry", () => {
     ]);
   });
 
-  it("returns empty array when MODULES is empty string", () => {
-    // NOTE: the env getter coalesces `""` → unset (compose `${VAR:-}`
-    // pattern), so an empty string yields the DEFAULT module set — same
-    // behavior an empty var has at boot.
+  it("returns empty array when MODULES is the empty string (legacy escape hatch)", () => {
+    // `""` is read from raw process.env (the env getter coalesces `""` →
+    // unset) so the historical "boot with zero modules" contract survives
+    // the move to getEnv() — see getModuleRegistry's doc comment.
     setModulesEnv("");
-    expect(getModuleRegistry()).toEqual([
-      "oidc",
-      "webhooks",
-      "mcp",
-      "core-providers",
-      "@appstrate/module-codex",
-      "@appstrate/module-claude-code",
-    ]);
+    expect(getModuleRegistry()).toEqual([]);
+  });
+
+  it("returns empty array for the MODULES=none sentinel", () => {
+    setModulesEnv("none");
+    expect(getModuleRegistry()).toEqual([]);
+  });
+
+  it("treats whitespace-padded none as the sentinel", () => {
+    setModulesEnv(" none ");
+    expect(getModuleRegistry()).toEqual([]);
   });
 
   it("parses comma-separated specifiers, trims whitespace, drops empty segments", () => {

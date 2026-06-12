@@ -33,6 +33,7 @@
 
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
+import { getEnv } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
 import { runs, TERMINAL_RUN_STATUSES, type RunStatus } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber } from "./realtime.ts";
@@ -48,21 +49,15 @@ import type { AppScope } from "../lib/scope.ts";
  */
 export const MAX_WAIT_SECONDS = 55;
 
-/** Fallback DB re-check cadence while waiting (see module doc, point 2). */
-const FALLBACK_POLL_INTERVAL_MS = 2_000;
-
 /**
- * Resolve the fallback poll cadence. `RUN_WAIT_POLL_INTERVAL_MS` is a
- * test-only override (set in `test/setup/preload.ts`, same pattern as
- * `REMOTE_RUN_BUFFER_FLUSH_MS`) so route-level long-poll tests don't pay a
- * real 2 s tick per wakeup. Unset in production — read at use time, never
- * cached, so the default applies everywhere else.
+ * Resolve the fallback DB re-check cadence while waiting (see module doc,
+ * point 2). `RUN_WAIT_POLL_INTERVAL_MS` is schema-validated in
+ * `@appstrate/env` (default 2s); the test preload shrinks it to 50ms so
+ * route-level long-poll tests don't pay a real 2s tick per wakeup. Read at
+ * use time so the cached env snapshot is consulted per wait, not at import.
  */
 function fallbackPollIntervalMs(): number {
-  const raw = process.env["RUN_WAIT_POLL_INTERVAL_MS"];
-  if (raw === undefined) return FALLBACK_POLL_INTERVAL_MS;
-  const parsed = Number(raw);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : FALLBACK_POLL_INTERVAL_MS;
+  return getEnv().RUN_WAIT_POLL_INTERVAL_MS;
 }
 
 /**
