@@ -133,6 +133,16 @@ Old MCP clients ignore unknown `_meta` keys per spec — the propagation is wire
 
 The runtime-side parser at [`runtime-pi/mcp/upstream-meta.ts`](../mcp/upstream-meta.ts) re-applies the allowlist defensively, so a compromised sidecar can't slip an extra header through.
 
+## Initial-URL SSRF gate
+
+Before any outbound byte, `executeApiCall` validates the resolved target:
+
+- **Literal floor** — `isBlockedUrl` refuses IP-literal / known-internal targets (loopback, RFC1918, link-local, cloud metadata, `host.docker.internal`) on every branch without a literal operator host pin.
+- **DNS rebind layer** — on `allowAllUris`, no-allowlist, and glob-matched-allowlist branches, the hostname is DNS-resolved pre-flight (`resolveAndCheckHost`) and EVERY A/AAAA record is checked against the blocklist. Fail-closed: any blocked record → `403`, unresolvable → `502`. The connection is then delegated to `fetch` (which re-resolves), so this is defence-in-depth with a documented residual TOCTOU — only the raw-socket egress paths (forward proxy, egress listener) connect to the pinned IP and close the window fully.
+- **Literal-allowlist exemption** — an `authorizedUris` entry whose host segment is wildcard-free pins that exact host as operator-declared topology: an on-prem API resolving into a private range stays reachable. A glob-host entry (`https://**`, `https://*.example.com/**`) never exempts — the concrete host is agent-chosen, so the SSRF gate still applies.
+
+The CLI's `guardedFetch`/`preflightUrl` (`@appstrate/afps-runtime`) applies the identical branches, so an AFPS package behaves the same under the sidecar and the standalone `afps` CLI.
+
 ## Redirect handling
 
 `{ns}__api_call` follows 30x redirects manually (`redirect: "manual"`) on the buffered path so `Set-Cookie` from intermediate hops is captured into the per-integration jar (Bun's native `redirect: "follow"` only exposes the terminal hop's cookies — see #473). Three defence-in-depth rules apply to every hop:

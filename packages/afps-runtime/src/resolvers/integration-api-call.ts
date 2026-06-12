@@ -49,7 +49,7 @@ import {
   type ApiCallFn,
   type ApiCallMeta,
 } from "./http-call-core.ts";
-import { guardedFetch, PreflightError } from "./api-call-engine.ts";
+import { guardedFetch, PreflightError, type HostResolver } from "./api-call-engine.ts";
 import { AuthorizedUrisError, ResolverError } from "../errors.ts";
 import { resolveHttpDelivery, type HttpDeliveryConfig } from "./http-delivery.ts";
 import {
@@ -270,6 +270,11 @@ export interface LocalIntegrationResolverOptions {
   creds: string | LocalIntegrationCredentialsFile;
   /** Override the low-level HTTP client. Defaults to the global `fetch`. */
   fetch?: typeof fetch;
+  /**
+   * DNS resolver for the SSRF rebind preflight — injectable for tests.
+   * Production callers omit it (system resolver via `node:dns`).
+   */
+  resolveHost?: HostResolver;
 }
 
 /**
@@ -280,11 +285,13 @@ export interface LocalIntegrationResolverOptions {
  */
 export class LocalIntegrationResolver implements IntegrationApiCallResolver {
   private readonly fetchImpl: typeof fetch;
+  private readonly resolveHost: HostResolver | undefined;
   private creds: LocalIntegrationCredentialsFile | null;
   private readonly credsPath: string | null;
 
   constructor(opts: LocalIntegrationResolverOptions) {
     this.fetchImpl = opts.fetch ?? fetch;
+    this.resolveHost = opts.resolveHost;
     if (typeof opts.creds === "string") {
       this.creds = null;
       this.credsPath = opts.creds;
@@ -381,6 +388,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
           allowAllUris: meta.allowAllUris,
           injectedCredentialHeader: injectedCredentialHeader?.toLowerCase() ?? null,
           integrationId: meta.name,
+          resolveHost: this.resolveHost,
         });
         res = result.response;
       } catch (err) {

@@ -202,7 +202,7 @@ Tier 0 (zero-install) requires only Bun.
 - **Cost tracking**: `runs.cost` (doublePrecision) = sum of `llm_usage` ledger via `computeRunCost(runId)` (single read path). Ingestion paths + precision trade-off: `docs/architecture/RUN_COST.md`.
 - **Hono context** (`c.get`): `user`, `orgId`, `orgRole`, `orgSlug`, `permissions`, `authMethod`, `apiKeyId`, `applicationId`, `app`, `endUser`, `apiVersion`, `package` (set by `requireAgent` — NOT `agent`), `run`, `requestId`, `sessionRealm`.
 - **Route guards** (`middleware/guards.ts`): `requireAgent()` (no arg — reads `:scope`/`:name`, loads package, sets `c.set("package")`), `requireOrgAgent()`, `requirePackageInOrg()` (gates package mutation on DB `orgId` ownership — NOT scope identity; a foreign-scope package the org owns is freely mutable), `requireMutableAgent()` (403 system package, 409 running runs), `apiKeyOrgScopeGuard()`/`apiKeyAppScopeGuard()` (stop an API key escaping its org/app via path params). RBAC is `requirePermission(resource, action)` (`middleware/require-permission.ts`) — there is **no** `requireAdmin()`/`requireOwner()`. `requireAppContext()` (`middleware/app-context.ts`) validates `X-Application-Id` (or API-key's `applicationId`) + app∈org.
-- **Rate limiting**: Redis-backed `rate-limiter-flexible`. Keyed `method:path:identity` (`userId` / `apikey:{id}`), IP-based for public routes. IETF `RateLimit` headers. Key limits: run 20/min, import 10/min, schedule-create 10/min.
+- **Rate limiting**: Redis-backed `rate-limiter-flexible`. Keyed `method:path:identity` (`userId` / `apikey:{id}`), IP-based for public routes. IETF `RateLimit` headers. Key limits: run 20/min, import 10/min, schedule-create 10/min, run logs 120/min.
 - **Route registration order**: `userAgentsRouter` MUST register before `agentsRouter` in `index.ts` — Hono matches in order.
 - **Docker streams**: multiplexed 8-byte frame headers `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`.
 - **Package versioning**: semver across `package-versions.ts`, `package-version-deps.ts`, `package-storage.ts`. Tables: `packageVersions`, `packageDistTags`, `packageVersionDependencies`. Enforcement via `@appstrate/core/version-policy` (`validateForwardVersion` — forward-only). Resolution: exact → dist-tag → semver range (`resolveVersionFromCatalog`). Integrity: SHA256 SRI via `@appstrate/core/integrity`.
@@ -242,12 +242,13 @@ bun test apps/api/test            # Core only
 bun test apps/api/src/modules     # All modules
 bun run test:unit                 # API unit tests only (no DB)
 bun run test:e2e                  # Playwright e2e suite
+bun run test:docker               # Include slow Docker-engine (DinD) tests (TEST_DOCKER=1)
 cd apps/api/src/modules/webhooks && bun test   # Per-module (own bunfig.toml)
 bun test path/to/file.test.ts     # Single file
 bun test -t "substring"           # Filter by test name
 ```
 
-Requires Docker (PostgreSQL :5433, Redis :6380, MinIO :9012, DinD :2375 — started automatically by preload). The Tier-0 path (`TEST_TIER=0`, `bun run test:tier0`) runs against PGlite with no Docker.
+Requires Docker (PostgreSQL :5433, Redis :6380, MinIO :9012, DinD :2375 — started automatically by preload). DinD-dependent tests skip by default locally — opt in with `TEST_DOCKER=1` (or `bun run test:docker`); they always run when `CI=true` (GitHub Actions). Third-party CI that sets `CI=1` must set `TEST_DOCKER=1` explicitly (the tier helper warns). The Tier-0 path (`TEST_TIER=0`, `bun run test:tier0`) runs against PGlite with no Docker.
 
 ### Configuration
 

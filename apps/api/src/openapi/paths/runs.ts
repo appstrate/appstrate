@@ -711,7 +711,7 @@ export const runsPaths = {
                   hasMore: {
                     type: "boolean",
                     description:
-                      'True when `?limit=` was set and more entries follow — the `Link; rel="next"` header carries the next page\'s URL.',
+                      'True when more entries follow the current page (the server caps each page at `limit`, default 1000) — the `Link; rel="next"` header carries the next page\'s URL.',
                   },
                 },
               },

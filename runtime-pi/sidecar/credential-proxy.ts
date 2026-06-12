@@ -44,6 +44,7 @@ import {
 } from "./helpers.ts";
 import {
   fetchFollowingRedirectsCapturingCookies,
+  hostLiterallyAllowlisted,
   mergeSetCookieIntoJar,
   redactHost,
   RedirectBlockedError,
@@ -482,37 +483,6 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   });
 
   return { ok: true, response: upstream, finalUrl: upstreamFinalUrl, authRefreshed };
-}
-
-/**
- * True when some allowlist entry names the URL's host with a literal
- * (wildcard-free) host component. Only then is the allowlist a
- * host-level trust declaration that exempts the target from the SSRF
- * gate: the operator wrote that exact host down, so an internal
- * address behind it is their declared topology. Entries whose host
- * segment contains a glob (`https://**`, `https://*.example.com/…`)
- * never pin — the concrete host is then chosen by the agent at call
- * time, and the SSRF gate must still apply.
- *
- * The host comparison is authority-only (userinfo and port stripped),
- * case-insensitive, matching how `matchesAuthorizedUriSpec` treats the
- * pattern as an opaque string while WHATWG URL lowercases hostnames.
- */
-function hostLiterallyAllowlisted(url: string, specs: string[]): boolean {
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    return false;
-  }
-  for (const spec of specs) {
-    const m = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/([^/?#]+)/.exec(spec.trim());
-    if (!m) continue;
-    const hostPart = m[1]!.replace(/^[^@]*@/, "").replace(/:\d+$/, "");
-    if (hostPart.includes("*")) continue;
-    if (hostPart.toLowerCase() === host) return true;
-  }
-  return false;
 }
 
 /**

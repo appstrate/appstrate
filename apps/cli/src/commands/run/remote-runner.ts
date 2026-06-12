@@ -358,10 +358,12 @@ export async function runRemote(
   // The server flips status + closes the sink atomically (any in-flight
   // event POST 410's after that point), so by the time the loop observes
   // a terminal status all log rows for this run are already persisted.
-  // We still re-fetch logs once with `?since=lastLogId` to pick up any
-  // rows committed in the same transaction as the status flip, in case
-  // they landed after our last loop poll but before the loop's record
-  // fetch saw the terminal state.
+  // We still re-fetch logs with `?since=lastLogId` (fetchLogs follows the
+  // `hasMore` cursor across pages, so a terminal burst larger than one
+  // server page is fully drained) to pick up any rows committed in the
+  // same transaction as the status flip, in case they landed after our
+  // last loop poll but before the loop's record fetch saw the terminal
+  // state.
   const finalRecord = await fetchRunRecord(opts, runId, { fetchImpl, requestTimeoutMs });
   const finalLogs = await fetchLogs(opts, runId, lastLogId, { fetchImpl, requestTimeoutMs });
   for (const log of finalLogs) {
@@ -537,26 +539,38 @@ async function fetchLogs(
   sinceId: number,
   deps: HttpDeps,
 ): Promise<RemoteRunLog[]> {
-  const url = apiUrl(opts, `/api/runs/${encodeURIComponent(runId)}/logs`);
-  // `since=0` is treated as "no cursor" by the server (rows have id ≥ 1),
-  // so we send it unconditionally — keeps the URL shape uniform across
-  // the first poll and the subsequent ones for easier debugging.
-  if (sinceId > 0) url.searchParams.set("since", String(sinceId));
-  const res = await timeoutFetch(deps, url.toString(), { headers: platformHeaders(opts) });
-  if (!res.ok) {
-    // Logs endpoint failures are non-fatal — we keep polling. The next
-    // fetchRunRecord will surface the real error if it's persistent.
-    return [];
+  // The server caps each page at 1000 rows and signals `hasMore` in the
+  // standard list envelope (`{ object: "list", data, hasMore }`) — follow
+  // the `since` cursor until the page is final, so a burst larger than
+  // one page (e.g. the terminal flush) can't silently truncate the tail.
+  // The page cap is a runaway-guard against a server bug, not a
+  // correctness bound (50 × 1000 rows per poll tick).
+  const MAX_PAGES = 50;
+  const all: RemoteRunLog[] = [];
+  let cursor = sinceId;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const url = apiUrl(opts, `/api/runs/${encodeURIComponent(runId)}/logs`);
+    // `since=0` means "no cursor" (rows have id ≥ 1) — omit it.
+    if (cursor > 0) url.searchParams.set("since", String(cursor));
+    const res = await timeoutFetch(deps, url.toString(), { headers: platformHeaders(opts) });
+    if (!res.ok) {
+      // Logs endpoint failures are non-fatal — we keep polling, returning
+      // any earlier pages. The next fetchRunRecord will surface the real
+      // error if it's persistent.
+      return all;
+    }
+    const payload = (await res.json().catch(() => null)) as {
+      object?: string;
+      data?: RemoteRunLog[];
+      hasMore?: boolean;
+    } | null;
+    const rows = Array.isArray(payload?.data) ? payload.data : [];
+    all.push(...rows);
+    const last = rows.at(-1);
+    if (!payload?.hasMore || !last) break;
+    cursor = last.id;
   }
-  const payload = (await res.json().catch(() => null)) as
-    | RemoteRunLog[]
-    | { object?: string; data?: RemoteRunLog[] }
-    | null;
-  // The platform returns the standard list envelope (`{ object: "list",
-  // data, hasMore }`); older platforms returned a bare array — accept both
-  // so the tail keeps working across platform versions.
-  if (Array.isArray(payload)) return payload;
-  return Array.isArray(payload?.data) ? payload.data : [];
+  return all;
 }
 
 async function cancelRun(opts: RunRemoteOptions, runId: string, deps: HttpDeps): Promise<void> {
