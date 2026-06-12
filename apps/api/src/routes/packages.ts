@@ -1684,6 +1684,7 @@ export function createPackagesRouter() {
         resourceType: "package",
         resourceId: identity?.packageId ?? entry.identity,
         after: {
+          type: entry.type ?? null,
           version: identity?.version ?? null,
           via: "import:bundle",
           root: entry.identity === `${result.root_package_id}@${result.root_version}`,

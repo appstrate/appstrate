@@ -207,6 +207,12 @@ export interface ImportedPackageResult {
   identity: string;
   status: "inserted" | "reused";
   version_id: number | null;
+  /**
+   * Package type, present on `inserted` entries only (the reuse paths
+   * never parse the ZIP, so the type is not known there without an
+   * extra read). Consumed by the route's audit events.
+   */
+  type?: string;
 }
 
 export interface ImportBundleResult {
@@ -362,6 +368,7 @@ export async function importBundle(
       identity,
       status: "inserted",
       version_id: newVer?.id ?? null,
+      type: parsedZip.type,
     });
   }
 

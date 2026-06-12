@@ -294,7 +294,9 @@ describe("POST /api/packages/import-bundle — import", () => {
       expect(row.after).toMatchObject({ via: "import:bundle" });
     }
     const rootRow = auditRows.find((r) => r.resourceId === "@srcorg/agent-root");
-    expect(rootRow?.after).toMatchObject({ version: "1.0.0", root: true });
+    expect(rootRow?.after).toMatchObject({ type: "agent", version: "1.0.0", root: true });
+    const skillRow = auditRows.find((r) => r.resourceId === "@srcorg/skill-a");
+    expect(skillRow?.after).toMatchObject({ type: "skill", root: false });
   });
 
   it("accepts a raw .afps and promotes it to a bundle-of-one", async () => {

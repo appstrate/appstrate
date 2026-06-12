@@ -1435,7 +1435,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
-  it("does NOT run the DNS layer on the allowlist branch (operator trust boundary)", async () => {
+  it("does NOT run the DNS layer when the allowlist pins the host literally", async () => {
     const resolveHost = mock(async () => ["203.0.113.7"]);
     const fetchFn = mock(async () => new Response("ok", { status: 200 }));
     const result = await call(
@@ -1443,6 +1443,114 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
       "https://api.example.com/x",
     );
     expect(result.ok).toBe(true);
+    expect(resolveHost).not.toHaveBeenCalled();
+  });
+
+  it("literal-host allowlist exempts an internal-resolving host (operator topology)", async () => {
+    // On-prem case: the operator explicitly named the host; it resolving
+    // into a private range is their declared network, not an agent pivot.
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const result = await call(
+      makeDeps({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        fetchCredentials: mock(
+          async (): Promise<CredentialsResponse> => ({
+            credentials: { access_token: "tok" },
+            authorizedUris: ["https://intranet.corp.example/**"],
+            allowAllUris: false,
+            credentialHeaderName: "Authorization",
+            credentialHeaderPrefix: "Bearer",
+            credentialFieldName: "access_token",
+          }),
+        ),
+        resolveHost: async () => ["10.0.0.5"],
+      }),
+      "https://intranet.corp.example/api/x",
+    );
+    expect(result.ok).toBe(true);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  for (const [label, pattern] of [
+    ["host-spanning **", "https://**"],
+    ["wildcard subdomain", "https://*.example.com/**"],
+  ] as const) {
+    it(`glob-matched allowlist host stays behind the SSRF gate (${label})`, async () => {
+      // `https://**` (and any glob in the host segment) means the concrete
+      // host is agent-chosen — without the gate the allowlist branch would
+      // be strictly weaker than allow_all.
+      const fetchFn = mock(async () => new Response("leaked", { status: 200 }));
+      const result = await call(
+        makeDeps({
+          fetchFn: fetchFn as unknown as typeof fetch,
+          fetchCredentials: mock(
+            async (): Promise<CredentialsResponse> => ({
+              credentials: { access_token: "tok" },
+              authorizedUris: [pattern],
+              allowAllUris: false,
+              credentialHeaderName: "Authorization",
+              credentialHeaderPrefix: "Bearer",
+              credentialFieldName: "access_token",
+            }),
+          ),
+          resolveHost: async () => ["169.254.169.254"],
+        }),
+        "https://rebind.example.com/x",
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.status).toBe(403);
+        expect(result.error).toMatch(/blocked network range/);
+      }
+      expect(fetchFn).not.toHaveBeenCalled();
+    });
+  }
+
+  it("glob-matched allowlist host resolving public proceeds normally", async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const result = await call(
+      makeDeps({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        fetchCredentials: mock(
+          async (): Promise<CredentialsResponse> => ({
+            credentials: { access_token: "tok" },
+            authorizedUris: ["https://**"],
+            allowAllUris: false,
+            credentialHeaderName: "Authorization",
+            credentialHeaderPrefix: "Bearer",
+            credentialFieldName: "access_token",
+          }),
+        ),
+        resolveHost: async () => ["203.0.113.7"],
+      }),
+      "https://anything.example.net/x",
+    );
+    expect(result.ok).toBe(true);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("glob allowlist + IP-literal internal target is literal-blocked before DNS", async () => {
+    // `https://**` matches `https://169.254.169.254/...` in the allowlist
+    // matcher — the literal blocklist inside the gate must still refuse it.
+    const resolveHost = mock(async () => ["203.0.113.7"]);
+    const result = await call(
+      makeDeps({
+        fetchCredentials: mock(
+          async (): Promise<CredentialsResponse> => ({
+            credentials: { access_token: "tok" },
+            authorizedUris: ["https://**"],
+            allowAllUris: false,
+            credentialHeaderName: "Authorization",
+            credentialHeaderPrefix: "Bearer",
+            credentialFieldName: "access_token",
+          }),
+        ),
+        resolveHost,
+      }),
+      "https://169.254.169.254/latest/meta-data",
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.status).toBe(403);
     expect(resolveHost).not.toHaveBeenCalled();
   });
 
