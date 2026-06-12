@@ -540,8 +540,15 @@ async function fetchLogs(
     // fetchRunRecord will surface the real error if it's persistent.
     return [];
   }
-  const payload = (await res.json().catch(() => null)) as RemoteRunLog[] | null;
-  return Array.isArray(payload) ? payload : [];
+  const payload = (await res.json().catch(() => null)) as
+    | RemoteRunLog[]
+    | { object?: string; data?: RemoteRunLog[] }
+    | null;
+  // The platform returns the standard list envelope (`{ object: "list",
+  // data, hasMore }`); older platforms returned a bare array — accept both
+  // so the tail keeps working across platform versions.
+  if (Array.isArray(payload)) return payload;
+  return Array.isArray(payload?.data) ? payload.data : [];
 }
 
 async function cancelRun(opts: RunRemoteOptions, runId: string, deps: HttpDeps): Promise<void> {

@@ -22,6 +22,7 @@ import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { notFound, conflict } from "../lib/errors.ts";
+import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
@@ -243,10 +244,17 @@ export function createRunsRouter() {
     }
 
     if (waitMs > 0 && !TERMINAL_RUN_STATUSES.has(row.status)) {
+      const apiKeyId = c.get("apiKeyId");
       await waitForRunTerminal({
         runId,
         scope,
         timeoutMs: waitMs,
+        // Per-identity concurrent-waiter cap (same identity keying as the
+        // rate-limit middleware). Beyond the cap the wait degrades to
+        // no-wait: the fresh read below answers immediately and the
+        // client's normal poll-again loop takes over. Documented in the
+        // OpenAPI `wait` parameter.
+        identity: apiKeyId ? `apikey:${apiKeyId}` : c.get("user").id,
         // Client disconnect aborts the server-side wait — no leaked
         // timers/subscriptions for a response nobody will read.
         signal: c.req.raw.signal,
@@ -284,8 +292,12 @@ export function createRunsRouter() {
   // unfiltered default rather than 400, because a stale cursor or a
   // typo'd filter on a re-fetch must never break the tail. Default
   // behavior (no params) is unchanged: the full chronological history.
-  router.get("/runs/:id/logs", async (c) => {
-    const runId = c.req.param("id");
+  //
+  // Rate limited at 120/min per identity (same budget as the inbound MCP
+  // server) — the log history can be large and the CLI tail polls it in a
+  // loop, so an unmetered caller could turn this read into a DB hammer.
+  router.get("/runs/:id/logs", rateLimit(120), async (c) => {
+    const runId = c.req.param("id")!;
     const scope = getAppScope(c);
     const exec = await getRun(scope, runId);
     if (!exec) {
@@ -329,7 +341,10 @@ export function createRunsRouter() {
     const logs = hasMore ? rows.slice(0, limit) : rows;
     setSinceLinkHeader({ c, hasMore, lastId: logs.at(-1)?.id });
 
-    return c.json(logs);
+    // Standard list envelope (`{ object: "list", data, hasMore }`) — same
+    // wire shape as every other list endpoint. The RFC 5988 `Link` header
+    // and the `since` cursor semantics are unchanged.
+    return c.json(listResponse(logs, { hasMore }));
   });
 
   // POST /api/runs/:id/cancel — cancel a running/pending run
@@ -455,7 +470,11 @@ export function createRunsRouter() {
 
       await runInlinePreflight({ orgId, applicationId, actor, body, mode: "accumulate" });
 
-      return c.json({ ok: true });
+      // Structured validation result. Failures never reach this line — the
+      // preflight throws problem+json ApiErrors (accumulated) — so a 200
+      // always means `valid: true`; the shape leaves room for non-fatal
+      // detail (warnings) later without another wire break.
+      return c.json({ valid: true });
     },
   );
 

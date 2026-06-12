@@ -655,12 +655,14 @@ describe("Runs API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body).toBeArray();
-      expect(body.length).toBeGreaterThanOrEqual(2);
+      const body = (await res.json()) as { object: string; data: unknown[]; hasMore: boolean };
+      expect(body.object).toBe("list");
+      expect(body.data).toBeArray();
+      expect(body.data.length).toBeGreaterThanOrEqual(2);
+      expect(body.hasMore).toBe(false);
     });
 
-    it("returns empty array when no logs exist", async () => {
+    it("returns an empty list envelope when no logs exist", async () => {
       await seedAgent({ id: "@runorg/nolog-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       const run = await seedRun({
         packageId: "@runorg/nolog-agent",
@@ -675,9 +677,10 @@ describe("Runs API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body).toBeArray();
-      expect(body).toHaveLength(0);
+      const body = (await res.json()) as { object: string; data: unknown[]; hasMore: boolean };
+      expect(body.object).toBe("list");
+      expect(body.data).toHaveLength(0);
+      expect(body.hasMore).toBe(false);
     });
 
     it("returns 404 for run from another org", async () => {
@@ -740,8 +743,8 @@ describe("Runs API", () => {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as Array<{ id: number; message: string }>;
-      expect(body.map((l) => l.id)).toEqual([log2.id, log3.id]);
+      const body = (await res.json()) as { data: Array<{ id: number; message: string }> };
+      expect(body.data.map((l) => l.id)).toEqual([log2.id, log3.id]);
     });
 
     it("ignores a malformed ?since= cursor (returns full list)", async () => {
@@ -770,8 +773,8 @@ describe("Runs API", () => {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as unknown[];
-      expect(body).toHaveLength(1);
+      const body = (await res.json()) as { data: unknown[] };
+      expect(body.data).toHaveLength(1);
     });
 
     it("?since=<highest_id> returns an empty array", async () => {
@@ -798,8 +801,8 @@ describe("Runs API", () => {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as unknown[];
-      expect(body).toHaveLength(0);
+      const body = (await res.json()) as { data: unknown[] };
+      expect(body.data).toHaveLength(0);
     });
 
     it("filters by ?level= minimum severity", async () => {
@@ -821,22 +824,22 @@ describe("Runs API", () => {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as Array<{ level: string; message: string }>;
-      expect(body.map((l) => l.level)).toEqual(["info", "warn", "error"]);
+      const body = (await res.json()) as { data: Array<{ level: string; message: string }> };
+      expect(body.data.map((l) => l.level)).toEqual(["info", "warn", "error"]);
 
       // level=error → error only
       const resErr = await app.request(`/api/runs/${run.id}/logs?level=error`, {
         headers: authHeaders(ctx),
       });
-      const bodyErr = (await resErr.json()) as Array<{ level: string }>;
-      expect(bodyErr.map((l) => l.level)).toEqual(["error"]);
+      const bodyErr = (await resErr.json()) as { data: Array<{ level: string }> };
+      expect(bodyErr.data.map((l) => l.level)).toEqual(["error"]);
 
       // level=debug → everything (explicit minimum == default)
       const resAll = await app.request(`/api/runs/${run.id}/logs?level=debug`, {
         headers: authHeaders(ctx),
       });
-      const bodyAll = (await resAll.json()) as unknown[];
-      expect(bodyAll).toHaveLength(4);
+      const bodyAll = (await resAll.json()) as { data: unknown[] };
+      expect(bodyAll.data).toHaveLength(4);
     });
 
     it("ignores an invalid ?level= value (returns full list)", async () => {
@@ -855,8 +858,8 @@ describe("Runs API", () => {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as unknown[];
-      expect(body).toHaveLength(2);
+      const body = (await res.json()) as { data: unknown[] };
+      expect(body.data).toHaveLength(2);
     });
 
     it("paginates with ?limit= and emits a Link rel=next header re-using since", async () => {
@@ -876,8 +879,9 @@ describe("Runs API", () => {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as Array<{ id: number }>;
-      expect(body.map((l) => l.id)).toEqual([log1.id, log2.id]);
+      const body = (await res.json()) as { data: Array<{ id: number }>; hasMore: boolean };
+      expect(body.data.map((l) => l.id)).toEqual([log1.id, log2.id]);
+      expect(body.hasMore).toBe(true);
 
       // Link header points at the next page, keyed on the last returned id.
       const link = res.headers.get("Link");
@@ -890,8 +894,9 @@ describe("Runs API", () => {
         headers: authHeaders(ctx),
       });
       expect(res2.status).toBe(200);
-      const body2 = (await res2.json()) as Array<{ id: number }>;
-      expect(body2.map((l) => l.id)).toEqual([log3.id]);
+      const body2 = (await res2.json()) as { data: Array<{ id: number }>; hasMore: boolean };
+      expect(body2.data.map((l) => l.id)).toEqual([log3.id]);
+      expect(body2.hasMore).toBe(false);
       expect(res2.headers.get("Link")).toBeNull();
     });
 
@@ -910,7 +915,9 @@ describe("Runs API", () => {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
-      expect((await res.json()) as unknown[]).toHaveLength(1);
+      const body = (await res.json()) as { data: unknown[]; hasMore: boolean };
+      expect(body.data).toHaveLength(1);
+      expect(body.hasMore).toBe(false);
       expect(res.headers.get("Link")).toBeNull();
     });
 
@@ -934,8 +941,8 @@ describe("Runs API", () => {
         { headers: authHeaders(ctx) },
       );
       expect(res.status).toBe(200);
-      const body = (await res.json()) as Array<{ id: number }>;
-      expect(body.map((l) => l.id)).toEqual([kept1.id, kept2.id]);
+      const body = (await res.json()) as { data: Array<{ id: number }> };
+      expect(body.data.map((l) => l.id)).toEqual([kept1.id, kept2.id]);
       const link = res.headers.get("Link");
       expect(link).toContain(`since=${kept2.id}`);
       expect(link).toContain("level=info");
@@ -959,8 +966,10 @@ describe("Runs API", () => {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as unknown[];
-      expect(body).toHaveLength(3);
+      const body = (await res.json()) as { object: string; data: unknown[]; hasMore: boolean };
+      expect(body.object).toBe("list");
+      expect(body.data).toHaveLength(3);
+      expect(body.hasMore).toBe(false);
       expect(res.headers.get("Link")).toBeNull();
     });
   });

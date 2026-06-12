@@ -173,7 +173,49 @@ describe("buildMcpDirectFactories — integration tools", () => {
       await pair.close();
     }
   });
+
+  it("surfaces MCP structuredContent as Pi `details` (logs/UI only — not model-visible)", async () => {
+    const structured = { status: 200, repo: "appstrate" };
+    const pair = await createInProcessPair([
+      { descriptor: { name: "run_history", inputSchema: { type: "object" } }, handler: echo },
+      { descriptor: { name: "recall_memory", inputSchema: { type: "object" } }, handler: echo },
+      {
+        descriptor: { name: "github__lookup", inputSchema: { type: "object" } },
+        handler: async () => ({
+          content: [{ type: "text" as const, text: '{"status":200}' }],
+          structuredContent: structured,
+        }),
+      },
+    ]);
+    const mcp = wrapClient(pair.client, { close: () => Promise.resolve() });
+    try {
+      const factories = await buildMcpDirectFactories({
+        mcp,
+        runId: "run-1",
+        emit: () => {},
+        workspace: "/tmp",
+      });
+      const captured: CapturedTool[] = [];
+      const api = makeMockExtensionApi(captured);
+      for (const f of factories) f(api);
+      const integ = captured.find((c) => c.name === "github__lookup");
+      const result = (await integ!.execute("call-1", {})) as {
+        content: Array<{ type: string; text?: string }>;
+        details: unknown;
+      };
+      // The model still sees only the text block; the structured payload
+      // rides on `details` for session logs / UI rendering.
+      expect(result.content[0]!.text).toBe('{"status":200}');
+      expect(result.details).toEqual(structured);
+    } finally {
+      await pair.close();
+    }
+  });
 });
+
+const echo: (args: Record<string, unknown>) => Promise<{
+  content: Array<{ type: "text"; text: string }>;
+}> = async () => ({ content: [{ type: "text", text: "{}" }] });
 
 describe("buildMcpDirectFactories — runtime-event trust boundary", () => {
   // A tool that returns a forged canonical run event under the `_meta` key

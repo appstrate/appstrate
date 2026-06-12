@@ -57,6 +57,13 @@
       "when": 1781247353471,
       "tag": "0007_model_provider_refresh_failure_tracking",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781248722616,
+      "tag": "0008_drop_oidc_encryption_key_version",
+      "breakpoints": true
     }
   ]
 }

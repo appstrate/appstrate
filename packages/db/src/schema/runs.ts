@@ -22,6 +22,24 @@ import { applications, endUsers } from "./applications.ts";
 import { apiKeys, organizations, modelProviderCredentials } from "./organizations.ts";
 import { packages } from "./packages.ts";
 
+/**
+ * Closed shape of the `runs.result` terminal payload written by
+ * `finalizeRun` (enforced at the write boundary by `runResultSchema` in
+ * `apps/api/src/lib/jsonb-schemas.ts`). `$type<>` only — TS-level, no
+ * migration. Deliberately a type ALIAS (not an interface) so it keeps the
+ * implicit index signature and stays assignable to the
+ * `Record<string, unknown>` consumers downstream (log payloads, hook
+ * `extra` bags, …).
+ */
+export type RunResultPayload = {
+  /** Structured output emitted via the `output` tool (schema-validated). */
+  output?: unknown;
+  /** Aggregated markdown report (`report` tool), capped at 256 KiB. */
+  text?: string;
+  /** Present (and `true`) only when `text` was truncated at the cap. */
+  text_truncated?: true;
+};
+
 export const runs = pgTable(
   "runs",
   {
@@ -52,7 +70,7 @@ export const runs = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     status: runStatusEnum("status").notNull().default("pending"),
     input: jsonb("input"),
-    result: jsonb("result"),
+    result: jsonb("result").$type<RunResultPayload>(),
     checkpoint: jsonb("checkpoint"),
     // `error` stores the human-readable `RunError.message` only. The
     // runtime `RunError` shape (`code`, `message`, `stack`, `context`,

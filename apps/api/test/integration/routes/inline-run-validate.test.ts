@@ -4,7 +4,7 @@
  * Integration tests for POST /api/runs/inline/validate — dry-run validator.
  *
  * The validator must:
- *   1. Return 200 { ok: true } on a manifest that /runs/inline would accept.
+ *   1. Return 200 { valid: true } on a manifest that /runs/inline would accept.
  *   2. Return 400 with the same error shape on any validation failure.
  *   3. Never insert a shadow row regardless of outcome.
  */
@@ -66,11 +66,11 @@ describe("POST /api/runs/inline/validate", () => {
     return rows.length;
   }
 
-  it("returns 200 { ok: true } on a valid manifest + prompt", async () => {
+  it("returns 200 { valid: true } on a valid manifest + prompt", async () => {
     const res = await post({ manifest: validManifest(), prompt: "do something" });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean };
-    expect(body.ok).toBe(true);
+    const body = (await res.json()) as { valid: boolean };
+    expect(body.valid).toBe(true);
   });
 
   it("does NOT insert a shadow row on success", async () => {
@@ -272,8 +272,8 @@ describe("POST /api/runs/inline/validate", () => {
       const manifest = manifestWithDeps({ skills: { "@inlineorg/helper": "^1.0.0" } });
       const res = await post({ manifest, prompt: "do something" });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { ok: boolean };
-      expect(body.ok).toBe(true);
+      const body = (await res.json()) as { valid: boolean };
+      expect(body.valid).toBe(true);
     });
 
     it("returns 400 missing_skill when skill dep is not seeded", async () => {

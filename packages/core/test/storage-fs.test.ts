@@ -4,7 +4,12 @@ import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createFileSystemStorage } from "../src/storage-fs.ts";
+import {
+  createFileSystemStorage,
+  signFsUploadToken,
+  verifyFsUploadToken,
+  type FsUploadTokenPayload,
+} from "../src/storage-fs.ts";
 import { StorageAlreadyExistsError } from "../src/storage.ts";
 
 let basePath: string;
@@ -275,5 +280,49 @@ describe("createFileSystemStorage", () => {
         "Path traversal detected",
       );
     });
+  });
+});
+
+describe("FS upload token keyring rotation", () => {
+  const KEY1 = "new-active-upload-key-16+";
+  const KEY2 = "old-retired-upload-key-16+";
+
+  function payload(): FsUploadTokenPayload {
+    return { k: "uploads/app_x/upl_y/doc.pdf", s: 1024, m: "application/pdf", e: future() };
+  }
+
+  function future(): number {
+    return Math.floor(Date.now() / 1000) + 300;
+  }
+
+  it("signs with the FIRST key of a comma-separated keyring", () => {
+    const p = payload();
+    const token = signFsUploadToken(p, `${KEY1},${KEY2}`);
+    // Verifiable with KEY1 alone — proof the first key signed it
+    expect(verifyFsUploadToken(token, KEY1)).toEqual(p);
+  });
+
+  it("verifies a token signed with a non-first key (in-flight upload survives rotation)", () => {
+    const p = payload();
+    const inFlight = signFsUploadToken(p, KEY2);
+    expect(verifyFsUploadToken(inFlight, `${KEY1},${KEY2}`)).toEqual(p);
+  });
+
+  it("accepts the array keyring form", () => {
+    const p = payload();
+    const inFlight = signFsUploadToken(p, [KEY2]);
+    expect(verifyFsUploadToken(inFlight, [KEY1, KEY2])).toEqual(p);
+  });
+
+  it("rejects a token signed with a key removed from the keyring", () => {
+    const stale = signFsUploadToken(payload(), KEY2);
+    expect(verifyFsUploadToken(stale, KEY1)).toBeNull();
+    expect(verifyFsUploadToken(stale, [KEY1])).toBeNull();
+  });
+
+  it("throws when signing with an empty keyring", () => {
+    expect(() => signFsUploadToken(payload(), [])).toThrow(
+      "signFsUploadToken requires at least one signing key",
+    );
   });
 });

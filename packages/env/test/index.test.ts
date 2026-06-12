@@ -7,6 +7,7 @@ const TRACKED = [
   "BETTER_AUTH_SECRETS",
   "CONNECTION_ENCRYPTION_KEY",
   "UPLOAD_SIGNING_SECRET",
+  "RUN_TOKEN_SECRET",
   "APP_URL",
   "NODE_ENV",
   "AUTH_DISABLE_SIGNUP",
@@ -119,6 +120,56 @@ describe("empty string is universally treated as unset (compose `${VAR:-}` patte
   it('NODE_ENV: empty string falls back to default `"development"`', () => {
     process.env.NODE_ENV = "";
     expect(getEnv().NODE_ENV).toBe("development");
+  });
+});
+
+describe("signing-secret keyrings (comma-separated, per-key validation)", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  it("UPLOAD_SIGNING_SECRET: single ≥16-char key passes (keyring of one)", () => {
+    process.env.UPLOAD_SIGNING_SECRET = "a".repeat(16);
+    expect(getEnv().UPLOAD_SIGNING_SECRET).toBe("a".repeat(16));
+  });
+
+  it("UPLOAD_SIGNING_SECRET: multiple ≥16-char keys pass", () => {
+    process.env.UPLOAD_SIGNING_SECRET = `${"a".repeat(16)},${"b".repeat(20)}`;
+    expect(getEnv().UPLOAD_SIGNING_SECRET).toBe(`${"a".repeat(16)},${"b".repeat(20)}`);
+  });
+
+  it("UPLOAD_SIGNING_SECRET: rejects a keyring containing a <16-char key", () => {
+    process.env.UPLOAD_SIGNING_SECRET = `${"a".repeat(16)},short`;
+    expect(() => getEnv()).toThrow(/UPLOAD_SIGNING_SECRET/);
+  });
+
+  it("UPLOAD_SIGNING_SECRET: rejects an empty segment (trailing comma)", () => {
+    process.env.UPLOAD_SIGNING_SECRET = `${"a".repeat(16)},`;
+    expect(() => getEnv()).toThrow(/UPLOAD_SIGNING_SECRET/);
+  });
+
+  it("RUN_TOKEN_SECRET: comma-separated keys pass", () => {
+    process.env.RUN_TOKEN_SECRET = "new-key,old-key";
+    expect(getEnv().RUN_TOKEN_SECRET).toBe("new-key,old-key");
+  });
+
+  it("RUN_TOKEN_SECRET: rejects an empty segment", () => {
+    process.env.RUN_TOKEN_SECRET = "new-key,,old-key";
+    expect(() => getEnv()).toThrow(/RUN_TOKEN_SECRET/);
+  });
+
+  it("RUN_TOKEN_SECRET: unset stays optional", () => {
+    delete process.env.RUN_TOKEN_SECRET;
+    expect(getEnv().RUN_TOKEN_SECRET).toBeUndefined();
   });
 });
 

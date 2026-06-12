@@ -221,18 +221,24 @@ describe("runRemote — happy path", () => {
         "GET /api/runs/run_test_1/logs": [
           {
             status: 200,
-            body: [
-              {
-                id: 1,
-                runId: "run_test_1",
-                type: "progress",
-                event: "progress",
-                message: "runtime ready in 39ms",
-                level: "info",
-              },
-            ] satisfies RemoteRunLog[],
+            // Current platforms return the standard list envelope.
+            body: {
+              object: "list",
+              data: [
+                {
+                  id: 1,
+                  runId: "run_test_1",
+                  type: "progress",
+                  event: "progress",
+                  message: "runtime ready in 39ms",
+                  level: "info",
+                },
+              ] satisfies RemoteRunLog[],
+              hasMore: false,
+            },
           },
           {
+            // Older platforms returned a bare array — fetchLogs accepts both.
             status: 200,
             body: [
               {

@@ -18,7 +18,7 @@ import { uploads, runs } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
-import { parseRequestInput } from "../../../src/services/input-parser.ts";
+import { parseRequestInput, isStrippedInlineMarker } from "../../../src/services/input-parser.ts";
 import {
   downloadRunDocumentStream,
   downloadRunDocumentsManifest,
@@ -351,6 +351,44 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     ).rejects.toMatchObject({ status: 410 });
   });
 
+  it("rejects replaying materialized inline data: inputs with 409 rerun_inline_input_unavailable", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-rerun-inline" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+
+    // The prior run's persisted input holds the payload-stripped marker the
+    // consume path writes in place of inline bytes (empty payload + `name`
+    // param). Pre-fix, replaying it walked into parseDataUri and surfaced a
+    // misleading 400 "data: URI payload is empty".
+    const priorRunId = `run_${crypto.randomUUID()}`;
+    await seedRun(scope, {
+      id: priorRunId,
+      input: { doc: "data:application/pdf;name=report.pdf;base64," },
+    });
+
+    await expect(
+      parseRequestInput(
+        fakeCtx({ rerun_from: priorRunId }, scope),
+        `run_${crypto.randomUUID()}`,
+        fileSchema,
+      ),
+    ).rejects.toMatchObject({ status: 409, code: "rerun_inline_input_unavailable" });
+  });
+
+  it("a fresh (non-rerun) empty inline payload still surfaces the plain 400", async () => {
+    // Marker detection is rerun-only — a direct request carrying an
+    // empty-payload data URI keeps today's invalid_request contract.
+    const ctx = await createTestContext({ orgSlug: "org-rerun-fresh" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+
+    await expect(
+      parseRequestInput(
+        fakeCtx({ input: { doc: "data:application/pdf;name=report.pdf;base64," } }, scope),
+        `run_${crypto.randomUUID()}`,
+        fileSchema,
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
   it("replays a run with null input as an empty input", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-null" });
     const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
@@ -365,5 +403,19 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     );
     expect(result.input).toEqual({});
     expect(result.uploadedFiles).toBeUndefined();
+  });
+});
+
+describe("isStrippedInlineMarker", () => {
+  it("matches only the payload-stripped marker shape (empty payload + name param)", () => {
+    expect(isStrippedInlineMarker("data:application/pdf;name=report.pdf;base64,")).toBe(true);
+    expect(isStrippedInlineMarker("data:text/plain;name=a%20b.txt;base64,")).toBe(true);
+    // Payload present → a real inline file, not the marker.
+    expect(isStrippedInlineMarker("data:text/plain;name=a.txt;base64,aGk=")).toBe(false);
+    // No name param → a (broken) plain empty data URI, not the marker.
+    expect(isStrippedInlineMarker("data:text/plain;base64,")).toBe(false);
+    // Not a data URI at all.
+    expect(isStrippedInlineMarker("upload://upl_x")).toBe(false);
+    expect(isStrippedInlineMarker("data:text/plain;name=a.txt;base64")).toBe(false);
   });
 });

@@ -46,6 +46,21 @@ describe("shapeApiCallResponse — responseMode.toFile", () => {
     expect(readFileSync(join(workspace, "out.json"), "utf8")).toBe('{"a":1}');
   });
 
+  it("emits the descriptor as structuredContent alongside the JSON text fallback", async () => {
+    const workspace = ws();
+    const result = withStatus([{ type: "text", text: '{"a":1}' }], 200);
+    const out = await shapeApiCallResponse(result, baseOpts(workspace, "out.json"));
+    // Same payload twice per the MCP spec recommendation: machine-readable
+    // structuredContent (matches the tool's outputSchema) + text fallback.
+    expect(out.structuredContent).toEqual({
+      kind: "file",
+      path: "out.json",
+      size: 7,
+      status: 200,
+    });
+    expect(JSON.parse((out.content[0] as { text: string }).text)).toEqual(out.structuredContent);
+  });
+
   it("resolves a resource_link body via readResource before writing", async () => {
     const workspace = ws();
     const result = withStatus([{ type: "resource_link", uri: "appstrate://blob/1" }], 200);
@@ -74,6 +89,16 @@ describe("shapeApiCallResponse — no toFile (status surfacing)", () => {
     const out = await shapeApiCallResponse(result, baseOpts(workspace));
     expect((out.content[0] as { text: string }).text).toBe("[api_call status=404]");
     expect((out.content[1] as { text: string }).text).toBe("hi");
+  });
+
+  it("preserves the sidecar-attached structuredContent { status } through shaping", async () => {
+    const workspace = ws();
+    const result = {
+      ...withStatus([{ type: "text", text: "hi" }], 404),
+      structuredContent: { status: 404 },
+    };
+    const out = await shapeApiCallResponse(result, baseOpts(workspace));
+    expect(out.structuredContent).toEqual({ status: 404 });
   });
 
   it("leaves the result unchanged when no upstream _meta is present", async () => {

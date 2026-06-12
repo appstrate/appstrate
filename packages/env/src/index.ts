@@ -99,7 +99,18 @@ const envSchema = z
     // Dedicated HMAC secret for FS upload-sink tokens. Separate from
     // BETTER_AUTH_SECRET so the two can be rotated independently and a
     // compromise of one does not affect the other.
-    UPLOAD_SIGNING_SECRET: z.string().min(16, "UPLOAD_SIGNING_SECRET must be at least 16 chars"),
+    //
+    // Comma-separated keyring for online rotation (single value = keyring of
+    // one): the FIRST key signs new tokens, ALL keys verify, so rotation does
+    // not invalidate in-flight upload URLs. Rotation pattern: prepend the new
+    // key + restart, wait out the longest token TTL, drop the old key +
+    // restart. Each key must be ≥16 chars (and thus comma-free).
+    UPLOAD_SIGNING_SECRET: z
+      .string()
+      .min(1, "UPLOAD_SIGNING_SECRET is required")
+      .refine((v) => v.split(",").every((k) => k.length >= 16), {
+        message: "UPLOAD_SIGNING_SECRET: each comma-separated key must be at least 16 chars",
+      }),
     // S3 storage (optional — falls back to filesystem when S3_BUCKET is absent)
     S3_BUCKET: z.string().optional(),
     S3_REGION: z.string().optional(),
@@ -431,8 +442,19 @@ const envSchema = z
     // Outbound proxy
     PROXY_URL: z.string().optional(),
 
-    // Run token signing (optional — if unset, run tokens are unsigned)
-    RUN_TOKEN_SECRET: z.string().optional(),
+    // Run token signing (optional — if unset, run tokens are unsigned).
+    //
+    // Comma-separated keyring for online rotation (single value = keyring of
+    // one): the FIRST key signs new run tokens, ALL keys verify, so rotation
+    // does not kill event ingestion for in-flight runs. Rotation pattern:
+    // prepend the new key + restart, wait out the longest in-flight run, drop
+    // the old key + restart. Keys must be non-empty (and thus comma-free).
+    RUN_TOKEN_SECRET: z
+      .string()
+      .optional()
+      .refine((v) => v === undefined || v.split(",").every((k) => k.length >= 1), {
+        message: "RUN_TOKEN_SECRET: comma-separated keys must be non-empty",
+      }),
 
     // Social auth (optional — enables Google/GitHub sign-in when both are set)
     GOOGLE_CLIENT_ID: z.string().optional(),

@@ -80,3 +80,54 @@ describe("parseSignedToken", () => {
     expect(parseSignedToken(token)).toBe(id);
   });
 });
+
+describe("RUN_TOKEN_SECRET keyring rotation", () => {
+  const KEY1 = "new-active-key-for-rotation-min32chars!!";
+  const KEY2 = "old-retired-key-for-rotation-min32chars!";
+
+  function signWith(key: string, runId: string): string {
+    const hasher = new Bun.CryptoHasher("sha256", key);
+    hasher.update(runId);
+    return `${runId}.${hasher.digest("hex")}`;
+  }
+
+  function setSecret(value: string): void {
+    process.env.RUN_TOKEN_SECRET = value;
+    _resetCacheForTesting();
+  }
+
+  afterAll(() => {
+    // Restore the single secret the surrounding describes rely on
+    process.env.RUN_TOKEN_SECRET = "test-secret-for-hmac-signing-min32chars!!";
+    _resetCacheForTesting();
+  });
+
+  it("signs with the FIRST key of the keyring", () => {
+    setSecret(`${KEY1},${KEY2}`);
+    expect(signRunToken("exec_first")).toBe(signWith(KEY1, "exec_first"));
+  });
+
+  it("verifies a token signed with a non-first key (in-flight run survives rotation)", () => {
+    setSecret(`${KEY1},${KEY2}`);
+    const inFlight = signWith(KEY2, "exec_inflight");
+    expect(parseSignedToken(inFlight)).toBe("exec_inflight");
+  });
+
+  it("verifies a token signed with the first key", () => {
+    setSecret(`${KEY1},${KEY2}`);
+    expect(parseSignedToken(signWith(KEY1, "exec_active"))).toBe("exec_active");
+  });
+
+  it("rejects a token signed with a key removed from the keyring", () => {
+    setSecret(KEY1);
+    const stale = signWith(KEY2, "exec_stale");
+    expect(parseSignedToken(stale)).toBeNull();
+  });
+
+  it("single-value secret behaves as a keyring of one (backward compatible)", () => {
+    setSecret(KEY1);
+    const token = signRunToken("exec_solo");
+    expect(token).toBe(signWith(KEY1, "exec_solo"));
+    expect(parseSignedToken(token)).toBe("exec_solo");
+  });
+});

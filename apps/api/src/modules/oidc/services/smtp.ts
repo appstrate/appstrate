@@ -17,11 +17,12 @@
  *    one request.
  *
  * Rotation:
- *  - Each row carries an encryption-key version. Resolvers reject rows whose
- *    stamped version differs from `ENCRYPTION_KEY_VERSION` below — the row
- *    surfaces as "not configured" instead of throwing on stale ciphertext.
- *    Rotation SOP: bump the constant alongside the `CONNECTION_ENCRYPTION_KEY`
- *    rollout, re-upsert every row via the admin API.
+ *  - Ciphertexts are self-describing `v1:<kid>:` envelopes (`@appstrate/connect`).
+ *    Key rotation rides the connect keyring: rotate `CONNECTION_ENCRYPTION_KEY`
+ *    / `CONNECTION_ENCRYPTION_KEY_ID` and keep the retired key in
+ *    `CONNECTION_ENCRYPTION_KEYS` — old rows keep decrypting, new writes embed
+ *    the active kid. A row whose kid is no longer in the keyring fails
+ *    decryption and surfaces as "not configured" instead of throwing.
  *
  * Test hook: when `row.host === "__test_json__"`, a nodemailer `jsonTransport`
  * is returned. Mirrors the instance-level behavior in `packages/db/src/auth.ts`.
@@ -38,8 +39,6 @@ import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-
-const ENCRYPTION_KEY_VERSION = "v1";
 
 export interface ResolvedSmtpConfig {
   transport: Transporter;
@@ -121,7 +120,6 @@ function buildTransport(row: SmtpRow): Transporter | null {
   } catch (err) {
     logger.error("oidc smtp: decryption failed for per-app config, treating as unconfigured", {
       applicationId: row.applicationId,
-      rowVersion: row.encryptionKeyVersion,
       error: getErrorMessage(err),
     });
     return null;
@@ -142,14 +140,6 @@ async function resolvePerAppSmtp(applicationId: string): Promise<ResolvedSmtpCon
       .where(eq(applicationSmtpConfigs.applicationId, applicationId))
       .limit(1);
     if (!row) return null;
-    if (row.encryptionKeyVersion !== ENCRYPTION_KEY_VERSION) {
-      logger.warn("oidc smtp: stale encryption key version, treating as unconfigured", {
-        applicationId,
-        rowVersion: row.encryptionKeyVersion,
-        currentVersion: ENCRYPTION_KEY_VERSION,
-      });
-      return null;
-    }
     const transport = buildTransport(row);
     if (!transport) return null;
     return {
@@ -236,7 +226,6 @@ export async function upsertSmtpConfig(
     port: input.port,
     username: input.username,
     passEncrypted,
-    encryptionKeyVersion: ENCRYPTION_KEY_VERSION,
     fromAddress: input.fromAddress,
     fromName: input.fromName ?? null,
     secureMode: input.secureMode ?? ("auto" as const),
