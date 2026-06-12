@@ -50,6 +50,7 @@ import {
 } from "../services/package-versions.ts";
 import { agentDetailHandler, buildAgentDetailDto } from "./agent-detail-handler.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { recordAuditFromContext } from "../services/audit.ts";
 import { requirePackageInOrg } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
@@ -548,6 +549,13 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         );
       }
 
+      await recordAuditFromContext(c, {
+        action: "package.created",
+        resourceType: "package",
+        resourceId: packageId,
+        after: { type: rcfg.cfg.type, version: validatedManifest.version ?? null },
+      });
+
       // Return the created package resource bare — same DTO/serializer as the
       // GET detail (issue #657). `id` and `lock_version` (the optimistic-lock
       // token of the draft) are part of the resource; no operation envelope.
@@ -654,6 +662,13 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         logger.debug("auto-install skipped", { packageId: item.id, applicationId, err: String(e) }),
       );
     }
+
+    await recordAuditFromContext(c, {
+      action: "package.created",
+      resourceType: "package",
+      resourceId: item.id,
+      after: { type: rcfg.cfg.type, version: finalManifest.version ?? null },
+    });
 
     // Return the created package resource bare — same serializer as the GET
     // detail (issue #657). `id` and `lock_version` are part of the resource.
@@ -873,6 +888,13 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       });
     }
 
+    await recordAuditFromContext(c, {
+      action: "package.updated",
+      resourceType: "package",
+      resourceId: itemId,
+      after: { type: rcfg.cfg.type },
+    });
+
     // Return the updated package resource bare — same serializer as the GET
     // detail (issue #657). The resource carries `lock_version`, the NEW
     // optimistic-lock token consumers must read back for the next edit.
@@ -914,6 +936,13 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
         `${label} '${itemId}' is used by ${result.dependents!.length} package(s)`,
       );
     }
+
+    await recordAuditFromContext(c, {
+      action: "package.deleted",
+      resourceType: "package",
+      resourceId: itemId,
+      after: { type: rcfg.cfg.type },
+    });
 
     return c.body(null, 204);
   };
@@ -1066,6 +1095,13 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       throw invalidRequest("Failed to create version (invalid or duplicate)");
     }
 
+    await recordAuditFromContext(c, {
+      action: "package.version_created",
+      resourceType: "package",
+      resourceId: itemId,
+      after: { type: rcfg.cfg.type, version: result.version },
+    });
+
     // Return the created version resource bare — same DTO/serializer as the
     // GET version detail — so callers see the snapshot (manifest, integrity,
     // dist_tags, …) without a follow-up GET (issue #657). `id` (version row
@@ -1161,6 +1197,13 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       });
     }
 
+    await recordAuditFromContext(c, {
+      action: "package.version_restored",
+      resourceType: "package",
+      resourceId: itemId,
+      after: { type: rcfg.cfg.type, version: detail.version },
+    });
+
     // Restore mutates the package draft — return the updated PACKAGE resource
     // bare, same DTO/serializer as the package GET detail (issue #657). The
     // restored version info is reflected in the resource itself (`version`,
@@ -1207,6 +1250,13 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
     if (!deleted) {
       throw notFound(`Version '${versionQuery}' not found`);
     }
+
+    await recordAuditFromContext(c, {
+      action: "package.version_deleted",
+      resourceType: "package",
+      resourceId: itemId,
+      after: { type: rcfg.cfg.type, version: versionQuery },
+    });
 
     return c.body(null, 204);
   };
@@ -1317,6 +1367,13 @@ export function createPackagesRouter() {
         }),
       );
     }
+
+    await recordAuditFromContext(c, {
+      action: "package.forked",
+      resourceType: "package",
+      resourceId: result.packageId,
+      after: { type: result.type, forkedFrom: packageId },
+    });
 
     // Return the forked package resource bare — same DTO/serializer as the new
     // package's GET detail, selected by its type (issue #657). The fork

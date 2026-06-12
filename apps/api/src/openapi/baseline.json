@@ -1517,7 +1517,7 @@
                   },
                   "rerun_from": {
                     "type": "string",
-                    "description": "Run id whose `input` to replay verbatim on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). File fields keep their `upload://` URIs in the stored input, and consumed uploads stay re-consumable for `UPLOAD_RETENTION_HOURS` (default 24 h) after their first consume — so a cancelled or completed run can be re-triggered with the same documents and different overrides (`modelId`, `config`, `?version`, `connection_overrides`) in a single call, without re-uploading. Returns 410 `upload_expired` when a referenced upload's reuse window has elapsed (re-upload required)."
+                    "description": "Run id whose `input` to replay verbatim on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). File fields keep their `upload://` URIs in the stored input, and consumed uploads stay re-consumable for `UPLOAD_RETENTION_HOURS` (default 24 h) after their first consume — so a cancelled or completed run can be re-triggered with the same documents and different overrides (`modelId`, `config`, `?version`, `connection_overrides`) in a single call, without re-uploading. Returns 410 `upload_expired` when a referenced upload's reuse window has elapsed (re-upload required). **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Use `upload://` references when the input must be replayable."
                   },
                   "modelId": {
                     "type": "string",
@@ -1578,9 +1578,20 @@
                 },
                 "example": {
                   "id": "run_cm1abc123def456",
+                  "packageId": "@acme/email-sorter",
+                  "userId": "usr_k7x9m2p4q1",
+                  "orgId": "org_r3t5w8y1z6",
+                  "applicationId": "app_m4n5o6p7",
                   "status": "pending",
+                  "input": {
+                    "message": "Summarize my latest emails"
+                  },
+                  "version_label": "1.2.0",
+                  "version_dirty": false,
+                  "version_ref": "1.2.0",
                   "model_label": "Claude Sonnet 4",
-                  "model_source": "org"
+                  "model_source": "org",
+                  "started_at": "2026-01-15T10:30:00Z"
                 }
               }
             }
@@ -1612,7 +1623,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Concurrent request with the same Idempotency-Key still in flight, or the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`)",
+            "description": "Concurrent request with the same Idempotency-Key still in flight, the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -1706,6 +1717,9 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "Link": {
+                "$ref": "#/components/headers/Link"
               }
             },
             "content": {
@@ -1913,8 +1927,19 @@
                 },
                 "example": {
                   "id": "run_cm1abc123",
-                  "packageId": "@inline/r-abc12345-...",
-                  "status": "pending"
+                  "packageId": "@inline/r-abc12345-6789-4cde-8f01-23456789abcd",
+                  "userId": "usr_k7x9m2p4q1",
+                  "orgId": "org_r3t5w8y1z6",
+                  "applicationId": "app_m4n5o6p7",
+                  "status": "pending",
+                  "input": {
+                    "docId": "doc_123"
+                  },
+                  "version_dirty": true,
+                  "version_ref": "draft",
+                  "model_label": "Claude Sonnet 4",
+                  "model_source": "org",
+                  "started_at": "2026-01-15T10:30:00Z"
                 }
               }
             }
@@ -1972,7 +1997,7 @@
         "operationId": "validateInlineRun",
         "tags": ["Runs"],
         "summary": "Validate an inline manifest without firing a run",
-        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, config + input against manifest schemas, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { ok: true }` on success, `400` problem+json otherwise. Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.",
+        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, config + input against manifest schemas, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json (with the accumulated validation errors) otherwise. Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2039,16 +2064,17 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["ok"],
+                  "required": ["valid"],
                   "properties": {
-                    "ok": {
+                    "valid": {
                       "type": "boolean",
-                      "enum": [true]
+                      "enum": [true],
+                      "description": "Always `true` on 200 — validation failures are reported as `400` problem+json with the accumulated error list."
                     }
                   }
                 },
                 "example": {
-                  "ok": true
+                  "valid": true
                 }
               }
             }
@@ -2160,6 +2186,9 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "Link": {
+                "$ref": "#/components/headers/Link"
               }
             },
             "content": {
@@ -2210,7 +2239,7 @@
         "operationId": "getRun",
         "tags": ["Runs"],
         "summary": "Get run status/result (optionally long-poll until terminal)",
-        "description": "Get run details including status, result, input, and duration.\n\nPass `?wait=<seconds>` (or `?wait=true` for the maximum) to long-poll: the server holds the request until the run reaches a terminal status (`success`, `failed`, `timeout`, `cancelled`) or the wait elapses, then returns the current run object exactly as the plain call does. The wait is capped at **55 seconds** — deliberately below the 60 s idle timeouts that ship as defaults in common reverse proxies (nginx `proxy_read_timeout`, ALB idle timeout) so the long poll always completes with a real response instead of a proxy 504; values above the cap are clamped. A response with a non-terminal `status` simply means the wait timed out — issue the same call again to keep waiting. One long poll replaces N sleep+getRun round-trips, which is the recommended completion-wait pattern for MCP clients (the SSE stream is not reachable through the MCP server).",
+        "description": "Get run details including status, result, input, and duration.\n\nPass `?wait=<seconds>` (or `?wait=true` for the maximum) to long-poll: the server holds the request until the run reaches a terminal status (`success`, `failed`, `timeout`, `cancelled`) or the wait elapses, then returns the current run object exactly as the plain call does. The wait is capped at **55 seconds** — deliberately below the 60 s idle timeouts that ship as defaults in common reverse proxies (nginx `proxy_read_timeout`, ALB idle timeout) so the long poll always completes with a real response instead of a proxy 504; values above the cap are clamped. A response with a non-terminal `status` simply means the wait timed out — issue the same call again to keep waiting. One long poll replaces N sleep+getRun round-trips, which is the recommended completion-wait pattern for MCP clients (the SSE stream is not reachable through the MCP server).\n\n**Concurrency bound:** each identity (user or API key) may hold at most **10** concurrent waits across all runs. Beyond the cap the request degrades to the immediate no-wait response (`wait` is ignored) — a non-terminal `status` means poll again, and capacity self-heals as earlier waits resolve.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2243,7 +2272,7 @@
                 }
               ]
             },
-            "description": "Hold the request until the run reaches a terminal status or this many seconds elapse (capped at 55, see operation description), then return the run object. `0`/`false`/absent = return immediately (default). Negative, fractional, or non-numeric values return 400."
+            "description": "Hold the request until the run reaches a terminal status or this many seconds elapse (capped at 55, see operation description), then return the run object. `0`/`false`/absent = return immediately (default). Negative, fractional, or non-numeric values return 400. At most 10 concurrent waits per identity — beyond the cap the request returns immediately as if `wait` were 0 (degrade-to-immediate, see operation description)."
           }
         ],
         "responses": {
@@ -2306,6 +2335,24 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid `wait` parameter (negative, fractional, or non-numeric value — see the `wait` parameter description)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                },
+                "example": {
+                  "type": "about:blank",
+                  "title": "Bad Request",
+                  "status": 400,
+                  "detail": "Invalid 'wait' value: expected true, false, or a non-negative integer number of seconds (max 55)",
+                  "code": "invalid_request",
+                  "requestId": "req_abc123"
+                }
+              }
+            }
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -2320,7 +2367,7 @@
         "operationId": "getRunLogs",
         "tags": ["Runs"],
         "summary": "Get run logs",
-        "description": "Get persisted log entries for a run. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI's polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). When `limit` is set and more entries follow, an RFC 5988 `Link: <…?since=<lastId>>; rel=\"next\"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the unfiltered default rather than 400 so a stale cursor never breaks a polling tail. Without query parameters the full chronological history is returned (backward-compatible default). Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.",
+        "description": "Get persisted log entries for a run, wrapped in the standard list envelope `{ object: \"list\", data, hasMore }`. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI's polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). When `limit` is set and more entries follow, `hasMore` is `true` and an RFC 5988 `Link: <…?since=<lastId>>; rel=\"next\"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the unfiltered default rather than 400 so a stale cursor never breaks a polling tail. Without query parameters the full chronological history is returned. Rate-limited to 120/min per identity. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2371,7 +2418,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Log entries",
+            "description": "Log entries (list envelope)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -2381,14 +2428,34 @@
               },
               "Link": {
                 "$ref": "#/components/headers/Link"
+              },
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimitPolicy"
               }
             },
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RunLog"
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RunLog"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean",
+                      "description": "True when `?limit=` was set and more entries follow — the `Link; rel=\"next\"` header carries the next page's URL."
+                    }
                   }
                 }
               }
@@ -2396,6 +2463,12 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
@@ -2440,7 +2513,21 @@
                 },
                 "example": {
                   "id": "run_cm1abc123def456",
-                  "status": "cancelled"
+                  "packageId": "@acme/email-sorter",
+                  "userId": "usr_k7x9m2p4q1",
+                  "orgId": "org_r3t5w8y1z6",
+                  "applicationId": "app_m4n5o6p7",
+                  "status": "cancelled",
+                  "error": "Cancelled by user",
+                  "version_label": "1.2.0",
+                  "version_dirty": false,
+                  "version_ref": "1.2.0",
+                  "model_label": "Claude Sonnet 4",
+                  "model_source": "org",
+                  "cost": 0.0012,
+                  "started_at": "2026-01-15T10:30:00Z",
+                  "completed_at": "2026-01-15T10:30:45Z",
+                  "duration": 45000
                 }
               }
             }
@@ -6193,7 +6280,7 @@
         "operationId": "getIntegrationOrgDefault",
         "tags": ["Integrations"],
         "summary": "Get the org-wide default connection for this integration",
-        "description": "The cross-agent governance baseline: one default connection per (application, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Returns `{ default: null }` when unset.",
+        "description": "The cross-agent governance baseline: one default connection per (application, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Returns 204 when unset.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6214,7 +6301,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Org default (or null)",
+            "description": "Org default (bare resource — same shape as PUT)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -6227,51 +6314,49 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["default"],
+                  "required": [
+                    "integration_package_id",
+                    "connection_id",
+                    "auth_key",
+                    "enforce",
+                    "createdAt",
+                    "updatedAt"
+                  ],
                   "properties": {
-                    "default": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "integration_package_id",
-                            "connection_id",
-                            "auth_key",
-                            "enforce",
-                            "createdAt",
-                            "updatedAt"
-                          ],
-                          "properties": {
-                            "integration_package_id": {
-                              "type": "string"
-                            },
-                            "connection_id": {
-                              "type": "string",
-                              "format": "uuid"
-                            },
-                            "auth_key": {
-                              "type": "string"
-                            },
-                            "enforce": {
-                              "type": "boolean"
-                            },
-                            "createdAt": {
-                              "type": "string",
-                              "format": "date-time"
-                            },
-                            "updatedAt": {
-                              "type": "string",
-                              "format": "date-time"
-                            }
-                          }
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
+                    "integration_package_id": {
+                      "type": "string"
+                    },
+                    "connection_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "auth_key": {
+                      "type": "string"
+                    },
+                    "enforce": {
+                      "type": "boolean"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
                     }
                   }
                 }
+              }
+            }
+          },
+          "204": {
+            "description": "No org default is set for this integration",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
               }
             }
           }
@@ -8554,18 +8639,28 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "scopes": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "type": "string"
                       },
                       "description": "Permission scopes the current user can assign to API keys"
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "scopes": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     "agents:read",
                     "agents:run",
                     "runs:read",
@@ -8614,17 +8709,27 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "apiKeys": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/ApiKeyInfo"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "apiKeys": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "id": "cm8vwx234",
                       "name": "Production CI",
@@ -16633,7 +16738,7 @@
         "operationId": "createUpload",
         "tags": ["Uploads"],
         "summary": "Create a direct-upload descriptor",
-        "description": "Reserve an upload slot and return a signed URL the client PUTs the binary to. Full upload→run recipe: (1) POST /api/uploads with the file's `name`, exact `size` in bytes, and `mime` — the response carries a `uri` (e.g. `upload://upl_xxx`), a signed `url`, and `headers`. (2) PUT the raw file bytes (not multipart) to `url`, sending exactly the returned `headers` (typically just `Content-Type`). No other headers are required — in particular no checksum headers; the signed URL does not bind one. (3) Call `runAgent` with `uri` as the value of the file-typed input field. The actual byte count must equal the declared `size`, and binary MIMEs are verified by magic-byte sniffing. Consumed uploads are NOT single-use: the bytes stay retained — and the `uri` re-consumable — for `UPLOAD_RETENTION_HOURS` (default 24 h) after the first consume, so the same input can be re-run (e.g. via `rerun_from` after cancelling) without re-uploading. Unconsumed uploads expire with the signed URL. Small files (≤4 MiB decoded) can skip this flow entirely: inline the content directly in the `runAgent` input as `data:<mime>;name=<filename>;base64,<payload>`. Rate-limited to 20/min.",
+        "description": "Reserve an upload slot and return a signed URL the client PUTs the binary to. Full upload→run recipe: (1) POST /api/uploads with the file's `name`, exact `size` in bytes, and `mime` — the response carries a `uri` (e.g. `upload://upl_xxx`), a signed `url`, and `headers`. (2) PUT the raw file bytes (not multipart) to `url`, sending exactly the returned `headers` (`Content-Type`, plus `Content-Length` when the storage signs the declared size — the body must then be exactly `size` bytes). No other headers are required — in particular no checksum headers; the signed URL does not bind one. (3) Call `runAgent` with `uri` as the value of the file-typed input field. The actual byte count must equal the declared `size`, and binary MIMEs are verified by magic-byte sniffing. Consumed uploads are NOT single-use: the bytes stay retained — and the `uri` re-consumable — for `UPLOAD_RETENTION_HOURS` (default 24 h) after the first consume, so the same input can be re-run (e.g. via `rerun_from` after cancelling) without re-uploading. Unconsumed uploads expire with the signed URL. Small files (≤4 MiB decoded) can skip this flow entirely: inline the content directly in the `runAgent` input as `data:<mime>;name=<filename>;base64,<payload>`. Rate-limited to 20/min.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16719,7 +16824,7 @@
                       "additionalProperties": {
                         "type": "string"
                       },
-                      "description": "The complete set of headers the client MUST send verbatim on the PUT request (typically just `Content-Type`). Nothing else is required — no checksum headers."
+                      "description": "The complete set of headers the client MUST send verbatim on the PUT request (`Content-Type`, plus `Content-Length` bound to the declared `size` in S3 mode). Nothing else is required — no checksum headers."
                     },
                     "expiresAt": {
                       "type": "string",
@@ -16734,7 +16839,8 @@
                   "url": "https://s3.example.com/uploads/app_1/upl_abc123/invoice.pdf?X-Amz-...",
                   "method": "PUT",
                   "headers": {
-                    "Content-Type": "application/pdf"
+                    "Content-Type": "application/pdf",
+                    "Content-Length": "24576"
                   },
                   "expiresAt": "2026-04-14T12:15:00Z"
                 }
@@ -16761,7 +16867,7 @@
         "operationId": "writeUploadContent",
         "tags": ["Uploads"],
         "summary": "Write upload bytes (filesystem sink)",
-        "description": "Public endpoint used when the platform runs in filesystem storage mode. Authenticated via HMAC-signed `token` query parameter returned in the upload descriptor. The token binds storage key, declared MIME, max size and expiry. In S3 mode the signed URL points directly at the bucket and this endpoint is not used. Rate-limited per IP (60/min).",
+        "description": "Public endpoint used when the platform runs in filesystem storage mode. Authenticated via HMAC-signed `token` query parameter returned in the upload descriptor. The token binds storage key, declared MIME, max size and expiry; the max size is enforced while the body streams to disk, so chunked uploads cannot exceed it. In S3 mode the signed URL points directly at the bucket and this endpoint is not used. Rate-limited per IP (60/min).",
         "security": [],
         "parameters": [
           {
@@ -18385,6 +18491,13 @@
         "description": "Seconds to wait before retrying. Present on 429 responses.",
         "schema": {
           "type": "integer"
+        }
+      },
+      "WWWAuthenticate": {
+        "description": "RFC 6750 Bearer challenge, present on every 401. `Bearer error=\"invalid_token\"` when a credential was presented but rejected, bare `Bearer` when no credential was presented. Resources registered for RFC 9728 discovery (e.g. MCP) answer with a richer challenge carrying `resource_metadata=\"…\"`.",
+        "schema": {
+          "type": "string",
+          "example": "Bearer error=\"invalid_token\""
         }
       },
       "Link": {
@@ -20211,6 +20324,11 @@
     "responses": {
       "Unauthorized": {
         "description": "Missing or invalid authentication",
+        "headers": {
+          "WWW-Authenticate": {
+            "$ref": "#/components/headers/WWWAuthenticate"
+          }
+        },
         "content": {
           "application/problem+json": {
             "schema": {

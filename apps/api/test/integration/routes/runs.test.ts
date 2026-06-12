@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs } from "@appstrate/db/schema";
+import { auditEvents, runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -471,6 +471,21 @@ describe("Runs API", () => {
       const [row] = await db.select().from(runs).where(eq(runs.id, body.id!));
       expect(row!.modelLabel).toBe("Echo Default GPT");
       expect(row!.modelSource).toBe("org");
+
+      // The trigger leaves an audit trail (run.triggered, actor = the caller).
+      const auditRows = await db
+        .select()
+        .from(auditEvents)
+        .where(and(eq(auditEvents.action, "run.triggered"), eq(auditEvents.resourceId, body.id!)));
+      expect(auditRows).toHaveLength(1);
+      expect(auditRows[0]!.orgId).toBe(ctx.orgId);
+      expect(auditRows[0]!.resourceType).toBe("run");
+      expect(auditRows[0]!.actorType).toBe("user");
+      expect(auditRows[0]!.actorId).toBe(ctx.user.id);
+      expect(auditRows[0]!.after).toMatchObject({
+        packageId: "@runorg/echo-agent",
+        origin: "platform",
+      });
 
       await waitForBackgroundSettled();
     });
@@ -1013,6 +1028,18 @@ describe("Runs API", () => {
         .where(eq(runs.id, run.id));
       expect(final[0]!.status).toBe("cancelled");
       expect(final[0]!.sinkClosedAt).not.toBeNull();
+
+      // The cancellation leaves an audit trail (run.cancelled, before/after status).
+      const auditRows = await db
+        .select()
+        .from(auditEvents)
+        .where(and(eq(auditEvents.action, "run.cancelled"), eq(auditEvents.resourceId, run.id)));
+      expect(auditRows).toHaveLength(1);
+      expect(auditRows[0]!.orgId).toBe(ctx.orgId);
+      expect(auditRows[0]!.resourceType).toBe("run");
+      expect(auditRows[0]!.actorId).toBe(ctx.user.id);
+      expect(auditRows[0]!.before).toMatchObject({ status: "running" });
+      expect(auditRows[0]!.after).toMatchObject({ status: "cancelled" });
     });
 
     it("cancels a pending run and transitions it to cancelled", async () => {
@@ -1129,6 +1156,20 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.deleted_count).toBeGreaterThanOrEqual(2);
+
+      // The bulk delete leaves an audit trail (agent-scoped, with the count).
+      const auditRows = await db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.action, "agent.runs_bulk_deleted"),
+            eq(auditEvents.resourceId, "@runorg/del-agent"),
+          ),
+        );
+      expect(auditRows).toHaveLength(1);
+      expect(auditRows[0]!.resourceType).toBe("agent");
+      expect(auditRows[0]!.after).toMatchObject({ deletedCount: body.deleted_count });
     });
 
     it("returns 409 when running runs exist", async () => {

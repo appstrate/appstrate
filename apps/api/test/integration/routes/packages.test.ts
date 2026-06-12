@@ -7,8 +7,8 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedAgent, seedPackage, seedPackageVersion, seedApplication } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
-import { packages, packageDistTags } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
+import { auditEvents, packages, packageDistTags } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
 import { db } from "../../helpers/db.ts";
 
 const app = getTestApp();
@@ -355,6 +355,23 @@ describe("Packages API", () => {
       expect(body.message).toBeUndefined();
 
       await assertDbHas(packages, eq(packages.id, "@pkgorg/new-agent"));
+
+      // The creation leaves an audit trail (package.created, actor = caller).
+      const auditRows = await db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.action, "package.created"),
+            eq(auditEvents.resourceId, "@pkgorg/new-agent"),
+          ),
+        );
+      expect(auditRows).toHaveLength(1);
+      expect(auditRows[0]!.orgId).toBe(ctx.orgId);
+      expect(auditRows[0]!.resourceType).toBe("package");
+      expect(auditRows[0]!.actorType).toBe("user");
+      expect(auditRows[0]!.actorId).toBe(ctx.user.id);
+      expect(auditRows[0]!.after).toMatchObject({ type: "agent", version: "0.1.0" });
     });
 
     it("returns 400 when content is empty", async () => {
@@ -907,6 +924,22 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(204);
       await assertDbMissing(packages, eq(packages.id, "@pkgorg/delete-me"));
+
+      // The deletion leaves an audit trail (package.deleted, actor = caller).
+      const auditRows = await db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.action, "package.deleted"),
+            eq(auditEvents.resourceId, "@pkgorg/delete-me"),
+          ),
+        );
+      expect(auditRows).toHaveLength(1);
+      expect(auditRows[0]!.orgId).toBe(ctx.orgId);
+      expect(auditRows[0]!.resourceType).toBe("package");
+      expect(auditRows[0]!.actorId).toBe(ctx.user.id);
+      expect(auditRows[0]!.after).toMatchObject({ type: "agent" });
     });
 
     it("returns 403 when trying to delete package from another org", async () => {

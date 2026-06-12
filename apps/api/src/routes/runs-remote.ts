@@ -29,6 +29,7 @@ import { idempotency } from "../middleware/idempotency.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest, notFound, ApiError } from "../lib/errors.ts";
 import { getActor } from "../lib/actor.ts";
+import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { insertShadowPackage, buildShadowLoadedPackage } from "../services/inline-run.ts";
@@ -318,6 +319,18 @@ export function createRunsRemoteRouter() {
         path: attributionPath,
         packageId: agentForRun.id,
         versionLabel: overrideVersionLabel ?? null,
+      });
+
+      await recordAuditFromContext(c, {
+        action: "run.triggered",
+        resourceType: "run",
+        resourceId: result.runId,
+        after: {
+          packageId: agentForRun.id,
+          versionLabel: overrideVersionLabel ?? null,
+          origin: "remote",
+          attributionPath,
+        },
       });
 
       // Operation envelope (legit exception under #657: one-time sink

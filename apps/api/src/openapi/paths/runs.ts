@@ -105,9 +105,18 @@ export const runsPaths = {
               schema: { $ref: "#/components/schemas/Run" },
               example: {
                 id: "run_cm1abc123def456",
+                packageId: "@acme/email-sorter",
+                userId: "usr_k7x9m2p4q1",
+                orgId: "org_r3t5w8y1z6",
+                applicationId: "app_m4n5o6p7",
                 status: "pending",
+                input: { message: "Summarize my latest emails" },
+                version_label: "1.2.0",
+                version_dirty: false,
+                version_ref: "1.2.0",
                 model_label: "Claude Sonnet 4",
                 model_source: "org",
+                started_at: "2026-01-15T10:30:00Z",
               },
             },
           },
@@ -194,6 +203,7 @@ export const runsPaths = {
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            Link: { $ref: "#/components/headers/Link" },
           },
           content: {
             "application/json": {
@@ -351,8 +361,17 @@ export const runsPaths = {
               },
               example: {
                 id: "run_cm1abc123",
-                packageId: "@inline/r-abc12345-...",
+                packageId: "@inline/r-abc12345-6789-4cde-8f01-23456789abcd",
+                userId: "usr_k7x9m2p4q1",
+                orgId: "org_r3t5w8y1z6",
+                applicationId: "app_m4n5o6p7",
                 status: "pending",
+                input: { docId: "doc_123" },
+                version_dirty: true,
+                version_ref: "draft",
+                model_label: "Claude Sonnet 4",
+                model_source: "org",
+                started_at: "2026-01-15T10:30:00Z",
               },
             },
           },
@@ -502,6 +521,7 @@ export const runsPaths = {
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            Link: { $ref: "#/components/headers/Link" },
           },
           content: {
             "application/json": {
@@ -608,6 +628,24 @@ export const runsPaths = {
             },
           },
         },
+        "400": {
+          description:
+            "Invalid `wait` parameter (negative, fractional, or non-numeric value — see the `wait` parameter description)",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Bad Request",
+                status: 400,
+                detail:
+                  "Invalid 'wait' value: expected true, false, or a non-negative integer number of seconds (max 55)",
+                code: "invalid_request",
+                requestId: "req_abc123",
+              },
+            },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -681,6 +719,7 @@ export const runsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -707,7 +746,24 @@ export const runsPaths = {
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Run" },
-              example: { id: "run_cm1abc123def456", status: "cancelled" },
+              example: {
+                id: "run_cm1abc123def456",
+                packageId: "@acme/email-sorter",
+                userId: "usr_k7x9m2p4q1",
+                orgId: "org_r3t5w8y1z6",
+                applicationId: "app_m4n5o6p7",
+                status: "cancelled",
+                error: "Cancelled by user",
+                version_label: "1.2.0",
+                version_dirty: false,
+                version_ref: "1.2.0",
+                model_label: "Claude Sonnet 4",
+                model_source: "org",
+                cost: 0.0012,
+                started_at: "2026-01-15T10:30:00Z",
+                completed_at: "2026-01-15T10:30:45Z",
+                duration: 45000,
+              },
             },
           },
         },

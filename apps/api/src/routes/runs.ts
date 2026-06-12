@@ -37,6 +37,7 @@ import { triggerInlineRun, type InlineRunBody } from "../services/inline-run.ts"
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { getEnv } from "@appstrate/env";
+import { recordAuditFromContext } from "../services/audit.ts";
 import { currentTraceparent } from "../observability/index.ts";
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/schema";
 import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
@@ -159,6 +160,17 @@ export function createRunsRouter() {
           traceparent: runTraceparent(c),
           runnerName: runner.name,
           runnerKind: runner.kind,
+        });
+
+        await recordAuditFromContext(c, {
+          action: "run.triggered",
+          resourceType: "run",
+          resourceId: runId,
+          after: {
+            packageId: agent.id,
+            versionLabel: overrideVersionLabel ?? null,
+            origin: "platform",
+          },
         });
 
         // 201 + the bare created run resource — same DTO and serializer as
@@ -386,6 +398,14 @@ export function createRunsRouter() {
       error: { message: "Cancelled by user" },
     });
 
+    await recordAuditFromContext(c, {
+      action: "run.cancelled",
+      resourceType: "run",
+      resourceId: runId,
+      before: { status: run.status },
+      after: { status: "cancelled", packageId: run.packageId },
+    });
+
     // Return the bare updated run resource — read AFTER synthesiseFinalize so
     // the response reflects the terminal state (`status: "cancelled"`, cost,
     // completed_at). Same DTO and serializer as GET /runs/:id (#657).
@@ -421,13 +441,20 @@ export function createRunsRouter() {
 
       const body = await c.req.json<InlineRunBody>();
 
-      const { runId } = await triggerInlineRun({
+      const { runId, packageId } = await triggerInlineRun({
         orgId,
         applicationId,
         actor,
         body,
         apiKeyId: c.get("apiKeyId") ?? undefined,
         traceparent: runTraceparent(c),
+      });
+
+      await recordAuditFromContext(c, {
+        action: "run.triggered",
+        resourceType: "run",
+        resourceId: runId,
+        after: { packageId, origin: "inline" },
       });
 
       // 201 + the bare created run resource (#657) — same DTO and serializer
@@ -493,6 +520,12 @@ export function createRunsRouter() {
       }
 
       const deleted = await deletePackageRuns(scope, agent.id);
+      await recordAuditFromContext(c, {
+        action: "agent.runs_bulk_deleted",
+        resourceType: "agent",
+        resourceId: agent.id,
+        after: { deletedCount: deleted },
+      });
       return c.json({ deleted_count: deleted });
     },
   );

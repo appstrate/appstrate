@@ -15,6 +15,7 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { createUpload, writeFsUploadContent } from "../services/uploads.ts";
+import { recordAuditFromContext } from "../services/audit.ts";
 import { parseBody, invalidRequest, unauthorized } from "../lib/errors.ts";
 import { verifyFsUploadToken } from "@appstrate/core/storage-fs";
 import { getEnv } from "@appstrate/env";
@@ -49,6 +50,12 @@ export function createUploadsRouter() {
       name: data.name,
       size: data.size,
       mime: data.mime,
+    });
+    await recordAuditFromContext(c, {
+      action: "upload.created",
+      resourceType: "upload",
+      resourceId: upload.id,
+      after: { name: data.name, size: data.size, mime: data.mime },
     });
     return c.json(upload, 201);
   });
