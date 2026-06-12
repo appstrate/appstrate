@@ -197,6 +197,13 @@ export interface RunRemoteOptions {
   recordPollEveryNTicks?: number;
   /** Per-request timeout (ms). Default 30000. */
   requestTimeoutMs?: number;
+  /**
+   * Backoff schedule (ms) for transient-5xx trigger retries — one entry per
+   * retry, so the length bounds the retry count. Defaults to
+   * `TRANSIENT_RETRY_DELAYS_MS`; tests inject ~1 ms delays to avoid real
+   * backoff sleeps without changing the attempt-counting semantics.
+   */
+  transientRetryDelaysMs?: number[];
   /** Output writer for stdout (`--json` / final result). Defaults to `process.stdout.write`. */
   writeStdout?: (chunk: string) => void;
   /** Output writer for human-facing status lines. Defaults to `process.stderr.write`. */
@@ -455,6 +462,7 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
   // (auth, not-found, validation), 408 (request timeout — surface to user),
   // or network-level errors (DNS / TLS) since those are typically not
   // transient on a CLI invocation.
+  const retryDelaysMs = opts.transientRetryDelaysMs ?? TRANSIENT_RETRY_DELAYS_MS;
   let res!: Response;
   for (let attempt = 0; ; attempt++) {
     res = await timeoutFetch(deps, url.toString(), {
@@ -464,8 +472,8 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
     });
     if (res.ok) break;
     const transient = res.status === 502 || res.status === 503 || res.status === 504;
-    if (!transient || attempt >= TRANSIENT_RETRY_DELAYS_MS.length) break;
-    await sleep(TRANSIENT_RETRY_DELAYS_MS[attempt]!);
+    if (!transient || attempt >= retryDelaysMs.length) break;
+    await sleep(retryDelaysMs[attempt]!);
   }
 
   if (!res.ok) {

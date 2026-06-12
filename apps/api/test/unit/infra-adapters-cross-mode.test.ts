@@ -23,6 +23,18 @@ import type { JobQueue, QueueJob } from "../../src/infra/queue/interface.ts";
 // Shared test suite — runs against any adapter implementation
 // ---------------------------------------------------------------------------
 
+/** Poll `predicate` every 10ms until it holds (or fail after `timeoutMs`). */
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await predicate())) {
+    if (Date.now() > deadline) throw new Error("condition not met within timeout");
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 function pubsubSuite(name: string, create: () => PubSub) {
   describe(`PubSub (${name})`, () => {
     let ps: PubSub;
@@ -34,7 +46,7 @@ function pubsubSuite(name: string, create: () => PubSub) {
       await ps.subscribe("ch1", (msg) => received.push(msg));
       await ps.publish("ch1", "a");
       await ps.publish("ch1", "b");
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => received.length === 2);
       expect(received).toEqual(["a", "b"]);
       await ps.unsubscribe("ch1");
     });
@@ -44,10 +56,11 @@ function pubsubSuite(name: string, create: () => PubSub) {
       const received: string[] = [];
       await ps.subscribe("ch2", (msg) => received.push(msg));
       await ps.publish("ch2", "before");
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => received.length === 1);
       await ps.unsubscribe("ch2");
+      // LocalPubSub delivers synchronously inside publish(), so once it
+      // resolves the (absent) delivery has already happened — no settle wait.
       await ps.publish("ch2", "after");
-      await new Promise((r) => setTimeout(r, 50));
       expect(received).toEqual(["before"]);
     });
   });
@@ -78,8 +91,15 @@ function cacheSuite(name: string, create: () => KeyValueCache) {
       c = create();
       await c.set("ttl", "val", { ttlSeconds: 1 });
       expect(await c.get("ttl")).toBe("val");
-      await new Promise((r) => setTimeout(r, 1100));
-      expect(await c.get("ttl")).toBeNull();
+      // LocalCache computes expiry from Date.now() — pin the clock 1.1s
+      // ahead instead of sleeping past the real TTL.
+      const realNow = Date.now;
+      Date.now = () => realNow() + 1_100;
+      try {
+        expect(await c.get("ttl")).toBeNull();
+      } finally {
+        Date.now = realNow;
+      }
     });
 
     it("returns null for missing", async () => {
@@ -118,7 +138,7 @@ function queueSuite(name: string, create: () => JobQueue<{ v: string }>) {
       });
       await q.add("j1", { v: "a" });
       await q.add("j2", { v: "b" });
-      await new Promise((r) => setTimeout(r, 300));
+      await waitFor(() => processed.includes("a") && processed.includes("b"));
       expect(processed).toContain("a");
       expect(processed).toContain("b");
       await q.shutdown();
@@ -132,7 +152,12 @@ function queueSuite(name: string, create: () => JobQueue<{ v: string }>) {
         throw new PermanentJobError("stop");
       });
       await q.add("perm", { v: "x" }, { attempts: 5 });
-      await new Promise((r) => setTimeout(r, 500));
+      await waitFor(() => attempts >= 1);
+      // A pending retry keeps the job active (the backoff timer is awaited
+      // inside the queue's executeJob), so a fully drained queue proves no
+      // retry was scheduled — stronger than the old fixed 500ms sleep,
+      // which ended before the 1s first-retry backoff would have fired.
+      await waitFor(async () => (await q.count()) === 0);
       expect(attempts).toBe(1);
       await q.shutdown();
     });

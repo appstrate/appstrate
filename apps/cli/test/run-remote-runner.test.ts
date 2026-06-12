@@ -127,6 +127,9 @@ function buildBaseOpts(over: Partial<RunRemoteOptions> = {}): RunRemoteOptions {
     json: false,
     bundleLabel: "@system/hello-world",
     pollIntervalMs: 1,
+    // Keep the production schedule's LENGTH (2 retries) so the retry-budget
+    // assertions stay meaningful, but drop the real 500/1500 ms backoffs.
+    transientRetryDelaysMs: [1, 1],
     ...over,
   };
 }

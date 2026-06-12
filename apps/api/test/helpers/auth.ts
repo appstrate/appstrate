@@ -3,12 +3,31 @@
 /**
  * Test authentication helpers.
  *
- * Uses Better Auth's actual sign-up API to create real users with valid signed session cookies.
+ * `createTestUser` seeds the Better Auth tables (user/account/session/profiles)
+ * directly and crafts the signed session cookie itself — skipping the full
+ * HTTP sign-up round-trip that used to dominate integration-test setup time.
+ * The cookie is still a REAL Better Auth cookie: the auth middleware verifies
+ * it through `getAuth().api.getSession()` (HMAC signature + DB session row),
+ * so nothing about what the tests prove is weakened.
+ *
+ * Tests that exercise the sign-up HTTP flow itself (email-verification
+ * interstitial, signup gates, …) should use `createTestUserViaHttp` — the
+ * original implementation that POSTs `/api/auth/sign-up/email`.
+ *
  * Organizations, memberships, and applications are seeded directly in the DB.
  */
 import { eq, sql } from "drizzle-orm";
+import { getAuth } from "@appstrate/db/auth";
 import { db } from "./db.ts";
-import { organizations, organizationMembers, applications } from "@appstrate/db/schema";
+import {
+  organizations,
+  organizationMembers,
+  applications,
+  user as userTable,
+  session as sessionTable,
+  account as accountTable,
+  profiles,
+} from "@appstrate/db/schema";
 import type { OrgRole } from "@appstrate/shared-types";
 import { getTestApp } from "./app.ts";
 
@@ -37,13 +56,118 @@ export interface TestContext {
   defaultAppId: string;
 }
 
+// ─── Session-cookie crafting (fast path) ─────────────────────────────────────
+//
+// Better Auth signs the session cookie via better-call's `signCookieValue`:
+//   encodeURIComponent(`${token}.${base64(HMAC-SHA256(secret, token))}`)
+// (see better-call/dist/crypto.mjs — standard base64 via btoa, NOT base64url).
+// The secret is read from the LIVE auth instance (`getAuth().$context.secret`)
+// — not from `getEnv()` — so the crafted signature always matches what the
+// middleware verifies with, even when a unit test mutates `BETTER_AUTH_SECRET`
+// in `process.env` or `_rebuildAuthForTesting()` swaps the instance mid-suite.
+// If a better-auth/better-call upgrade ever changes this format, every
+// integration test fails with 401 on its first authenticated request — loud
+// and immediate.
+
+const SESSION_COOKIE_NAME = "better-auth.session_token";
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // matches auth.ts session.expiresIn
+
+const textEncoder = new TextEncoder();
+let signingKey: CryptoKey | null = null;
+let signingKeySecret: string | null = null;
+
+async function getSigningKey(): Promise<CryptoKey> {
+  const secret = (await getAuth().$context).secret;
+  if (!signingKey || signingKeySecret !== secret) {
+    signingKey = await crypto.subtle.importKey(
+      "raw",
+      textEncoder.encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    signingKeySecret = secret;
+  }
+  return signingKey;
+}
+
+/** Build the `Cookie` header value for a session token, signed like Better Auth does. */
+async function signSessionCookie(token: string): Promise<string> {
+  const key = await getSigningKey();
+  const sigBuf = await crypto.subtle.sign("HMAC", key, textEncoder.encode(token));
+  const signature = btoa(String.fromCharCode(...new Uint8Array(sigBuf)));
+  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(`${token}.${signature}`)}`;
+}
+
+function randomSessionToken(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Create a test user by seeding the Better Auth tables directly.
+ * Returns the user record and a signed session cookie that the app's
+ * auth middleware accepts (verified through `getSession()` like any
+ * production cookie — signature check + session row lookup).
+ *
+ * Rows seeded (mirrors what a real sign-up produces in SMTP-off mode):
+ *   - `user`     — emailVerified=false, realm="platform"
+ *   - `profiles` — inserted by the BA `user.create.after` hook in prod
+ *   - `account`  — providerId="credential" with the AUTH_FAST_TEST_HASH
+ *                  SHA-256 password hash, so HTTP sign-in with the same
+ *                  password still verifies (see packages/db/src/auth.ts)
+ *   - `session`  — realm="platform" (denormalized, read by the realm guard)
+ *
+ * For tests that must exercise the real sign-up HTTP flow, use
+ * `createTestUserViaHttp` instead.
+ */
+export async function createTestUser(
+  overrides: Partial<{ email: string; name: string; password: string }> = {},
+): Promise<TestUser & { cookie: string }> {
+  const email = (overrides.email ?? `test-${nextId()}@test.com`).toLowerCase();
+  const name = overrides.name ?? `Test User ${nextId()}`;
+  const password = overrides.password ?? "TestPassword123!";
+
+  const userId = crypto.randomUUID();
+  const token = randomSessionToken();
+  // AUTH_FAST_TEST_HASH=1 (set by test/setup/preload.ts) swaps Better Auth's
+  // scrypt for plain SHA-256 — mirror that scheme so a later HTTP sign-in
+  // with this password verifies against the account row.
+  const passwordHash = new Bun.CryptoHasher("sha256").update(password).digest("hex");
+
+  await db.insert(userTable).values({ id: userId, name, email, realm: "platform" });
+  await Promise.all([
+    db.insert(profiles).values({ id: userId, displayName: name || email, language: "fr" }),
+    db.insert(accountTable).values({
+      id: crypto.randomUUID(),
+      accountId: userId,
+      providerId: "credential",
+      userId,
+      password: passwordHash,
+    }),
+    db.insert(sessionTable).values({
+      id: crypto.randomUUID(),
+      token,
+      userId,
+      expiresAt: new Date(Date.now() + SESSION_TTL_MS),
+      realm: "platform",
+    }),
+  ]);
+
+  return { id: userId, email, name, cookie: await signSessionCookie(token) };
+}
+
 /**
  * Create a test user via Better Auth's sign-up endpoint.
  * Returns the user record and the signed session cookie.
  *
  * This goes through the real auth flow: sign-up → session creation → cookie.
+ * Slower than `createTestUser` — use it only when the test depends on the
+ * actual sign-up HTTP behavior (verification interstitial, signup gates,
+ * BA hooks firing, …).
  */
-export async function createTestUser(
+export async function createTestUserViaHttp(
   overrides: Partial<{ email: string; name: string; password: string }> = {},
 ): Promise<TestUser & { cookie: string }> {
   const app = getTestApp();

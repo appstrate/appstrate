@@ -13,8 +13,11 @@
  * deadline. The buggy build never gets there — it spins in `provisionDocuments`
  * and is silent after "runtime starting".
  *
- * Gated: skips when Docker or the `appstrate-pi` image is unavailable (local
- * dev without a built image, CI without the runtime image). Build it with:
+ * Gated: heavy DinD e2e (~11s), so it is opt-in locally — set `TEST_DOCKER=1`
+ * (or use the root `bun run test:docker` script) to enable it; CI always runs
+ * it (GitHub Actions sets `CI=true` automatically). Even when enabled, it
+ * still skips if Docker or the `appstrate-pi` image is unavailable (local dev
+ * without a built image, CI without the runtime image). Build it with:
  *   docker build --platform linux/amd64 -t appstrate-pi -f runtime-pi/Dockerfile .
  */
 
@@ -46,8 +49,12 @@ function hasImage(): boolean {
   }
 }
 
-const RUN = hasDocker() && hasImage();
-if (!RUN) {
+// Opt-in gate: TEST_DOCKER=1 locally, CI=true on GitHub Actions (set
+// automatically). Mirrors the rule in apps/api/test/helpers/tier.ts.
+const dockerEnabled = process.env.TEST_DOCKER === "1" || process.env.CI === "true";
+
+const RUN = dockerEnabled && hasDocker() && hasImage();
+if (dockerEnabled && !RUN) {
   console.warn(
     `[provision-container.e2e] skipped — docker=${hasDocker()} image(${IMAGE})=${hasImage()}`,
   );

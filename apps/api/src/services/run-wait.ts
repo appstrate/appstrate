@@ -52,6 +52,20 @@ export const MAX_WAIT_SECONDS = 55;
 const FALLBACK_POLL_INTERVAL_MS = 2_000;
 
 /**
+ * Resolve the fallback poll cadence. `RUN_WAIT_POLL_INTERVAL_MS` is a
+ * test-only override (set in `test/setup/preload.ts`, same pattern as
+ * `REMOTE_RUN_BUFFER_FLUSH_MS`) so route-level long-poll tests don't pay a
+ * real 2 s tick per wakeup. Unset in production — read at use time, never
+ * cached, so the default applies everywhere else.
+ */
+function fallbackPollIntervalMs(): number {
+  const raw = process.env["RUN_WAIT_POLL_INTERVAL_MS"];
+  if (raw === undefined) return FALLBACK_POLL_INTERVAL_MS;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : FALLBACK_POLL_INTERVAL_MS;
+}
+
+/**
  * Per-identity concurrent-waiter ceiling. Each waiter holds an HTTP
  * connection for up to {@link MAX_WAIT_SECONDS} and registers a realtime
  * subscriber, so an unbounded caller could pin one connection per request.
@@ -229,7 +243,7 @@ export async function waitForRunTerminal(opts: {
   pollIntervalMs?: number;
 }): Promise<void> {
   const { runId, scope, timeoutMs, signal, identity } = opts;
-  const pollIntervalMs = opts.pollIntervalMs ?? FALLBACK_POLL_INTERVAL_MS;
+  const pollIntervalMs = opts.pollIntervalMs ?? fallbackPollIntervalMs();
 
   if (signal?.aborted || timeoutMs <= 0) return;
 
