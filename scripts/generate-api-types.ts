@@ -33,11 +33,26 @@ const BANNER = `/* eslint-disable */
 
 `;
 
+/** Codepoint-order key sort — deterministic across platforms and locales. */
+function sortKeys<T>(obj: Record<string, T>): Record<string, T> {
+  return Object.fromEntries(Object.entries(obj).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
 async function generate(): Promise<string> {
   // Built-in modules (e.g. webhooks) contribute paths the web SPA may call,
   // so they are included — same discovery as verify-openapi/detect-breaking.
   const { paths, componentSchemas, tags } = await collectModuleOpenApi();
-  const spec = buildOpenApiSpec(paths, componentSchemas, tags);
+  const spec = buildOpenApiSpec(paths, componentSchemas, tags) as {
+    paths?: Record<string, unknown>;
+    components?: { schemas?: Record<string, unknown> };
+  };
+
+  // Canonicalize object key order before emitting types: the merged spec's
+  // key order depends on module discovery order, and `--check` byte-compares
+  // the output across machines. Sorting here keeps the committed file
+  // independent of where it was generated.
+  if (spec.paths) spec.paths = sortKeys(spec.paths);
+  if (spec.components?.schemas) spec.components.schemas = sortKeys(spec.components.schemas);
 
   const ast = await openapiTS(JSON.parse(JSON.stringify(spec)), {
     // Wire enums stay string literal unions (default) — keep options explicit
