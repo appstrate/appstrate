@@ -1069,6 +1069,90 @@ if (orphans.length === 0) {
 }
 
 // ═══════════════════════════════════════════════════
+// 6. Response Schema Presence
+// ═══════════════════════════════════════════════════
+//
+// Every 2xx response (except 204 No Content) must declare `content`, and every
+// JSON media type must carry a `schema`. Without one, the generated frontend
+// types (scripts/generate-api-types.ts) degrade to `unknown` and response
+// validation has nothing to check against — a silent hole in the contract.
+// Non-JSON media types (SSE, binary, HTML) are exempt; fully body-less or
+// otherwise justified responses go through the allowlist below.
+
+console.log(`\n  6. Response Schema Presence`);
+console.log(`  -----------------------------`);
+
+// "METHOD /path STATUS" entries allowed to omit content/schema, with a reason.
+const RESPONSE_SCHEMA_ALLOWLIST = new Set<string>([
+  // OAuth/OIDC discovery metadata — shape owned by Better Auth, not consumed
+  // by the SPA's typed client.
+  "GET /.well-known/oauth-authorization-server 200",
+  "GET /.well-known/openid-configuration 200",
+  "GET /api/auth/oauth2/authorize 200",
+  "GET /api/auth/oauth2/userinfo 200",
+  "POST /api/auth/oauth2/revoke 200",
+  "GET /api/oauth/logout 200",
+  // Server-rendered HTML pages (device-flow activation, OAuth callback).
+  "GET /activate 200",
+  "POST /activate/approve 200",
+  "POST /activate/deny 200",
+  "GET /api/integrations/callback 200",
+  // LLM proxy passthrough — the body is the upstream provider's response,
+  // verbatim; there is no stable schema to declare.
+  "POST /api/llm-proxy/anthropic-messages/v1/messages 200",
+  "POST /api/llm-proxy/mistral-conversations/v1/chat/completions 200",
+  "POST /api/llm-proxy/openai-completions/v1/chat/completions 200",
+]);
+
+const JSON_MEDIA_TYPE = /^application\/([a-z0-9.+-]+\+)?json$/;
+
+const schemaGaps: string[] = [];
+for (const [specPath, pathItem] of Object.entries(
+  openApiSpec.paths as Record<string, Record<string, unknown>>,
+)) {
+  for (const verb of ROUTE_VERBS) {
+    const op = (pathItem as Record<string, unknown>)[verb] as Record<string, unknown> | undefined;
+    if (!op || typeof op !== "object") continue;
+    const responses = (op.responses ?? {}) as Record<string, unknown>;
+    for (const [status, rawResp] of Object.entries(responses)) {
+      if (!/^2\d\d$/.test(status) || status === "204") continue;
+      const key = `${verb.toUpperCase()} ${specPath} ${status}`;
+      if (RESPONSE_SCHEMA_ALLOWLIST.has(key)) continue;
+
+      let resp = rawResp as Record<string, unknown>;
+      if (typeof resp.$ref === "string") {
+        resp = resolveRef(resp.$ref) ?? {};
+      }
+      const content = resp.content as Record<string, Record<string, unknown>> | undefined;
+      if (!content || Object.keys(content).length === 0) {
+        schemaGaps.push(`${key} — no content declared (use 204 if truly body-less)`);
+        continue;
+      }
+      for (const [mediaType, media] of Object.entries(content)) {
+        if (!JSON_MEDIA_TYPE.test(mediaType)) continue;
+        if (!media || typeof media.schema !== "object" || media.schema === null) {
+          schemaGaps.push(`${key} — ${mediaType} has no schema`);
+        }
+      }
+    }
+  }
+}
+
+if (schemaGaps.length === 0) {
+  console.log(
+    `  OK — every 2xx JSON response declares a schema (allowlist: ${RESPONSE_SCHEMA_ALLOWLIST.size}).`,
+  );
+} else {
+  exitCode = 1;
+  console.log(`\n  2xx responses without a schema (${schemaGaps.length}):`);
+  for (const gap of schemaGaps.sort()) console.log(`    - ${gap}`);
+  console.log(
+    `\n  Declare a response schema in apps/api/src/openapi/paths/, switch the ` +
+      `response to 204, or add a justified entry to RESPONSE_SCHEMA_ALLOWLIST in this file.`,
+  );
+}
+
+// ═══════════════════════════════════════════════════
 // Summary
 // ═══════════════════════════════════════════════════
 

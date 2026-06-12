@@ -14820,8 +14820,10 @@ export interface operations {
                      */
                     "application/json": {
                         /** @enum {string} */
-                        object?: "list";
-                        data?: components["schemas"]["ApplicationObject"][];
+                        object: "list";
+                        data: components["schemas"]["ApplicationObject"][];
+                        /** @description Whether more results exist beyond this page */
+                        hasMore: boolean;
                     };
                 };
             };

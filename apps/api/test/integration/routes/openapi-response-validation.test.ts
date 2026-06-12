@@ -56,6 +56,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
     });
   });
 
@@ -82,6 +83,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect(body).toHaveProperty("object", "list");
       expect(body).toHaveProperty("data");
       expect((body as any).data).toBeArray();
@@ -107,6 +109,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       // ProblemDetail should have these fields
       expect(body).toHaveProperty("status");
       expect(body).toHaveProperty("code");
@@ -136,6 +139,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect(body).toHaveProperty("object");
       expect((body as any).object).toBe("list");
       expect(body).toHaveProperty("data");
@@ -163,6 +167,7 @@ describe("OpenAPI response validation", () => {
           console.warn(`ApplicationObject extra fields for ${item.id}:`, result.extraFields);
         }
         expect(result.valid).toBe(true);
+        expect(result.extraFields).toEqual([]);
       }
     });
   });
@@ -190,6 +195,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect(body).toHaveProperty("data");
       expect((body as any).data).toBeArray();
       expect((body as any).data.length).toBeGreaterThanOrEqual(1);
@@ -213,6 +219,7 @@ describe("OpenAPI response validation", () => {
           console.warn(`Organization extra fields for ${org.id}:`, result.extraFields);
         }
         expect(result.valid).toBe(true);
+        expect(result.extraFields).toEqual([]);
       }
     });
   });
@@ -240,6 +247,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect(body).toHaveProperty("id");
     });
   });
@@ -270,6 +278,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect(body).toHaveProperty("count");
       expect(typeof (body as any).count).toBe("number");
     });
@@ -304,6 +313,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect(body).toHaveProperty("counts");
     });
   });
@@ -337,6 +347,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
     });
   });
 
@@ -364,6 +375,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect(body).toHaveProperty("data");
       expect((body as any).data).toBeArray();
       expect((body as any).data.length).toBeGreaterThanOrEqual(1);
@@ -393,11 +405,54 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect((body as any).id).toBe(eu.id);
     });
   });
 
   // ── Schedules list (auth + app-scoped) ─────────────────────
+
+  describe("PATCH /api/end-users/{id} -> 200", () => {
+    it("response body conforms to OpenAPI schema", async () => {
+      const schema = getResponseSchema("/api/end-users/{id}", "PATCH", "200");
+      expect(schema).not.toBeNull();
+
+      const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+
+      const res = await app.request(`/api/end-users/${eu.id}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Renamed End User", metadata: { plan: "pro" } }),
+      });
+      expect(res.status).toBe(200);
+
+      const body = await res.json();
+      const result = validateResponse(body, schema);
+
+      if (!result.valid) {
+        console.error("PATCH /api/end-users/{id} 200 validation errors:", result.errors);
+      }
+      if (result.extraFields.length > 0) {
+        console.warn("PATCH /api/end-users/{id} 200 extra fields not in spec:", result.extraFields);
+      }
+
+      expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
+    });
+  });
+
+  describe("DELETE /api/end-users/{id} -> 204", () => {
+    it("returns an empty body as specified", async () => {
+      const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+
+      const res = await app.request(`/api/end-users/${eu.id}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(204);
+      expect(await res.text()).toBe("");
+    });
+  });
 
   describe("GET /api/schedules -> 200 (empty list)", () => {
     it("response body conforms to OpenAPI schema", async () => {
@@ -420,6 +475,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect(body).toBeArray();
     });
   });
@@ -447,6 +503,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect(body).toHaveProperty("data");
       expect((body as any).data).toBeArray();
     });
@@ -475,6 +532,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect(body).toHaveProperty("data");
       expect((body as any).data).toBeArray();
     });
@@ -506,6 +564,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect((body as any).object).toBe("list");
       expect((body as any).data).toBeArray();
       expect((body as any).data.length).toBeGreaterThanOrEqual(1);
@@ -535,6 +594,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
     });
   });
 
@@ -558,6 +618,7 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect(body).toHaveProperty("status");
       expect((body as any).status).toBe(404);
     });
