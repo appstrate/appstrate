@@ -127,6 +127,9 @@ function buildBaseOpts(over: Partial<RunRemoteOptions> = {}): RunRemoteOptions {
     json: false,
     bundleLabel: "@system/hello-world",
     pollIntervalMs: 1,
+    // Keep the production schedule's LENGTH (2 retries) so the retry-budget
+    // assertions stay meaningful, but drop the real 500/1500 ms backoffs.
+    transientRetryDelaysMs: [1, 1],
     ...over,
   };
 }
@@ -221,18 +224,24 @@ describe("runRemote — happy path", () => {
         "GET /api/runs/run_test_1/logs": [
           {
             status: 200,
-            body: [
-              {
-                id: 1,
-                runId: "run_test_1",
-                type: "progress",
-                event: "progress",
-                message: "runtime ready in 39ms",
-                level: "info",
-              },
-            ] satisfies RemoteRunLog[],
+            // Current platforms return the standard list envelope.
+            body: {
+              object: "list",
+              data: [
+                {
+                  id: 1,
+                  runId: "run_test_1",
+                  type: "progress",
+                  event: "progress",
+                  message: "runtime ready in 39ms",
+                  level: "info",
+                },
+              ] satisfies RemoteRunLog[],
+              hasMore: false,
+            },
           },
           {
+            // Older platforms returned a bare array — fetchLogs accepts both.
             status: 200,
             body: [
               {

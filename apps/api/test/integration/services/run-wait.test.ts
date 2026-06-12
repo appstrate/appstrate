@@ -24,6 +24,9 @@ import {
   waitForRunTerminal,
   parseWaitQuery,
   MAX_WAIT_SECONDS,
+  MAX_CONCURRENT_WAITERS_PER_IDENTITY,
+  activeWaiterCount,
+  activePollLoopCount,
 } from "../../../src/services/run-wait.ts";
 
 describe("waitForRunTerminal", () => {
@@ -129,6 +132,117 @@ describe("waitForRunTerminal", () => {
     });
     // The immediate re-check treats "row missing" as terminal.
     expect(Date.now() - start).toBeLessThan(2_000);
+  });
+
+  // ─── Per-identity concurrent-waiter cap ─────────────────────
+
+  it("caps concurrent waiters per identity — excess waits degrade to no-wait", async () => {
+    const run = await seedSvcRun("running");
+    const controller = new AbortController();
+    const identity = "user_cap_test";
+
+    // Saturate the identity's slots. The slot is claimed synchronously on
+    // call, before any awaiting starts.
+    const held = Array.from({ length: MAX_CONCURRENT_WAITERS_PER_IDENTITY }, () =>
+      waitForRunTerminal({
+        runId: run.id,
+        scope,
+        timeoutMs: 30_000,
+        pollIntervalMs: 5_000,
+        identity,
+        signal: controller.signal,
+      }),
+    );
+    expect(activeWaiterCount(identity)).toBe(MAX_CONCURRENT_WAITERS_PER_IDENTITY);
+
+    // One past the cap → resolves immediately (degrade-to-no-wait, not 429).
+    const start = Date.now();
+    await waitForRunTerminal({
+      runId: run.id,
+      scope,
+      timeoutMs: 30_000,
+      pollIntervalMs: 5_000,
+      identity,
+    });
+    expect(Date.now() - start).toBeLessThan(500);
+    // The degraded call did not consume (or leak) a slot.
+    expect(activeWaiterCount(identity)).toBe(MAX_CONCURRENT_WAITERS_PER_IDENTITY);
+
+    // A different identity is unaffected by the saturated one.
+    const otherController = new AbortController();
+    const other = waitForRunTerminal({
+      runId: run.id,
+      scope,
+      timeoutMs: 30_000,
+      pollIntervalMs: 5_000,
+      identity: "user_cap_other",
+      signal: otherController.signal,
+    });
+    expect(activeWaiterCount("user_cap_other")).toBe(1);
+
+    // Releasing the held waits frees every slot (no leaks).
+    controller.abort();
+    otherController.abort();
+    await Promise.all([...held, other]);
+    expect(activeWaiterCount(identity)).toBe(0);
+    expect(activeWaiterCount("user_cap_other")).toBe(0);
+  });
+
+  it("waits without an identity are not capped (internal callers)", async () => {
+    const run = await seedSvcRun("success");
+    // No identity → resolves via the immediate terminal re-check; the
+    // waiter-count map is untouched.
+    await waitForRunTerminal({ runId: run.id, scope, timeoutMs: 10_000, pollIntervalMs: 5_000 });
+    expect(activeWaiterCount("")).toBe(0);
+  });
+
+  // ─── Shared per-run DB poll loop ────────────────────────────
+
+  it("shares ONE DB poll loop per runId across concurrent waiters and tears it down", async () => {
+    const run = await seedSvcRun("running");
+
+    const waiters = Array.from({ length: 5 }, () =>
+      waitForRunTerminal({ runId: run.id, scope, timeoutMs: 10_000, pollIntervalMs: 50 }),
+    );
+    // Five concurrent waiters on the same run → exactly one poll loop.
+    expect(activePollLoopCount()).toBe(1);
+
+    await Bun.sleep(100);
+    await db.update(runs).set({ status: "success" }).where(eq(runs.id, run.id));
+
+    // The single shared poll (or the NOTIFY fan-out when realtime is live in
+    // this process) observes the transition and wakes EVERY waiter.
+    await Promise.all(waiters);
+    // Last waiter detached → the shared loop is gone.
+    expect(activePollLoopCount()).toBe(0);
+  });
+
+  it("keeps poll loops independent across different runs", async () => {
+    const runA = await seedSvcRun("running");
+    const runB = await seedSvcRun("running");
+    const controller = new AbortController();
+
+    const waits = [
+      waitForRunTerminal({
+        runId: runA.id,
+        scope,
+        timeoutMs: 10_000,
+        pollIntervalMs: 5_000,
+        signal: controller.signal,
+      }),
+      waitForRunTerminal({
+        runId: runB.id,
+        scope,
+        timeoutMs: 10_000,
+        pollIntervalMs: 5_000,
+        signal: controller.signal,
+      }),
+    ];
+    expect(activePollLoopCount()).toBe(2);
+
+    controller.abort();
+    await Promise.all(waits);
+    expect(activePollLoopCount()).toBe(0);
   });
 });
 

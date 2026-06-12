@@ -6,7 +6,12 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db } from "@appstrate/db/client";
-import { user as userTable, organizations, applications } from "@appstrate/db/schema";
+import {
+  user as userTable,
+  organizations,
+  applications,
+  applicationSocialProviders,
+} from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
   resolveSocialProviderForClient,
@@ -112,6 +117,23 @@ describe("resolveSocialProviderForClient", () => {
       "google",
     );
     expect(afterDelete).toBeNull();
+  });
+
+  it("treats a row whose ciphertext cannot be decrypted as unconfigured", async () => {
+    const applicationId = await seedApp();
+    // Envelope with a kid absent from the keyring — decryption must fail and
+    // the resolver must surface "not configured" instead of throwing.
+    await db.insert(applicationSocialProviders).values({
+      applicationId,
+      provider: "google",
+      clientId: "tenant-google-client",
+      clientSecretEncrypted: `v1:retired-unknown-kid:${Buffer.alloc(64).toString("base64")}`,
+    });
+    const resolved = await resolveSocialProviderForClient(
+      { level: "application", referencedApplicationId: applicationId },
+      "google",
+    );
+    expect(resolved).toBeNull();
   });
 
   it("returns null for non-application clients (no env fallback here)", async () => {

@@ -32,7 +32,7 @@
 import { createServer as netCreateServer } from "node:net";
 import type { Socket } from "node:net";
 
-import { isBlockedHost } from "./helpers.ts";
+import { isBlockedHost, resolveAndCheckHost, type HostResolver } from "./helpers.ts";
 import { parseConnectTarget, netConnectWithTimeout, relaySockets } from "./connect-tunnel.ts";
 import type { MitmListenerHandle } from "./integration-mitm-listener.ts";
 
@@ -51,6 +51,11 @@ export interface CreateEgressListenerOptions {
   onEvent?: (event: EgressListenerEvent) => void;
   /** Injectable SSRF predicate (tests pass a permissive stub). */
   isBlockedHostFn?: typeof isBlockedHost;
+  /**
+   * Injectable DNS resolver for the rebind guard (tests stub it; production
+   * uses the system resolver). Only consulted for non-IP-literal targets.
+   */
+  resolveHostFn?: HostResolver;
   /**
    * Optional hard egress allowlist (#543 follow-up). When provided, a CONNECT
    * whose host matches NONE of the patterns is refused. `undefined` (default)
@@ -71,6 +76,7 @@ export function createIntegrationEgressListener(
 ): MitmListenerHandle {
   const host = options.host ?? "127.0.0.1";
   const isBlockedHostFn = options.isBlockedHostFn ?? isBlockedHost;
+  const resolveHostFn = options.resolveHostFn;
   const emit = options.onEvent ?? (() => {});
   const matcher = options.authorizedHostMatcher;
 
@@ -113,10 +119,11 @@ export function createIntegrationEgressListener(
         return;
       }
       const { host: targetHost, port } = parsed;
+      const lowerHost = targetHost.toLowerCase();
 
-      // SSRF floor — the hard boundary. Refuse internal / cloud-metadata
-      // targets before opening any tunnel.
-      if (isBlockedHostFn(targetHost.toLowerCase())) {
+      // SSRF floor, literal layer — refuse IP-literal / known-internal
+      // targets before any DNS round-trip or tunnel.
+      if (isBlockedHostFn(lowerHost)) {
         emit({ kind: "tunnel-refused", target, reason: "ssrf" });
         clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
         clientSocket.destroy();
@@ -124,23 +131,48 @@ export function createIntegrationEgressListener(
       }
 
       // Optional hard egress allowlist (#543 follow-up; no-op by default).
-      if (matcher && !matcher(targetHost.toLowerCase())) {
+      if (matcher && !matcher(lowerHost)) {
         emit({ kind: "tunnel-refused", target, reason: "not-authorized" });
         clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
         clientSocket.destroy();
         return;
       }
 
-      const upstream = netConnectWithTimeout(port, targetHost, () => {
-        clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-        emit({ kind: "tunnel-opened", target });
-        relaySockets(clientSocket, upstream);
-      });
-      upstream.on("error", (err: Error) => {
-        emit({ kind: "tunnel-error", target, reason: err.message });
-        clientSocket.destroy();
-      });
-      clientSocket.on("error", () => upstream.destroy());
+      // SSRF floor, DNS-rebind layer (resolve-and-pin): a DNS name whose
+      // A/AAAA record points inside (10.x, 169.254.169.254, …) passes the
+      // literal check above — resolve every record, refuse if ANY lands in
+      // a blocked range (fail closed on resolution failure), then connect
+      // to the PINNED resolved IP so the upstream connect can't re-resolve
+      // to a different answer. Pinning is safe here: this is a blind CONNECT
+      // tunnel — the sidecar never opens TLS, the client's own handshake
+      // carries SNI/Host for the original name.
+      void (async () => {
+        const check = await resolveAndCheckHost(lowerHost, {
+          resolve: resolveHostFn,
+          isBlockedHostFn,
+        });
+        if (clientSocket.destroyed) return; // client gave up during resolution
+        if (check.blocked) {
+          emit({
+            kind: "tunnel-refused",
+            target,
+            reason: check.reason === "resolution-failed" ? "dns-resolution-failed" : "ssrf",
+          });
+          clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+          clientSocket.destroy();
+          return;
+        }
+        const upstream = netConnectWithTimeout(port, check.pinnedAddress, () => {
+          clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+          emit({ kind: "tunnel-opened", target });
+          relaySockets(clientSocket, upstream);
+        });
+        upstream.on("error", (err: Error) => {
+          emit({ kind: "tunnel-error", target, reason: err.message });
+          clientSocket.destroy();
+        });
+        clientSocket.on("error", () => upstream.destroy());
+      })();
     };
     clientSocket.on("data", onData);
     clientSocket.on("error", () => clientSocket.destroy());

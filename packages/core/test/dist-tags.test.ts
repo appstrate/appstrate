@@ -59,6 +59,13 @@ describe("isProtectedTag", () => {
     expect(isProtectedTag("latest")).toBe(true);
   });
 
+  it('"draft" and "published" are protected (reserved version_ref keywords)', () => {
+    // The run-version resolver consumes these keywords before dist-tag
+    // lookup — a dist-tag with either name would be permanently shadowed.
+    expect(isProtectedTag("draft")).toBe(true);
+    expect(isProtectedTag("published")).toBe(true);
+  });
+
   it("other tags are not protected", () => {
     expect(isProtectedTag("beta")).toBe(false);
     expect(isProtectedTag("next")).toBe(false);

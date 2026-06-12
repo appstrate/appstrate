@@ -4,7 +4,13 @@ import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createFileSystemStorage } from "../src/storage-fs.ts";
+import {
+  createFileSystemStorage,
+  signFsUploadToken,
+  verifyFsUploadToken,
+  type FsUploadTokenPayload,
+} from "../src/storage-fs.ts";
+import { StorageAlreadyExistsError } from "../src/storage.ts";
 
 let basePath: string;
 let storage: ReturnType<typeof createFileSystemStorage>;
@@ -102,10 +108,44 @@ describe("createFileSystemStorage", () => {
       expect(key).toBe(join("b", "p", "f.bin"));
     });
 
-    it("rejects exclusive uploads (unsupported on the stream path)", async () => {
+    it("exclusive: streams to disk and refuses a second write at the same key", async () => {
+      await storage.uploadStream("b", "excl.bin", new Response("first").body!, {
+        exclusive: true,
+      });
+      expect(new TextDecoder().decode((await storage.downloadFile("b", "excl.bin"))!)).toBe(
+        "first",
+      );
+      // Replay with the same key must fail atomically (O_EXCL) and preserve
+      // the original bytes.
       await expect(
-        storage.uploadStream("b", "excl.bin", new Response("x").body!, { exclusive: true }),
-      ).rejects.toThrow(/exclusive/);
+        storage.uploadStream("b", "excl.bin", new Response("second").body!, { exclusive: true }),
+      ).rejects.toThrow(StorageAlreadyExistsError);
+      expect(new TextDecoder().decode((await storage.downloadFile("b", "excl.bin"))!)).toBe(
+        "first",
+      );
+    });
+
+    it("exclusive: removes the partial file on a mid-stream error so a retry succeeds", async () => {
+      // First chunk lands, then the source errors — mirrors the FS upload
+      // sink's counting transform aborting past the signed max size.
+      const source = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("partial"));
+          controller.error(new Error("size cap exceeded"));
+        },
+      });
+      await expect(
+        storage.uploadStream("b", "excl-err.bin", source, { exclusive: true }),
+      ).rejects.toThrow(/size cap exceeded/);
+      // The partial file must be gone — a leftover would 409 every retry.
+      expect(await storage.downloadFile("b", "excl-err.bin")).toBeNull();
+      // A clean retry with the same key succeeds.
+      await storage.uploadStream("b", "excl-err.bin", new Response("retry").body!, {
+        exclusive: true,
+      });
+      expect(new TextDecoder().decode((await storage.downloadFile("b", "excl-err.bin"))!)).toBe(
+        "retry",
+      );
     });
 
     // Regression: a pre-buffered `new Response("string").body` stream resolves
@@ -240,5 +280,49 @@ describe("createFileSystemStorage", () => {
         "Path traversal detected",
       );
     });
+  });
+});
+
+describe("FS upload token keyring rotation", () => {
+  const KEY1 = "new-active-upload-key-16+";
+  const KEY2 = "old-retired-upload-key-16+";
+
+  function payload(): FsUploadTokenPayload {
+    return { k: "uploads/app_x/upl_y/doc.pdf", s: 1024, m: "application/pdf", e: future() };
+  }
+
+  function future(): number {
+    return Math.floor(Date.now() / 1000) + 300;
+  }
+
+  it("signs with the FIRST key of a comma-separated keyring", () => {
+    const p = payload();
+    const token = signFsUploadToken(p, `${KEY1},${KEY2}`);
+    // Verifiable with KEY1 alone — proof the first key signed it
+    expect(verifyFsUploadToken(token, KEY1)).toEqual(p);
+  });
+
+  it("verifies a token signed with a non-first key (in-flight upload survives rotation)", () => {
+    const p = payload();
+    const inFlight = signFsUploadToken(p, KEY2);
+    expect(verifyFsUploadToken(inFlight, `${KEY1},${KEY2}`)).toEqual(p);
+  });
+
+  it("accepts the array keyring form", () => {
+    const p = payload();
+    const inFlight = signFsUploadToken(p, [KEY2]);
+    expect(verifyFsUploadToken(inFlight, [KEY1, KEY2])).toEqual(p);
+  });
+
+  it("rejects a token signed with a key removed from the keyring", () => {
+    const stale = signFsUploadToken(payload(), KEY2);
+    expect(verifyFsUploadToken(stale, KEY1)).toBeNull();
+    expect(verifyFsUploadToken(stale, [KEY1])).toBeNull();
+  });
+
+  it("throws when signing with an empty keyring", () => {
+    expect(() => signFsUploadToken(payload(), [])).toThrow(
+      "signFsUploadToken requires at least one signing key",
+    );
   });
 });

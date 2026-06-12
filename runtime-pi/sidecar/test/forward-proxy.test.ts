@@ -355,6 +355,100 @@ describe("CONNECT tunneling", () => {
   });
 });
 
+// --- DNS rebind guard (resolve-and-pin on the direct paths) ---
+
+describe("DNS rebind guard", () => {
+  it("CONNECT: refuses a DNS name that RESOLVES to a blocked address (real isBlockedHost)", async () => {
+    // `rebind.example` passes the literal blocklist, but its A record points
+    // inside — the resolve-and-pin layer must refuse before any tunnel opens.
+    const proxy = makeProxy({
+      isBlockedHostFn: undefined,
+      resolveHostFn: async () => ["169.254.169.254"],
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await connectViaProxy(port, "rebind.example:443");
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("CONNECT: refuses (fails closed) when DNS resolution fails", async () => {
+    const proxy = makeProxy({
+      isBlockedHostFn: undefined,
+      resolveHostFn: async () => {
+        throw new Error("NXDOMAIN");
+      },
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await connectViaProxy(port, "nxdomain.example:443");
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("CONNECT: tunnels to the PINNED resolved IP for an allowed DNS name", async () => {
+    const echo = await startEchoServer();
+    // `pinned.example` does NOT resolve in real DNS — the tunnel can only
+    // open if the proxy connects to the injected resolver's answer (the pin).
+    const proxy = makeProxy({ resolveHostFn: async () => ["127.0.0.1"] });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await connectViaProxy(port, `pinned.example:${echo.port}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.statusLine).toContain("Connection Established");
+  });
+
+  it("HTTP: refuses a DNS name that RESOLVES to a blocked address (real isBlockedHost)", async () => {
+    const proxy = makeProxy({
+      isBlockedHostFn: undefined,
+      resolveHostFn: async () => ["10.0.0.5"],
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await httpViaProxy(port, "http://rebind.example/latest/meta-data/");
+    expect(res.status).toBe(403);
+  });
+
+  it("HTTP: forwards to the PINNED resolved IP, preserving the original Host header", async () => {
+    const echo = await startEchoServer();
+    const proxy = makeProxy({ resolveHostFn: async () => ["127.0.0.1"] });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await httpViaProxy(port, `http://pinned.example:${echo.port}/via-pin`);
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.url).toBe("/via-pin");
+    // The TCP target was pinned but the Host header kept the original name.
+    expect(body.headers.host).toBe(`pinned.example:${echo.port}`);
+  });
+
+  it("platform host is exempt — keeps its name-based connect, no DNS guard", async () => {
+    const echo = await startEchoServer();
+    // Platform = localhost (an internal name, blocked by the literal list and
+    // unresolvable through the throwing stub) — the exemption must skip BOTH
+    // layers, exactly like local-dev `host.docker.internal`.
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: `http://localhost:${echo.port}`,
+        runToken: "tok",
+        proxyUrl: "",
+      },
+      isBlockedHostFn: undefined,
+      resolveHostFn: async () => {
+        throw new Error("guard must not run for the platform host");
+      },
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await httpViaProxy(port, `http://localhost:${echo.port}/sink/events`);
+    expect(res.status).toBe(200);
+  });
+});
+
 // --- Platform host exemption ---
 
 describe("platform host exemption", () => {

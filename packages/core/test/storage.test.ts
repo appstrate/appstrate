@@ -59,6 +59,28 @@ describe("createS3Storage — createUploadUrl presign shape", () => {
     expect(params.get("x-amz-checksum-crc32")).toBeNull();
     expect(params.get("x-amz-sdk-checksum-algorithm")).toBeNull();
     expect(params.get("X-Amz-Signature")).not.toBeNull();
+    // No declared size → content-length stays out of the signature.
+    expect(params.get("X-Amz-SignedHeaders")).not.toContain("content-length");
+  });
+
+  it("signs Content-Length into the presigned PUT when a size is declared", async () => {
+    const storage = createS3Storage({
+      bucket: "test",
+      region: "us-east-1",
+      endpoint: "http://localhost:9000",
+    });
+    const descriptor = await storage.createUploadUrl("uploads", "app/upl_4/file.pdf", {
+      mime: "application/pdf",
+      maxSize: 24576,
+    });
+    const params = new URL(descriptor.url).searchParams;
+    // content-length in X-Amz-SignedHeaders means S3 rejects any PUT whose
+    // Content-Length differs from the declared size — a client cannot reserve
+    // a small slot and upload an unbounded object.
+    expect(params.get("X-Amz-SignedHeaders")).toContain("content-length");
+    // The descriptor tells the client the exact byte count the signature binds.
+    expect(descriptor.headers["Content-Length"]).toBe("24576");
+    expect(descriptor.headers["Content-Type"]).toBe("application/pdf");
   });
 
   it("returns a PUT descriptor whose headers are sufficient for the upload", async () => {

@@ -52,6 +52,7 @@ import type { CredentialBundle } from "@appstrate/connect/connect";
 
 import { McpHost } from "./mcp-host.ts";
 import { logger } from "./logger.ts";
+import type { HostResolver } from "./helpers.ts";
 import { createOpensslCertGenerator } from "./ca-cert-openssl.ts";
 import { createCertMinter, type CertMinter } from "./integration-cert-minter.ts";
 import {
@@ -154,6 +155,12 @@ export interface BundleFetchOptions {
   runToken: string;
   /** Override for tests. Defaults to `globalThis.fetch`. */
   fetchFn?: typeof fetch;
+  /**
+   * Override for tests: DNS resolver used by the per-integration egress
+   * listeners' SSRF rebind guard (tests use non-resolving mock hostnames).
+   * Defaults to the system resolver.
+   */
+  resolveHostFn?: HostResolver;
 }
 
 export interface BootIntegrationsResult {
@@ -711,6 +718,7 @@ async function spawnAndConnectLocalIntegration(params: {
       // Adapter decides where the listener binds so the runner can reach it
       // (0.0.0.0 for bridged networks, 127.0.0.1 when it shares the parent NS).
       host: adapterCtx.listenerBindHost,
+      resolveHostFn: bundleFetchOpts.resolveHostFn,
       onEvent: (event) => {
         // Surface enough to debug auth-injection bugs without leaking
         // signed query params. URL is reduced to `host + path` (no
@@ -755,6 +763,7 @@ async function spawnAndConnectLocalIntegration(params: {
     // env block + cert delivery.
     const listener = createIntegrationEgressListener({
       host: adapterCtx.listenerBindHost,
+      resolveHostFn: bundleFetchOpts.resolveHostFn,
       onEvent: (event) =>
         logger.info(`${logLabel} egress event`, { integrationId: spec.integrationId, ...event }),
     });

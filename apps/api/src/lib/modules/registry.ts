@@ -32,10 +32,11 @@ import { listLlmUsageForRun } from "../../services/state/runs.ts";
 /**
  * Returns the list of module entries to load at boot.
  *
- * Reads `MODULES` (comma-separated specifiers) directly from
- * `process.env` rather than the cached `getEnv()`, so callers can mutate
- * the env in tests without flushing the whole env cache. The field is a
- * plain comma-separated string — no validation beyond trim/filter is useful.
+ * Reads `MODULES` (comma-separated specifiers) via `getEnv()` so the
+ * default string lives in exactly one place — the `@appstrate/env` Zod
+ * schema (duplicating it here is the #513 drift failure mode). Tests that
+ * mutate `process.env.MODULES` must call `_resetCacheForTesting()` from
+ * `@appstrate/env` to flush the cached snapshot.
  *
  * Defaults to the built-in OSS modules plus the two reference
  * OAuth-provider modules (`@appstrate/module-codex`,
@@ -58,12 +59,21 @@ import { listLlmUsageForRun } from "../../services/state/runs.ts";
  *
  * All declared modules are required — if a module is in the list, it must
  * load and init successfully or the platform crashes.
+ *
+ * Booting with ZERO modules: `MODULES=none` is the documented sentinel.
+ * `MODULES=""` (present but empty) is kept as a backward-compatible alias
+ * for the same thing — it was the original documented escape hatch, and
+ * silently re-enabling disabled module surfaces on upgrade would be the
+ * worse failure mode. The empty-string case must be read from raw
+ * `process.env` because the env getter coalesces `""` → unset (compose
+ * `${VAR:-}` pattern), which would otherwise resolve to the default set.
  */
-const DEFAULT_MODULES =
-  "oidc,webhooks,mcp,core-providers,@appstrate/module-codex,@appstrate/module-claude-code";
-
 export function getModuleRegistry(): string[] {
-  return (process.env.MODULES ?? DEFAULT_MODULES)
+  const raw = process.env["MODULES"];
+  if (raw !== undefined && raw.trim() === "") return [];
+  const value = getEnv().MODULES;
+  if (value.trim() === "none") return [];
+  return value
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);

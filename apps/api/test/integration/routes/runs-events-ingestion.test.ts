@@ -39,7 +39,12 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
-import { capUtf8Text } from "../../../src/services/run-event-ingestion.ts";
+import {
+  capUtf8Text,
+  finalizeRun,
+  getRunSinkContext,
+} from "../../../src/services/run-event-ingestion.ts";
+import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import type { AppstrateModule, RunStatusChangeParams } from "@appstrate/core/module";
 
 const app = getTestApp();
@@ -654,6 +659,70 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.status).toBe("success");
     expect(row?.error).toBeNull();
     expect(row?.sinkClosedAt).not.toBeNull();
+  });
+
+  // Service-level Zod boundary on `result.usage` — the HTTP route already
+  // drops malformed usage via `.catch(undefined)`, but `finalizeRun` is also
+  // reached by non-HTTP callers (platform synthesis, in-process runners).
+  // The boundary must hold on its own: invalid shape ⇒ treated as absent
+  // (zero-token heuristic falls back to the column) ⇒ never written.
+  it("service-level finalize ignores malformed usage — column untouched, no false zero-token failure", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+      tokenUsage: { input_tokens: 50, output_tokens: 25 },
+    });
+
+    const run = await getRunSinkContext(runId);
+    expect(run).not.toBeNull();
+    const result = emptyRunResult();
+    result.status = "success";
+    result.output = { ok: true };
+    // Bypass the route schema deliberately — exercise the service boundary.
+    (result as { usage?: unknown }).usage = { input_tokens: "lots", bogus: true };
+
+    await finalizeRun({ run: run!, result });
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    // Invalid usage ⇒ absent: the heuristic reads the (non-zero) column and
+    // the run stays successful; the malformed shape never reaches the column.
+    expect(row?.status).toBe("success");
+    expect(row?.error).toBeNull();
+    expect(row?.tokenUsage).toMatchObject({ input_tokens: 50, output_tokens: 25 });
+  });
+
+  it("strips unknown keys from finalize usage before the runs.tokenUsage write", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", { tokenUsage: null });
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      durationMs: 10,
+      usage: { input_tokens: 12, output_tokens: 3, vendor_specific: { huge: "blob" } },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    // Only the canonical TokenUsage fields land on the column.
+    expect(row?.tokenUsage).toEqual({ input_tokens: 12, output_tokens: 3 });
+  });
+
+  // Zod boundary on `runs.result` (runResultSchema, 512 KiB cap): an
+  // over-cap payload degrades to `result: null` + a warn log — it must
+  // never fail the terminal transition of an already-completed run.
+  it("drops an oversized result payload without failing the finalize", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { blob: "x".repeat(600 * 1024) },
+      durationMs: 5,
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    expect(row?.sinkClosedAt).not.toBeNull();
+    expect(row?.result).toBeNull();
   });
 
   it("idempotent — once the sink is closed, further finalize POSTs reject with 410", async () => {

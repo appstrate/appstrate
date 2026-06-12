@@ -258,7 +258,6 @@ export const applicationSmtpConfigs = pgTable(
     port: integer("port").notNull(),
     username: text("username").notNull(),
     passEncrypted: text("pass_encrypted").notNull(),
-    encryptionKeyVersion: text("encryption_key_version").notNull().default("v1"),
     fromAddress: text("from_address").notNull(),
     fromName: text("from_name"),
     secureMode: text("secure_mode", { enum: ["auto", "tls", "starttls", "none"] })
@@ -286,7 +285,6 @@ export const applicationSocialProviders = pgTable(
     provider: text("provider", { enum: ["google", "github"] }).notNull(),
     clientId: text("client_id").notNull(),
     clientSecretEncrypted: text("client_secret_encrypted").notNull(),
-    encryptionKeyVersion: text("encryption_key_version").notNull().default("v1"),
     scopes: text("scopes").array(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),

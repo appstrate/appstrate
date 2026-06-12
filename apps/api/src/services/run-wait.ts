@@ -33,6 +33,7 @@
 
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
+import { getEnv } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
 import { runs, TERMINAL_RUN_STATUSES, type RunStatus } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber } from "./realtime.ts";
@@ -48,8 +49,111 @@ import type { AppScope } from "../lib/scope.ts";
  */
 export const MAX_WAIT_SECONDS = 55;
 
-/** Fallback DB re-check cadence while waiting (see module doc, point 2). */
-const FALLBACK_POLL_INTERVAL_MS = 2_000;
+/**
+ * Resolve the fallback DB re-check cadence while waiting (see module doc,
+ * point 2). `RUN_WAIT_POLL_INTERVAL_MS` is schema-validated in
+ * `@appstrate/env` (default 2s); the test preload shrinks it to 50ms so
+ * route-level long-poll tests don't pay a real 2s tick per wakeup. Read at
+ * use time so the cached env snapshot is consulted per wait, not at import.
+ */
+function fallbackPollIntervalMs(): number {
+  return getEnv().RUN_WAIT_POLL_INTERVAL_MS;
+}
+
+/**
+ * Per-identity concurrent-waiter ceiling. Each waiter holds an HTTP
+ * connection for up to {@link MAX_WAIT_SECONDS} and registers a realtime
+ * subscriber, so an unbounded caller could pin one connection per request.
+ * Beyond the cap the wait **degrades to no-wait**: the route returns the
+ * current run resource immediately (non-breaking — a non-terminal status
+ * already means "poll again"), and capacity self-heals as earlier waits
+ * resolve. Documented on the OpenAPI `wait` parameter.
+ */
+export const MAX_CONCURRENT_WAITERS_PER_IDENTITY = 10;
+
+/** Live waiter count per identity (userId / `apikey:<id>`). */
+const waiterCounts = new Map<string, number>();
+
+/** Test-only introspection — current number of live waits for an identity. */
+export function activeWaiterCount(identity: string): number {
+  return waiterCounts.get(identity) ?? 0;
+}
+
+function releaseWaiterSlot(identity: string): void {
+  const current = waiterCounts.get(identity) ?? 0;
+  if (current <= 1) waiterCounts.delete(identity);
+  else waiterCounts.set(identity, current - 1);
+}
+
+/**
+ * Shared fallback-poll registry — ONE 2 s DB poll loop per runId, no matter
+ * how many concurrent waiters hold a long poll on that run. Each entry fans
+ * a terminal observation out to every registered waiter; the loop is torn
+ * down when the last waiter detaches. (Pre-fix, every waiter ran its own
+ * interval — N waiters on one run cost N identical indexed reads per tick.)
+ */
+interface RunPollEntry {
+  timer: ReturnType<typeof setInterval>;
+  inFlight: boolean;
+  waiters: Set<() => void>;
+}
+
+const runPolls = new Map<string, RunPollEntry>();
+
+/** Test-only introspection — number of live shared poll loops. */
+export function activePollLoopCount(): number {
+  return runPolls.size;
+}
+
+/**
+ * Attach `onTerminal` to the run's shared poll loop, creating the loop on
+ * first attach. Returns a detach function (idempotent); detaching the last
+ * waiter clears the interval and drops the registry entry. The first
+ * attacher's `scope` and `pollIntervalMs` drive the loop — run ids are
+ * globally unique so all waiters on a run share the same scope.
+ */
+function addSharedPollWaiter(
+  runId: string,
+  scope: AppScope,
+  pollIntervalMs: number,
+  onTerminal: () => void,
+): () => void {
+  let entry = runPolls.get(runId);
+  if (!entry) {
+    const created: RunPollEntry = {
+      timer: undefined as unknown as ReturnType<typeof setInterval>,
+      inFlight: false,
+      waiters: new Set(),
+    };
+    // Guarded so a slow query never stacks concurrent reads.
+    created.timer = setInterval(() => {
+      if (created.inFlight) return;
+      created.inFlight = true;
+      void isRunTerminal(scope, runId)
+        .then((terminal) => {
+          // Snapshot — each callback detaches itself from the set.
+          if (terminal) for (const wake of [...created.waiters]) wake();
+        })
+        .catch(() => {
+          // Transient read failure — the next tick (or each waiter's own
+          // timeout) covers it.
+        })
+        .finally(() => {
+          created.inFlight = false;
+        });
+    }, pollIntervalMs);
+    runPolls.set(runId, created);
+    entry = created;
+  }
+  entry.waiters.add(onTerminal);
+  return () => {
+    entry.waiters.delete(onTerminal);
+    if (entry.waiters.size === 0 && runPolls.get(runId) === entry) {
+      clearInterval(entry.timer);
+      runPolls.delete(runId);
+    }
+  };
+}
 
 /**
  * `?wait=` accepts `true`/`false` (boolean form) or a non-negative integer
@@ -120,48 +224,53 @@ export async function waitForRunTerminal(opts: {
   scope: AppScope;
   /** Wait budget in milliseconds (already capped by {@link parseWaitQuery}). */
   timeoutMs: number;
+  /**
+   * Auth identity holding this wait (userId / `apikey:<id>` — same keying
+   * as the rate-limit middleware). When provided, the per-identity
+   * concurrent-waiter cap applies: beyond
+   * {@link MAX_CONCURRENT_WAITERS_PER_IDENTITY} live waits the call
+   * degrades to no-wait (resolves immediately).
+   */
+  identity?: string;
   /** Request abort signal — stops the wait when the client disconnects. */
   signal?: AbortSignal;
   /** Fallback DB poll cadence override (tests). */
   pollIntervalMs?: number;
 }): Promise<void> {
-  const { runId, scope, timeoutMs, signal } = opts;
-  const pollIntervalMs = opts.pollIntervalMs ?? FALLBACK_POLL_INTERVAL_MS;
+  const { runId, scope, timeoutMs, signal, identity } = opts;
+  const pollIntervalMs = opts.pollIntervalMs ?? fallbackPollIntervalMs();
 
   if (signal?.aborted || timeoutMs <= 0) return;
+
+  // Per-identity concurrent-waiter cap — degrade to no-wait when exceeded.
+  // The caller re-reads the run and answers immediately, exactly like a
+  // `wait=0` request; the client's normal "non-terminal → poll again" loop
+  // self-heals once earlier waits resolve.
+  if (identity !== undefined) {
+    const current = waiterCounts.get(identity) ?? 0;
+    if (current >= MAX_CONCURRENT_WAITERS_PER_IDENTITY) return;
+    waiterCounts.set(identity, current + 1);
+  }
 
   await new Promise<void>((resolve) => {
     const subId = `wait-${runId}-${crypto.randomUUID().slice(0, 8)}`;
     let done = false;
-    let pollInFlight = false;
 
     const finish = (): void => {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      clearInterval(interval);
+      detachPollWaiter();
       signal?.removeEventListener("abort", finish);
       removeSubscriber(subId);
+      if (identity !== undefined) releaseWaiterSlot(identity);
       resolve();
     };
 
     const timer = setTimeout(finish, timeoutMs);
 
-    // Fallback poll — guarded so a slow query never stacks concurrent reads.
-    const interval = setInterval(() => {
-      if (pollInFlight) return;
-      pollInFlight = true;
-      void isRunTerminal(scope, runId)
-        .then((terminal) => {
-          if (terminal) finish();
-        })
-        .catch(() => {
-          // Transient read failure — the next tick (or the timeout) covers it.
-        })
-        .finally(() => {
-          pollInFlight = false;
-        });
-    }, pollIntervalMs);
+    // Fallback poll — one shared DB loop per runId (see addSharedPollWaiter).
+    const detachPollWaiter = addSharedPollWaiter(runId, scope, pollIntervalMs, finish);
 
     signal?.addEventListener("abort", finish, { once: true });
 

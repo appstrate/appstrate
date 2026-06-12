@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import type { ApiKeyInfo } from "@appstrate/shared-types";
@@ -11,7 +11,7 @@ export function useApiKeys() {
   const applicationId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["api-keys", orgId, applicationId],
-    queryFn: () => api<{ apiKeys: ApiKeyInfo[] }>("/api-keys").then((d) => d.apiKeys),
+    queryFn: () => apiList<ApiKeyInfo>("/api-keys"),
     enabled: !!orgId && !!applicationId,
   });
 }
@@ -20,7 +20,7 @@ export function useAvailableScopes() {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["api-keys/available-scopes", orgId],
-    queryFn: () => api<{ scopes: string[] }>("/api-keys/available-scopes").then((d) => d.scopes),
+    queryFn: () => apiList<string>("/api-keys/available-scopes"),
     enabled: !!orgId,
   });
 }

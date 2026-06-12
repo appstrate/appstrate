@@ -23,16 +23,21 @@ export const apiKeysPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  scopes: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { type: "string" },
                     description: "Permission scopes the current user can assign to API keys",
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                scopes: [
+                object: "list",
+                hasMore: false,
+                data: [
                   "agents:read",
                   "agents:run",
                   "runs:read",
@@ -70,15 +75,20 @@ export const apiKeysPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  apiKeys: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/ApiKeyInfo" },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                apiKeys: [
+                object: "list",
+                hasMore: false,
+                data: [
                   {
                     id: "cm8vwx234",
                     name: "Production CI",

@@ -133,7 +133,7 @@ test.describe("Cross-org API key isolation", () => {
     const res = await clientB.get("/api-keys");
     expect(res.status()).toBe(200);
     const body = await res.json();
-    const ids = (body.apiKeys ?? []).map((k: { id: string }) => k.id);
+    const ids = (body.data ?? []).map((k: { id: string }) => k.id);
     expect(ids).not.toContain(key.id);
   });
 

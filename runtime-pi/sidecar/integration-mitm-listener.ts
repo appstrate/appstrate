@@ -53,7 +53,13 @@
  */
 
 import { createServer as netCreateServer, connect as netConnect, type Socket } from "node:net";
-import { isBlockedHost, isBlockedUrl, OUTBOUND_TIMEOUT_MS } from "./helpers.ts";
+import {
+  isBlockedHost,
+  isBlockedUrl,
+  resolveAndCheckHost,
+  OUTBOUND_TIMEOUT_MS,
+  type HostResolver,
+} from "./helpers.ts";
 import type {
   HttpDeliveryPlan,
   IntegrationCredentialsPayload,
@@ -120,6 +126,12 @@ export interface CreateMitmListenerOptions {
   host?: string;
   /** Upstream fetch implementation. Defaults to `globalThis.fetch`. */
   fetch?: typeof fetch;
+  /**
+   * Injectable DNS resolver for the SNI rebind guard (tests stub it so
+   * non-resolving `*.local` SNI hosts pass; production uses the system
+   * resolver). Only consulted for non-IP-literal SNI hosts.
+   */
+  resolveHostFn?: HostResolver;
   /** Telemetry sink — non-fatal events surface here. */
   onEvent?: (event: MitmListenerEvent) => void;
 }
@@ -217,7 +229,12 @@ export function createIntegrationMitmListener(
   // Outer TCP server: parse CONNECT, peek ClientHello for SNI, relay
   // to the per-SNI Bun.serve.
   const tcpServer = netCreateServer((rawSocket: Socket) => {
-    handleInboundConnection(rawSocket, async (sniHost) => getOrCreateTlsServer(sniHost), emit);
+    handleInboundConnection(
+      rawSocket,
+      async (sniHost) => getOrCreateTlsServer(sniHost),
+      emit,
+      options.resolveHostFn,
+    );
   });
 
   let readyResolve!: () => void;
@@ -270,6 +287,7 @@ async function handleInboundConnection(
   rawSocket: Socket,
   resolveTlsServer: (sniHost: string) => Promise<BunServerHandle>,
   emit: (event: MitmListenerEvent) => void,
+  resolveHostFn?: HostResolver,
 ): Promise<void> {
   rawSocket.on("error", () => {
     // Per-connection handlers own teardown.
@@ -376,8 +394,26 @@ async function handleInboundConnection(
   // host network + cloud metadata — so this must run BEFORE any cert mint.
   // Mirrors the credential-proxy SSRF guard; external egress stays open
   // (the per-integration MITM model intentionally forwards to external hosts).
+  //
+  // Literal layer first (cheap, no DNS) …
   if (isBlockedHost(sniHost)) {
     emit({ kind: "tls-error", error: `SNI host blocked by SSRF policy: ${sniHost}` });
+    rawSocket.destroy();
+    return;
+  }
+  // … then the DNS-rebind layer: a public-looking SNI name whose A/AAAA
+  // record points inside must not get a minted leaf either. Fail closed on
+  // resolution failure. Note: the upstream request is made by `fetch` against
+  // the SNI hostname (TLS cert validation needs the name), so this cannot pin
+  // the connect to a resolved IP — it is fail-closed defence-in-depth with a
+  // residual resolver TOCTOU, same stance as the platform's `ssrf-dns` guard.
+  const sniCheck = await resolveAndCheckHost(sniHost, { resolve: resolveHostFn });
+  if (sniCheck.blocked) {
+    const why =
+      sniCheck.reason === "resolution-failed"
+        ? `SNI host DNS resolution failed (fail closed): ${sniHost}`
+        : `SNI host resolves into a blocked range (DNS rebind): ${sniHost}`;
+    emit({ kind: "tls-error", error: why });
     rawSocket.destroy();
     return;
   }

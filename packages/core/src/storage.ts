@@ -5,7 +5,13 @@
 export interface CreateUploadUrlOptions {
   /** Declared MIME type (advisory; storage adapters may enforce it in the signature). */
   mime?: string;
-  /** Maximum allowed upload size in bytes (adapters enforce when possible). */
+  /**
+   * Declared upload size in bytes. Callers pass the EXACT size the client
+   * declared: S3 signs it as the presigned PUT's `Content-Length` (the upload
+   * is rejected unless the body is exactly that many bytes); filesystem
+   * storage encodes it into the signed token as the upper bound the FS sink
+   * enforces while streaming the body to disk.
+   */
   maxSize?: number;
   /** Seconds until the URL expires. Default: 900 (15 min). */
   expiresIn?: number;
@@ -63,9 +69,12 @@ export interface Storage {
    * upload (`@aws-sdk/lib-storage`), which handles an unknown content length;
    * filesystem pipes the web stream straight to disk. Returns the storage key.
    *
-   * `opts.exclusive` is NOT supported on this path (S3 multipart cannot send
-   * `If-None-Match: *`) and throws if set — callers needing exclusivity must
-   * use uploadFile(). Streamed destinations here are single-use keys.
+   * `opts.exclusive` gives the same atomic create-new-or-fail semantics as
+   * uploadFile(): filesystem opens the destination with `O_EXCL` (and removes
+   * the partial file if the stream errors mid-write, so a retry is not
+   * poisoned); S3 sends `If-None-Match: *` on PutObject / CompleteMultipart-
+   * Upload (conditional writes, supported by AWS S3 and MinIO since 2024).
+   * Throws `StorageAlreadyExistsError` when the object already exists.
    */
   uploadStream(
     bucket: string,

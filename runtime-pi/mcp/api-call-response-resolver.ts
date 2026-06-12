@@ -20,6 +20,15 @@
  * When `responseMode.toFile` is absent, large responses still auto-spill to
  * `resources/<file>` (existing behaviour via {@link spillResourcesToWorkspace});
  * we just prepend an `[api_call status=…]` line so the status is visible.
+ *
+ * Structured data vs. text: the file descriptor is ALSO emitted as MCP
+ * `structuredContent` (matching the api_call tool's declared
+ * `outputSchema`), with the JSON text block kept as the spec-recommended
+ * fallback. Do NOT drop the text forms: Pi's `AgentToolResult` forwards
+ * only text/image `content` blocks to the model (`details` is logs/UI
+ * only — see `callToolResultToPi`), so the `[api_call status=…]` line and
+ * the JSON descriptor text block remain the ONLY way the model sees the
+ * status while Pi is the runtime.
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
@@ -38,6 +47,7 @@ interface ResultContentBlock {
 interface ToolResult {
   content: ResultContentBlock[];
   isError?: boolean;
+  structuredContent?: Record<string, unknown>;
   _meta?: Record<string, unknown>;
 }
 
@@ -120,8 +130,13 @@ export async function shapeApiCallResponse(
       size: bytes.byteLength,
       ...(status !== null ? { status } : {}),
     };
+    // Descriptor rides twice, per the MCP spec recommendation: as
+    // `structuredContent` (machine-readable, matches the tool's
+    // `outputSchema`) and as a JSON text block (the fallback — and the
+    // only form Pi forwards to the model, see module doc).
     return {
       content: [{ type: "text", text: JSON.stringify(descriptor) }],
+      structuredContent: descriptor,
       ...(result.isError ? { isError: true } : {}),
     };
   }
@@ -138,6 +153,10 @@ export async function shapeApiCallResponse(
     },
   )) as ToolResult;
   if (status === null) return spilled;
+  // The spread keeps the sidecar-attached `structuredContent: { status }`
+  // (and `_meta`) intact. The text prefix is NOT redundant with it: Pi
+  // forwards only text/image content to the model, so this line is the
+  // model-visible status channel (see module doc).
   return {
     ...spilled,
     content: [{ type: "text", text: `[api_call status=${status}]` }, ...spilled.content],

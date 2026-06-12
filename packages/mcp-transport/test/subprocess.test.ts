@@ -23,6 +23,15 @@ import { SubprocessTransport } from "../src/index.ts";
 
 const ECHO_FIXTURE = path.resolve(import.meta.dir, "fixtures/echo-server.ts");
 
+/** Poll `predicate` every 10ms until it holds (or fail after `timeoutMs`). */
+async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error("condition not met within timeout");
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 function spawnTransport(opts: Partial<ConstructorParameters<typeof SubprocessTransport>[0]> = {}) {
   return new SubprocessTransport({
     command: "bun",
@@ -122,8 +131,8 @@ describe("SubprocessTransport — failure surfaces", () => {
     };
     await transport.start();
     await transport.send({ jsonrpc: "2.0", id: 1, method: "crash" });
-    // Wait for the subprocess to exit.
-    await new Promise((r) => setTimeout(r, 200));
+    // Wait for the subprocess exit to surface via onerror.
+    await waitFor(() => observed !== null);
     expect(observed).not.toBeNull();
     expect(observed!.message).toMatch(/code 1|killed/);
   });
@@ -156,12 +165,14 @@ describe("SubprocessTransport — env scrubbing (security invariant I3)", () => 
       const stderrLines: string[] = [];
       const transport = new SubprocessTransport({
         command: "sh",
-        args: ["-c", "env >&2"], // dump env to stderr so we can capture
+        // Dump env to stderr so we can capture; the sentinel line marks the
+        // full dump as flushed (deterministic wait, no fixed sleep).
+        args: ["-c", "env >&2; echo __ENV_DUMP_DONE__ >&2"],
         onStderrLine: (l) => stderrLines.push(l),
       });
       transport.onerror = () => {}; // silence "malformed JSON-RPC" noise
       await transport.start();
-      await new Promise((r) => setTimeout(r, 200));
+      await waitFor(() => stderrLines.includes("__ENV_DUMP_DONE__"));
       await transport.close();
       const blob = stderrLines.join("\n");
       expect(blob.includes("SECRET_TOKEN")).toBe(false);
@@ -182,7 +193,7 @@ describe("SubprocessTransport — env scrubbing (security invariant I3)", () => 
     });
     transport.onerror = () => {};
     await transport.start();
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => stderrLines.some((l) => l.includes("INJECTED=")));
     await transport.close();
     const blob = stderrLines.join("\n");
     expect(blob).toContain("INJECTED=yes");
@@ -200,7 +211,7 @@ describe("SubprocessTransport — env scrubbing (security invariant I3)", () => 
       });
       transport.onerror = () => {};
       await transport.start();
-      await new Promise((r) => setTimeout(r, 200));
+      await waitFor(() => stderrLines.some((l) => l.includes("GOT=")));
       await transport.close();
       const blob = stderrLines.join("\n");
       expect(blob).toContain("GOT=expected-value");
@@ -226,7 +237,7 @@ describe("SubprocessTransport — rate limits", () => {
       await client.callTool({ name: "echo", arguments: { msg: "trigger" } });
       // Trigger flood-stderr through a raw send (not a typed tool).
       await transport.send({ jsonrpc: "2.0", id: 99, method: "flood-stderr" });
-      await new Promise((r) => setTimeout(r, 300));
+      await waitFor(() => stderrLines.length > 0);
       expect(stderrLines.length).toBeGreaterThan(0);
       expect(stderrLines.length).toBeLessThanOrEqual(1000);
     } finally {

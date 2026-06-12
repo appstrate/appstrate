@@ -2,11 +2,18 @@
 
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import type { Socket } from "node:net";
-import type { IncomingMessage, ServerResponse, Server as HttpServer } from "node:http";
+import type {
+  IncomingMessage,
+  ServerResponse,
+  Server as HttpServer,
+  RequestOptions,
+} from "node:http";
 import {
   isBlockedHost,
+  resolveAndCheckHost,
   OUTBOUND_TIMEOUT_MS,
   HOP_BY_HOP_HEADERS,
+  type HostResolver,
   type SidecarConfig,
 } from "./helpers.ts";
 import {
@@ -22,6 +29,13 @@ export interface ForwardProxyDeps {
   listenPort?: number; // default 8081 — tests use 0 (ephemeral)
   listenHost?: string; // default "0.0.0.0" — tests use "127.0.0.1"
   isBlockedHostFn?: typeof isBlockedHost; // injectable for testing pass-through
+  /**
+   * Injectable DNS resolver for the rebind guard (tests stub it; production
+   * uses the system resolver). Only consulted for non-IP-literal targets on
+   * the DIRECT paths — upstream-proxy-chained traffic resolves remotely and
+   * the trusted platform host keeps its name-based connect.
+   */
+  resolveHostFn?: HostResolver;
 }
 
 export interface ForwardProxyResult {
@@ -36,6 +50,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   const listenPort = deps.listenPort ?? 8081;
   const listenHost = deps.listenHost ?? "0.0.0.0";
   const isBlockedHostFn = deps.isBlockedHostFn ?? isBlockedHost;
+  const resolveHostFn = deps.resolveHostFn;
 
   const MAX_CONNECT_HEADER_SIZE = 16_384; // 16 KB — CONNECT response headers should be tiny
 
@@ -119,11 +134,37 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     }
   }
 
+  function isPlatformHost(hostname: string): boolean {
+    const platformHost = getPlatformHost();
+    return platformHost !== null && hostname.toLowerCase() === platformHost;
+  }
+
   function isAllowedHost(hostname: string): boolean {
     const h = hostname.toLowerCase();
-    const platformHost = getPlatformHost();
-    if (platformHost && h === platformHost) return true;
+    if (isPlatformHost(h)) return true;
     return !isBlockedHostFn(h);
+  }
+
+  /**
+   * DNS-rebind guard for the DIRECT egress paths (resolve-and-pin): a DNS
+   * name whose A/AAAA record points inside (10.x, 169.254.169.254, …) passes
+   * the literal `isAllowedHost` check but must NOT reach the boundary.
+   * Returns the address to connect to — the PINNED resolved IP for DNS names
+   * (so the actual connect can't re-resolve to a different answer), the
+   * literal itself for IPs, or `null` when the target must be refused (any
+   * blocked record, or resolution failure — fail closed).
+   *
+   * The trusted platform host is exempt and keeps its name-based connect: in
+   * local dev it is `host.docker.internal`/an internal name by design, and
+   * platform traffic is HMAC-scoped (same rationale as `isAllowedHost`).
+   */
+  async function pinDirectTarget(hostname: string): Promise<string | null> {
+    if (isPlatformHost(hostname)) return hostname;
+    const check = await resolveAndCheckHost(hostname.toLowerCase(), {
+      resolve: resolveHostFn,
+      isBlockedHostFn,
+    });
+    return check.blocked ? null : check.pinnedAddress;
   }
 
   const server = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
@@ -158,50 +199,67 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
 
     const cleaned = forwardHeaders(req.headers);
 
-    const options = upstream
-      ? {
-          hostname: upstream.host,
-          port: upstream.port,
-          path: targetUrl,
-          method: req.method,
-          headers: {
-            ...cleaned,
-            host: parsed.host,
-            ...(upstream.auth ? { "Proxy-Authorization": upstream.auth } : {}),
-          },
-        }
-      : {
-          hostname: parsed.hostname,
-          port: parseInt(parsed.port) || 80,
-          path: parsed.pathname + parsed.search,
-          method: req.method,
-          headers: { ...cleaned, host: parsed.host },
-        };
+    const forward = (options: RequestOptions) => {
+      const proxyReq = httpRequest(options, (proxyRes) => {
+        res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+        proxyRes.pipe(res);
+      });
 
-    const proxyReq = httpRequest(options, (proxyRes) => {
-      res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
-      proxyRes.pipe(res);
-    });
+      // Timeout — abort if the target or upstream proxy hangs
+      proxyReq.setTimeout(OUTBOUND_TIMEOUT_MS, () => {
+        proxyReq.destroy(new Error(`Request timeout after ${OUTBOUND_TIMEOUT_MS}ms`));
+      });
 
-    // Timeout — abort if the target or upstream proxy hangs
-    proxyReq.setTimeout(OUTBOUND_TIMEOUT_MS, () => {
-      proxyReq.destroy(new Error(`Request timeout after ${OUTBOUND_TIMEOUT_MS}ms`));
-    });
+      // Clean up if either side breaks
+      req.on("error", () => {
+        proxyReq.destroy();
+      });
+      res.on("error", () => {
+        proxyReq.destroy();
+      });
+      proxyReq.on("error", (err) => {
+        logger.error("Forward proxy HTTP error", { target: targetUrl, error: err.message });
+        if (!res.headersSent) res.writeHead(502);
+        res.end("Proxy error");
+      });
 
-    // Clean up if either side breaks
-    req.on("error", () => {
-      proxyReq.destroy();
-    });
-    res.on("error", () => {
-      proxyReq.destroy();
-    });
-    proxyReq.on("error", (err) => {
-      logger.error("Forward proxy HTTP error", { target: targetUrl, error: err.message });
-      if (!res.headersSent) res.writeHead(502);
-      res.end("Proxy error");
-    });
+      req.pipe(proxyReq);
+    };
 
-    req.pipe(proxyReq);
+    if (upstream) {
+      // Chained: the upstream proxy resolves the target remotely — no local
+      // DNS to pin. Connect to the proxy itself.
+      forward({
+        hostname: upstream.host,
+        port: upstream.port,
+        path: targetUrl,
+        method: req.method,
+        headers: {
+          ...cleaned,
+          host: parsed.host,
+          ...(upstream.auth ? { "Proxy-Authorization": upstream.auth } : {}),
+        },
+      });
+      return;
+    }
+
+    // Direct: resolve-and-pin to close the DNS-rebind gap — the literal
+    // isAllowedHost() check above does not resolve names. The Host header
+    // keeps the original name; only the TCP target is pinned.
+    void pinDirectTarget(parsed.hostname).then((pinned) => {
+      if (pinned === null) {
+        res.writeHead(403);
+        res.end("Blocked: internal network");
+        return;
+      }
+      forward({
+        hostname: pinned,
+        port: parseInt(parsed.port) || 80,
+        path: parsed.pathname + parsed.search,
+        method: req.method,
+        headers: { ...cleaned, host: parsed.host },
+      });
+    });
   });
 
   // CONNECT handler — HTTPS tunneling
@@ -284,17 +342,29 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       });
       clientSocket.on("error", () => proxySocket.destroy());
     } else {
-      // Direct connection (pass-through)
-      const targetSocket = netConnectWithTimeout(port, host, () => {
-        clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-        if (head.length) targetSocket.write(head);
-        relay(clientSocket, targetSocket);
+      // Direct connection (pass-through). Resolve-and-pin to close the
+      // DNS-rebind gap — the literal isAllowedHost() check above does not
+      // resolve names. Pinning is safe: this is a blind CONNECT tunnel (no
+      // TLS termination here), the client's own handshake carries SNI/Host
+      // for the original name. The platform host keeps a name-based connect.
+      void pinDirectTarget(host).then((pinned) => {
+        if (clientSocket.destroyed) return; // client gave up during resolution
+        if (pinned === null) {
+          clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+          clientSocket.destroy();
+          return;
+        }
+        const targetSocket = netConnectWithTimeout(port, pinned, () => {
+          clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+          if (head.length) targetSocket.write(head);
+          relay(clientSocket, targetSocket);
+        });
+        targetSocket.on("error", (err) => {
+          logger.error("CONNECT direct error", { target, error: err.message });
+          clientSocket.destroy();
+        });
+        clientSocket.on("error", () => targetSocket.destroy());
       });
-      targetSocket.on("error", (err) => {
-        logger.error("CONNECT direct error", { target, error: err.message });
-        clientSocket.destroy();
-      });
-      clientSocket.on("error", () => targetSocket.destroy());
     }
   });
 

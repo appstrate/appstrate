@@ -24,6 +24,7 @@
  * — the org comes from the URL/token, and the org-context middleware pins it.
  */
 
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
@@ -251,11 +252,20 @@ function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
     const operationId = asString(args.operation_id);
-    if (!operationId) return textResult({ error: "operation_id is required." }, true);
+    // Structural protocol errors (-32602 InvalidParams): a missing required
+    // argument or an unknown operationId is a malformed call, not a failed
+    // execution — the MCP spec files these under protocol errors. Execution
+    // failures (upstream HTTP errors, …) stay `isError` tool results so the
+    // model sees them and can self-correct.
+    if (!operationId) {
+      throw new McpError(ErrorCode.InvalidParams, "operation_id is required.");
+    }
 
     const { operations, componentSchemas } = getCatalog();
     const op = operations.get(operationId);
-    if (!op) return textResult({ error: `Unknown operationId: ${operationId}` }, true);
+    if (!op) {
+      throw new McpError(ErrorCode.InvalidParams, `Unknown operationId: ${operationId}`);
+    }
 
     emit(ctx, {
       tool: "describe_operation",
@@ -475,13 +485,19 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       );
     }
 
+    // Structural protocol errors (-32602 InvalidParams): missing required
+    // argument / unknown operationId — the call itself is malformed, per the
+    // MCP spec's protocol-error taxonomy. The telemetry `rejected` event is
+    // still emitted before throwing. Everything past this point (missing
+    // path_params, permission denial, upstream HTTP failures) stays a
+    // model-visible `isError` tool result for self-correction.
     if (!operationId) {
       emit(ctx, {
         tool: "invoke_operation",
         durationMs: performance.now() - start,
         outcome: "rejected",
       });
-      return textResult({ error: "operation_id is required." }, true);
+      throw new McpError(ErrorCode.InvalidParams, "operation_id is required.");
     }
 
     const { operations } = getCatalog();
@@ -493,7 +509,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         operationId,
         outcome: "rejected",
       });
-      return textResult({ error: `Unknown operationId: ${operationId}` }, true);
+      throw new McpError(ErrorCode.InvalidParams, `Unknown operationId: ${operationId}`);
     }
 
     const pathParams = asRecord(args.path_params) ?? {};

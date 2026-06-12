@@ -283,6 +283,64 @@ describe("POST /mcp — api_call resource spillover", () => {
   });
 });
 
+describe("POST /mcp — api_call structured output (outputSchema + structuredContent)", () => {
+  it("advertises an outputSchema on the api_call descriptor through the McpHost", async () => {
+    const app = await makeResourcesApp();
+    const res = await rpc(app, { method: "tools/list" });
+    const { tools } = res.json.result as {
+      tools: Array<{ name: string; outputSchema?: { type: string; properties: object } }>;
+    };
+    const apiCall = tools.find((t) => t.name === "test__api_call");
+    expect(apiCall).toBeDefined();
+    expect(apiCall!.outputSchema?.type).toBe("object");
+    // status (plain calls), file-descriptor fields (toFile), error envelope.
+    expect(Object.keys(apiCall!.outputSchema!.properties)).toEqual(
+      expect.arrayContaining(["status", "kind", "path", "size", "error"]),
+    );
+  });
+
+  it("attaches structuredContent { status } to a successful api_call result", async () => {
+    const app = await makeResourcesApp();
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "test__api_call",
+        arguments: { target: "https://api.example.com/ping" },
+      },
+    });
+    const result = res.json.result as {
+      isError?: boolean;
+      structuredContent?: { status?: number };
+    };
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toEqual({ status: 200 });
+  });
+
+  it("attaches structuredContent { status } to an upstream error result too", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response('{"error":"nope"}', {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "test__api_call",
+        arguments: { target: "https://api.example.com/missing" },
+      },
+    });
+    const result = res.json.result as {
+      isError?: boolean;
+      structuredContent?: { status?: number };
+    };
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({ status: 404 });
+  });
+});
+
 describe("POST /mcp — resources/list + resources/read", () => {
   it("returns an empty resources/list initially", async () => {
     const app = createApp(makeDeps());

@@ -23,6 +23,32 @@ export default tseslint.config(
     },
   },
   {
+    // Zod 4 regression guard: string formats are top-level functions
+    // (z.email(), z.url(), z.uuid()) — the Zod 3 method forms are deprecated
+    // and must not creep back in.
+    files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.property.name='email'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
+          message: "Zod 4: use z.email() instead of z.string().email().",
+        },
+        {
+          selector:
+            "CallExpression[callee.property.name='url'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
+          message: "Zod 4: use z.url() instead of z.string().url().",
+        },
+        {
+          selector:
+            "CallExpression[callee.property.name='uuid'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
+          message: "Zod 4: use z.uuid() instead of z.string().uuid().",
+        },
+      ],
+    },
+  },
+  {
     files: ["**/test/**/*.ts"],
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
@@ -49,8 +75,7 @@ export default tseslint.config(
                 "@appstrate/api*",
                 "@appstrate/web*",
               ],
-              message:
-                "core must remain independent — no imports from other workspace packages",
+              message: "core must remain independent — no imports from other workspace packages",
             },
             {
               // Supply-chain guard: core imports the Pi SDK zero times and must

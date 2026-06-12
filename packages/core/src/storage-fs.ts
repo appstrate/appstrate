@@ -1,7 +1,7 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdir, unlink, realpath, writeFile } from "node:fs/promises";
+import { mkdir, unlink, realpath, writeFile, open } from "node:fs/promises";
 import { join, dirname, normalize, resolve as resolvePath } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Storage, CreateUploadUrlOptions, UploadUrlDescriptor } from "./storage.ts";
@@ -26,9 +26,22 @@ export interface FileSystemStorageConfig {
   uploadBaseUrl?: string;
   /**
    * Secret used to HMAC-sign upload tokens. Required when createUploadUrl() is called.
-   * Should be a high-entropy server-side secret (e.g. BETTER_AUTH_SECRET).
+   * Should be a high-entropy server-side secret (e.g. UPLOAD_SIGNING_SECRET).
+   *
+   * Accepts a keyring for online rotation — either an array of keys or a
+   * comma-separated string: the FIRST key signs new tokens, ALL keys verify.
+   * Individual keys must therefore not contain commas.
    */
-  uploadSecret?: string;
+  uploadSecret?: string | readonly string[];
+}
+
+/**
+ * Normalize an upload-signing secret into a keyring. A plain string is split
+ * on commas (rotation: prepend the new key); empty segments are dropped.
+ */
+function toUploadKeyring(secret: string | readonly string[]): string[] {
+  const keys = typeof secret === "string" ? secret.split(",") : [...secret];
+  return keys.filter((k) => k.length > 0);
 }
 
 /** Payload encoded inside an upload token. */
@@ -44,28 +57,43 @@ export interface FsUploadTokenPayload {
 }
 
 /**
- * Encode + HMAC-sign an upload token.
+ * Encode + HMAC-sign an upload token with the FIRST key of the keyring.
  * Format: base64url(JSON).base64url(HMAC-SHA256).
  */
-export function signFsUploadToken(payload: FsUploadTokenPayload, secret: string): string {
+export function signFsUploadToken(
+  payload: FsUploadTokenPayload,
+  secret: string | readonly string[],
+): string {
+  const [activeKey] = toUploadKeyring(secret);
+  if (!activeKey) throw new Error("signFsUploadToken requires at least one signing key");
   const body = Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
-  const sig = createHmac("sha256", secret).update(body).digest("base64url");
+  const sig = createHmac("sha256", activeKey).update(body).digest("base64url");
   return `${body}.${sig}`;
 }
 
 /**
  * Verify + decode an upload token. Returns the payload on success, null on any failure.
- * Constant-time signature comparison; rejects expired tokens.
+ * Verifies against EVERY key of the keyring (constant-time comparison per key)
+ * so tokens signed before a rotation stay valid; rejects expired tokens.
  */
-export function verifyFsUploadToken(token: string, secret: string): FsUploadTokenPayload | null {
+export function verifyFsUploadToken(
+  token: string,
+  secret: string | readonly string[],
+): FsUploadTokenPayload | null {
   const dot = token.indexOf(".");
   if (dot <= 0) return null;
   const body = token.slice(0, dot);
   const sig = token.slice(dot + 1);
-  const expected = createHmac("sha256", secret).update(body).digest("base64url");
   const a = Buffer.from(sig);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  let valid = false;
+  for (const key of toUploadKeyring(secret)) {
+    const b = Buffer.from(createHmac("sha256", key).update(body).digest("base64url"));
+    if (a.length === b.length && timingSafeEqual(a, b)) {
+      valid = true;
+      break;
+    }
+  }
+  if (!valid) return null;
   let payload: FsUploadTokenPayload;
   try {
     payload = JSON.parse(Buffer.from(body, "base64url").toString("utf-8")) as FsUploadTokenPayload;
@@ -153,12 +181,44 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
     },
 
     async uploadStream(bucket, path, stream, opts) {
-      if (opts?.exclusive) {
-        throw new Error("uploadStream does not support exclusive uploads");
-      }
       const fullPath = resolve(bucket, path);
       await mkdir(dirname(fullPath), { recursive: true });
       await verifyContainment(dirname(fullPath));
+      if (opts?.exclusive) {
+        // "wx" = O_CREAT | O_EXCL — same atomic create-new-or-fail primitive as
+        // uploadFile, but the body is pulled from the stream chunk-by-chunk
+        // through the filehandle, never buffered whole. Used by the FS
+        // direct-upload sink: replay protection (single-use signed token) plus
+        // bounded memory for bodies up to the signed max.
+        let fh: Awaited<ReturnType<typeof open>>;
+        try {
+          fh = await open(fullPath, "wx");
+        } catch (err: unknown) {
+          if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+            throw new StorageAlreadyExistsError();
+          }
+          throw err;
+        }
+        const reader = stream.getReader();
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            await fh.write(value);
+          }
+          await fh.close();
+        } catch (err) {
+          await fh.close().catch(() => {});
+          await reader.cancel(err).catch(() => {});
+          // O_EXCL guarantees THIS call created the file, so a failed write
+          // must remove the partial — a leftover would make every retry with
+          // the still-valid token 409 until GC sweeps it.
+          await unlink(fullPath).catch(() => {});
+          throw err;
+        }
+        await verifyContainment(fullPath);
+        return makeKey(bucket, path);
+      }
       // Pull the web ReadableStream chunk-by-chunk into a FileSink — never
       // buffering the whole payload in memory.
       //

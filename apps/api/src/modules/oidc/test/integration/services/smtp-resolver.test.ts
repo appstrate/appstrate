@@ -6,7 +6,12 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db } from "@appstrate/db/client";
-import { user as userTable, organizations, applications } from "@appstrate/db/schema";
+import {
+  user as userTable,
+  organizations,
+  applications,
+  applicationSmtpConfigs,
+} from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
   resolveSmtpForClient,
@@ -104,6 +109,25 @@ describe("resolveSmtpForClient", () => {
       referencedApplicationId: applicationId,
     });
     expect(afterDelete).toBeNull();
+  });
+
+  it("treats a row whose ciphertext cannot be decrypted as unconfigured", async () => {
+    const applicationId = await seedApp();
+    // Envelope with a kid absent from the keyring — decryption must fail and
+    // the resolver must surface "not configured" instead of throwing.
+    await db.insert(applicationSmtpConfigs).values({
+      applicationId,
+      host: "smtp.tenant.example",
+      port: 587,
+      username: "u",
+      passEncrypted: `v1:retired-unknown-kid:${Buffer.alloc(64).toString("base64")}`,
+      fromAddress: "noreply@tenant.example",
+    });
+    const resolved = await resolveSmtpForClient({
+      level: "application",
+      referencedApplicationId: applicationId,
+    });
+    expect(resolved).toBeNull();
   });
 
   it("level=org / level=instance fall back to env SMTP (null when env absent)", async () => {

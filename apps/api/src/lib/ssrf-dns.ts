@@ -10,10 +10,12 @@
  * initiates against a client-controlled URL (the CIMD metadata-document fetch
  * is the only caller today), that residual rebinding-to-internal vector matters.
  *
- * This guard layers DNS resolution on top: it resolves every A/AAAA record and
- * blocks if ANY resolves into a private/internal range. It fails closed on any
- * resolution error (an attacker who can make resolution fail must not thereby
- * bypass the check).
+ * The resolution layer itself lives in `@appstrate/core/ssrf`
+ * (`resolveAndCheckHost`) and is shared with the sidecar egress listeners.
+ * This wrapper keeps the URL-shaped API and platform logging: it resolves
+ * every A/AAAA record and blocks if ANY resolves into a private/internal
+ * range, failing closed on any resolution error (an attacker who can make
+ * resolution fail must not thereby bypass the check).
  *
  * Residual TOCTOU: the actual connection (made by the caller / the upstream
  * plugin) re-resolves, so a hostile resolver could return a public IP here and
@@ -24,22 +26,10 @@
  * platform host denylist (`isBlockedUrl`) still runs first and unconditionally.
  */
 
-import { lookup } from "node:dns/promises";
-import { isBlockedUrl, isBlockedHost } from "@appstrate/core/ssrf";
+import { isBlockedUrl, resolveAndCheckHost, type HostResolver } from "@appstrate/core/ssrf";
 import { logger } from "./logger.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
 
-/**
- * Resolve a hostname to its IP addresses. Injectable so tests can exercise the
- * resolution branch deterministically without real DNS. Production uses
- * `node:dns/promises` `lookup` (honours the system resolver + `/etc/hosts`).
- */
-export type HostResolver = (hostname: string) => Promise<string[]>;
-
-const defaultResolver: HostResolver = async (hostname) => {
-  const records = await lookup(hostname, { all: true });
-  return records.map((r) => r.address);
-};
+export type { HostResolver } from "@appstrate/core/ssrf";
 
 /**
  * True if `url` should be blocked — either by the literal denylist or because
@@ -62,16 +52,12 @@ export async function isBlockedUrlWithDns(
     return true;
   }
 
-  const resolve = deps?.resolve ?? defaultResolver;
-  try {
-    const addresses = await resolve(hostname);
-    if (addresses.length === 0) return true; // no address → nothing legitimate to reach
-    return addresses.some((addr) => isBlockedHost(addr));
-  } catch (err) {
+  const check = await resolveAndCheckHost(hostname, { resolve: deps?.resolve });
+  if (check.blocked && check.reason === "resolution-failed") {
     logger.debug("ssrf-dns: resolution failed — blocking", {
       hostname,
-      error: getErrorMessage(err),
+      error: check.detail ?? "unknown",
     });
-    return true;
   }
+  return check.blocked;
 }

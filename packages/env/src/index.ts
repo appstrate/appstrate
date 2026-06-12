@@ -99,7 +99,18 @@ const envSchema = z
     // Dedicated HMAC secret for FS upload-sink tokens. Separate from
     // BETTER_AUTH_SECRET so the two can be rotated independently and a
     // compromise of one does not affect the other.
-    UPLOAD_SIGNING_SECRET: z.string().min(16, "UPLOAD_SIGNING_SECRET must be at least 16 chars"),
+    //
+    // Comma-separated keyring for online rotation (single value = keyring of
+    // one): the FIRST key signs new tokens, ALL keys verify, so rotation does
+    // not invalidate in-flight upload URLs. Rotation pattern: prepend the new
+    // key + restart, wait out the longest token TTL, drop the old key +
+    // restart. Each key must be ≥16 chars (and thus comma-free).
+    UPLOAD_SIGNING_SECRET: z
+      .string()
+      .min(1, "UPLOAD_SIGNING_SECRET is required")
+      .refine((v) => v.split(",").every((k) => k.length >= 16), {
+        message: "UPLOAD_SIGNING_SECRET: each comma-separated key must be at least 16 chars",
+      }),
     // S3 storage (optional — falls back to filesystem when S3_BUCKET is absent)
     S3_BUCKET: z.string().optional(),
     S3_REGION: z.string().optional(),
@@ -226,6 +237,11 @@ const envSchema = z
     // events (run.success/failed/timeout/cancelled) flush immediately
     // regardless of gaps.
     REMOTE_RUN_BUFFER_FLUSH_MS: z.coerce.number().int().positive().default(5000),
+    // Fallback DB-poll cadence for `GET /runs/:id?wait=` long-polls — the
+    // safety net when the realtime NOTIFY path doesn't deliver. Tuning
+    // knob only; the test preload shrinks it to 50ms so route tests don't
+    // pay a real 2s tick per wakeup.
+    RUN_WAIT_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
 
     // Standard Webhooks `webhook-timestamp` tolerance window (seconds).
     // Inbound run-event signatures with a timestamp drifting more than
@@ -291,7 +307,10 @@ const envSchema = z
     // built-in OSS modules plus the two reference OAuth-provider modules:
     // `@appstrate/module-codex` (ChatGPT/Codex) and
     // `@appstrate/module-claude-code` (Claude Pro/Max/Team) — remove
-    // either to drop that provider surface.
+    // either to drop that provider surface. `MODULES=none` boots with
+    // zero modules; `MODULES=""` is a legacy alias for the same thing,
+    // handled in getModuleRegistry() (the getter coalesces "" → unset,
+    // so it can't be expressed here).
     MODULES: z
       .string()
       .default(
@@ -381,6 +400,13 @@ const envSchema = z
     // Run — execution backend: "docker" (isolated containers) or "process" (default, Bun subprocesses, no isolation)
     RUN_ADAPTER: z.enum(["docker", "process"]).default("process"),
 
+    // Integration runtime backend the Docker orchestrator pins onto the
+    // sidecar (operator override; same value set as RUN_ADAPTER). The
+    // process orchestrator deliberately reads the raw environment instead —
+    // it must distinguish "unset" (pin to "process") from an explicit
+    // operator override, which a schema default would erase.
+    INTEGRATION_RUNTIME_ADAPTER: z.enum(["docker", "process"]).default("docker"),
+
     // Docker images (override for GHCR / custom registries)
     PI_IMAGE: z.string().default("appstrate-pi:latest"),
     SIDECAR_IMAGE: z.string().default("appstrate-sidecar:latest"),
@@ -424,8 +450,19 @@ const envSchema = z
     // Outbound proxy
     PROXY_URL: z.string().optional(),
 
-    // Run token signing (optional — if unset, run tokens are unsigned)
-    RUN_TOKEN_SECRET: z.string().optional(),
+    // Run token signing (optional — if unset, run tokens are unsigned).
+    //
+    // Comma-separated keyring for online rotation (single value = keyring of
+    // one): the FIRST key signs new run tokens, ALL keys verify, so rotation
+    // does not kill event ingestion for in-flight runs. Rotation pattern:
+    // prepend the new key + restart, wait out the longest in-flight run, drop
+    // the old key + restart. Keys must be non-empty (and thus comma-free).
+    RUN_TOKEN_SECRET: z
+      .string()
+      .optional()
+      .refine((v) => v === undefined || v.split(",").every((k) => k.length >= 1), {
+        message: "RUN_TOKEN_SECRET: comma-separated keys must be non-empty",
+      }),
 
     // Social auth (optional — enables Google/GitHub sign-in when both are set)
     GOOGLE_CLIENT_ID: z.string().optional(),

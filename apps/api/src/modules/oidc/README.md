@@ -395,14 +395,14 @@ Before exposing the module to external satellites:
 
 ### Per-app secret encryption — rotation SOP
 
-`application_smtp_configs.pass_encrypted` and `application_social_providers.client_secret_encrypted` are AES-256-GCM encrypted via `CONNECTION_ENCRYPTION_KEY`. Each row also carries an `encryption_key_version` tag stamped at write time (see `services/smtp.ts or services/social.ts`). On read, the resolver compares the row's tag with `ENCRYPTION_KEY_VERSION`; a mismatch is treated as "not configured" (no silent decryption error, no silent fallback to env credentials).
+`application_smtp_configs.pass_encrypted` and `application_social_providers.client_secret_encrypted` are AES-256-GCM encrypted via `@appstrate/connect`. Each ciphertext is a self-describing envelope (`v1:<kid>:<base64>`): the embedded key id (`kid`) drives decryption against the connect keyring, so per-app secrets rotate exactly like every other credential on the platform — no parallel version column, no module-specific SOP.
 
 To rotate `CONNECTION_ENCRYPTION_KEY`:
 
-1. Bump `ENCRYPTION_KEY_VERSION` in `services/smtp.ts or services/social.ts` (e.g. `v1` → `v2`).
-2. Roll out the new `CONNECTION_ENCRYPTION_KEY` and the new constant together (blue/green).
-3. After deploy, per-app email + social auth are disabled for every tenant until an operator re-`PUT`s each `/api/applications/:id/smtp-config` and `/api/applications/:id/social-providers/:provider` row. For deployments with more than a handful of tenants, drive this via a one-off migration script that reads `CONNECTION_ENCRYPTION_KEY_OLD` + `CONNECTION_ENCRYPTION_KEY_NEW` side by side, decrypts each row with the old key, re-encrypts with the new key, and writes back via the admin API (which stamps the new `encryption_key_version`). Per-tenant `PUT`s become the fallback, not the default path.
-4. Rows carrying the old tag stay unreachable until explicitly rewritten — this is intentional: a stale ciphertext must never silently fall through to instance-level env credentials or surface as a cryptic crypto error.
+1. Generate the new key, set it as `CONNECTION_ENCRYPTION_KEY` with a new `CONNECTION_ENCRYPTION_KEY_ID`, and move the old key into `CONNECTION_ENCRYPTION_KEYS` (the retired-keys map, keyed by its old kid).
+2. Deploy. Existing rows keep decrypting via their embedded kid; new/updated rows are encrypted under the active kid. Nothing is disabled for tenants during the rotation window.
+3. (Optional hygiene) Re-`PUT` rows via the admin API to re-encrypt them under the active kid, then drop the retired kid from `CONNECTION_ENCRYPTION_KEYS` once no row references it.
+4. A row whose kid was removed from the keyring (or whose ciphertext is corrupt) fails decryption; the resolver logs it and treats the row as "not configured" — it never silently falls through to instance-level env credentials or surfaces as a cryptic crypto error.
 
 Cross-instance cache invalidation: admin `PUT`/`DELETE` publishes the invalidated key on the platform `PubSub` (`oidc:smtp-cache-invalidate`, `oidc:social-cache-invalidate`). Every API instance subscribes at boot and evicts its local `TtlCache` entry on publish — see `services/ttl-cache.ts`. When Redis is unavailable the subscribe fails open (logged as `oidc per-app cache: pub/sub subscribe failed, running single-instance`); in that mode, other pods only see admin mutations after the **10-second null TTL** expires. Multi-instance deployments MUST configure `REDIS_URL` for immediate invalidation. Operators should also expect a ≤10 s propagation window on freshly-configured SMTP/social rows (first read caches `null`, subsequent reads see the new row once the null entry expires).
 

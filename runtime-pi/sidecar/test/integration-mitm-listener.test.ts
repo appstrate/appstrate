@@ -62,6 +62,15 @@ const runIfOpenssl: typeof it = HAS_OPENSSL ? it : (it.skip as unknown as typeof
 // Helpers
 // ─────────────────────────────────────────────
 
+/**
+ * The SNI hosts in this suite (`api.test.local`, …) don't resolve in real
+ * DNS, and the listener's SSRF floor fails closed on resolution failure —
+ * stub the rebind-guard resolver to a public TEST-NET-3 address so the
+ * tunnels under test open. Rebind refusal is covered explicitly in the
+ * "SSRF floor" describe below.
+ */
+const stubResolveHost = async () => ["203.0.113.10"];
+
 async function makeCaBundle() {
   const workDir = path.join(tmpdir(), `afps-mitm-ca-${randomUUID()}`);
   await fs.mkdir(workDir, { recursive: true });
@@ -224,6 +233,7 @@ describe("MITM listener — CONNECT preamble", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      resolveHostFn: stubResolveHost,
     });
     await listener.ready;
     try {
@@ -302,6 +312,7 @@ describe("MITM listener — strip + inject end-to-end", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      resolveHostFn: stubResolveHost,
       fetch: recordedFetch,
     });
     await listener.ready;
@@ -362,6 +373,7 @@ describe("MITM listener — strip + inject end-to-end", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      resolveHostFn: stubResolveHost,
       fetch: recordedFetch,
     });
     await listener.ready;
@@ -437,6 +449,7 @@ describe("MITM listener — 401 refresh + retry", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      resolveHostFn: stubResolveHost,
       fetch: recorded.fetch,
     });
     await listener.ready;
@@ -500,6 +513,7 @@ describe("MITM listener — 401 refresh + retry", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      resolveHostFn: stubResolveHost,
       fetch: recorded.fetch,
     });
     await listener.ready;
@@ -552,6 +566,7 @@ describe("MITM listener — 401 refresh + retry", () => {
         caBundle: bundle,
         minter,
         credentials: creds,
+        resolveHostFn: stubResolveHost,
         fetch: recorded.fetch,
       });
       await listener.ready;
@@ -626,6 +641,7 @@ describe("MITM listener — connect.tool re-login (P3)", () => {
         caBundle: bundle,
         minter,
         credentials: creds,
+        resolveHostFn: stubResolveHost,
         fetch: recorded.fetch,
       });
       await listener.ready;
@@ -684,6 +700,7 @@ describe("MITM listener — connect.tool re-login (P3)", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      resolveHostFn: stubResolveHost,
       fetch: recorded.fetch,
     });
     await listener.ready;
@@ -746,6 +763,7 @@ describe("MITM listener — connect.tool re-login (P3)", () => {
         caBundle: bundle,
         minter,
         credentials: creds,
+        resolveHostFn: stubResolveHost,
         fetch: recorded.fetch,
       });
       await listener.ready;
@@ -801,6 +819,7 @@ describe("MITM listener — connect.tool re-login (P3)", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      resolveHostFn: stubResolveHost,
       fetch: recorded.fetch,
     });
     await listener.ready;
@@ -845,6 +864,7 @@ describe("MITM listener — telemetry", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      resolveHostFn: stubResolveHost,
       fetch: recorded.fetch,
       onEvent: (e) => events.push(e),
     });
@@ -890,6 +910,7 @@ describe("MITM listener — SSRF floor", () => {
         caBundle: bundle,
         minter,
         credentials: creds,
+        resolveHostFn: stubResolveHost,
         fetch: recorded.fetch,
         onEvent: (e) => events.push(e),
       });
@@ -918,6 +939,100 @@ describe("MITM listener — SSRF floor", () => {
       }
     },
   );
+
+  runIfOpenssl(
+    "refuses a CONNECT whose SNI is a public-looking name that RESOLVES to a blocked address (DNS rebind)",
+    async () => {
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+      const events: MitmListenerEvent[] = [];
+      const creds: MitmCredentialSource = {
+        current: () => payload("v", "oauth2", { access_token: "t" }, ["https://**/**"]),
+        deliveryPlans: () => ({ v: plan("Authorization", "t") }),
+      };
+      const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
+
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        resolveHostFn: async () => ["169.254.169.254"],
+        fetch: recorded.fetch,
+        onEvent: (e) => events.push(e),
+      });
+      await listener.ready;
+      try {
+        const addr = listener.address();
+        // `rebind.example` passes the LITERAL blocklist, but its A record
+        // points at the cloud metadata address — the resolve-and-check layer
+        // must destroy the socket before any mint or upstream fetch.
+        await expect(
+          drivenFetch({
+            listenerPort: addr.port,
+            sni: "rebind.example",
+            caCertPem: bundle.pems.caCertPem,
+            method: "GET",
+            path: "/latest/meta-data/",
+            headers: {},
+          }),
+        ).rejects.toThrow();
+
+        expect(events.some((e) => e.kind === "tls-error" && /rebind/i.test(e.error))).toBe(true);
+        expect(recorded.calls.length).toBe(0);
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+
+  runIfOpenssl("refuses (fails closed) when SNI host DNS resolution fails", async () => {
+    const bundle = await makeCaBundle();
+    const minter = createCertMinter({
+      caCertPem: bundle.pems.caCertPem,
+      caKeyPem: bundle.pems.caKeyPem,
+    });
+    const events: MitmListenerEvent[] = [];
+    const creds: MitmCredentialSource = {
+      current: () => payload("v", "oauth2", { access_token: "t" }, ["https://**/**"]),
+      deliveryPlans: () => ({ v: plan("Authorization", "t") }),
+    };
+    const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
+
+    const listener = createIntegrationMitmListener({
+      caBundle: bundle,
+      minter,
+      credentials: creds,
+      resolveHostFn: async () => {
+        throw new Error("NXDOMAIN");
+      },
+      fetch: recorded.fetch,
+      onEvent: (e) => events.push(e),
+    });
+    await listener.ready;
+    try {
+      const addr = listener.address();
+      await expect(
+        drivenFetch({
+          listenerPort: addr.port,
+          sni: "flaky.example",
+          caCertPem: bundle.pems.caCertPem,
+          method: "GET",
+          path: "/",
+          headers: {},
+        }),
+      ).rejects.toThrow();
+
+      expect(events.some((e) => e.kind === "tls-error" && /resolution failed/i.test(e.error))).toBe(
+        true,
+      );
+      expect(recorded.calls.length).toBe(0);
+    } finally {
+      await listener.close();
+    }
+  });
 });
 
 describe("MITM listener — proxyUrl shape", () => {
@@ -935,6 +1050,7 @@ describe("MITM listener — proxyUrl shape", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      resolveHostFn: stubResolveHost,
     });
     await listener.ready;
     try {

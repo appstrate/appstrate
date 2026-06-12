@@ -506,9 +506,9 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
-      expect(body).toHaveProperty("apiKeys");
-      expect((body as any).apiKeys).toBeArray();
-      expect((body as any).apiKeys.length).toBeGreaterThanOrEqual(1);
+      expect((body as any).object).toBe("list");
+      expect((body as any).data).toBeArray();
+      expect((body as any).data.length).toBeGreaterThanOrEqual(1);
     });
   });
 

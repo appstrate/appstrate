@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { ApiError, internalError, notFound, parseBody } from "../lib/errors.ts";
+import { listResponse } from "../lib/list-response.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { validateScopes, roleScopes, getApiKeyAllowedScopes } from "../lib/permissions.ts";
 import {
@@ -38,14 +39,14 @@ export function createApiKeysRouter() {
     const orgRole = c.get("orgRole");
     const rolePerms = roleScopes(orgRole);
     const available = [...getApiKeyAllowedScopes()].filter((s) => rolePerms.has(s));
-    return c.json({ scopes: available });
+    return c.json(listResponse(available));
   });
 
   // GET /api/api-keys — list active keys for the current application
   router.get("/", requirePermission("api-keys", "read"), async (c) => {
     const scope = getAppScope(c);
     const keys = await listApiKeys(scope);
-    return c.json({ apiKeys: keys });
+    return c.json(listResponse(keys));
   });
 
   // POST /api/api-keys — create a new key (returns raw key ONCE)

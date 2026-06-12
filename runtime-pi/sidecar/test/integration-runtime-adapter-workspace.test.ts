@@ -26,6 +26,23 @@ import { createProcessIntegrationRuntimeAdapter } from "../integration-runtime-a
 import { WORKSPACE_ENV_VAR } from "../integration-runtime-adapter.ts";
 import type { IntegrationSpawnSpec } from "../integrations-boot.ts";
 
+/**
+ * Poll until the spawned env-dump-and-exit script has flushed its output
+ * (every 10ms, 2s budget) — deterministic replacement for a fixed sleep.
+ * A partially-written file fails JSON.parse and is retried.
+ */
+async function readEnvDump(path: string): Promise<Record<string, string>> {
+  const deadline = Date.now() + 2_000;
+  for (;;) {
+    try {
+      return JSON.parse(await readFile(path, "utf8")) as Record<string, string>;
+    } catch {
+      if (Date.now() > deadline) throw new Error("env dump never flushed");
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+}
+
 function baseSpec(extra: Partial<IntegrationSpawnSpec> = {}): IntegrationSpawnSpec {
   return {
     integrationId: "@orga/test",
@@ -84,8 +101,7 @@ describe("process adapter — workspace env propagation", () => {
     // the MCP handshake — invoke `.start()` directly + wait for the
     // env-dump-and-exit script to flush.
     await spawned.transport.start();
-    await new Promise((r) => setTimeout(r, 300));
-    const dump = JSON.parse(await readFile(envFile, "utf8")) as Record<string, string>;
+    const dump = await readEnvDump(envFile);
     expect(dump[WORKSPACE_ENV_VAR]).toBe(workspacePath);
 
     await spawned.transport.close().catch(() => {});
@@ -115,8 +131,7 @@ describe("process adapter — workspace env propagation", () => {
       onStderrLine: () => {},
     });
     await spawned.transport.start();
-    await new Promise((r) => setTimeout(r, 300));
-    const dump = JSON.parse(await readFile(envFile, "utf8")) as Record<string, string>;
+    const dump = await readEnvDump(envFile);
     expect(dump[WORKSPACE_ENV_VAR]).toBeUndefined();
 
     await spawned.transport.close().catch(() => {});
@@ -144,8 +159,7 @@ describe("process adapter — workspace env propagation", () => {
       onStderrLine: () => {},
     });
     await spawned.transport.start();
-    await new Promise((r) => setTimeout(r, 300));
-    const dump = JSON.parse(await readFile(envFile, "utf8")) as Record<string, string>;
+    const dump = await readEnvDump(envFile);
     expect(dump[WORKSPACE_ENV_VAR]).toBeUndefined();
 
     await spawned.transport.close().catch(() => {});

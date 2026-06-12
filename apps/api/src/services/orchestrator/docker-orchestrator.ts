@@ -257,8 +257,9 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     // The sidecar selects its integration runtime purely from this var (no
     // auto-detection). Pin it to mirror this orchestrator's RUN_ADAPTER so a
     // containerized run spawns its integrations as containers too. Respect an
-    // explicit operator override carried in from the environment.
-    sidecarEnv.INTEGRATION_RUNTIME_ADAPTER = process.env.INTEGRATION_RUNTIME_ADAPTER ?? "docker";
+    // explicit operator override — the env schema validates the value and
+    // defaults it to "docker".
+    sidecarEnv.INTEGRATION_RUNTIME_ADAPTER = env.INTEGRATION_RUNTIME_ADAPTER;
 
     // Create sidecar on egress network (primary) so it has DNS + internet.
     // Then connect to run network (internal) with "sidecar" alias for agent DNS.

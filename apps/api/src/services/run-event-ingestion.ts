@@ -24,7 +24,12 @@
 
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, runLogs, TERMINAL_RUN_EVENT_TYPES } from "@appstrate/db/schema";
+import {
+  runs,
+  runLogs,
+  TERMINAL_RUN_EVENT_TYPES,
+  type RunResultPayload,
+} from "@appstrate/db/schema";
 import { type CloudEventEnvelope } from "@appstrate/afps-runtime/events";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
@@ -52,6 +57,8 @@ import type { RunStatusChangeParams } from "@appstrate/core/module";
 import { assertSinkOpen, verifyRunSignatureHeaders } from "../lib/run-signature.ts";
 import { clearRunMetricBroadcastState } from "./run-metric-broadcaster.ts";
 import { deleteRunWorkspace } from "./run-workspace-storage.ts";
+import { runResultSchema } from "../lib/jsonb-schemas.ts";
+import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import type { TokenUsage } from "@appstrate/shared-types";
 
 // Re-export the pure helpers so callers that already import from this
@@ -329,8 +336,17 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     }
   }
 
+  // Zod boundary on the runner-supplied terminal usage (tolerant: known
+  // numeric fields kept, unknown keys stripped, an invalid shape is treated
+  // as ABSENT + a warn log — never fails the finalize of an already-completed
+  // run). The HTTP route already drops malformed usage via `.catch(undefined)`;
+  // this guards the non-HTTP callers (platform synthesis, in-process runners)
+  // and replaces the previous unchecked double-cast at the column write. The
+  // zero-token heuristic below only fires on validated-present usage.
+  const validatedUsage = validateFinalizeUsage(result.usage, run.id);
+
   if (status === "success") {
-    const zeroTokens = await runHadZeroTokens(run.id, result);
+    const zeroTokens = await runHadZeroTokens(run.id, validatedUsage);
     if (zeroTokens) {
       status = "failed";
       errorMessage = llmUnreachableMessage(run);
@@ -359,8 +375,23 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     resultPayload.text = text;
     if (truncated) resultPayload.text_truncated = true;
   }
-  const resultToPersist =
-    Object.keys(resultPayload).length > 0 ? (resultPayload as Record<string, unknown>) : null;
+  // Zod boundary on the persisted payload (`runResultSchema`: closed shape,
+  // JSON-safe values, 512 KiB cap). `output` is runner-controlled, so the
+  // validation is tolerant: an invalid payload degrades to `null` + a warn
+  // log (the terminal status, error message and run_logs trail survive) —
+  // it must never fail the finalize of an already-completed run.
+  let resultToPersist: RunResultPayload | null = null;
+  if (Object.keys(resultPayload).length > 0) {
+    const parsedResult = runResultSchema.safeParse(resultPayload);
+    if (parsedResult.success) {
+      resultToPersist = parsedResult.data;
+    } else {
+      logger.warn("finalize: dropping invalid runs.result payload", {
+        runId: run.id,
+        reason: parsedResult.error.issues[0]?.message ?? "validation failed",
+      });
+    }
+  }
 
   // 4b. Write the runner-source ledger row from `result.cost` when the
   //     `appstrate.metric` event never landed (e.g. process exited
@@ -372,7 +403,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   if (typeof result.cost === "number" && result.cost > 0) {
     await writeRunnerLedgerRow({ orgId: run.orgId, applicationId: run.applicationId }, run.id, {
       cost: result.cost,
-      usage: result.usage ?? null,
+      usage: validatedUsage,
     });
   }
 
@@ -445,8 +476,9 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
       // the side-channel `appstrate.metric` event was dropped (network
       // hiccup, container exit before the POST drained, …). The metric
       // handler still runs the same UPDATE on its own path; whichever
-      // arrives second is a no-op overwrite of the same value.
-      ...(result.usage ? { tokenUsage: result.usage as unknown as Record<string, unknown> } : {}),
+      // arrives second is a no-op overwrite of the same value. Only the
+      // Zod-validated shape reaches the column (see validateFinalizeUsage).
+      ...(validatedUsage ? { tokenUsage: validatedUsage } : {}),
       ...(metadata ? { metadata } : {}),
     })
     .where(and(eq(runs.id, run.id), sql`sink_closed_at IS NULL`))
@@ -708,9 +740,9 @@ export function capUtf8Text(value: string, maxBytes: number): { text: string; tr
  *      paths, third-party AFPS runners) that do not set `result.usage`
  *      and rely on the metric event being ingested before finalize.
  */
-async function runHadZeroTokens(runId: string, result: RunResult): Promise<boolean> {
-  if (result.usage) {
-    return (result.usage.input_tokens ?? 0) === 0 && (result.usage.output_tokens ?? 0) === 0;
+async function runHadZeroTokens(runId: string, usage: TokenUsage | null): Promise<boolean> {
+  if (usage) {
+    return (usage.input_tokens ?? 0) === 0 && (usage.output_tokens ?? 0) === 0;
   }
   const [row] = await db
     .select({ tokenUsage: runs.tokenUsage })
@@ -718,8 +750,27 @@ async function runHadZeroTokens(runId: string, result: RunResult): Promise<boole
     .where(eq(runs.id, runId))
     .limit(1);
   if (!row?.tokenUsage) return true;
-  const usage = row.tokenUsage as Partial<TokenUsage>;
-  return (usage.input_tokens ?? 0) === 0 && (usage.output_tokens ?? 0) === 0;
+  return (row.tokenUsage.input_tokens ?? 0) === 0 && (row.tokenUsage.output_tokens ?? 0) === 0;
+}
+
+/**
+ * Tolerant Zod boundary on the runner-supplied finalize `usage`: known
+ * numeric fields validated, unknown keys stripped, and an invalid shape is
+ * treated as absent (+ warn log) so a malformed billing field can never fail
+ * the finalize of an already-completed run. Returns `null` when absent or
+ * invalid — the zero-token heuristic then falls back to `runs.tokenUsage`.
+ */
+function validateFinalizeUsage(usage: unknown, runId: string): TokenUsage | null {
+  if (usage === null || usage === undefined) return null;
+  const parsed = tokenUsageSchema.safeParse(usage);
+  if (!parsed.success) {
+    logger.warn("finalize: ignoring malformed result.usage", {
+      runId,
+      reason: parsed.error.issues[0]?.message ?? "validation failed",
+    });
+    return null;
+  }
+  return parsed.data;
 }
 
 /**

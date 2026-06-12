@@ -62,7 +62,7 @@ import { triggerPostBootstrapOrg } from "../lib/post-bootstrap-hook.ts";
 
 const redeemSchema = z.object({
   token: z.string().min(1).max(128),
-  email: z.string().email().toLowerCase().trim(),
+  email: z.email().toLowerCase().trim(),
   name: z.string().min(1).max(120).trim(),
   password: z.string().min(8).max(256),
 });
