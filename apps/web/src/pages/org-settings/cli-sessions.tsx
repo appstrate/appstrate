@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Laptop } from "lucide-react";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CliSessionCard } from "../../components/cli-session-card";
-import { api, apiList } from "../../api";
+import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { deriveLabel, type CliSessionDisplay } from "../../lib/cli-sessions";
 
@@ -27,17 +28,23 @@ export function OrgSettingsCliSessionsPage() {
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["org-cli-sessions", orgId],
-    queryFn: () => apiList<AdminCliSession>(`/orgs/${orgId}/cli-sessions`),
-    enabled: !!orgId,
-  });
+  const { data, isLoading, error } = $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}/cli-sessions",
+    { params: { path: { orgId: orgId ?? "" } } },
+    {
+      enabled: !!orgId,
+      // Unwrap the list envelope (legacy apiList behavior). The spec declares
+      // the item fields optional, but the route always serializes them.
+      select: (envelope) => envelope.data as AdminCliSession[],
+    },
+  );
 
-  const revoke = useMutation({
-    mutationFn: async (familyId: string) =>
-      api<void>(`/orgs/${orgId}/cli-sessions/${familyId}`, { method: "DELETE" }),
+  const revoke = $api.useMutation("delete", "/api/orgs/{orgId}/cli-sessions/{familyId}", {
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["org-cli-sessions", orgId] });
+      void queryClient.invalidateQueries({
+        queryKey: ["get", "/api/orgs/{orgId}/cli-sessions"],
+      });
     },
   });
 
@@ -45,7 +52,7 @@ export function OrgSettingsCliSessionsPage() {
 
   if (!orgId) return <LoadingState />;
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   const sessions = data ?? [];
 
@@ -71,7 +78,9 @@ export function OrgSettingsCliSessionsPage() {
               key={s.familyId}
               session={s}
               meta={<span className="text-muted-foreground text-xs">· {memberLabel(s)}</span>}
-              revokeDisabled={revoke.isPending && revoke.variables === s.familyId}
+              revokeDisabled={
+                revoke.isPending && revoke.variables?.params.path.familyId === s.familyId
+              }
               onRevoke={() => setPendingRevoke(s)}
             />
           ))}
@@ -94,9 +103,10 @@ export function OrgSettingsCliSessionsPage() {
         isPending={revoke.isPending}
         onConfirm={() => {
           if (!pendingRevoke) return;
-          revoke.mutate(pendingRevoke.familyId, {
-            onSuccess: () => setPendingRevoke(null),
-          });
+          revoke.mutate(
+            { params: { path: { orgId: orgId ?? "", familyId: pendingRevoke.familyId } } },
+            { onSuccess: () => setPendingRevoke(null) },
+          );
         }}
         onClose={() => setPendingRevoke(null)}
       />

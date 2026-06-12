@@ -72,6 +72,9 @@ export const uploadsPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                // Mirrors CreateUploadResponse (services/uploads.ts) — every
+                // field is always serialized.
+                required: ["object", "id", "uri", "url", "method", "headers", "expiresAt"],
                 properties: {
                   object: { type: "string", enum: ["upload"] },
                   id: { type: "string" },

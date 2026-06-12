@@ -158,11 +158,14 @@ function DisplayNameForm() {
 
   const onSubmit = (data: { name: string }) => {
     setSuccess("");
-    updateDisplayName.mutate(data.name.trim(), {
-      onSuccess: () => {
-        setSuccess(t("preferences.displayNameChanged"));
+    updateDisplayName.mutate(
+      { body: { displayName: data.name.trim() } },
+      {
+        onSuccess: () => {
+          setSuccess(t("preferences.displayNameChanged"));
+        },
       },
-    });
+    );
   };
 
   return (

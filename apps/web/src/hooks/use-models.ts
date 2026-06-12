@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, apiList } from "../api";
+import { api } from "../api";
+import { $api, type components } from "../api/client";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelFormData } from "../components/model-form-modal";
 import {
@@ -12,105 +12,63 @@ import {
   useModelProviderCredentials,
 } from "./use-model-provider-credentials";
 
-export function useModels() {
+/** Wire shape from the OpenAPI spec (components.schemas.OrgModel). */
+export type OrgModelInfo = components["schemas"]["OrgModel"];
+
+/**
+ * Org context for queries. The header is a spec-declared param passed
+ * explicitly (instead of relying on the client middleware alone) so it is
+ * part of the React Query key — switching org refetches instead of serving
+ * another org's cached page.
+ */
+function useOrgScope() {
   const orgId = useCurrentOrgId();
-  return useQuery({
-    queryKey: ["models", orgId],
-    queryFn: () => apiList<OrgModelInfo>("/models"),
+  return {
     enabled: !!orgId,
-  });
+    header: { "X-Org-Id": orgId ?? undefined },
+  };
+}
+
+export function useModels() {
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/models",
+    { params: { header: scope.header } },
+    { enabled: scope.enabled, select: (e) => e.data },
+  );
+}
+
+/** openapi-react-query keys are [method, path, init] — invalidate the literal spec path. */
+function useInvalidateModels() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
+  };
 }
 
 export function useCreateModel() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: {
-      label?: string;
-      modelId: string;
-      credentialId: string;
-      input?: string[];
-      contextWindow?: number;
-      maxTokens?: number;
-      reasoning?: boolean;
-      cost?: ModelCost;
-    }) => {
-      // Bare created model resource (#657).
-      return api<OrgModelInfo>("/models", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["models"] });
-    },
-  });
+  const invalidate = useInvalidateModels();
+  return $api.useMutation("post", "/api/models", { onSuccess: invalidate });
 }
 
 export function useUpdateModel() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      id,
-      data,
-    }: {
-      id: string;
-      data: {
-        label?: string;
-        modelId?: string;
-        credentialId?: string;
-        enabled?: boolean;
-        input?: string[] | null;
-        contextWindow?: number | null;
-        maxTokens?: number | null;
-        reasoning?: boolean | null;
-        cost?: ModelCost | null;
-      };
-    }) => {
-      // Bare updated model resource (#657).
-      return api<OrgModelInfo>(`/models/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(data),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["models"] });
-    },
-  });
+  const invalidate = useInvalidateModels();
+  return $api.useMutation("put", "/api/models/{id}", { onSuccess: invalidate });
 }
 
 export function useDeleteModel() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      return api(`/models/${id}`, { method: "DELETE" });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["models"] });
-    },
-  });
+  const invalidate = useInvalidateModels();
+  return $api.useMutation("delete", "/api/models/{id}", { onSuccess: invalidate });
 }
 
 export function useSetDefaultModel() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (modelId: string | null) => {
-      // Bare effective default model resource, or undefined when no default
-      // remains in effect (204) (#657).
-      return api<OrgModelInfo | undefined>("/models/default", {
-        method: "PUT",
-        body: JSON.stringify({ modelId }),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["models"] });
-    },
-  });
+  const invalidate = useInvalidateModels();
+  return $api.useMutation("put", "/api/models/default", { onSuccess: invalidate });
 }
 
 export function useTestModel() {
-  return useMutation({
-    mutationFn: (id: string) => api<TestResult>(`/models/${id}/test`, { method: "POST" }),
-  });
+  return $api.useMutation("post", "/api/models/{id}/test");
 }
 
 export interface OpenRouterModel {
@@ -124,17 +82,42 @@ export interface OpenRouterModel {
 }
 
 export function useOpenRouterModels(search: string | undefined) {
-  return useQuery({
-    queryKey: ["openrouter-models", search],
-    queryFn: () =>
-      apiList<OpenRouterModel>(
-        `/models/openrouter${search ? `?q=${encodeURIComponent(search)}` : ""}`,
-      ),
-    enabled: search !== undefined,
-    staleTime: 5 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
-  });
+  return $api.useQuery(
+    "get",
+    "/api/models/openrouter",
+    { params: { query: { q: search || undefined } } },
+    {
+      enabled: search !== undefined,
+      staleTime: 5 * 60 * 1000,
+      gcTime: 10 * 60 * 1000,
+      // The spec marks every item field optional — normalize to the
+      // non-optional shape the model form has always consumed.
+      select: (e): OpenRouterModel[] =>
+        e.data.map((m) => ({
+          id: m.id ?? "",
+          name: m.name ?? m.id ?? "",
+          contextWindow: m.contextWindow ?? null,
+          maxTokens: m.maxTokens ?? null,
+          input: m.input ?? [],
+          reasoning: m.reasoning ?? false,
+          cost:
+            m.cost?.input !== undefined && m.cost.output !== undefined
+              ? {
+                  input: m.cost.input,
+                  output: m.cost.output,
+                  cacheRead: m.cost.cacheRead,
+                  cacheWrite: m.cost.cacheWrite,
+                }
+              : null,
+        })),
+    },
+  );
 }
+
+// NOTE: the agent-scoped hooks below stay on the legacy `api()` helper. The
+// typed client percent-encodes path params (`@scope` → `%40scope`) and the
+// API's `:scope{@[^/]+}` route patterns match the raw path, so encoded
+// scopes 404. Migrate once the client gains a reserved-safe path serializer.
 
 export function useAgentModel(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
@@ -187,11 +170,13 @@ export function useModelFormHandler(opts: {
       // can pass `label` explicitly to override.
       createCredential.mutate(
         {
-          providerId: data.newCredential!.providerId,
-          apiKey: data.newCredential!.apiKey,
-          ...(data.newCredential!.baseUrlOverride
-            ? { baseUrlOverride: data.newCredential!.baseUrlOverride }
-            : {}),
+          body: {
+            providerId: data.newCredential!.providerId,
+            apiKey: data.newCredential!.apiKey,
+            ...(data.newCredential!.baseUrlOverride
+              ? { baseUrlOverride: data.newCredential!.baseUrlOverride }
+              : {}),
+          },
         },
         { onSuccess: (result) => onKeyCreated(result.id) },
       );
@@ -202,20 +187,29 @@ export function useModelFormHandler(opts: {
         createCredentialAndThen((keyId) => {
           const { newCredential: _, ...modelData } = data;
           updateModel.mutate(
-            { id: opts.editModel!.id, data: { ...modelData, credentialId: keyId } },
+            {
+              params: { path: { id: opts.editModel!.id } },
+              body: { ...modelData, credentialId: keyId },
+            },
             { onSuccess: opts.onSuccess },
           );
         });
       } else {
-        updateModel.mutate({ id: opts.editModel.id, data }, { onSuccess: opts.onSuccess });
+        updateModel.mutate(
+          { params: { path: { id: opts.editModel.id } }, body: data },
+          { onSuccess: opts.onSuccess },
+        );
       }
     } else if (data.newCredential) {
       createCredentialAndThen((keyId) => {
         const { newCredential: _, ...modelData } = data;
-        createModel.mutate({ ...modelData, credentialId: keyId }, { onSuccess: opts.onSuccess });
+        createModel.mutate(
+          { body: { ...modelData, credentialId: keyId } },
+          { onSuccess: opts.onSuccess },
+        );
       });
     } else {
-      createModel.mutate(data, { onSuccess: opts.onSuccess });
+      createModel.mutate({ body: data }, { onSuccess: opts.onSuccess });
     }
   };
 

@@ -140,7 +140,7 @@ export function NotificationBell() {
   >[];
 
   const handleClick = (runId: string) => {
-    markRead.mutate(runId);
+    markRead.mutate({ params: { path: { runId } } });
     setOpen(false);
   };
 
@@ -168,7 +168,7 @@ export function NotificationBell() {
     agentNameMap,
     onItemClick: handleClick,
     onClose: () => setOpen(false),
-    markAllRead: () => markAllRead.mutate(),
+    markAllRead: () => markAllRead.mutate({}),
   };
 
   if (isMobile) {

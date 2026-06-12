@@ -44,7 +44,9 @@ export function PreferencesAppearancePage() {
           <div className="flex-1">
             <Select
               value={i18n.language}
-              onValueChange={(lng) => updateLanguage.mutate(lng)}
+              onValueChange={(lng) =>
+                updateLanguage.mutate({ body: { language: lng as "fr" | "en" } })
+              }
               disabled={updateLanguage.isPending}
             >
               <SelectTrigger>

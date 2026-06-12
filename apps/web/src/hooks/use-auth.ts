@@ -3,19 +3,19 @@
 import { useCallback } from "react";
 import { useStore } from "zustand";
 import { authClient } from "../lib/auth-client";
-import { api } from "../api";
+import { client } from "../api/client";
 import { authStore } from "../stores/auth-store";
 import i18n from "../i18n";
 import type { UserProfile } from "@appstrate/shared-types";
 
 async function fetchProfile(): Promise<UserProfile | null> {
   try {
-    const data = await api<{ id: string; displayName: string; language: string }>("/profile");
-    const language = data.language === "fr" || data.language === "en" ? data.language : "fr";
+    const { data } = await client.GET("/api/profile");
+    if (!data) return null;
     const profile: UserProfile = {
       id: data.id,
-      displayName: data.displayName,
-      language,
+      displayName: data.displayName ?? null,
+      language: data.language,
       createdAt: new Date(),
       updatedAt: new Date(),
     };

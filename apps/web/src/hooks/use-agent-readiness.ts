@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useMemo } from "react";
-import type { AgentDetail, OrgModelInfo } from "@appstrate/shared-types";
+import type { AgentDetail } from "@appstrate/shared-types";
+import type { OrgModelInfo } from "./use-models";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
 

@@ -61,7 +61,7 @@ export function RunDetailPage() {
   // Auto-mark notification as read when viewing an run
   useEffect(() => {
     if (run && runId && run.notifiedAt && !run.readAt) {
-      markRead.mutate(runId);
+      markRead.mutate({ params: { path: { runId } } });
     }
   }, [run?.notifiedAt, run?.readAt, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 

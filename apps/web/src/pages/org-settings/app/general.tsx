@@ -18,6 +18,7 @@ import {
 import { useCurrentApplicationId } from "../../../hooks/use-current-application";
 import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
 import { Spinner } from "../../../components/spinner";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 interface SettingsFormData {
   name: string;
@@ -33,7 +34,7 @@ export function OrgSettingsAppGeneralPage() {
   if (!applicationId)
     return <EmptyState message={t("applications.noAppSelected")} icon={AppWindow} />;
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
   if (!application) return <ErrorState />;
 
   return <GeneralForm applicationId={applicationId} application={application} />;
@@ -66,8 +67,8 @@ function GeneralForm({
 
   const onSubmit = (data: SettingsFormData) => {
     updateMutation.mutate({
-      id: applicationId,
-      data: { name: data.name.trim(), settings: { allowedRedirectDomains: activeDomains } },
+      params: { path: { id: applicationId } },
+      body: { name: data.name.trim(), settings: { allowedRedirectDomains: activeDomains } },
     });
   };
 
@@ -164,12 +165,15 @@ function GeneralForm({
         description={t("applications.deleteConfirm", { name: application.name })}
         isPending={deleteMutation.isPending}
         onConfirm={() => {
-          deleteMutation.mutate(applicationId, {
-            onSuccess: () => {
-              setConfirmOpen(false);
-              navigate("/org-settings/applications");
+          deleteMutation.mutate(
+            { params: { path: { id: applicationId } } },
+            {
+              onSuccess: () => {
+                setConfirmOpen(false);
+                navigate("/org-settings/applications");
+              },
             },
-          });
+          );
         }}
       />
     </>

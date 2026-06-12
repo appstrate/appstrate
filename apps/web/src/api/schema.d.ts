@@ -15609,23 +15609,23 @@ export interface operations {
                      */
                     "application/json": {
                         /** @enum {string} */
-                        object?: "upload";
-                        id?: string;
+                        object: "upload";
+                        id: string;
                         /** @description Reference to embed in the agent's file-typed input field on `runAgent` (e.g. `upload://upl_xxx`). */
-                        uri?: string;
+                        uri: string;
                         /**
                          * Format: uri
                          * @description Pre-signed PUT URL. Points at S3/MinIO directly, or at the platform FS sink. PUT the raw binary body to it before the upload expires.
                          */
-                        url?: string;
+                        url: string;
                         /** @enum {string} */
-                        method?: "PUT";
+                        method: "PUT";
                         /** @description The complete set of headers the client MUST send verbatim on the PUT request (`Content-Type`, plus `Content-Length` bound to the declared `size` in S3 mode). Nothing else is required — no checksum headers. */
-                        headers?: {
+                        headers: {
                             [key: string]: string;
                         };
                         /** Format: date-time */
-                        expiresAt?: string;
+                        expiresAt: string;
                     };
                 };
             };

@@ -15,6 +15,7 @@ import {
   useSetDefaultModel,
   useTestModel,
   useModelFormHandler,
+  type OrgModelInfo,
 } from "../../hooks/use-models";
 import {
   useModelProviderCredentials,
@@ -24,7 +25,9 @@ import {
   useTestModelProviderCredential,
   useProvidersRegistry,
   deduplicateLabel,
+  type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
@@ -35,11 +38,7 @@ import { formatDateField } from "../../lib/markdown";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
-import type {
-  OrgModelInfo,
-  ModelProviderCredentialInfo,
-  TestResult,
-} from "@appstrate/shared-types";
+import type { TestResult } from "@appstrate/shared-types";
 
 function TestResultSpan({
   result,
@@ -121,7 +120,7 @@ function ModelsList({
 }: {
   models: OrgModelInfo[] | undefined;
   isLoading: boolean;
-  error: Error | null;
+  error: unknown;
   onCreate: () => void;
   onEdit: (m: OrgModelInfo) => void;
   onDelete: (m: OrgModelInfo) => void;
@@ -134,7 +133,7 @@ function ModelsList({
   const { data: registry } = useProvidersRegistry();
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   return (
     <>
@@ -238,7 +237,7 @@ function CredentialsSection({
 }: {
   credentials: ModelProviderCredentialInfo[] | undefined;
   isLoading: boolean;
-  error: Error | null;
+  error: unknown;
   onCreate: () => void;
   onEdit: (pk: ModelProviderCredentialInfo) => void;
   onDelete: (pk: ModelProviderCredentialInfo) => void;
@@ -251,7 +250,7 @@ function CredentialsSection({
   const { data: registry } = useProvidersRegistry();
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   // Single entry point — the unified modal handles both API-key and OAuth
   // flows. Removing a module from `MODULES` hides its OAuth tile from the
@@ -431,8 +430,8 @@ export function OrgSettingsModelsPage() {
             setModelModalOpen(true);
           }}
           onDelete={(m) => setConfirmState({ type: "deleteModel", label: m.label, id: m.id })}
-          onSetDefault={(m) => setDefaultModelMutation.mutate(m.id)}
-          onRemoveDefault={() => setDefaultModelMutation.mutate(null)}
+          onSetDefault={(m) => setDefaultModelMutation.mutate({ body: { modelId: m.id } })}
+          onRemoveDefault={() => setDefaultModelMutation.mutate({ body: { modelId: null } })}
         />
       )}
 
@@ -455,7 +454,10 @@ export function OrgSettingsModelsPage() {
             setConfirmState({ type: "deleteCredential", label: pk.label, id: pk.id })
           }
           onRename={(pk, newLabel) => {
-            updatePkMutation.mutate({ id: pk.id, data: { label: newLabel } });
+            updatePkMutation.mutate({
+              params: { path: { id: pk.id } },
+              body: { label: newLabel },
+            });
           }}
           onConnectOAuth={(providerId) => {
             setEditPk(null);
@@ -490,17 +492,19 @@ export function OrgSettingsModelsPage() {
             const patch: { label?: string; apiKey?: string } = { label: data.label };
             if (data.apiKey) patch.apiKey = data.apiKey;
             updatePkMutation.mutate(
-              { id: editPk.id, data: patch },
+              { params: { path: { id: editPk.id } }, body: patch },
               { onSuccess: () => setPkModalOpen(false) },
             );
           } else {
             const uniqueLabel = deduplicateLabel(data.label, credentials ?? []);
             createPkMutation.mutate(
               {
-                label: uniqueLabel,
-                providerId: data.providerId,
-                apiKey: data.apiKey ?? "",
-                ...(data.baseUrlOverride ? { baseUrlOverride: data.baseUrlOverride } : {}),
+                body: {
+                  label: uniqueLabel,
+                  providerId: data.providerId,
+                  apiKey: data.apiKey ?? "",
+                  ...(data.baseUrlOverride ? { baseUrlOverride: data.baseUrlOverride } : {}),
+                },
               },
               { onSuccess: () => setPkModalOpen(false) },
             );
@@ -524,9 +528,15 @@ export function OrgSettingsModelsPage() {
           if (!confirmState) return;
           const close = () => setConfirmState(null);
           if (confirmState.type === "deleteModel") {
-            deleteModelMutation.mutate(confirmState.id, { onSuccess: close });
+            deleteModelMutation.mutate(
+              { params: { path: { id: confirmState.id } } },
+              { onSuccess: close },
+            );
           } else {
-            deletePkMutation.mutate(confirmState.id, { onSuccess: close });
+            deletePkMutation.mutate(
+              { params: { path: { id: confirmState.id } } },
+              { onSuccess: close },
+            );
           }
         }}
       />

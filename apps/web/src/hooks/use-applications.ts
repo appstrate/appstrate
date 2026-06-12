@@ -1,76 +1,70 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, apiList } from "../api";
+import { useQueryClient } from "@tanstack/react-query";
+import { $api, type components } from "../api/client";
 import { useCurrentOrgId } from "./use-org";
-import type { ApplicationInfo } from "@appstrate/shared-types";
-export type { ApplicationInfo } from "@appstrate/shared-types";
+
+/** Wire shape from the OpenAPI spec (components.schemas.ApplicationObject). */
+export type ApplicationInfo = components["schemas"]["ApplicationObject"];
+
+/**
+ * Org context for queries. The header is a spec-declared param passed
+ * explicitly (instead of relying on the client middleware alone) so it is
+ * part of the React Query key — switching org refetches instead of serving
+ * another org's cached page.
+ */
+function useOrgScope() {
+  const orgId = useCurrentOrgId();
+  return {
+    enabled: !!orgId,
+    header: { "X-Org-Id": orgId ?? undefined },
+  };
+}
 
 export function useApplications() {
-  const orgId = useCurrentOrgId();
-  return useQuery({
-    queryKey: ["applications", orgId],
-    queryFn: () => apiList<ApplicationInfo>("/applications"),
-    enabled: !!orgId,
-  });
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/applications",
+    { params: { header: scope.header } },
+    { enabled: scope.enabled, select: (e) => e.data },
+  );
 }
 
 export function useApplication(applicationId: string) {
-  const orgId = useCurrentOrgId();
-  return useQuery({
-    queryKey: ["applications", orgId, applicationId],
-    queryFn: () => api<ApplicationInfo>(`/applications/${applicationId}`),
-    enabled: !!orgId && !!applicationId,
-  });
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/applications/{id}",
+    { params: { path: { id: applicationId }, header: scope.header } },
+    { enabled: scope.enabled && !!applicationId },
+  );
+}
+
+/**
+ * openapi-react-query keys are [method, path, init] with the literal spec
+ * path — list and detail live under different path strings, so both need
+ * invalidating after a write.
+ */
+function useInvalidateApplications() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: ["get", "/api/applications"] });
+    void qc.invalidateQueries({ queryKey: ["get", "/api/applications/{id}"] });
+  };
 }
 
 export function useCreateApplication() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: {
-      name: string;
-      settings?: { allowedRedirectDomains?: string[] };
-    }) => {
-      return api<ApplicationInfo>("/applications", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["applications"] });
-    },
-  });
+  const invalidate = useInvalidateApplications();
+  return $api.useMutation("post", "/api/applications", { onSuccess: invalidate });
 }
 
 export function useUpdateApplication() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      id,
-      data,
-    }: {
-      id: string;
-      data: { name?: string; settings?: { allowedRedirectDomains?: string[] } };
-    }) => {
-      return api<ApplicationInfo>(`/applications/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify(data),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["applications"] });
-    },
-  });
+  const invalidate = useInvalidateApplications();
+  return $api.useMutation("patch", "/api/applications/{id}", { onSuccess: invalidate });
 }
 
 export function useDeleteApplication() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      return api(`/applications/${id}`, { method: "DELETE" });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["applications"] });
-    },
-  });
+  const invalidate = useInvalidateApplications();
+  return $api.useMutation("delete", "/api/applications/{id}", { onSuccess: invalidate });
 }

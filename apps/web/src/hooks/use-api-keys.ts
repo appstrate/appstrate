@@ -1,53 +1,65 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, apiList } from "../api";
+import { useQueryClient } from "@tanstack/react-query";
+import { $api, type components } from "../api/client";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-import type { ApiKeyInfo } from "@appstrate/shared-types";
 
-export function useApiKeys() {
+/** Wire shape from the OpenAPI spec (components.schemas.ApiKeyInfo). */
+export type ApiKeyInfo = components["schemas"]["ApiKeyInfo"];
+
+/**
+ * Org/app context for queries. The headers are spec-declared params passed
+ * explicitly (instead of relying on the client middleware alone) so they are
+ * part of the React Query key — switching org or application refetches
+ * instead of serving another scope's cached page.
+ */
+function useOrgScope() {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: ["api-keys", orgId, applicationId],
-    queryFn: () => apiList<ApiKeyInfo>("/api-keys"),
+  return {
     enabled: !!orgId && !!applicationId,
-  });
+    header: {
+      "X-Org-Id": orgId ?? undefined,
+      "X-Application-Id": applicationId ?? undefined,
+    },
+  };
+}
+
+export function useApiKeys() {
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/api-keys",
+    { params: { header: scope.header } },
+    { enabled: scope.enabled, select: (e) => e.data },
+  );
 }
 
 export function useAvailableScopes() {
   const orgId = useCurrentOrgId();
-  return useQuery({
-    queryKey: ["api-keys/available-scopes", orgId],
-    queryFn: () => apiList<string>("/api-keys/available-scopes"),
-    enabled: !!orgId,
-  });
+  return $api.useQuery(
+    "get",
+    "/api/api-keys/available-scopes",
+    { params: { header: { "X-Org-Id": orgId ?? undefined } } },
+    { enabled: !!orgId, select: (e) => e.data },
+  );
 }
 
 export function useCreateApiKey() {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: { name: string; expiresAt: string | null; scopes?: string[] }) => {
-      return api<{ id: string; key: string; keyPrefix: string; scopes: string[] }>("/api-keys", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-    },
+  return $api.useMutation("post", "/api/api-keys", {
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["api-keys"] });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/api-keys"] });
     },
   });
 }
 
 export function useRevokeApiKey() {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      return api(`/api-keys/${id}`, { method: "DELETE" });
-    },
+  return $api.useMutation("delete", "/api/api-keys/{id}", {
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["api-keys"] });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/api-keys"] });
     },
   });
 }
