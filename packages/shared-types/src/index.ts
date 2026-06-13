@@ -426,7 +426,8 @@ export interface AgentDetail {
   last_run: {
     id: string;
     status: string;
-    started_at: Date | string | null;
+    /** `runs.started_at` is NOT NULL (defaultNow); Date server-side, ISO string on the wire. */
+    started_at: Date | string;
     duration: number | null;
   } | null;
   /** Omitted for system agents (the SPA treats absence as "no timestamp"). */
@@ -447,8 +448,8 @@ export interface AgentDetail {
 // --- Organization Package Types ---
 
 export interface OrgPackageItem extends BasePackageListItem {
-  /** Display name from the manifest, may be missing on legacy rows. */
-  name: string | null;
+  /** Always a string — `getPackageDisplayName` falls back to the package id. */
+  name: string;
   /** Always emitted by the org-package list/detail mappers. */
   description: string | null;
   forked_from: string | null;

@@ -112,9 +112,7 @@ export function useCreateWebhook() {
       };
       const { data: created } = await client.POST("/api/webhooks", { body });
       if (!created) throw new Error("empty response");
-      // The server always returns `secret` on create; the spec marks it
-      // optional only because the response reuses WebhookObject.
-      return created as WebhookCreateResponse;
+      return created;
     },
     onSuccess: invalidate,
   });

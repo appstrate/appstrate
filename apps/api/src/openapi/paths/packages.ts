@@ -581,6 +581,7 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["versions"],
                 properties: {
                   versions: {
                     type: "array",
@@ -718,21 +719,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  manifest: { $ref: "#/components/schemas/SkillManifest" },
-                  content: { type: ["string", "null"] },
-                  yanked: { type: "boolean" },
-                  yanked_reason: { type: ["string", "null"] },
-                  integrity: { type: "string" },
-                  artifact_size: { type: "integer" },
-                  createdAt: { type: ["string", "null"], format: "date-time" },
-                  dist_tags: { type: "array", items: { type: "string" } },
-                },
-              },
+              schema: { $ref: "#/components/schemas/PackageVersionDetail" },
             },
           },
         },
@@ -1136,6 +1123,7 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["versions"],
                 properties: {
                   versions: {
                     type: "array",
@@ -1269,21 +1257,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  manifest: { $ref: "#/components/schemas/AgentManifest" },
-                  content: { type: ["string", "null"] },
-                  yanked: { type: "boolean" },
-                  yanked_reason: { type: ["string", "null"] },
-                  integrity: { type: "string" },
-                  artifact_size: { type: "integer" },
-                  createdAt: { type: ["string", "null"], format: "date-time" },
-                  dist_tags: { type: "array", items: { type: "string" } },
-                },
-              },
+              schema: { $ref: "#/components/schemas/PackageVersionDetail" },
             },
           },
         },
@@ -1815,6 +1789,7 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["versions"],
                 properties: {
                   versions: {
                     type: "array",
@@ -1952,25 +1927,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  manifest: {
-                    type: "object",
-                    additionalProperties: true,
-                    description: "Full manifest object",
-                  },
-                  content: { type: ["string", "null"] },
-                  yanked: { type: "boolean" },
-                  yanked_reason: { type: ["string", "null"] },
-                  integrity: { type: "string" },
-                  artifact_size: { type: "integer" },
-                  createdAt: { type: ["string", "null"], format: "date-time" },
-                  dist_tags: { type: "array", items: { type: "string" } },
-                },
-              },
+              schema: { $ref: "#/components/schemas/PackageVersionDetail" },
             },
           },
         },
@@ -2421,6 +2378,7 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["versions"],
                 properties: {
                   versions: {
                     type: "array",
@@ -2558,25 +2516,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  manifest: {
-                    type: "object",
-                    additionalProperties: true,
-                    description: "Full manifest object",
-                  },
-                  content: { type: ["string", "null"] },
-                  yanked: { type: "boolean" },
-                  yanked_reason: { type: ["string", "null"] },
-                  integrity: { type: "string" },
-                  artifact_size: { type: "integer" },
-                  createdAt: { type: ["string", "null"], format: "date-time" },
-                  dist_tags: { type: "array", items: { type: "string" } },
-                },
-              },
+              schema: { $ref: "#/components/schemas/PackageVersionDetail" },
             },
           },
         },

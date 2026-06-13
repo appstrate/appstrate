@@ -174,7 +174,9 @@ export const schemas = {
   },
   OrgMember: {
     type: "object",
-    required: ["userId", "email", "role", "joinedAt"],
+    // `email`/`displayName` are best-effort joins (getOrgMembers emits
+    // `?? undefined` when the user/profile row is missing) — NOT required.
+    required: ["userId", "role", "joinedAt"],
     properties: {
       userId: { type: "string" },
       displayName: { type: "string" },
@@ -354,6 +356,9 @@ export const schemas = {
       },
       dependencies: {
         type: "object",
+        // The detail serializer always emits all three arrays (skills/mcp_servers
+        // from the manifest, integrations via parseManifestIntegrations).
+        required: ["skills", "mcp_servers", "integrations"],
         properties: {
           skills: { type: "array", items: { $ref: "#/components/schemas/AgentSkillRef" } },
           mcp_servers: {
@@ -397,6 +402,9 @@ export const schemas = {
       last_run: {
         type: ["object", "null"],
         description: "Summary of the most recent run (null if never run)",
+        // When present, the serializer always sets all four (id/status/started_at
+        // are NOT NULL columns; duration is nullable but always emitted).
+        required: ["id", "status", "started_at", "duration"],
         properties: {
           id: { type: "string" },
           status: { type: "string" },
@@ -881,7 +889,7 @@ export const schemas = {
         type: ["string", "null"],
         description: "Owning organization ID (null for system packages)",
       },
-      name: { type: ["string", "null"] },
+      name: { type: "string" }, // getPackageDisplayName always returns a string (falls back to id)
       description: { type: ["string", "null"] },
       source: { type: "string", enum: ["system", "local"] },
       created_by: { type: ["string", "null"] },
@@ -920,7 +928,7 @@ export const schemas = {
         type: ["string", "null"],
         description: "Owning organization ID (null for system packages)",
       },
-      name: { type: ["string", "null"] },
+      name: { type: "string" }, // getPackageDisplayName always returns a string (falls back to id)
       description: { type: ["string", "null"] },
       content: { type: ["string", "null"], description: "Package item content" },
       source_code: {

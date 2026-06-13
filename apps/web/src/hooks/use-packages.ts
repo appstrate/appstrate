@@ -60,32 +60,24 @@ function normalizeAgentDetail(d: components["schemas"]["AgentDetail"]): AgentDet
     version: d.version ?? null,
     manifest: d.manifest,
     updatedAt: d.updatedAt ?? null,
-    lock_version: d.lock_version ?? 0,
-    running_runs: d.running_runs ?? 0,
-    forked_from: d.forked_from ?? null,
+    lock_version: d.lock_version,
+    running_runs: d.running_runs,
+    forked_from: d.forked_from,
     dependencies: {
-      skills: (d.dependencies?.skills ?? []).map((s) => ({ ...s, version: s.version ?? "" })),
-      mcp_servers: d.dependencies?.mcp_servers ?? [],
-      integrations: d.dependencies?.integrations ?? [],
+      skills: d.dependencies.skills.map((s) => ({ ...s, version: s.version ?? "" })),
+      mcp_servers: d.dependencies.mcp_servers,
+      integrations: d.dependencies.integrations,
     },
     config: {
-      ...(d.config ?? {}),
-      schema: asJSONSchemaObject(d.config?.schema ?? {}),
-      current: d.config?.current ?? {},
+      ...d.config,
+      schema: asJSONSchemaObject(d.config.schema ?? {}),
+      current: d.config.current,
     },
     input: d.input ? { ...d.input, schema: asJSONSchemaObject(d.input.schema ?? {}) } : undefined,
     output: d.output
       ? { ...d.output, schema: asJSONSchemaObject(d.output.schema ?? {}) }
       : undefined,
-    last_run: d.last_run
-      ? {
-          ...d.last_run,
-          id: d.last_run.id ?? "",
-          status: d.last_run.status ?? "",
-          started_at: d.last_run.started_at ?? null,
-          duration: d.last_run.duration ?? null,
-        }
-      : null,
+    last_run: d.last_run ?? null,
   };
 }
 
@@ -100,22 +92,18 @@ function normalizePackageItemDetail(
 ): OrgPackageItemDetail {
   return {
     ...d,
-    name: d.name ?? null,
-    description: d.description ?? null,
+    name: d.name,
+    description: d.description,
     scope: null,
-    version: d.version ?? null,
-    forked_from: d.forked_from ?? null,
-    created_by: d.created_by ?? null,
+    version: d.version,
+    forked_from: d.forked_from,
+    created_by: d.created_by,
     created_by_name: null,
-    auto_installed: d.auto_installed ?? false,
-    content: d.content ?? null,
+    auto_installed: d.auto_installed,
+    content: d.content,
     source_code: d.source_code ?? null,
     manifest: d.manifest,
-    agents: (d.agents ?? []).map((a) => ({
-      ...a,
-      id: a.id ?? "",
-      display_name: a.display_name ?? "",
-    })),
+    agents: d.agents,
   };
 }
 
@@ -156,15 +144,15 @@ function usePackageList(type: PackageType, opts?: { activeOnly?: boolean }) {
       // returned by the list endpoints.
       return data!.data.map((item) => ({
         ...item,
-        name: item.name ?? null,
-        description: item.description ?? null,
+        name: item.name,
+        description: item.description,
         scope: null,
-        version: item.version ?? null,
-        forked_from: item.forked_from ?? null,
-        created_by: item.created_by ?? null,
+        version: item.version,
+        forked_from: item.forked_from,
+        created_by: item.created_by,
         created_by_name: item.created_by_name ?? null,
-        used_by_agents: item.used_by_agents ?? 0,
-        auto_installed: item.auto_installed ?? false,
+        used_by_agents: item.used_by_agents,
+        auto_installed: item.auto_installed,
       }));
     },
     enabled: !!orgId && !!applicationId,
@@ -349,20 +337,7 @@ export function useVersionDetail(
         `/api/packages/${PACKAGE_CONFIG[type].path}/{scope}/{name}/versions/{version}`,
         { params: { path: { ...splitPackageRef(packageId!), version: version! } } },
       );
-      // The spec marks every field optional — normalize to the asserted shape.
-      return {
-        ...data!,
-        id: data!.id ?? 0,
-        version: data!.version ?? "",
-        manifest: data!.manifest ?? {},
-        content: data!.content ?? null,
-        yanked: data!.yanked ?? false,
-        yanked_reason: data!.yanked_reason ?? null,
-        integrity: data!.integrity ?? "",
-        artifact_size: data!.artifact_size ?? 0,
-        createdAt: data!.createdAt ?? null,
-        dist_tags: data!.dist_tags ?? [],
-      };
+      return data!;
     },
     enabled: !!orgId && !!applicationId && !!packageId && !!version,
   });
@@ -378,17 +353,7 @@ export function usePackageVersions(type: PackageType, packageId: string | undefi
         `/api/packages/${PACKAGE_CONFIG[type].path}/{scope}/{name}/versions`,
         { params: { path: splitPackageRef(packageId!) } },
       );
-      // The spec marks every field optional — normalize to the asserted shape.
-      return (data!.versions ?? []).map((v) => ({
-        ...v,
-        id: v.id ?? 0,
-        version: v.version ?? "",
-        integrity: v.integrity ?? "",
-        artifact_size: v.artifact_size ?? 0,
-        yanked: v.yanked ?? false,
-        created_by: v.created_by ?? null,
-        createdAt: v.createdAt ?? null,
-      }));
+      return data!.versions;
     },
     enabled: !!orgId && !!applicationId && !!packageId,
   });
@@ -406,7 +371,7 @@ export function useCreateVersion(type: PackageType, packageId: string) {
         params: { path: splitPackageRef(packageId) },
         body: version ? { version } : undefined,
       });
-      return { id: data!.id ?? 0, version: data!.version ?? "" };
+      return { id: data!.id, version: data!.version };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["package-versions"] });

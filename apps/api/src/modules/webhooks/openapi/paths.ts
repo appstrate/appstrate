@@ -104,6 +104,8 @@ export const webhooksPaths = {
                   { $ref: "#/components/schemas/WebhookObject" },
                   {
                     type: "object",
+                    // The create handler always returns the freshly-minted secret.
+                    required: ["secret"],
                     properties: {
                       secret: {
                         type: "string",

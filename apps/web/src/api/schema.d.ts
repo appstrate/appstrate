@@ -4090,13 +4090,13 @@ export interface components {
                 property_order?: string[];
             };
             dependencies: {
-                skills?: components["schemas"]["AgentSkillRef"][];
+                skills: components["schemas"]["AgentSkillRef"][];
                 /** @description AFPS §4.1 mcp_servers dependency group */
-                mcp_servers?: {
+                mcp_servers: {
                     id: string;
                     version: string;
                 }[];
-                integrations?: {
+                integrations: {
                     id: string;
                     version: string;
                     /** @description Niveau 2 tool allowlist (optional). Either an array of selected tool names or the AFPS §4.4 wildcard literal '*' opting the agent into every upstream tool (requires integration's `allow_undeclared_tools: true`). */
@@ -4107,11 +4107,11 @@ export interface components {
             };
             /** @description Summary of the most recent run (null if never run) */
             last_run: {
-                id?: string;
-                status?: string;
+                id: string;
+                status: string;
                 /** Format: date-time */
-                started_at?: string;
-                duration?: number | null;
+                started_at: string;
+                duration: number | null;
             } | null;
             running_runs: number;
             /** @description Number of published versions (0 for built-in agents) */
@@ -4426,7 +4426,7 @@ export interface components {
         OrgMember: {
             userId: string;
             displayName?: string;
-            email: string;
+            email?: string;
             /** @enum {string} */
             role: "owner" | "admin" | "member" | "viewer";
             /** Format: date-time */
@@ -4465,7 +4465,7 @@ export interface components {
             id: string;
             /** @description Owning organization ID (null for system packages) */
             orgId?: string | null;
-            name: string | null;
+            name: string;
             description: string | null;
             /** @enum {string} */
             source: "system" | "local";
@@ -4486,7 +4486,7 @@ export interface components {
             id: string;
             /** @description Owning organization ID (null for system packages) */
             orgId?: string | null;
-            name: string | null;
+            name: string;
             description: string | null;
             /** @description Package item content */
             content: string | null;
@@ -13065,7 +13065,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        versions?: components["schemas"]["AgentVersion"][];
+                        versions: components["schemas"]["AgentVersion"][];
                     };
                 };
             };
@@ -13189,19 +13189,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id?: number;
-                        version?: string;
-                        manifest?: components["schemas"]["AgentManifest"];
-                        content?: string | null;
-                        yanked?: boolean;
-                        yanked_reason?: string | null;
-                        integrity?: string;
-                        artifact_size?: number;
-                        /** Format: date-time */
-                        createdAt?: string | null;
-                        dist_tags?: string[];
-                    };
+                    "application/json": components["schemas"]["PackageVersionDetail"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -13861,7 +13849,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        versions?: components["schemas"]["AgentVersion"][];
+                        versions: components["schemas"]["AgentVersion"][];
                     };
                 };
             };
@@ -13978,22 +13966,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id?: number;
-                        version?: string;
-                        /** @description Full manifest object */
-                        manifest?: {
-                            [key: string]: unknown;
-                        };
-                        content?: string | null;
-                        yanked?: boolean;
-                        yanked_reason?: string | null;
-                        integrity?: string;
-                        artifact_size?: number;
-                        /** Format: date-time */
-                        createdAt?: string | null;
-                        dist_tags?: string[];
-                    };
+                    "application/json": components["schemas"]["PackageVersionDetail"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -14440,7 +14413,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        versions?: components["schemas"]["AgentVersion"][];
+                        versions: components["schemas"]["AgentVersion"][];
                     };
                 };
             };
@@ -14557,22 +14530,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id?: number;
-                        version?: string;
-                        /** @description Full manifest object */
-                        manifest?: {
-                            [key: string]: unknown;
-                        };
-                        content?: string | null;
-                        yanked?: boolean;
-                        yanked_reason?: string | null;
-                        integrity?: string;
-                        artifact_size?: number;
-                        /** Format: date-time */
-                        createdAt?: string | null;
-                        dist_tags?: string[];
-                    };
+                    "application/json": components["schemas"]["PackageVersionDetail"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -15026,7 +14984,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        versions?: components["schemas"]["AgentVersion"][];
+                        versions: components["schemas"]["AgentVersion"][];
                     };
                 };
             };
@@ -15143,19 +15101,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id?: number;
-                        version?: string;
-                        manifest?: components["schemas"]["skill.schema"];
-                        content?: string | null;
-                        yanked?: boolean;
-                        yanked_reason?: string | null;
-                        integrity?: string;
-                        artifact_size?: number;
-                        /** Format: date-time */
-                        createdAt?: string | null;
-                        dist_tags?: string[];
-                    };
+                    "application/json": components["schemas"]["PackageVersionDetail"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -17388,7 +17334,7 @@ export interface operations {
                      */
                     "application/json": components["schemas"]["WebhookObject"] & {
                         /** @description Webhook secret (whsec_ prefix). Store securely — shown only once. */
-                        secret?: string;
+                        secret: string;
                     };
                 };
             };

@@ -842,37 +842,110 @@ function extractFunctionBody(src: string, fnName: string): string | null {
 const unresolvedTemplatedRoutes: { file: string; verb: string; raw: string }[] = [];
 
 /**
+ * Look up the string/template-literal value(s) bound to `ident` in a source
+ * file, via either a top-level const (`const <ident> = "lit"`) or an
+ * object-literal field (`<ident>: "lit"`). The captured value may itself be a
+ * template literal that still contains `${…}` (e.g. `const MCP_PATH =
+ * \`${MCP_PREFIX}/:org\``) — callers must recurse to fully resolve it.
+ */
+function lookupIdentLiterals(ident: string, fullSrc: string): string[] {
+  const literals = new Set<string>();
+  const constRe = new RegExp(`\\bconst\\s+${ident}\\s*=\\s*["'\`]([^"'\`]+)["'\`]`, "g");
+  for (const m of fullSrc.matchAll(constRe)) literals.add(m[1]!);
+  const fieldRe = new RegExp(`\\b${ident}\\s*:\\s*["'\`]([^"'\`]+)["'\`]`, "g");
+  for (const m of fullSrc.matchAll(fieldRe)) literals.add(m[1]!);
+  return [...literals];
+}
+
+/**
  * Resolve `${ident}` interpolations in a templated route path against literals
  * declared in the same source file:
  *   - `const <ident> = "literal"`              (top-level const)
  *   - `<ident>: "literal"`                     (object-literal field, e.g. the
  *     `path:` members of a config table the route loop destructures —
  *     `for (const rcfg of Object.values(ROUTE_CONFIGS)) { const { path } = rcfg; router.get(`/${path}/…`) }`)
- * Returns every concrete path (cross-product across multi-valued idents), or
- * `null` if any `${…}` can't be resolved (caller fails closed).
+ * Resolution is recursive: a resolved literal may itself be a template that
+ * references further consts (e.g. `PRM_PATH` → `\`${PRM_PATH_PREFIX}${MCP_PATH}\``
+ * → `${PRM_PATH_PREFIX}${MCP_PREFIX}/:org`). Returns every concrete path
+ * (cross-product across multi-valued idents), or `null` if any `${…}` can't be
+ * resolved or the nesting exceeds `depth` (caller fails closed).
  */
-function resolveTemplatedPath(rawPath: string, fullSrc: string): string[] | null {
+function resolveTemplatedPath(rawPath: string, fullSrc: string, depth = 0): string[] | null {
+  if (depth > 10) return null; // cycle / runaway guard
   const idents = [...rawPath.matchAll(/\$\{([a-zA-Z_$][\w$]*)\}/g)].map((m) => m[1]!);
   if (idents.length === 0) return [rawPath];
   let paths = [rawPath];
   for (const ident of idents) {
-    const literals = new Set<string>();
-    const constRe = new RegExp(`\\bconst\\s+${ident}\\s*=\\s*["'\`]([^"'\`]+)["'\`]`, "g");
-    for (const m of fullSrc.matchAll(constRe)) literals.add(m[1]!);
-    const fieldRe = new RegExp(`\\b${ident}\\s*:\\s*["'\`]([^"'\`]+)["'\`]`, "g");
-    for (const m of fullSrc.matchAll(fieldRe)) literals.add(m[1]!);
-    if (literals.size === 0) return null;
+    const literals = lookupIdentLiterals(ident, fullSrc);
+    if (literals.length === 0) return null;
     paths = paths.flatMap((p) =>
-      [...literals].map((lit) => p.replace(new RegExp(`\\$\\{${ident}\\}`, "g"), lit)),
+      literals.map((lit) => p.replace(new RegExp(`\\$\\{${ident}\\}`, "g"), lit)),
     );
   }
-  return paths;
+  // A resolved literal may still contain `${…}` (nested template consts) — recurse.
+  const out: string[] = [];
+  for (const p of paths) {
+    if (p.includes("${")) {
+      const nested = resolveTemplatedPath(p, fullSrc, depth + 1);
+      if (!nested) return null;
+      out.push(...nested);
+    } else {
+      out.push(p);
+    }
+  }
+  return out;
 }
 
 /**
- * Extract all `router.METHOD("path", …)` registrations from a slice of source.
- * `fullSrc` is the whole file (the slice may be a single function body) so
- * `${ident}` interpolations can be resolved against file-level literals.
+ * Identifiers bound to a `new Hono(...)` instance in a source file. Route
+ * registrations are matched against these exact names, so a router declared as
+ * `const profileRouter = new Hono()` or a module's `const app = new Hono()` is
+ * caught — not just the `router` convention. This also avoids false positives
+ * from unrelated `.get(` calls on Maps/Headers/etc., which are never Hono
+ * instances.
+ */
+function honoInstanceIdents(src: string): string[] {
+  const out = new Set<string>();
+  for (const m of src.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*new\s+Hono\b/g)) out.add(m[1]!);
+  return [...out];
+}
+
+/**
+ * Resolve a route registration's path argument (literal or bare identifier) to
+ * concrete path(s), or `null` if unresolvable (caller fails closed). `lit` is
+ * the captured string/template body (may contain `${…}`); `ref` is a bare
+ * identifier path argument (e.g. `app.get(PRM_PATH, …)`) resolved against
+ * in-file const/field literals.
+ */
+function resolvePathArg(
+  lit: string | undefined,
+  ref: string | undefined,
+  fullSrc: string,
+): string[] | null {
+  if (lit !== undefined) {
+    return lit.includes("${") ? resolveTemplatedPath(lit, fullSrc) : [lit];
+  }
+  if (ref !== undefined) {
+    const literals = lookupIdentLiterals(ref, fullSrc);
+    if (literals.length === 0) return null;
+    const out: string[] = [];
+    for (const l of literals) {
+      const resolved = l.includes("${") ? resolveTemplatedPath(l, fullSrc) : [l];
+      if (!resolved) return null;
+      out.push(...resolved);
+    }
+    return out;
+  }
+  return null;
+}
+
+/**
+ * Extract all `<honoInstance>.METHOD(path, …)` registrations from a slice of
+ * source. `fullSrc` is the whole file (the slice may be a single function body)
+ * so Hono-instance identifiers and `${ident}` / bare-identifier path arguments
+ * can be resolved against file-level declarations. A path argument that can't
+ * be resolved to a literal is pushed to `unresolvedTemplatedRoutes` so the run
+ * fails closed rather than silently dropping the route.
  */
 function extractRouterRegistrations(
   slice: string,
@@ -880,20 +953,22 @@ function extractRouterRegistrations(
   file: string,
 ): RouteRegistration[] {
   const out: RouteRegistration[] = [];
-  const re = new RegExp(`router\\.(${ROUTE_VERB_PATTERN})\\s*\\(\\s*["'\`]([^"'\`]*)["'\`]`, "g");
+  const idents = honoInstanceIdents(fullSrc);
+  if (idents.length === 0) idents.push("router"); // pre-bound imported router fallback
+  const identAlt = idents.join("|");
+  // Path arg is either a quoted/template literal (group 2) or a bare identifier (group 3).
+  const re = new RegExp(
+    `\\b(?:${identAlt})\\.(${ROUTE_VERB_PATTERN})\\s*\\(\\s*(?:["'\`]([^"'\`]*)["'\`]|([A-Za-z_$][\\w$]*))`,
+    "g",
+  );
   for (const m of slice.matchAll(re)) {
     const verb = m[1]!;
-    const path = m[2]!;
-    if (path.includes("${")) {
-      const resolved = resolveTemplatedPath(path, fullSrc);
-      if (!resolved) {
-        unresolvedTemplatedRoutes.push({ file, verb, raw: path });
-        continue;
-      }
-      for (const p of resolved) out.push({ verb, path: p });
+    const resolved = resolvePathArg(m[2], m[3], fullSrc);
+    if (!resolved) {
+      unresolvedTemplatedRoutes.push({ file, verb, raw: m[2] ?? m[3] ?? "<unknown>" });
       continue;
     }
-    out.push({ verb, path });
+    for (const p of resolved) out.push({ verb, path: p });
   }
   return out;
 }
@@ -1084,18 +1159,35 @@ for (const mount of mounts) {
   }
 }
 
-// 4c. Built-in module routes — files at `apps/api/src/modules/<name>/routes.ts`
-//     mounted at `/` (paths are absolute in module routes).
+// 4c. Built-in module routes — ANY `.ts` file in a module dir that constructs a
+//     Hono instance (not just `routes.ts`: the mcp module registers on a
+//     `const app = new Hono()` in `router.ts`). Module routers mount at `/`
+//     (paths are absolute in module routes).
 const modulesDir = join(REPO_ROOT, "apps/api/src/modules");
+function collectModuleRouteFiles(dir: string): string[] {
+  const found: string[] = [];
+  for (const ent of readdirSync(dir, { withFileTypes: true })) {
+    if (ent.isDirectory()) {
+      // Skip non-route subtrees: tests, openapi specs, vendored deps.
+      if (ent.name === "test" || ent.name === "openapi" || ent.name === "node_modules") continue;
+      found.push(...collectModuleRouteFiles(join(dir, ent.name)));
+    } else if (ent.name.endsWith(".ts") && !ent.name.endsWith(".test.ts")) {
+      found.push(join(dir, ent.name));
+    }
+  }
+  return found;
+}
 if (existsSync(modulesDir)) {
   for (const name of readdirSync(modulesDir, { withFileTypes: true })) {
     if (!name.isDirectory()) continue;
-    const routesPath = join(modulesDir, name.name, "routes.ts");
-    if (!existsSync(routesPath)) continue;
-    const src = readFileSync(routesPath, "utf8");
-    for (const reg of extractRouterRegistrations(src, src, `modules/${name.name}/routes.ts`)) {
-      const fullPath = normaliseHonoPath(reg.path);
-      for (const ep of expandRegistration(reg.verb, fullPath)) codeEndpoints.add(ep);
+    for (const filePath of collectModuleRouteFiles(join(modulesDir, name.name))) {
+      const src = readFileSync(filePath, "utf8");
+      if (!src.includes("new Hono")) continue; // only files that define a router
+      const rel = "modules/" + filePath.slice(modulesDir.length + 1);
+      for (const reg of extractRouterRegistrations(src, src, rel)) {
+        const fullPath = normaliseHonoPath(reg.path);
+        for (const ep of expandRegistration(reg.verb, fullPath)) codeEndpoints.add(ep);
+      }
     }
   }
 }
@@ -1136,6 +1228,12 @@ const CODE_TO_SPEC_ALLOWLIST = new Set<string>([
   "GET /*",
   // Dev-time docs page served as plain text, not part of the JSON API.
   "GET /llms.txt",
+  // MCP per-org endpoint method-not-allowed catch-all: `app.all(MCP_PATH, …)`
+  // throws 405 for every verb other than the documented POST + GET channels.
+  // These three are the catch-all, not real endpoints.
+  "PUT /api/mcp/o/{org}",
+  "PATCH /api/mcp/o/{org}",
+  "DELETE /api/mcp/o/{org}",
 ]);
 
 const orphans = [...codeEndpoints]
