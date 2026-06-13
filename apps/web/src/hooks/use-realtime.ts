@@ -11,7 +11,9 @@ export interface RunMetricEvent {
   orgId: string;
   applicationId: string;
   packageId: string;
-  token_usage: TokenUsage | null;
+  // Server shallow-camelizes the notify payload (`token_usage` → `tokenUsage`)
+  // in services/realtime.ts; the inner TokenUsage object keeps snake keys.
+  tokenUsage: TokenUsage | null;
   costSoFar: number;
 }
 

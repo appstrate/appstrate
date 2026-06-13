@@ -144,9 +144,10 @@ export function agentResolutionQueryOptions(
     },
     {
       enabled: Boolean(orgId && applicationId && integrationId && agentPackageId),
-      // The spec marks the org-default fields optional; the shared wire type
-      // is the backend resolver's source of truth (always present). Same
-      // assertion the legacy `api<IntegrationAgentResolution>` call made.
+      // Bridge the generated inline response type to the named shared wire
+      // type used across consumers. The spec now marks every resolver field
+      // (incl. org_default_*) required, so this is a structural no-op, not a
+      // widening — the resolver always returns the full shape.
       select: (data) => data as IntegrationAgentResolution,
     },
   );

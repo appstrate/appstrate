@@ -37,7 +37,7 @@ export function useSaveConfig(packageId: string) {
       return data!;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packages", "agent"] });
+      qc.invalidateQueries({ queryKey: ["packages", "agents"] });
     },
     onError: onMutationError,
   });
@@ -202,7 +202,7 @@ export function useDeleteAgentRuns(packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["runs"] });
       qc.invalidateQueries({ queryKey: ["paginated-runs"] });
-      qc.invalidateQueries({ queryKey: ["packages", "agent"] });
+      qc.invalidateQueries({ queryKey: ["packages", "agents"] });
       qc.invalidateQueries({ queryKey: ["agents"] });
     },
     onError: onMutationError,

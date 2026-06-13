@@ -9182,8 +9182,8 @@ export interface operations {
                         resolved_owned_by_actor: boolean;
                         admin_pinned_connection_id: string | null;
                         member_pinned_connection_id: string | null;
-                        org_default_connection_id?: string | null;
-                        org_default_enforced?: boolean;
+                        org_default_connection_id: string | null;
+                        org_default_enforced: boolean;
                         can_add_connection: boolean;
                         candidates: {
                             /** Format: uuid */

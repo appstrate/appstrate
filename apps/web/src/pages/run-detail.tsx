@@ -134,7 +134,7 @@ export function RunDetailPage() {
           if (!prev) return prev;
           return {
             ...prev,
-            token_usage: metric.token_usage ?? prev.token_usage,
+            token_usage: metric.tokenUsage ?? prev.token_usage,
             cost: metric.costSoFar,
           } as EnrichedRun;
         });

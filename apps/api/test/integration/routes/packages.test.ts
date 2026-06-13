@@ -1149,6 +1149,39 @@ describe("Packages API", () => {
       });
     });
 
+    // The dashboard's resource-section ".afps import" (useUploadPackage) routes
+    // skill/integration/agent ZIPs here — the per-type create endpoints are
+    // JSON-only. Cover a non-agent type so type-detection on this path is
+    // guarded.
+    it("imports a skill .afps via type detection", async () => {
+      const enc = (s: string) => new TextEncoder().encode(s);
+      const afps = zipSync({
+        "manifest.json": enc(
+          JSON.stringify({
+            name: "@pkgorg/imported-skill",
+            version: "1.0.0",
+            type: "skill",
+            schema_version: "0.1",
+            display_name: "Imported Skill",
+            description: "Imported via ZIP",
+          }),
+        ),
+        "SKILL.md": enc("---\nname: @pkgorg/imported-skill\n---\n\nSkill body."),
+      });
+      const formData = new FormData();
+      formData.append("file", new File([new Uint8Array(afps)], "skill.afps"));
+
+      const res = await app.request("/api/packages/import", {
+        method: "POST",
+        headers: authHeaders(ctx),
+        body: formData,
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.packageId).toBe("@pkgorg/imported-skill");
+      expect(body.type).toBe("skill");
+    });
+
     it("returns 400 when no file is provided", async () => {
       const formData = new FormData();
 

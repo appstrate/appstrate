@@ -108,7 +108,10 @@ function handleSSEMessage(
     // Broad invalidations are debounced (trailing ~2s) — the in-place cache
     // patches above keep the visible run data live in the meantime.
     broad.schedule(["agents", orgId]);
-    broad.schedule(["packages", "agent", orgId, packageId]);
+    // Agent detail caches are keyed ["packages","agents",orgId,applicationId,id]
+    // (plural path, applicationId before id) — invalidate by the org-scoped
+    // prefix so a run status change refreshes the agent's config/model tabs.
+    broad.schedule(["packages", "agents", orgId]);
     broad.schedule(["paginated-runs"]);
 
     // Invalidate schedule-specific caches

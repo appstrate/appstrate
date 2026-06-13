@@ -650,6 +650,8 @@ export const integrationsPaths = {
                   "resolved_owned_by_actor",
                   "admin_pinned_connection_id",
                   "member_pinned_connection_id",
+                  "org_default_connection_id",
+                  "org_default_enforced",
                   "can_add_connection",
                   "candidates",
                 ],

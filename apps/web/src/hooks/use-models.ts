@@ -130,7 +130,7 @@ export function useSetAgentModel(packageId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["agent-model"] });
-      qc.invalidateQueries({ queryKey: ["packages", "agent"] });
+      qc.invalidateQueries({ queryKey: ["packages", "agents"] });
     },
   });
 }

@@ -32,4 +32,24 @@ describe("pathSerializer", () => {
   it("does not split / in values that are not scoped package ids", () => {
     expect(pathSerializer("/api/end-users/{id}", { id: "a/b" })).toBe("/api/end-users/a%2Fb");
   });
+
+  it("fully encodes a non-package param even when its value starts with @ (no shape guessing)", () => {
+    // `id` is not a package-id param, so an @scope/name-shaped value must NOT
+    // get its `@` or `/` relaxed — it routes to the literal {id} segment.
+    expect(pathSerializer("/api/end-users/{id}", { id: "@weird/value" })).toBe(
+      "/api/end-users/%40weird%2Fvalue",
+    );
+  });
+
+  it("encodes @ in ordinary params (only scope/package params keep it literal)", () => {
+    expect(pathSerializer("/api/end-users/{id}", { id: "user@example.com" })).toBe(
+      "/api/end-users/user%40example.com",
+    );
+  });
+
+  it("keeps @ literal in a bare scope param", () => {
+    expect(
+      pathSerializer("/api/packages/{scope}/{name}", { scope: "@myorg", name: "mailer" }),
+    ).toBe("/api/packages/@myorg/mailer");
+  });
 });

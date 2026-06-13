@@ -81,7 +81,7 @@ export function useSetAgentProxy(packageId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["agent-proxy"] });
-      qc.invalidateQueries({ queryKey: ["packages", "agent"] });
+      qc.invalidateQueries({ queryKey: ["packages", "agents"] });
     },
   });
 }

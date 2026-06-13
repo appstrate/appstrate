@@ -829,7 +829,13 @@ function extractRouterRegistrations(slice: string): RouteRegistration[] {
   const out: RouteRegistration[] = [];
   const re = new RegExp(`router\\.(${ROUTE_VERB_PATTERN})\\s*\\(\\s*["'\`]([^"'\`]*)["'\`]`, "g");
   for (const m of slice.matchAll(re)) {
-    out.push({ verb: m[1]!, path: m[2]! });
+    const path = m[2]!;
+    // Skip interpolated template-literal paths (`router.get(\`/${cfg}/...\`)`):
+    // the captured text still holds the `${…}` expression, which can't be
+    // resolved statically. These config-driven registrations are covered by
+    // check #1 (expectedEndpoints). Literal paths in the same file ARE parsed.
+    if (path.includes("${")) continue;
+    out.push({ verb: m[1]!, path });
   }
   return out;
 }
@@ -953,15 +959,14 @@ for (const m of indexSrc.matchAll(
 // 4b. Route files referenced by mounts — parse each factory body or default body
 //     and combine with the mount prefix.
 const SKIP_FILES = new Set<string>([
-  // Routes registered via runtime config (config-driven `for` loop). The
-  // emitted endpoints are already covered by check #1; static analysis can't
-  // see them.
+  // Routes registered via runtime config with a VARIABLE path
+  // (`router.post(entry.urlPath, …)`). The path isn't a string literal, so
+  // static analysis can't see it; the emitted endpoints are covered by check
+  // #1. (packages.ts is NOT skipped: its template-literal `${path}` routes are
+  // ignored by extractRouterRegistrations, while its literal-path routes —
+  // /import, /import-github, /import-bundle, fork, download — ARE statically
+  // verified against the spec.)
   "routes/llm-proxy",
-  // packages.ts iterates ROUTE_CONFIGS with template-literal paths
-  // (router.get(`/${path}/...`, …) where `path` ∈ {skills, agents,
-  // integrations}). All concrete paths are already enumerated in
-  // expectedEndpoints, so check #1 catches drift on this file.
-  "routes/packages",
 ]);
 
 const routeFileCache = new Map<string, string>();

@@ -25,29 +25,44 @@ import { getCurrentApplicationId } from "../stores/app-store";
 type ProblemDetail = components["schemas"]["ProblemDetail"];
 
 const PATH_PARAM_RE = /\{[^{}]+\}/g;
-const SCOPED_PACKAGE_ID_RE = /^@[^/]+\/[^/]+$/;
+
+/**
+ * Path params that carry a full scoped package id (`@scope/name`) in a SINGLE
+ * param — their internal `/` is a real route separator and must stay literal
+ * (Hono `:packageId{@[^/]+/[^/]+}` routes; `%2F` never matches). Each `@scope`
+ * and `name` segment is encoded individually with the `@` kept literal.
+ */
+const SCOPED_PACKAGE_ID_PARAMS = new Set(["packageId", "agentPackageId"]);
+
+/**
+ * Path params that carry a bare scope segment (`@scope`) — the leading `@`
+ * must stay literal (Hono `:scope{@[^/]+}` routes; `%40scope` never matches).
+ */
+const SCOPE_SEGMENT_PARAMS = new Set(["scope"]);
 
 /**
  * Path serializer mirroring openapi-fetch's default (simple style, the only
- * style this spec uses) with two API-mandated deviations — Hono's regex
- * routes match the RAW path, so percent-encoding these 404s:
- * - `@` stays literal (`:scope{@[^/]+}` routes; `%40scope` never matches).
- *   Valid pchar per RFC 3986, safe unencoded.
- * - a value shaped like a scoped package id (`@scope/name`) keeps its `/` as
- *   a real separator (`:packageId{@[^/]+/[^/]+}` routes; `%2F` never
- *   matches); each segment is encoded individually. No other ID type starts
- *   with `@`, so the shape test is unambiguous.
- * Everything else stays percent-encoded.
+ * style this spec uses) with two API-mandated deviations — Hono's regex routes
+ * match the RAW path, so percent-encoding these 404s. The deviations are keyed
+ * on the PARAM NAME (not the value shape): only package-id / scope params relax
+ * encoding, so an arbitrary value that happens to start with `@` or contain `/`
+ * in some other param is still faithfully percent-encoded.
  */
 export function pathSerializer(pathname: string, pathParams: Record<string, unknown>): string {
   let next = pathname;
   for (const match of pathname.match(PATH_PARAM_RE) ?? []) {
-    const value = pathParams[match.slice(1, -1)];
+    const paramName = match.slice(1, -1);
+    const value = pathParams[paramName];
     if (value === undefined || value === null) continue;
     const raw = String(value);
-    const encoded = SCOPED_PACKAGE_ID_RE.test(raw)
-      ? raw.split("/").map(encodeSegment).join("/")
-      : encodeSegment(raw);
+    let encoded: string;
+    if (SCOPED_PACKAGE_ID_PARAMS.has(paramName)) {
+      encoded = raw.split("/").map(encodeSegment).join("/");
+    } else if (SCOPE_SEGMENT_PARAMS.has(paramName)) {
+      encoded = encodeSegment(raw);
+    } else {
+      encoded = encodeURIComponent(raw);
+    }
     next = next.replace(match, encoded);
   }
   return next;

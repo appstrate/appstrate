@@ -56,6 +56,16 @@ function sortKeys<T>(obj: Record<string, T>): Record<string, T> {
  *     authored at runtime and validated by AJV, never written against this TS
  *     type. Collapse it to an opaque `Record<string, unknown>`.
  */
+/** True when `id` is a URL whose host is exactly the JSON-Schema meta domain. */
+function isJsonSchemaMetaId(id: unknown): boolean {
+  if (typeof id !== "string") return false;
+  try {
+    return new URL(id).host === "json-schema.org";
+  } catch {
+    return false;
+  }
+}
+
 function transformNode(schemaObject: {
   format?: string;
   $id?: unknown;
@@ -64,13 +74,14 @@ function transformNode(schemaObject: {
   if (schemaObject.format === "binary") {
     return ts.factory.createTypeReferenceNode("Blob");
   }
-  // Detect the meta-schema by its own `$id` (on json-schema.org) or the
-  // `$vocabulary` keyword — both unique to the JSON-Schema meta-schema and its
-  // vocabulary parts. NOT `$schema`, which every JSON Schema document carries
-  // (including the AFPS agent manifest itself, whose `$id` is on schemas.afps.dev).
+  // Detect the meta-schema by its own `$id` host (exactly json-schema.org) or
+  // the `$vocabulary` keyword — both unique to the JSON-Schema meta-schema and
+  // its vocabulary parts. NOT `$schema`, which every JSON Schema document
+  // carries (including the AFPS agent manifest itself, whose `$id` host is
+  // schemas.afps.dev). Parse the host instead of a substring check so an
+  // unrelated `$id` that merely contains the string can't match.
   const isJsonSchemaMeta =
-    (typeof schemaObject.$id === "string" && schemaObject.$id.includes("json-schema.org")) ||
-    schemaObject.$vocabulary !== undefined;
+    isJsonSchemaMetaId(schemaObject.$id) || schemaObject.$vocabulary !== undefined;
   if (isJsonSchemaMeta) {
     return ts.factory.createTypeReferenceNode("Record", [
       ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
