@@ -14,6 +14,10 @@
  *    plus apps/api/src/index.ts, composes the mount prefix from app.route(prefix, factory) calls,
  *    normalises Hono path syntax, and asserts every code-registered endpoint is documented in
  *    the OpenAPI spec or in the explicit allowlist.
+ * 6. Response schema presence — every 2xx JSON response (except 204) must declare a schema
+ * 7. Shared-type ↔ OpenAPI response required-field comparison — for each registered
+ *    (spec-schema ↔ @appstrate/shared-types interface) pair, asserts every type-required field
+ *    is also required in the spec response schema (catches spec-optional / type-required drift)
  *
  * Module-owned paths and schemas are loaded dynamically from built-in modules.
  * The set of modules validated matches `MODULES` (default: all built-in).
@@ -27,7 +31,12 @@ import { lintFromString, createConfig } from "@redocly/openapi-core";
 import type { OpenApiSchemaEntry } from "@appstrate/core/module";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
 import { buildZodSchemaRegistry } from "../apps/api/src/openapi/zod-schema-registry.ts";
+import {
+  responseTypeRegistry,
+  KNOWN_DRIFT,
+} from "../apps/api/src/openapi/response-type-registry.ts";
 import { collectModuleOpenApi } from "./lib/module-openapi.ts";
+import { getInterfaceKeys } from "./lib/ts-interface-required-keys.ts";
 
 // ---------------------------------------------------------------------------
 // Auto-discover built-in modules and collect their OpenAPI contributions
@@ -969,6 +978,33 @@ const SKIP_FILES = new Set<string>([
   "routes/llm-proxy",
 ]);
 
+// Meta-guard: a whole-file skip lets every endpoint in that file escape the
+// Code ⊆ Spec check (above), so adding one must be a deliberate, reviewed act.
+// The only sanctioned skip is `routes/llm-proxy` (variable-path config loop).
+// If anyone widens this set, fail loudly here and force per-route handling or
+// an explicit, justified decision instead of a silent coverage hole.
+const ALLOWED_SKIP_FILES = new Set<string>(["routes/llm-proxy"]);
+const unexpectedSkips = [...SKIP_FILES].filter((f) => !ALLOWED_SKIP_FILES.has(f));
+if (SKIP_FILES.size > ALLOWED_SKIP_FILES.size || unexpectedSkips.length > 0) {
+  exitCode = 1;
+  console.log(`\n  5. Code ⊆ Spec — SKIP_FILES guard`);
+  console.log(`  ---------------------------------`);
+  console.log(
+    `  ERROR  SKIP_FILES must contain only the sanctioned whole-file skip ` +
+      `(${[...ALLOWED_SKIP_FILES].join(", ")}).`,
+  );
+  if (unexpectedSkips.length > 0) {
+    console.log(`  Unexpected skip(s) that would hide endpoints from the Code ⊆ Spec check:`);
+    for (const f of unexpectedSkips) console.log(`    - ${f}`);
+  }
+  console.log(
+    `\n  A whole-file skip silently excludes every route in that file. Don't widen ` +
+      `SKIP_FILES — verify the file's literal-path routes against the spec individually, ` +
+      `or, if a skip is genuinely unavoidable, add the file to ALLOWED_SKIP_FILES in this ` +
+      `file with a justifying comment so the decision is reviewed.`,
+  );
+}
+
 const routeFileCache = new Map<string, string>();
 function readRouteFile(relPath: string): string {
   const cached = routeFileCache.get(relPath);
@@ -1154,6 +1190,126 @@ if (schemaGaps.length === 0) {
   console.log(
     `\n  Declare a response schema in apps/api/src/openapi/paths/, switch the ` +
       `response to 204, or add a justified entry to RESPONSE_SCHEMA_ALLOWLIST in this file.`,
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// 7. Shared-Type ↔ OpenAPI Response Required-Field Comparison
+// ═══════════════════════════════════════════════════
+//
+// Catches the "spec marks a response field optional that the shared-type marks
+// required" class of drift: the SPA trusts the generated type and reads the
+// field unconditionally, but the spec permits the server to omit it. For each
+// registered (spec-schema ↔ shared-type) pair, assert that every type-required
+// field is also required in the spec — restricted to fields the spec declares
+// as properties, and skipping accepted exceptions in KNOWN_DRIFT.
+
+console.log(`\n  7. Shared-Type <> OpenAPI Response Required-Field Comparison`);
+console.log(`  ------------------------------------------------------------`);
+
+interface ResponseDrift {
+  description: string;
+  issues: string[];
+}
+
+const responseDrifts: ResponseDrift[] = [];
+let responseCompared = 0;
+
+for (const entry of responseTypeRegistry) {
+  // Resolve the spec schema (named component or inline response).
+  let specSchema: Record<string, unknown> | undefined;
+  let driftKey: string;
+
+  if (entry.specSchemaName) {
+    driftKey = entry.specSchemaName;
+    specSchema = (openApiSpec.components.schemas as Record<string, Record<string, unknown>>)[
+      entry.specSchemaName
+    ];
+  } else if (entry.path && entry.method && entry.status) {
+    driftKey = entry.path;
+    const pathObj = (openApiSpec.paths as Record<string, Record<string, unknown>>)[entry.path];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const op = pathObj?.[entry.method.toLowerCase()] as any;
+    let resp = op?.responses?.[entry.status] as Record<string, unknown> | undefined;
+    if (resp && typeof resp.$ref === "string") resp = resolveRef(resp.$ref);
+    let schema = (resp?.content as Record<string, Record<string, unknown>> | undefined)?.[
+      "application/json"
+    ]?.schema as Record<string, unknown> | undefined;
+    if (schema && typeof schema.$ref === "string") schema = resolveRef(schema.$ref);
+    specSchema = schema;
+  } else {
+    responseDrifts.push({
+      description: entry.description,
+      issues: [
+        `Invalid registry entry: needs either specSchemaName or path+method+status (sharedType=${entry.sharedTypeName})`,
+      ],
+    });
+    continue;
+  }
+
+  if (!specSchema) {
+    responseDrifts.push({
+      description: entry.description,
+      issues: [`No OpenAPI response schema resolved (sharedType=${entry.sharedTypeName})`],
+    });
+    continue;
+  }
+
+  // Resolve the shared-type's required keys.
+  let sharedTypeRequired: Set<string>;
+  try {
+    ({ required: sharedTypeRequired } = getInterfaceKeys(entry.sharedTypeName));
+  } catch (err) {
+    responseDrifts.push({
+      description: entry.description,
+      issues: [`Failed to resolve shared type "${entry.sharedTypeName}": ${String(err)}`],
+    });
+    continue;
+  }
+
+  const specRequired = new Set<string>(
+    Array.isArray(specSchema.required) ? (specSchema.required as string[]) : [],
+  );
+  const specProps = new Set<string>(
+    Object.keys((specSchema.properties ?? {}) as Record<string, unknown>),
+  );
+  const known = new Set<string>(KNOWN_DRIFT[driftKey] ?? []);
+
+  responseCompared++;
+  const issues: string[] = [];
+
+  for (const field of sharedTypeRequired) {
+    // Only compare fields the spec declares as properties.
+    if (!specProps.has(field)) continue;
+    if (known.has(field)) continue;
+    if (!specRequired.has(field)) {
+      issues.push(`Field "${field}": shared-type=required, OpenAPI=optional`);
+    }
+  }
+
+  if (issues.length > 0) {
+    responseDrifts.push({ description: entry.description, issues });
+  }
+}
+
+console.log(`  Compared: ${responseCompared}/${responseTypeRegistry.length} registry entries\n`);
+
+if (responseDrifts.length === 0) {
+  console.log(`  OK — every registered response schema requires what its shared-type requires.`);
+} else {
+  exitCode = 1;
+  console.log(`  ${responseDrifts.length} entry(ies) with required-field drift:\n`);
+  for (const d of responseDrifts) {
+    console.log(`  ERROR  ${d.description}`);
+    for (const issue of d.issues) {
+      console.log(`          - ${issue}`);
+    }
+    console.log();
+  }
+  console.log(
+    `  Tighten the spec response schema's required array to match the shared-type, ` +
+      `or record the divergence in KNOWN_DRIFT in ` +
+      `apps/api/src/openapi/response-type-registry.ts with a justification.`,
   );
 }
 

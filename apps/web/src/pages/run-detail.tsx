@@ -11,7 +11,7 @@ import { usePackageDetail } from "../hooks/use-packages";
 import { useRun, useRunLogs } from "../hooks/use-runs";
 import { useRunAgent, useCancelRun } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
-import { useRunRealtime, type RunMetricEvent } from "../hooks/use-realtime";
+import { useRunRealtime, type RunMetricEvent, type RunLogEvent } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LogViewer } from "../components/log-viewer";
@@ -111,7 +111,11 @@ export function RunDetailPage() {
   // globally via `invalidateRunAndNotificationQueries`.
   useRunRealtime(isRunning ? runId : null, {
     onNewLog: useCallback(
-      (newLog: Record<string, unknown>) => {
+      (newLog: RunLogEvent) => {
+        // `newLog` is runtime-validated by `runLogEventSchema`. The cast bridges
+        // it to Drizzle `RunLog`, which types `createdAt` as `Date` even though
+        // both the GET endpoint and this SSE frame deliver an ISO string — a
+        // pre-existing frontend Drizzle-`Date` leak, out of scope here.
         const log = newLog as unknown as RunLog;
         qc.setQueryData<RunLog[]>(["run-logs", orgId, applicationId, runId], (prev) => {
           if (!prev) return [log];

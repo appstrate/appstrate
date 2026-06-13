@@ -1,26 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useRef } from "react";
-import type { TokenUsage } from "@appstrate/shared-types";
+import {
+  runUpdateEventSchema,
+  runLogEventSchema,
+  runMetricEventSchema,
+  type RunUpdateEvent,
+  type RunLogEvent,
+  type RunMetricEvent,
+} from "@appstrate/shared-types";
 import { getCurrentOrgId } from "./use-org";
 import { getCurrentApplicationId } from "./use-current-application";
 
-/** Live metric payload broadcast on the `run_metric` SSE event. */
-export interface RunMetricEvent {
-  runId: string;
-  orgId: string;
-  applicationId: string;
-  packageId: string;
-  // Server shallow-camelizes the notify payload (`token_usage` → `tokenUsage`)
-  // in services/realtime.ts; the inner TokenUsage object keeps snake keys.
-  tokenUsage: TokenUsage | null;
-  costSoFar: number;
-}
+// Re-export so existing consumers (run-detail.tsx) keep importing the metric
+// event type from here; the source of truth is the shared Zod schema.
+export type { RunUpdateEvent, RunLogEvent, RunMetricEvent } from "@appstrate/shared-types";
 
 interface RunRealtimeHandlers {
-  onStatusChange?: (payload: Record<string, unknown>) => void;
-  onNewLog?: (log: Record<string, unknown>) => void;
+  onStatusChange?: (payload: RunUpdateEvent) => void;
+  onNewLog?: (log: RunLogEvent) => void;
   onMetric?: (metric: RunMetricEvent) => void;
+}
+
+/** Parse JSON, returning `undefined` on malformed input (then safeParse rejects). */
+function safeJsonParse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -47,30 +55,18 @@ export function useRunRealtime(runId: string | null | undefined, handlers: RunRe
     );
 
     es.addEventListener("run_update", (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        handlersRef.current.onStatusChange?.(data);
-      } catch {
-        // Ignore malformed SSE payloads
-      }
+      const parsed = runUpdateEventSchema.safeParse(safeJsonParse(e.data));
+      if (parsed.success) handlersRef.current.onStatusChange?.(parsed.data);
     });
 
     es.addEventListener("run_log", (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        handlersRef.current.onNewLog?.(data);
-      } catch {
-        // Ignore malformed SSE payloads
-      }
+      const parsed = runLogEventSchema.safeParse(safeJsonParse(e.data));
+      if (parsed.success) handlersRef.current.onNewLog?.(parsed.data);
     });
 
     es.addEventListener("run_metric", (e) => {
-      try {
-        const data = JSON.parse(e.data) as RunMetricEvent;
-        handlersRef.current.onMetric?.(data);
-      } catch {
-        // Ignore malformed SSE payloads
-      }
+      const parsed = runMetricEventSchema.safeParse(safeJsonParse(e.data));
+      if (parsed.success) handlersRef.current.onMetric?.(parsed.data);
     });
 
     return () => {

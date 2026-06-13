@@ -761,3 +761,22 @@ export interface EndUserInfo {
 // existing importers keep working.
 
 export type { SocialProviderId, SmtpConfigView, SocialProviderView } from "./oidc.ts";
+
+// --- Realtime SSE event schemas (shared server↔client source of truth) ---
+//
+// Zod schemas + inferred types for every typed SSE frame, validated on emit
+// (apps/api/src/services/realtime.ts) and on receipt (apps/web realtime hooks).
+export {
+  runUpdateEventSchema,
+  runLogEventSchema,
+  runMetricEventSchema,
+  connectionUpdateEventSchema,
+  runUpdateToRunPatch,
+} from "./realtime-events.ts";
+export type {
+  RunUpdateEvent,
+  RunLogEvent,
+  RunMetricEvent,
+  ConnectionUpdateEvent,
+  RealtimeEvent,
+} from "./realtime-events.ts";
