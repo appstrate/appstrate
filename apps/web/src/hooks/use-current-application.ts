@@ -17,7 +17,15 @@ export function useCurrentApplicationId(): string | null {
   return useStore(appStore, (s) => s.id);
 }
 
-/** Core app-scoped query key prefixes — invalidated on app switch. */
+/**
+ * Core app-scoped PINNED query-key prefixes — invalidated on app switch.
+ * Only the run/schedule/package domains that keep flat legacy keys
+ * (`["runs", …]`, etc.) need listing here. Typed-client domains (api-keys,
+ * end-users, integrations, notifications, …) embed `X-Application-Id` in their
+ * `[method, path, init]` key via `useOrgScope`, so switching apps yields a new
+ * key and refetches automatically — they must NOT be listed (their `queryKey[0]`
+ * is the method string, never these prefixes).
+ */
 const CORE_APP_SCOPED_KEYS = [
   "packages",
   "agents",
@@ -31,12 +39,6 @@ const CORE_APP_SCOPED_KEYS = [
   "schedules",
   "schedule",
   "schedule-runs",
-  "api-keys",
-  "end-users",
-  "integrations",
-  "me-integration-pins",
-  "unread-count",
-  "unread-counts-by-agent",
   "version-detail",
   "package-versions",
   "version-info",

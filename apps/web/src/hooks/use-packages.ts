@@ -203,17 +203,19 @@ function useUploadPackage(type: PackageType) {
     mutationFn: async (file: File): Promise<{ id: string; version: string | null }> => {
       const fd = new FormData();
       fd.append("file", file);
-      const { data } = await client.POST(`/api/packages/${cfg.path}`, {
-        // Multipart gap: the generated body types the binary part as `string`
-        // (and most create operations only declare the JSON variant), so the
-        // typed body is unusable for a real File. The FormData passes through
-        // the serializer untouched; the browser sets the multipart boundary.
-        body: { file } as never,
+      // Single-package ZIP import goes through the canonical multipart import
+      // endpoint, which type-detects the package from the archive. The per-type
+      // create endpoints are JSON-only (except mcp-server), so POSTing a ZIP to
+      // `/api/packages/{type}` fails server-side — `/import` is the correct
+      // route for every type. Concrete path → the multipart `file` body is
+      // typed (Blob), so no cast is needed.
+      const { data } = await client.POST("/api/packages/import", {
+        body: { file },
         bodySerializer: () => fd,
       });
-      // 201 → the created package resource, bare (issue #657). `version` is
-      // the manifest version of the created draft.
-      return { id: data!.id, version: data!.version ?? null };
+      // 201 → { packageId, type, version? }. `version` is the manifest version
+      // of the imported draft (omitted when the manifest carries none).
+      return { id: data!.packageId, version: data!.version ?? null };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages", cfg.path] });

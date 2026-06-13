@@ -61,7 +61,6 @@ export function useDisconnectIntegrationConnection() {
       // The agent page's reuse hints + accessible-connection lists live under
       // the typed `/api/integrations…` keys — refresh the whole subtree.
       void invalidateIntegrationQueries(qc);
-      void qc.invalidateQueries({ queryKey: ["me-integration-pins"] });
     },
     onError: (err: unknown) =>
       toast.error(i18n.t("error.prefix", { message: getErrorMessage(err) })),

@@ -4893,150 +4893,27 @@ export interface components {
         uriString: string;
         anchorString: string;
         /** Core vocabulary meta-schema */
-        core: {
-            $id?: components["schemas"]["uriReferenceString"];
-            $schema?: components["schemas"]["uriString"];
-            $ref?: components["schemas"]["uriReferenceString"];
-            $anchor?: components["schemas"]["anchorString"];
-            $dynamicRef?: components["schemas"]["uriReferenceString"];
-            $dynamicAnchor?: components["schemas"]["anchorString"];
-            $vocabulary?: {
-                [key: string]: boolean;
-            };
-            $comment?: string;
-            $defs?: {
-                [key: string]: unknown;
-            };
-            $defs: {
-                anchorString: string;
-                /** Format: uri */
-                uriString: string;
-                /** Format: uri-reference */
-                uriReferenceString: string;
-            };
-        } | boolean;
+        core: Record<string, unknown>;
         schemaArray: unknown[];
         /** Applicator vocabulary meta-schema */
-        applicator: {
-            prefixItems?: components["schemas"]["schemaArray"];
-            items?: unknown;
-            contains?: unknown;
-            additionalProperties?: unknown;
-            /** @default {} */
-            properties: {
-                [key: string]: unknown;
-            };
-            /** @default {} */
-            patternProperties: {
-                [key: string]: unknown;
-            };
-            /** @default {} */
-            dependentSchemas: {
-                [key: string]: unknown;
-            };
-            propertyNames?: unknown;
-            if?: unknown;
-            then?: unknown;
-            else?: unknown;
-            allOf?: components["schemas"]["schemaArray"];
-            anyOf?: components["schemas"]["schemaArray"];
-            oneOf?: components["schemas"]["schemaArray"];
-            not?: unknown;
-            $defs: {
-                schemaArray: unknown[];
-            };
-        } | boolean;
+        applicator: Record<string, unknown>;
         /** Unevaluated applicator vocabulary meta-schema */
-        unevaluated: {
-            unevaluatedItems?: unknown;
-            unevaluatedProperties?: unknown;
-        } | boolean;
+        unevaluated: Record<string, unknown>;
         nonNegativeInteger: number;
         /** @enum {unknown} */
         simpleTypes: "array" | "boolean" | "integer" | "null" | "number" | "object" | "string";
         /** @default [] */
         stringArray: string[];
         /** Validation vocabulary meta-schema */
-        validation: {
-            type?: components["schemas"]["simpleTypes"] | components["schemas"]["simpleTypes"][];
-            const?: unknown;
-            enum?: unknown[];
-            multipleOf?: number;
-            maximum?: number;
-            exclusiveMaximum?: number;
-            minimum?: number;
-            exclusiveMinimum?: number;
-            maxLength?: components["schemas"]["nonNegativeInteger"];
-            minLength?: components["schemas"]["nonNegativeInteger"];
-            /** Format: regex */
-            pattern?: string;
-            maxItems?: components["schemas"]["nonNegativeInteger"];
-            minItems?: components["schemas"]["nonNegativeInteger"];
-            /** @default false */
-            uniqueItems: boolean;
-            maxContains?: components["schemas"]["nonNegativeInteger"];
-            /** @default 1 */
-            minContains: components["schemas"]["nonNegativeInteger"];
-            maxProperties?: components["schemas"]["nonNegativeInteger"];
-            minProperties?: components["schemas"]["nonNegativeInteger"];
-            required?: components["schemas"]["stringArray"];
-            dependentRequired?: {
-                [key: string]: components["schemas"]["stringArray"];
-            };
-            $defs: {
-                nonNegativeInteger: number;
-                /** @default 0 */
-                nonNegativeIntegerDefault0: components["schemas"]["nonNegativeInteger"];
-                /** @enum {unknown} */
-                simpleTypes: "array" | "boolean" | "integer" | "null" | "number" | "object" | "string";
-                /** @default [] */
-                stringArray: string[];
-            };
-        } | boolean;
+        validation: Record<string, unknown>;
         /** Meta-data vocabulary meta-schema */
-        "meta-data": {
-            title?: string;
-            description?: string;
-            default?: unknown;
-            /** @default false */
-            deprecated: boolean;
-            /** @default false */
-            readOnly: boolean;
-            /** @default false */
-            writeOnly: boolean;
-            examples?: unknown[];
-        } | boolean;
+        "meta-data": Record<string, unknown>;
         /** Format vocabulary meta-schema for annotation results */
-        "format-annotation": {
-            format?: string;
-        } | boolean;
+        "format-annotation": Record<string, unknown>;
         /** Content vocabulary meta-schema */
-        content: {
-            contentEncoding?: string;
-            contentMediaType?: string;
-            contentSchema?: unknown;
-        } | boolean;
+        content: Record<string, unknown>;
         /** Core and Validation specifications meta-schema */
-        schema: (({
-            /**
-             * @deprecated
-             * @default {}
-             */
-            definitions: {
-                [key: string]: unknown;
-            };
-            /**
-             * @deprecated
-             * @default {}
-             */
-            dependencies: {
-                [key: string]: unknown | components["schemas"]["stringArray"];
-            };
-            /** @deprecated */
-            $recursiveAnchor?: components["schemas"]["anchorString"];
-            /** @deprecated */
-            $recursiveRef?: components["schemas"]["uriReferenceString"];
-        } & (components["schemas"]["core"] & components["schemas"]["applicator"] & components["schemas"]["unevaluated"] & components["schemas"]["validation"] & components["schemas"]["meta-data"] & components["schemas"]["format-annotation"] & components["schemas"]["content"])) | (boolean & (components["schemas"]["core"] & components["schemas"]["applicator"] & components["schemas"]["unevaluated"] & components["schemas"]["validation"] & components["schemas"]["meta-data"] & components["schemas"]["format-annotation"] & components["schemas"]["content"]))) & (components["schemas"]["core"] & components["schemas"]["applicator"] & components["schemas"]["unevaluated"] & components["schemas"]["validation"] & components["schemas"]["meta-data"] & components["schemas"]["format-annotation"] & components["schemas"]["content"]);
+        schema: Record<string, unknown>;
         /**
          * AFPS Agent Manifest
          * @description Manifest schema for AFPS 0.2 agent packages. An agent declares dependencies, input/output/config schemas, a timeout hint, and per-integration configuration.
@@ -5807,7 +5684,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/zip": string;
+                    "application/zip": Blob;
                 };
             };
             400: components["responses"]["ValidationError"];
@@ -6876,7 +6753,8 @@ export interface operations {
                      *           "createdAt": "2026-01-15T10:30:00Z",
                      *           "updatedAt": "2026-01-15T10:30:00Z"
                      *         }
-                     *       ]
+                     *       ],
+                     *       "hasMore": false
                      *     }
                      */
                     "application/json": {
@@ -13394,7 +13272,7 @@ export interface operations {
                      * Format: binary
                      * @description ZIP file containing the package
                      */
-                    file: string;
+                    file: Blob;
                 };
             };
         };
@@ -13468,7 +13346,7 @@ export interface operations {
                      * Format: binary
                      * @description `.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker. May also be supplied under the `bundle` form field as an alias.
                      */
-                    file: string;
+                    file: Blob;
                 };
             };
         };
@@ -14212,7 +14090,7 @@ export interface operations {
                      * Format: binary
                      * @description Package archive (`.afps` or `.zip`). File name (sans extension) is the kebab-case package id.
                      */
-                    file: string;
+                    file: Blob;
                 };
                 "application/json": {
                     /** @description Kebab-case package id. */
@@ -15398,7 +15276,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/zip": string;
+                    "application/zip": Blob;
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -16558,7 +16436,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/octet-stream": string;
+                    "application/octet-stream": Blob;
                 };
             };
             /** @description Signature verification failed */
@@ -16854,7 +16732,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/zip": string;
+                    "application/zip": Blob;
                 };
             };
             /** @description Signature verification failed */
@@ -17193,7 +17071,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/octet-stream": string;
+                "application/octet-stream": Blob;
             };
         };
         responses: {
@@ -17895,7 +17773,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/zip": string;
+                    "application/zip": Blob;
                 };
             };
             401: components["responses"]["Unauthorized"];

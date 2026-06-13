@@ -24,9 +24,7 @@ import { type EnrichedRun, type RunStatus, TERMINAL_RUN_STATUSES } from "@appstr
  */
 function handleConnectionUpdate(qc: QueryClient) {
   // Connections page (`/preferences/connections`) — the orange
-  // "Reconnection required" badge reads off these keys (legacy flat key +
-  // typed path key while use-me-connections migrates).
-  qc.invalidateQueries({ queryKey: ["me-connections"] });
+  // "Reconnection required" badge reads off this typed query.
   qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
   // Integration list (sidebar status, integrations page count) +
   // detail subtree (auth statuses, connection lists, agent-resolution

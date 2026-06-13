@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * RFC 9457 problem-details error thrown by both the legacy fetch helpers
- * (`src/api.ts`) and the typed OpenAPI client (`src/api/client.ts`), so
- * `err instanceof ApiError` works the same everywhere during the migration.
+ * RFC 9457 problem-details error thrown by the typed OpenAPI client
+ * (`src/api/client.ts`) on any non-2xx response, so React Query errors are
+ * `instanceof ApiError` with `code`/`status`/`requestId`.
  */
 export class ApiError extends Error {
   constructor(

@@ -108,14 +108,15 @@ export function useEditorState<S extends EditorStateBase>(
     // the NEW `lock_version` so a subsequent save doesn't go stale.
     const { data: updated } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {
       params: { path: splitPackageRef(packageId) },
-      // Same TS2590 union as useUpdatePackage (use-mutations.ts): `cfg.path`
-      // is dynamic, so the agent variant's recursive `AgentManifest`
-      // meta-schema poisons the body union and forces the cast. Wire shape is
-      // spec-declared on every update operation; the server validates.
+      // `toWireBody` returns a `Record<string, unknown>`, so the spread body's
+      // `manifest`/`content` keys aren't statically known. Assert the wire
+      // shape the editor always produces (manifest + content + lock_version);
+      // it matches every update operation's spec body and the server
+      // validates.
       body: {
         ...toWireBody(state),
         lock_version: state.lock_version!,
-      } as never,
+      } as { manifest: Record<string, unknown>; content: string; lock_version: number },
     });
     setState((s) => ({ ...s, lock_version: updated!.lock_version ?? 0 }));
     qc.invalidateQueries({ queryKey: ["packages"] });

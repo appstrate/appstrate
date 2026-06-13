@@ -229,8 +229,6 @@ export function useConnectIntegrationFields() {
       void invalidateIntegrationQueries(qc);
       // Cross-app connections page (/preferences/connections) — keep parity with
       // the OAuth popup path so a fields connect/renew refreshes that list too.
-      // Both keys while use-me-connections migrates concurrently.
-      void qc.invalidateQueries({ queryKey: ["me-connections"] });
       void qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
     },
     onError: () => toast.error(t("integration.connect.error")),

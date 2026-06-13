@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import i18n from "../i18n";
-import { ApiError, client } from "../api/client";
+import { ApiError, client, type components } from "../api/client";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
@@ -121,7 +121,7 @@ export function useImportPackage() {
           // Multipart gap: the generated body types the binary part as
           // `string`. The FormData passes through the serializer untouched;
           // the browser sets the multipart boundary.
-          body: { file } as never,
+          body: { file },
           bodySerializer: () => fd,
         });
         return {
@@ -133,7 +133,7 @@ export function useImportPackage() {
       const { data } = await client.POST("/api/packages/import", {
         params: { query: force ? { force: true } : undefined },
         // Multipart gap — see above.
-        body: { file } as never,
+        body: { file },
         bodySerializer: () => fd,
       });
       return data!;
@@ -275,11 +275,16 @@ export function useCreatePackage(type: PackageType) {
       switch (type) {
         case "agent": {
           const { data } = await client.POST("/api/packages/agents", {
-            // The editor builds the manifest dynamically as a plain object;
-            // the generated `AgentManifest` type is deeply recursive (raw
-            // JSON Schema) and cannot be satisfied — or even compared —
-            // statically. The server validates against the AFPS schema.
-            body: body as never,
+            // The editor builds the manifest as a plain `Record<string,
+            // unknown>`; createAgent's body keeps the strict AFPS
+            // `AgentManifest` (the documented SDK contract). Assert only the
+            // manifest field across that dynamic-object → typed boundary —
+            // `content` stays checked, and the server validates the manifest
+            // against the AFPS schema.
+            body: {
+              manifest: body.manifest as components["schemas"]["AgentManifest"],
+              content: body.content,
+            },
           });
           return { id: data!.id };
         }
@@ -326,14 +331,11 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     }): Promise<{ id: string; lock_version: number }> => {
       const { data } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {
         params: { path: splitPackageRef(packageId) },
-        // `cfg.path` is dynamic, so the body type is the union of all four
-        // package update operations. The agent variant embeds the recursive
-        // `AgentManifest` JSON-Schema meta-schema, which TS cannot instantiate
-        // through the union (TS2590) — hence the cast. The wire shape is the
-        // mutationFn arg (`{manifest, content, source_code?, lock_version}`),
-        // which every update operation's spec body now declares; the server
-        // validates.
-        body: body as never,
+        // No cast needed: the body's explicit `{manifest, content,
+        // source_code?, lock_version}` keys satisfy the skill/integration/
+        // mcp-server update operations (generic-object manifest) in the
+        // dynamic-path union, so the assignment typechecks directly.
+        body,
       });
       // 200 → the updated package resource, bare (issue #657). The resource
       // carries the NEW `lock_version` optimistic-lock token.

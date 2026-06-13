@@ -8,8 +8,7 @@
  * - `$api` (openapi-react-query): typed `useQuery`/`useMutation`/`queryOptions`
  *   wrappers around the same client, with automatic query keys.
  *
- * Middleware mirrors the legacy `src/api.ts` behavior so both stacks are
- * interchangeable during migration:
+ * Middleware injects platform context and normalizes errors:
  * - `X-Org-Id` / `X-Application-Id` headers injected from the org/app stores
  * - non-2xx responses throw `ApiError` (RFC 9457 problem details), so React
  *   Query errors are `instanceof ApiError` with `code`/`status`/`requestId`.
@@ -94,7 +93,7 @@ const problemDetailErrors: Middleware = {
 
 /**
  * Raw typed fetch client. Spec paths already include the `/api` prefix, so
- * no baseUrl is needed — requests stay same-origin like the legacy helpers.
+ * no baseUrl is needed — requests stay same-origin.
  */
 export const client = createFetchClient<paths>({
   credentials: "include",

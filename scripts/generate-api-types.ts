@@ -20,6 +20,7 @@
  */
 import { resolve } from "node:path";
 import openapiTS, { astToString } from "openapi-typescript";
+import ts from "typescript";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
 import { collectModuleOpenApi } from "./lib/module-openapi.ts";
 
@@ -36,6 +37,47 @@ const BANNER = `/* eslint-disable */
 /** Codepoint-order key sort — deterministic across platforms and locales. */
 function sortKeys<T>(obj: Record<string, T>): Record<string, T> {
   return Object.fromEntries(Object.entries(obj).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+/**
+ * Per-node type overrides applied during emit. Two nodes that openapi-typescript
+ * cannot type usefully are rewritten here so the SPA's typed client needs no
+ * `as never` escape hatch at the call sites:
+ *
+ *  1. `format: binary` (multipart upload fields) defaults to `string`, but the
+ *     SPA sends a `File`/`Blob`. Emitting `Blob` (which `File` extends) lets
+ *     multipart bodies typecheck directly.
+ *  2. The JSON-Schema 2020-12 meta-schema — pulled in transitively by the AFPS
+ *     agent manifest's `input`/`output`/`config` `.schema` fields ($ref to
+ *     https://json-schema.org/draft/2020-12/schema) — expands to a deeply
+ *     recursive type that trips TS2590 ("type instantiation is excessively
+ *     deep") wherever the manifest appears in a request body. Typing it
+ *     verbatim carries no real safety: the content is dynamic AFPS JSON Schema,
+ *     authored at runtime and validated by AJV, never written against this TS
+ *     type. Collapse it to an opaque `Record<string, unknown>`.
+ */
+function transformNode(schemaObject: {
+  format?: string;
+  $id?: unknown;
+  $vocabulary?: unknown;
+}): ts.TypeNode | undefined {
+  if (schemaObject.format === "binary") {
+    return ts.factory.createTypeReferenceNode("Blob");
+  }
+  // Detect the meta-schema by its own `$id` (on json-schema.org) or the
+  // `$vocabulary` keyword — both unique to the JSON-Schema meta-schema and its
+  // vocabulary parts. NOT `$schema`, which every JSON Schema document carries
+  // (including the AFPS agent manifest itself, whose `$id` is on schemas.afps.dev).
+  const isJsonSchemaMeta =
+    (typeof schemaObject.$id === "string" && schemaObject.$id.includes("json-schema.org")) ||
+    schemaObject.$vocabulary !== undefined;
+  if (isJsonSchemaMeta) {
+    return ts.factory.createTypeReferenceNode("Record", [
+      ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+      ts.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+    ]);
+  }
+  return undefined;
 }
 
 async function generate(): Promise<string> {
@@ -58,6 +100,7 @@ async function generate(): Promise<string> {
     // Wire enums stay string literal unions (default) — keep options explicit
     // and minimal so output stays stable across openapi-typescript upgrades.
     defaultNonNullable: true,
+    transform: transformNode,
   });
 
   return BANNER + astToString(ast);
