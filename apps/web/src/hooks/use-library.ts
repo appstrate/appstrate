@@ -6,6 +6,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { $api, client, type components, type paths } from "../api/client";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
+import { agentsKeys, packageKeys } from "../lib/query-keys";
 
 /** Wire shape from the OpenAPI spec (GET /api/library response). */
 type LibraryResponse =
@@ -141,8 +142,8 @@ export function useTogglePackageInstall() {
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
       // Legacy keys — package/agent lists are still on the legacy cache.
-      void qc.invalidateQueries({ queryKey: ["packages"] });
-      void qc.invalidateQueries({ queryKey: ["agents"] });
+      void qc.invalidateQueries({ queryKey: packageKeys.all });
+      void qc.invalidateQueries({ queryKey: agentsKeys.all });
     },
   });
 }

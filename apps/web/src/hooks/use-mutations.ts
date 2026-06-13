@@ -9,6 +9,14 @@ import { ApiError, client, type components } from "../api/client";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
+import {
+  packageKeys,
+  agentsKeys,
+  runsKeys,
+  runKeys,
+  paginatedRunsKeys,
+  persistenceKeys,
+} from "../lib/query-keys";
 
 // NOTE on query keys: run-cache keys (["runs"], ["paginated-runs"], ["run"])
 // are PINNED legacy keys — use-global-run-sync.ts patches them from SSE
@@ -37,7 +45,7 @@ export function useSaveConfig(packageId: string) {
       return data!;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packages", "agents"] });
+      qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
     },
     onError: onMutationError,
   });
@@ -92,8 +100,8 @@ export function useRunAgent(packageId: string) {
       return data!;
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["runs"] });
-      qc.invalidateQueries({ queryKey: ["paginated-runs"] });
+      qc.invalidateQueries({ queryKey: runsKeys.all });
+      qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
       navigate(`/agents/${packageId}/runs/${data.id}`);
     },
     onError: onMutationError,
@@ -139,8 +147,8 @@ export function useImportPackage() {
       return data!;
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["agents"] });
-      qc.invalidateQueries({ queryKey: ["packages"] });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
       // Non-blocking install-time warnings (AFPS §7.7) —
       // surface each one as a sonner warning toast so publishers see them
       // immediately after a successful import.
@@ -164,8 +172,8 @@ export function useImportFromGithub() {
       return data!;
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["agents"] });
-      qc.invalidateQueries({ queryKey: ["packages"] });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
       navigate(`/${data.type === "agent" ? "agent" : data.type}s/${data.packageId}`);
     },
     onError: onMutationError,
@@ -182,9 +190,9 @@ export function useCancelRun() {
       return data!;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["run"] });
-      qc.invalidateQueries({ queryKey: ["runs"] });
-      qc.invalidateQueries({ queryKey: ["paginated-runs"] });
+      qc.invalidateQueries({ queryKey: runKeys.all });
+      qc.invalidateQueries({ queryKey: runsKeys.all });
+      qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
     },
     onError: onMutationError,
   });
@@ -200,10 +208,10 @@ export function useDeleteAgentRuns(packageId: string) {
       return data!;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["runs"] });
-      qc.invalidateQueries({ queryKey: ["paginated-runs"] });
-      qc.invalidateQueries({ queryKey: ["packages", "agents"] });
-      qc.invalidateQueries({ queryKey: ["agents"] });
+      qc.invalidateQueries({ queryKey: runsKeys.all });
+      qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
     },
     onError: onMutationError,
   });
@@ -219,7 +227,7 @@ export function useDeleteAgent() {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agents"] });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
       navigate("/");
     },
     onError: onMutationError,
@@ -237,7 +245,7 @@ export function useDeleteMemory(packageId: string) {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agent-persistence"] });
+      qc.invalidateQueries({ queryKey: persistenceKeys.all });
     },
     onError: onMutationError,
   });
@@ -253,7 +261,7 @@ export function useDeleteAllMemories(packageId: string) {
       return data!;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agent-persistence"] });
+      qc.invalidateQueries({ queryKey: persistenceKeys.all });
     },
     onError: onMutationError,
   });
@@ -307,8 +315,8 @@ export function useCreatePackage(type: PackageType) {
       }
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["packages"] });
-      if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
+      if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       if (type === "integration") void invalidateIntegrationQueries(qc);
       if (data.id) {
         navigate(packageDetailPath(type, data.id));
@@ -342,8 +350,8 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       return { id: data!.id, lock_version: data!.lock_version ?? 0 };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packages"] });
-      if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
+      if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       // An agent's tools drive the required OAuth scopes, so editing them
       // changes the per-integration agent-resolution verdict (e.g. a connection
       // flips to insufficient_scopes / needs reconnection). Invalidate the

@@ -16,6 +16,7 @@ import { useOrg } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 import { OnboardingLayout, useOnboardingNav } from "../../components/onboarding-layout";
+import { orgKeys } from "../../lib/query-keys";
 
 function suggestOrgDefaults(
   user: { email: string; name?: string },
@@ -87,7 +88,7 @@ export function OnboardingCreateStep() {
   const createMutation = $api.useMutation("post", "/api/orgs", {
     onSuccess: async (data) => {
       // use-org.ts still reads the legacy ["orgs"] key; invalidate both stacks.
-      await queryClient.invalidateQueries({ queryKey: ["orgs"] });
+      await queryClient.invalidateQueries({ queryKey: orgKeys.all });
       await queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs"] });
       if (data.id) switchOrg(data.id);
       if (nextRoute) navigate(nextRoute);

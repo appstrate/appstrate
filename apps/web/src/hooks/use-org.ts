@@ -7,6 +7,7 @@ import { client } from "../api/client";
 import { orgStore, getCurrentOrgId } from "../stores/org-store";
 import { appStore } from "../stores/app-store";
 import { useAutoSelect } from "./use-auto-select";
+import { orgKeys } from "../lib/query-keys";
 
 // Re-export non-hook accessor so existing imports keep working (e.g. api.ts)
 export { getCurrentOrgId };
@@ -25,7 +26,7 @@ export function useOrg() {
     // [method, path, init] key): it is the one query NOT wiped on org switch
     // (see the removeQueries predicate below) and other call sites invalidate
     // ["orgs"] directly. Only the fetch itself goes through the typed client.
-    queryKey: ["orgs"],
+    queryKey: orgKeys.all,
     queryFn: async () => {
       const { data } = await client.GET("/api/orgs");
       return data?.data ?? [];

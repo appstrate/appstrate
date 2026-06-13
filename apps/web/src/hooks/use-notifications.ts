@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { $api } from "../api/client";
 import { useCurrentApplicationId } from "./use-current-application";
 import { useOrgScope } from "./use-org-scope";
+import { paginatedRunsKeys, runsKeys, runKeys } from "../lib/query-keys";
 
 export function useUnreadCount() {
   const scope = useOrgScope();
@@ -46,9 +47,9 @@ export function invalidateNotificationQueries(qc: ReturnType<typeof useQueryClie
 export function invalidateRunAndNotificationQueries(qc: ReturnType<typeof useQueryClient>) {
   invalidateNotificationQueries(qc);
   // Legacy keys — the run hooks are not migrated to the typed client yet.
-  qc.invalidateQueries({ queryKey: ["paginated-runs"] });
-  qc.invalidateQueries({ queryKey: ["runs"] });
-  qc.invalidateQueries({ queryKey: ["run"] });
+  qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
+  qc.invalidateQueries({ queryKey: runsKeys.all });
+  qc.invalidateQueries({ queryKey: runKeys.all });
 }
 
 export function useMarkRead() {

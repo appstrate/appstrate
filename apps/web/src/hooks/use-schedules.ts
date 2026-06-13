@@ -10,6 +10,7 @@ import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
 import { useAgentProxy } from "./use-proxies";
 import { onMutationError } from "./use-mutations";
+import { scheduleKeys } from "../lib/query-keys";
 import type { ScheduleWireDto, EnrichedSchedule, EnrichedRun } from "@appstrate/shared-types";
 
 // The spec `Run`/`Schedule` schemas under-declare requiredness vs the
@@ -22,7 +23,7 @@ export function useScheduleRuns(scheduleId: string | undefined) {
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync invalidates
     // ["schedule-runs", orgId, applicationId, scheduleId] on SSE events.
-    queryKey: ["schedule-runs", orgId, applicationId, scheduleId],
+    queryKey: scheduleKeys.runs(orgId, applicationId, scheduleId),
     queryFn: async () => {
       const { data } = await client.GET("/api/schedules/{id}/runs", {
         params: { path: { id: scheduleId! } },
@@ -39,7 +40,7 @@ export function useAllSchedules() {
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync invalidates by the
     // ["schedules", orgId, applicationId] prefix on SSE events.
-    queryKey: ["schedules", orgId, applicationId],
+    queryKey: scheduleKeys.list(orgId, applicationId),
     queryFn: async () => {
       const { data } = await client.GET("/api/schedules");
       return (data?.data ?? []) as EnrichedSchedule[];
@@ -54,7 +55,7 @@ export function useScheduleById(id: string | undefined) {
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync invalidates
     // ["schedule", orgId, applicationId, scheduleId] on SSE events.
-    queryKey: ["schedule", orgId, applicationId, id],
+    queryKey: scheduleKeys.detail(orgId, applicationId, id),
     queryFn: async () => {
       const { data } = await client.GET("/api/schedules/{id}", {
         params: { path: { id: id! } },
@@ -72,7 +73,7 @@ export function useSchedules(packageId: string | undefined) {
   return useQuery({
     // Key pinned to the legacy shape (under the ["schedules", orgId,
     // applicationId] prefix invalidated by use-global-run-sync).
-    queryKey: ["schedules", orgId, applicationId, packageId],
+    queryKey: scheduleKeys.listForAgent(orgId, applicationId, packageId),
     queryFn: async () => {
       const { scope, name } = splitPackageRef(packageId!);
       const { data } = await client.GET("/api/agents/{scope}/{name}/schedules", {
@@ -85,8 +86,8 @@ export function useSchedules(packageId: string | undefined) {
 }
 
 function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
-  qc.invalidateQueries({ queryKey: ["schedules"] });
-  qc.invalidateQueries({ queryKey: ["schedule"] });
+  qc.invalidateQueries({ queryKey: scheduleKeys.listAll });
+  qc.invalidateQueries({ queryKey: scheduleKeys.detailAll });
 }
 
 type CreateScheduleBody =

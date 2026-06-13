@@ -8,6 +8,15 @@ import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateNotificationQueries } from "./use-notifications";
 import { parseSSEFrames } from "../lib/sse-parser";
 import {
+  runKeys,
+  runsKeys,
+  paginatedRunsKeys,
+  packageKeys,
+  agentsKeys,
+  scheduleKeys,
+  billingKeys,
+} from "../lib/query-keys";
+import {
   type EnrichedRun,
   TERMINAL_RUN_STATUSES,
   runUpdateEventSchema,
@@ -103,14 +112,14 @@ function handleSSEMessage(
   // completed_at are snake there) so the spread actually overwrites them.
   const patch = runUpdateToRunPatch(evt);
 
-  qc.setQueryData<EnrichedRun>(["run", orgId, applicationId, runId], (prev) =>
+  qc.setQueryData<EnrichedRun>(runKeys.detail(orgId, applicationId, runId), (prev) =>
     prev ? { ...prev, ...patch } : prev,
   );
 
   // Only the per-agent run list is keyed by packageId (nullable on the wire
   // once a run's package is deleted — ON DELETE SET NULL).
   if (packageId) {
-    const listKey = ["runs", orgId, applicationId, packageId] as const;
+    const listKey = runsKeys.forAgent(orgId, applicationId, packageId);
     const list = qc.getQueryData<EnrichedRun[]>(listKey);
     if (list) {
       if (list.some((ex) => ex.id === runId)) {
@@ -127,18 +136,18 @@ function handleSSEMessage(
 
   // Broad invalidations are debounced (trailing ~2s) — the in-place cache
   // patches above keep the visible run data live in the meantime.
-  broad.schedule(["agents", orgId]);
+  broad.schedule(agentsKeys.inOrg(orgId));
   // Agent detail caches are keyed ["packages","agents",orgId,applicationId,id]
   // (plural path, applicationId before id) — invalidate by the org-scoped
   // prefix so a run status change refreshes the agent's config/model tabs.
-  broad.schedule(["packages", "agents", orgId]);
-  broad.schedule(["paginated-runs"]);
+  broad.schedule(packageKeys.familyInOrg("agents", orgId));
+  broad.schedule(paginatedRunsKeys.all);
 
   // Invalidate schedule-specific caches
   if (scheduleId) {
-    qc.invalidateQueries({ queryKey: ["schedule-runs", orgId, applicationId, scheduleId] });
-    qc.invalidateQueries({ queryKey: ["schedule", orgId, applicationId, scheduleId] });
-    qc.invalidateQueries({ queryKey: ["schedules", orgId, applicationId] });
+    qc.invalidateQueries({ queryKey: scheduleKeys.runs(orgId, applicationId, scheduleId) });
+    qc.invalidateQueries({ queryKey: scheduleKeys.detail(orgId, applicationId, scheduleId) });
+    qc.invalidateQueries({ queryKey: scheduleKeys.list(orgId, applicationId) });
   }
 
   if (TERMINAL_RUN_STATUSES.has(status)) {
@@ -146,9 +155,9 @@ function handleSSEMessage(
     // broad invalidation above already covers it for this same event
     // (it used to be invalidated twice per terminal run).
     invalidateNotificationQueries(qc);
-    qc.invalidateQueries({ queryKey: ["runs"] });
-    qc.invalidateQueries({ queryKey: ["run"] });
-    qc.invalidateQueries({ queryKey: ["billing", orgId] });
+    qc.invalidateQueries({ queryKey: runsKeys.all });
+    qc.invalidateQueries({ queryKey: runKeys.all });
+    qc.invalidateQueries({ queryKey: billingKeys.forOrg(orgId) });
   }
 }
 

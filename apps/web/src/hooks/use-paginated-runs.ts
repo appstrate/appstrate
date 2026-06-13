@@ -5,6 +5,7 @@ import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
+import { paginatedRunsKeys } from "../lib/query-keys";
 import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
 
 export type RunKindFilter = "all" | "package" | "inline";
@@ -41,7 +42,16 @@ export function usePaginatedRuns({
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync (and run mutations)
     // invalidate by the ["paginated-runs"] prefix.
-    queryKey: ["paginated-runs", orgId, applicationId, endpoint, user, kind, status, limit, offset],
+    queryKey: paginatedRunsKeys.list(
+      orgId,
+      applicationId,
+      endpoint,
+      user,
+      kind,
+      status,
+      limit,
+      offset,
+    ),
     // The spec `Run` under-declares requiredness vs the enriched wire DTO the
     // server returns (the legacy helper blind-cast the same payload), hence
     // the single-step casts below. `user`/`kind`/`status` are only declared

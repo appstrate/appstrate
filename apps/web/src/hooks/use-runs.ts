@@ -5,6 +5,7 @@ import { client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
+import { runsKeys, runKeys } from "../lib/query-keys";
 import type { EnrichedRun } from "@appstrate/shared-types";
 
 /**
@@ -19,7 +20,7 @@ export function useRuns(packageId: string | undefined) {
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync patches this cache
     // in place (setQueryData) on SSE run_update events.
-    queryKey: ["runs", orgId, applicationId, packageId],
+    queryKey: runsKeys.forAgent(orgId, applicationId, packageId),
     queryFn: async () => {
       const { scope, name } = splitPackageRef(packageId!);
       const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
@@ -39,7 +40,7 @@ export function useRun(runId: string | undefined) {
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync and run-detail patch
     // this cache in place (setQueryData) on SSE events.
-    queryKey: ["run", orgId, applicationId, runId],
+    queryKey: runKeys.detail(orgId, applicationId, runId),
     queryFn: async () => {
       const { data } = await client.GET("/api/runs/{id}", {
         params: { path: { id: runId! } },
@@ -58,7 +59,7 @@ export function useRunLogs(runId: string | undefined) {
   return useQuery({
     // Key pinned to the legacy shape: run-detail appends live SSE log frames
     // into this cache (setQueryData).
-    queryKey: ["run-logs", orgId, applicationId, runId],
+    queryKey: runKeys.logs(orgId, applicationId, runId),
     // The endpoint pages at 1000 rows (ASC by id) and signals continuation
     // via the envelope's `hasMore` + a `since=<lastId>` cursor. Page through
     // until exhausted so runs longer than one page keep their tail (final

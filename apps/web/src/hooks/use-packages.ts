@@ -11,6 +11,7 @@ import { client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
+import { packageKeys, agentsKeys } from "../lib/query-keys";
 import type {
   OrgPackageItem,
   OrgPackageItemDetail,
@@ -146,7 +147,7 @@ function usePackageList(type: PackageType, opts?: { activeOnly?: boolean }) {
   const cfg = PACKAGE_CONFIG[type];
   const activeOnly = opts?.activeOnly ?? false;
   return useQuery({
-    queryKey: ["packages", cfg.path, orgId, applicationId, activeOnly ? "active" : "all"],
+    queryKey: packageKeys.list(cfg.path, orgId, applicationId, activeOnly ? "active" : "all"),
     queryFn: async (): Promise<OrgPackageItem[]> => {
       const { data } = await client.GET(`/api/packages/${cfg.path}`, {
         params: { query: activeOnly ? { active: "true" } : undefined },
@@ -181,7 +182,7 @@ function usePackageDetail<T extends PackageType>(
   const cfg = PACKAGE_CONFIG[type];
 
   return useQuery({
-    queryKey: ["packages", cfg.path, orgId, applicationId, id],
+    queryKey: packageKeys.detail(cfg.path, orgId, applicationId, id!),
     queryFn: () => fetchPackageDetail(type, id!),
     enabled: !!orgId && !!applicationId && !!id && (opts?.enabled ?? true),
   });
@@ -209,7 +210,7 @@ function useUploadPackage(type: PackageType) {
       return { id: data!.packageId, version: data!.version ?? null };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
+      qc.invalidateQueries({ queryKey: packageKeys.family(cfg.path) });
     },
   });
 }
@@ -225,7 +226,7 @@ function useDeletePackage(type: PackageType) {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
+      qc.invalidateQueries({ queryKey: packageKeys.family(cfg.path) });
       navigate("/");
     },
   });
@@ -247,7 +248,7 @@ export function useAgents() {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agents", orgId, applicationId],
+    queryKey: agentsKeys.list(orgId, applicationId),
     queryFn: async (): Promise<AgentListItem[]> => {
       const { data } = await client.GET("/api/agents");
       // The spec marks most item fields optional — normalize to the asserted
@@ -412,8 +413,8 @@ export function useCreateVersion(type: PackageType, packageId: string) {
       qc.invalidateQueries({ queryKey: ["package-versions"] });
       qc.invalidateQueries({ queryKey: ["version-detail"] });
       qc.invalidateQueries({ queryKey: ["version-info"] });
-      qc.invalidateQueries({ queryKey: ["agents"] });
-      qc.invalidateQueries({ queryKey: ["packages"] });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
     },
   });
 }
@@ -431,8 +432,8 @@ export function useDeleteVersion(type: PackageType, packageId: string) {
       qc.invalidateQueries({ queryKey: ["package-versions"] });
       qc.invalidateQueries({ queryKey: ["version-detail"] });
       qc.invalidateQueries({ queryKey: ["version-info"] });
-      qc.invalidateQueries({ queryKey: ["agents"] });
-      qc.invalidateQueries({ queryKey: ["packages"] });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
     },
   });
 }
@@ -458,8 +459,8 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
       };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agents"] });
-      qc.invalidateQueries({ queryKey: ["packages"] });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
     },
   });
 }
@@ -501,8 +502,8 @@ export function useForkPackage() {
       return { id: data!.id, forked_from: data!.forked_from ?? null };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agents"] });
-      qc.invalidateQueries({ queryKey: ["packages"] });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
     },
   });
 }

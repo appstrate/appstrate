@@ -24,6 +24,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { onMutationError } from "./use-mutations";
+import { persistenceKeys } from "../lib/query-keys";
 import type { PersistenceScopeFilter } from "../components/persistence/scope-filter";
 
 interface PersistenceResponse {
@@ -48,7 +49,7 @@ function usePersistenceQuery<T>(
   return useQuery({
     // Key pinned to the legacy "agent-persistence" prefix: use-mutations and
     // the app-switch reset invalidate by that prefix.
-    queryKey: ["agent-persistence", scopeTag, orgId, applicationId, packageId, query],
+    queryKey: persistenceKeys.list(scopeTag, orgId, applicationId, packageId, query),
     queryFn: async () => {
       const { scope, name } = splitPackageRef(packageId!);
       const { data } = await client.GET("/api/agents/{scope}/{name}/persistence", {
@@ -132,7 +133,7 @@ export function useDeletePinnedSlot(packageId: string) {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agent-persistence"] });
+      qc.invalidateQueries({ queryKey: persistenceKeys.all });
     },
     onError: onMutationError,
   });

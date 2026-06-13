@@ -12,6 +12,7 @@ import {
   useCreateModelProviderCredential,
   useModelProviderCredentials,
 } from "./use-model-provider-credentials";
+import { agentModelKeys, packageKeys } from "../lib/query-keys";
 
 /** Wire shape from the OpenAPI spec (components.schemas.OrgModel). */
 export type OrgModelInfo = components["schemas"]["OrgModel"];
@@ -107,7 +108,7 @@ export function useAgentModel(packageId: string | undefined) {
   return useQuery({
     // Key kept legacy-shaped: invalidated by useSetAgentModel below and
     // app-switch resets.
-    queryKey: ["agent-model", orgId, applicationId, packageId],
+    queryKey: agentModelKeys.detail(orgId, applicationId, packageId),
     queryFn: async () => {
       const { data } = await client.GET("/api/agents/{scope}/{name}/model", {
         params: { path: splitPackageRef(packageId!) },
@@ -129,8 +130,8 @@ export function useSetAgentModel(packageId: string) {
       return data;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agent-model"] });
-      qc.invalidateQueries({ queryKey: ["packages", "agents"] });
+      qc.invalidateQueries({ queryKey: agentModelKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
     },
   });
 }

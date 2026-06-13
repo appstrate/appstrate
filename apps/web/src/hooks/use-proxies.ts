@@ -6,6 +6,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { useOrgOnlyScope } from "./use-org-scope";
+import { agentProxyKeys, packageKeys } from "../lib/query-keys";
 
 /** Wire shape from the OpenAPI spec (components.schemas.OrgProxy). */
 export type OrgProxyInfo = components["schemas"]["OrgProxy"];
@@ -58,7 +59,7 @@ export function useAgentProxy(packageId: string | undefined) {
   return useQuery({
     // Key kept legacy-shaped: invalidated by useSetAgentProxy below and
     // app-switch resets.
-    queryKey: ["agent-proxy", orgId, applicationId, packageId],
+    queryKey: agentProxyKeys.detail(orgId, applicationId, packageId),
     queryFn: async () => {
       const { data } = await client.GET("/api/agents/{scope}/{name}/proxy", {
         params: { path: splitPackageRef(packageId!) },
@@ -80,8 +81,8 @@ export function useSetAgentProxy(packageId: string) {
       return data;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agent-proxy"] });
-      qc.invalidateQueries({ queryKey: ["packages", "agents"] });
+      qc.invalidateQueries({ queryKey: agentProxyKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
     },
   });
 }

@@ -9,6 +9,7 @@ import type { PackageType } from "@appstrate/shared-types";
 import { useCreatePackage, useUpdatePackage } from "./use-mutations";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { useUnsavedChanges } from "./use-unsaved-changes";
+import { agentsKeys, packageKeys } from "../lib/query-keys";
 
 /**
  * Minimal shape every package editor state must satisfy. The hook
@@ -119,10 +120,10 @@ export function useEditorState<S extends EditorStateBase>(
       } as { manifest: Record<string, unknown>; content: string; lock_version: number },
     });
     setState((s) => ({ ...s, lock_version: updated!.lock_version ?? 0 }));
-    qc.invalidateQueries({ queryKey: ["packages"] });
+    qc.invalidateQueries({ queryKey: packageKeys.all });
     qc.invalidateQueries({ queryKey: ["version-info"] });
     if (packageType === "agent") {
-      qc.invalidateQueries({ queryKey: ["agents"] });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
       // Tools → required scopes → per-integration agent-resolution verdict.
       // Refresh the integrations subtree so the Connections tab reflects a
       // newly-required reconnection/upgrade without a page reload.

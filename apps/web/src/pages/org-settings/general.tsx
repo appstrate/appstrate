@@ -17,6 +17,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Spinner } from "../../components/spinner";
 import { EmptyState } from "../../components/page-states";
+import { orgKeys } from "../../lib/query-keys";
 import { toast } from "sonner";
 
 export function OrgSettingsGeneralPage() {
@@ -39,7 +40,7 @@ export function OrgSettingsGeneralPage() {
   const updateNameMutation = $api.useMutation("put", "/api/orgs/{orgId}", {
     onSuccess: () => {
       // The org list lives under the legacy ["orgs"] key (see use-org.ts).
-      void queryClient.invalidateQueries({ queryKey: ["orgs"] });
+      void queryClient.invalidateQueries({ queryKey: orgKeys.all });
       setEditingName(false);
     },
     onError: (err) => {
@@ -49,7 +50,7 @@ export function OrgSettingsGeneralPage() {
 
   const deleteOrgMutation = $api.useMutation("delete", "/api/orgs/{orgId}", {
     onSuccess: () => {
-      queryClient.removeQueries({ queryKey: ["orgs"] });
+      queryClient.removeQueries({ queryKey: orgKeys.all });
       navigate("/");
       window.location.reload();
     },

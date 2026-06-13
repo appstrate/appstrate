@@ -6,6 +6,7 @@ import { ApiError } from "../api/errors";
 import { getCurrentOrgId } from "../stores/org-store";
 import { getCurrentApplicationId } from "../stores/app-store";
 import { useCurrentOrgId } from "./use-org";
+import { billingKeys } from "../lib/query-keys";
 
 /**
  * The `/api/billing/*` routes are contributed at runtime by the private
@@ -98,7 +99,7 @@ export function useBilling(options?: { enabled?: boolean }) {
   const orgId = useCurrentOrgId();
   const enabled = (options?.enabled ?? true) && !!orgId;
   return useQuery({
-    queryKey: ["billing", orgId],
+    queryKey: billingKeys.forOrg(orgId),
     queryFn: () => cloudApi<BillingInfo>("/billing"),
     enabled,
     staleTime: 60_000,

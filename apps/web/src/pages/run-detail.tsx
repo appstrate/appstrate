@@ -28,6 +28,7 @@ import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
 import { Markdown } from "../components/markdown";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
+import { runKeys } from "../lib/query-keys";
 import { MemoryPanel } from "../components/persistence/memory-panel";
 import { Play } from "lucide-react";
 
@@ -117,7 +118,7 @@ export function RunDetailPage() {
         // both the GET endpoint and this SSE frame deliver an ISO string — a
         // pre-existing frontend Drizzle-`Date` leak, out of scope here.
         const log = newLog as unknown as RunLog;
-        qc.setQueryData<RunLog[]>(["run-logs", orgId, applicationId, runId], (prev) => {
+        qc.setQueryData<RunLog[]>(runKeys.logs(orgId, applicationId, runId), (prev) => {
           if (!prev) return [log];
           if (prev.some((l) => l.id === log.id)) return prev;
           return [...prev, log];
@@ -134,7 +135,7 @@ export function RunDetailPage() {
         // `cost_so_far` instead. The next terminal-status invalidation
         // refetches the canonical row so this in-cache shadow is
         // bounded by the run's lifetime.
-        qc.setQueryData<EnrichedRun>(["run", orgId, applicationId, runId], (prev) => {
+        qc.setQueryData<EnrichedRun>(runKeys.detail(orgId, applicationId, runId), (prev) => {
           if (!prev) return prev;
           return {
             ...prev,

@@ -13,6 +13,7 @@ import { AuthLayout } from "../components/auth-layout";
 import { RegisterForm } from "../components/register-form";
 import { LoginForm } from "../components/login-form";
 import { roleI18nKey } from "../hooks/use-permissions";
+import { orgKeys } from "../lib/query-keys";
 import type { OrgRole } from "@appstrate/shared-types";
 
 /**
@@ -74,7 +75,7 @@ export function InviteAcceptPage() {
       });
       await refreshAuth();
       // Refetch orgs so the new org is in the cache BEFORE setId triggers useAutoSelect
-      await queryClient.invalidateQueries({ queryKey: ["orgs"] });
+      await queryClient.invalidateQueries({ queryKey: orgKeys.all });
       if (data?.id) {
         orgStore.getState().setId(data.id);
       }
