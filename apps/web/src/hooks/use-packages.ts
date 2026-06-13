@@ -63,14 +63,10 @@ function normalizeAgentDetail(d: components["schemas"]["AgentDetail"]): AgentDet
     lock_version: d.lock_version,
     running_runs: d.running_runs,
     forked_from: d.forked_from,
-    dependencies: {
-      skills: d.dependencies.skills.map((s) => ({ ...s, version: s.version ?? "" })),
-      mcp_servers: d.dependencies.mcp_servers,
-      integrations: d.dependencies.integrations,
-    },
+    dependencies: d.dependencies,
     config: {
       ...d.config,
-      schema: asJSONSchemaObject(d.config.schema ?? {}),
+      schema: asJSONSchemaObject(d.config.schema),
       current: d.config.current,
     },
     input: d.input ? { ...d.input, schema: asJSONSchemaObject(d.input.schema ?? {}) } : undefined,

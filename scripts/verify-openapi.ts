@@ -37,7 +37,7 @@ import {
   EXEMPT_SCHEMAS,
 } from "../apps/api/src/openapi/response-type-registry.ts";
 import { collectModuleOpenApi } from "./lib/module-openapi.ts";
-import { getInterfaceKeys } from "./lib/ts-interface-required-keys.ts";
+import { getTypeShape, type TypeShape } from "./lib/ts-interface-required-keys.ts";
 
 // ---------------------------------------------------------------------------
 // Auto-discover built-in modules and collect their OpenAPI contributions
@@ -536,6 +536,99 @@ function resolveRef(ref: string): Record<string, unknown> | undefined {
   }
   return current as Record<string, unknown> | undefined;
 }
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * Deref (`$ref`) and merge (`allOf`) a spec schema node into a normalized view
+ * for the recursive step-7 comparison. `oneOf`/`anyOf` schemas are treated as
+ * open (their required set is ambiguous) so the comparison never false-positives
+ * on a polymorphic schema.
+ */
+function normalizeSpecSchema(
+  schema: any,
+  depth = 0,
+): {
+  properties: Record<string, any>;
+  required: Set<string>;
+  open: boolean; // additionalProperties:true, an open object, or a polymorphic schema
+  items?: any;
+} | null {
+  if (!schema || typeof schema !== "object" || depth > 12) return null;
+  let s = schema;
+  if (typeof s.$ref === "string") {
+    const r = resolveRef(s.$ref);
+    if (!r) return null;
+    s = r;
+  }
+  let properties: Record<string, any> = { ...(s.properties ?? {}) };
+  const required = new Set<string>(Array.isArray(s.required) ? (s.required as string[]) : []);
+  let open = s.additionalProperties === true;
+  let items = s.items;
+  if (Array.isArray(s.allOf)) {
+    for (const sub of s.allOf) {
+      const n = normalizeSpecSchema(sub, depth + 1);
+      if (!n) continue;
+      properties = { ...properties, ...n.properties };
+      for (const r of n.required) required.add(r);
+      open = open || n.open;
+      if (!items && n.items) items = n.items;
+    }
+  }
+  if (Array.isArray(s.oneOf) || Array.isArray(s.anyOf)) open = true;
+  // A node declaring no properties is an open/dynamic object (JSON Schema
+  // `additionalProperties` defaults to true) — e.g. a bare `{type:"object"}`
+  // for a JSONB/JSON-Schema payload. Can't introspect it, so don't descend.
+  if (Object.keys(properties).length === 0) open = true;
+  return { properties, required, open, items };
+}
+
+/**
+ * Recursively compare a shared-type {@link TypeShape} against a spec schema,
+ * collecting required-field drift at every nesting level (nested objects and
+ * array element types — not just the top level). Recursion descends only where
+ * the shared-type exposes a closed nested shape AND the spec side is a closed
+ * object; open objects (`additionalProperties:true` / JSONB / Record) short-
+ * circuit so dynamic payloads never false-positive.
+ */
+function compareShapeToSchema(
+  shape: TypeShape,
+  specSchema: any,
+  prefix: string,
+  known: Set<string>,
+  issues: string[],
+  depth = 0,
+): void {
+  if (depth > 8) return;
+  const norm = normalizeSpecSchema(specSchema);
+  if (!norm) return;
+  const specProps = new Set(Object.keys(norm.properties));
+  for (const field of shape.required) {
+    const label = prefix ? `${prefix}.${field}` : field;
+    if (known.has(label) || (!prefix && known.has(field))) continue;
+    if (!specProps.has(field)) {
+      // An open object (additionalProperties / Record) legitimately omits the key.
+      if (!norm.open) {
+        issues.push(
+          `Field "${label}": shared-type=required, OpenAPI=absent (not a declared property)`,
+        );
+      }
+      continue;
+    }
+    if (!norm.required.has(field)) {
+      issues.push(`Field "${label}": shared-type=required, OpenAPI=optional`);
+    }
+    const childShape = shape.nested.get(field);
+    if (childShape) {
+      const childNorm = normalizeSpecSchema(norm.properties[field]);
+      if (childNorm?.items) {
+        compareShapeToSchema(childShape, childNorm.items, `${label}[]`, known, issues, depth + 1);
+      } else {
+        compareShapeToSchema(childShape, norm.properties[field], label, known, issues, depth + 1);
+      }
+    }
+  }
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**
  * Extract the request-body JSON Schema from the OpenAPI spec for a given path+method.
@@ -1420,10 +1513,10 @@ for (const entry of responseTypeRegistry) {
     continue;
   }
 
-  // Resolve the shared-type's required keys.
-  let sharedTypeRequired: Set<string>;
+  // Resolve the shared-type's recursive shape (nested objects + array elements).
+  let shape: TypeShape;
   try {
-    ({ required: sharedTypeRequired } = getInterfaceKeys(entry.sharedTypeName));
+    shape = getTypeShape(entry.sharedTypeName);
   } catch (err) {
     responseDrifts.push({
       description: entry.description,
@@ -1432,32 +1525,11 @@ for (const entry of responseTypeRegistry) {
     continue;
   }
 
-  const specRequired = new Set<string>(
-    Array.isArray(specSchema.required) ? (specSchema.required as string[]) : [],
-  );
-  const specProps = new Set<string>(
-    Object.keys((specSchema.properties ?? {}) as Record<string, unknown>),
-  );
   const known = new Set<string>(KNOWN_DRIFT[driftKey] ?? []);
 
   responseCompared++;
   const issues: string[] = [];
-
-  for (const field of sharedTypeRequired) {
-    if (known.has(field)) continue;
-    if (!specProps.has(field)) {
-      // Worst drift class: the consuming type reads `.field` unconditionally
-      // but the spec doesn't declare it at all → the generated client type
-      // never has it, so the frontend reads `undefined`.
-      issues.push(
-        `Field "${field}": shared-type=required, OpenAPI=absent (not a declared property)`,
-      );
-      continue;
-    }
-    if (!specRequired.has(field)) {
-      issues.push(`Field "${field}": shared-type=required, OpenAPI=optional`);
-    }
-  }
+  compareShapeToSchema(shape, specSchema, "", known, issues);
 
   if (issues.length > 0) {
     responseDrifts.push({ description: entry.description, issues });

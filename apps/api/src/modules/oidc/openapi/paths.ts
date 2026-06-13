@@ -481,6 +481,7 @@ export const oidcPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["keys"],
                 properties: { keys: { type: "array", items: { type: "object" } } },
               },
             },

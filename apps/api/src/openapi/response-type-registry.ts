@@ -167,7 +167,6 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   // AFPS manifest schemas — the spec mirrors the AFPS standard (AJV-validated
   // at runtime), no hand-written shared-type.
   AgentManifest: "AFPS manifest standard; validated by AJV, not a shared-type",
-  SkillManifest: "AFPS manifest standard",
   AgentSkillRef: "AFPS dependency sub-object embedded in AgentDetail.dependencies",
   FileConstraintsMap: "AFPS schema-wrapper sub-schema (structural map)",
   UIHintsMap: "AFPS schema-wrapper sub-schema (structural map)",

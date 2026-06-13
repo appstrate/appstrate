@@ -61,7 +61,9 @@ const integrationOrgDefaultSchema = {
 
 const integrationSummarySchema = {
   type: "object",
-  required: ["id", "manifest", "orgId", "source"],
+  // Only `id` is guaranteed: this list supports the `?fields=` projection
+  // (projectFields forces `id`, drops every other key on request).
+  required: ["id"],
   properties: {
     id: { type: "string" },
     manifest: { type: "object", additionalProperties: true },

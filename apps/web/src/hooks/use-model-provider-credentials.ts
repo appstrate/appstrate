@@ -8,9 +8,31 @@ import { useOrgOnlyScope } from "./use-org-scope";
 /** Wire shape from the OpenAPI spec (components.schemas.ModelProviderCredential). */
 export type ModelProviderCredentialInfo = components["schemas"]["ModelProviderCredential"];
 
-/** Wire shape of a `GET /api/model-provider-credentials/registry` list item. */
-export type ProviderRegistryEntry =
+/**
+ * Wire shape of a `GET /api/model-provider-credentials/registry` list item.
+ *
+ * The endpoint supports the `?fields=` projection (which is why every field but
+ * `providerId` is optional in the generated type). This hook never projects, so
+ * the server always returns the full catalog entry — the projectable fields are
+ * re-required here, asserted at the `select` trust boundary below (same pattern
+ * as the integrations summary list).
+ */
+type RawProviderRegistryEntry =
   paths["/api/model-provider-credentials/registry"]["get"]["responses"][200]["content"]["application/json"]["data"][number];
+export type ProviderRegistryEntry = RawProviderRegistryEntry &
+  Required<
+    Pick<
+      RawProviderRegistryEntry,
+      | "displayName"
+      | "iconUrl"
+      | "apiShape"
+      | "defaultBaseUrl"
+      | "baseUrlOverridable"
+      | "authMode"
+      | "featured"
+      | "models"
+    >
+  >;
 
 export function useModelProviderCredentials() {
   const scope = useOrgOnlyScope();
@@ -28,7 +50,13 @@ export function useProvidersRegistry() {
     "get",
     "/api/model-provider-credentials/registry",
     { params: { header: scope.header } },
-    { enabled: scope.enabled, staleTime: 5 * 60 * 1000, select: (e) => e.data },
+    {
+      enabled: scope.enabled,
+      staleTime: 5 * 60 * 1000,
+      // This hook never sends `?fields=`, so the server returns full entries —
+      // narrow the projection-loosened wire type to the full catalog shape.
+      select: (e) => e.data as ProviderRegistryEntry[],
+    },
   );
 }
 

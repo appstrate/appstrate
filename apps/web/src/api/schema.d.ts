@@ -4065,7 +4065,7 @@ export interface components {
             /** @description AFPS schema wrapper for agent configuration (set once, reused across runs). */
             config: {
                 /** @description Pure JSON Schema 2020-12 object */
-                schema?: Record<string, never>;
+                schema: Record<string, never>;
                 /** @description Current configuration values */
                 current: Record<string, never>;
                 file_constraints?: components["schemas"]["FileConstraintsMap"];
@@ -4634,7 +4634,9 @@ export interface components {
             orgId: string;
             /** @enum {string} */
             status: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
-            input: Record<string, never>;
+            input: {
+                [key: string]: unknown;
+            } | null;
             /** @description What the run produced — the stable API contract for the run's deliverable, set when the run reaches a terminal status. `null` while the run is in flight, and on terminal runs that emitted neither structured output nor a report. Persisted even on failed runs (a run that reported and then failed keeps its partial deliverable). */
             result: {
                 /** @description Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped. */
@@ -4644,7 +4646,9 @@ export interface components {
                 /** @description Present and `true` when `text` exceeded the 256 KiB cap and was truncated at a UTF-8 character boundary. Absent otherwise. */
                 text_truncated?: boolean;
             } | null;
-            checkpoint: Record<string, never>;
+            checkpoint: {
+                [key: string]: unknown;
+            } | null;
             error: string | null;
             /** @description Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action) and stored verbatim in JSONB. */
             token_usage: {
@@ -4807,8 +4811,6 @@ export interface components {
             /** @enum {string|null} */
             actor_type: "user" | "end_user" | null;
         };
-        /** @description AFPS Skill manifest. See https://schemas.afps.dev for field reference. */
-        SkillManifest: components["schemas"]["skill.schema"];
         SmtpConfigView: {
             applicationId: string;
             host: string;
@@ -5082,82 +5084,6 @@ export interface components {
                 };
             };
             timeout?: number;
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * AFPS Skill Manifest
-         * @description Manifest schema for AFPS 0.2 skill packages. A skill is a superset of the Agent Skills format with package identity and versioning.
-         */
-        "skill.schema": {
-            name: string;
-            version: string;
-            /** @constant */
-            type: "skill";
-            display_name?: string;
-            description?: string;
-            long_description?: string;
-            keywords?: string[];
-            license?: string;
-            author?: string | ({
-                name: string;
-                email?: string;
-                url?: string;
-            } & {
-                [key: string]: unknown;
-            });
-            repository?: string | ({
-                type: string;
-                url: string;
-                directory?: string;
-            } & {
-                [key: string]: unknown;
-            });
-            homepage?: string;
-            documentation?: string;
-            support?: string;
-            icon?: string;
-            icons?: ({
-                src: string;
-                size?: string;
-                /** @enum {string} */
-                theme?: "light" | "dark" | "high-contrast";
-            } & {
-                [key: string]: unknown;
-            })[];
-            screenshots?: string[];
-            privacy_policies?: string[];
-            compatibility?: {
-                platforms?: ("darwin" | "win32" | "linux")[];
-                runtimes?: {
-                    [key: string]: string;
-                };
-                clients?: {
-                    [key: string]: string;
-                };
-            } & {
-                [key: string]: unknown;
-            };
-            /** @description AFPS schema version this manifest targets, in MAJOR.MINOR format (e.g. "0.0"). Distinct from the package "version" field, which uses full MAJOR.MINOR.PATCH semver. */
-            schema_version?: string;
-            dependencies?: {
-                skills?: {
-                    [key: string]: string;
-                };
-                mcp_servers?: {
-                    [key: string]: string;
-                };
-                integrations?: {
-                    [key: string]: string;
-                };
-            } & {
-                [key: string]: unknown;
-            };
-            _meta?: {
-                [key: string]: {
-                    [key: string]: unknown;
-                };
-            };
         } & {
             [key: string]: unknown;
         };
@@ -6898,8 +6824,8 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        object?: "list";
-                        data?: components["schemas"]["ApplicationPackage"][];
+                        object: "list";
+                        data: components["schemas"]["ApplicationPackage"][];
                     };
                 };
             };
@@ -7847,7 +7773,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        keys?: Record<string, never>[];
+                        keys: Record<string, never>[];
                     };
                 };
             };
@@ -8955,12 +8881,12 @@ export interface operations {
                         object: "list";
                         data: {
                             id: string;
-                            manifest: {
+                            manifest?: {
                                 [key: string]: unknown;
                             };
-                            orgId: string | null;
+                            orgId?: string | null;
                             /** @enum {string} */
-                            source: "local" | "system";
+                            source?: "local" | "system";
                             active?: boolean;
                             block_user_connections?: boolean;
                         }[];
@@ -10041,8 +9967,6 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
             };
             path?: never;
             cookie?: never;
@@ -10833,19 +10757,19 @@ export interface operations {
                         object: "list";
                         data: {
                             providerId: string;
-                            displayName: string;
-                            iconUrl: string;
+                            displayName?: string;
+                            iconUrl?: string;
                             description?: string | null;
                             docsUrl?: string | null;
                             /** @enum {string} */
-                            apiShape: "anthropic-messages" | "openai-completions" | "openai-responses" | "openai-codex-responses" | "mistral-conversations" | "google-generative-ai" | "google-vertex" | "azure-openai-responses" | "bedrock-converse-stream";
-                            defaultBaseUrl: string;
-                            baseUrlOverridable: boolean;
+                            apiShape?: "anthropic-messages" | "openai-completions" | "openai-responses" | "openai-codex-responses" | "mistral-conversations" | "google-generative-ai" | "google-vertex" | "azure-openai-responses" | "bedrock-converse-stream";
+                            defaultBaseUrl?: string;
+                            baseUrlOverridable?: boolean;
                             /** @enum {string} */
-                            authMode: "api_key" | "oauth2";
+                            authMode?: "api_key" | "oauth2";
                             /** @description Surface this provider in the picker's 'Featured' group (above an 'Other' divider). Module-supplied metadata; never gates writes — any registry entry stays selectable. */
-                            featured: boolean;
-                            models: {
+                            featured?: boolean;
+                            models?: {
                                 id: string;
                                 /** @description Human-readable label, derived from the id at vendoring time. */
                                 label: string;
@@ -12241,13 +12165,13 @@ export interface operations {
                      */
                     "application/json": {
                         /** Format: uuid */
-                        id?: string;
-                        name?: string;
-                        slug?: string;
+                        id: string;
+                        name: string;
+                        slug: string;
                         /** @enum {string} */
-                        role?: "owner";
+                        role: "owner";
                         /** Format: date-time */
-                        createdAt?: string;
+                        createdAt: string;
                     };
                 };
             };
@@ -15368,7 +15292,10 @@ export interface operations {
     batchGetProfiles: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -17239,14 +17166,15 @@ export interface operations {
                      *           "createdAt": "2026-01-15T10:30:00Z",
                      *           "updatedAt": "2026-01-15T10:30:00Z"
                      *         }
-                     *       ]
+                     *       ],
+                     *       "hasMore": false
                      *     }
                      */
                     "application/json": {
                         /** @enum {string} */
-                        object?: "list";
-                        data?: components["schemas"]["WebhookObject"][];
-                        hasMore?: boolean;
+                        object: "list";
+                        data: components["schemas"]["WebhookObject"][];
+                        hasMore: boolean;
                     };
                 };
             };
@@ -17519,13 +17447,14 @@ export interface operations {
                      *           "error": null,
                      *           "createdAt": "2026-01-15T11:00:00Z"
                      *         }
-                     *       ]
+                     *       ],
+                     *       "hasMore": false
                      *     }
                      */
                     "application/json": {
                         /** @enum {string} */
-                        object?: "list";
-                        data?: {
+                        object: "list";
+                        data: {
                             id: string;
                             eventId: string;
                             eventType: string;
@@ -17539,7 +17468,7 @@ export interface operations {
                             /** Format: date-time */
                             createdAt: string;
                         }[];
-                        hasMore?: boolean;
+                        hasMore: boolean;
                     };
                 };
             };

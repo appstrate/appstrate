@@ -404,7 +404,9 @@ export interface AgentDetail {
   description?: string;
   source: "system" | "local";
   dependencies: {
-    skills: { id: string; version: string; name?: string; description?: string }[];
+    // `version`/`name`/`description` are emitted only when present on the
+    // manifest skill ref (handler spreads them conditionally) — AFPS §4.1.
+    skills: { id: string; version?: string; name?: string; description?: string }[];
     /** AFPS §4.1 mcp_servers dependency group (`{ id, version }` per entry). */
     mcp_servers: { id: string; version: string }[];
     /**

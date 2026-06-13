@@ -46,17 +46,10 @@ export const modelProviderCredentialsPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      required: [
-                        "providerId",
-                        "displayName",
-                        "iconUrl",
-                        "apiShape",
-                        "defaultBaseUrl",
-                        "baseUrlOverridable",
-                        "authMode",
-                        "featured",
-                        "models",
-                      ],
+                      // Only `providerId` is guaranteed: this registry list
+                      // supports the `?fields=` projection (projectFields forces
+                      // `providerId`, drops every other key on request).
+                      required: ["providerId"],
                       properties: {
                         providerId: { type: "string" },
                         displayName: { type: "string" },

@@ -175,6 +175,7 @@ export const webhooksPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: { type: "array", items: { $ref: "#/components/schemas/WebhookObject" } },
@@ -198,6 +199,7 @@ export const webhooksPaths = {
                     updatedAt: "2026-01-15T10:30:00Z",
                   },
                 ],
+                hasMore: false,
               },
             },
           },
@@ -479,6 +481,7 @@ export const webhooksPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: {
@@ -530,6 +533,7 @@ export const webhooksPaths = {
                     createdAt: "2026-01-15T11:00:00Z",
                   },
                 ],
+                hasMore: false,
               },
             },
           },

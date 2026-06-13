@@ -314,7 +314,9 @@ export const schemas = {
       },
       config: {
         type: "object",
-        required: ["current"],
+        // The detail serializer always emits `schema` (falls back to an empty
+        // object schema when the manifest has no config wrapper).
+        required: ["schema", "current"],
         description: "AFPS schema wrapper for agent configuration (set once, reused across runs).",
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
@@ -550,7 +552,9 @@ export const schemas = {
         type: "string",
         enum: ["pending", "running", "success", "failed", "timeout", "cancelled"],
       },
-      input: { type: "object" },
+      // `runs.input` is a nullable jsonb column (createFailedRun writes null);
+      // emitted verbatim, so the wire value can be null.
+      input: { type: ["object", "null"], additionalProperties: true },
       result: {
         type: ["object", "null"],
         description:
@@ -572,7 +576,9 @@ export const schemas = {
           },
         },
       },
-      checkpoint: { type: "object" },
+      // `runs.checkpoint` is a nullable jsonb column — null on every run that
+      // never emitted a checkpoint (pending/running/most terminal runs).
+      checkpoint: { type: ["object", "null"], additionalProperties: true },
       error: { type: ["string", "null"] },
       token_usage: {
         type: ["object", "null"],
@@ -1253,10 +1259,6 @@ export const schemas = {
         },
       },
     ],
-  },
-  SkillManifest: {
-    description: "AFPS Skill manifest. See https://schemas.afps.dev for field reference.",
-    $ref: "https://schemas.afps.dev/v0/skill.schema.json",
   },
   FileConstraintsMap: {
     type: "object",

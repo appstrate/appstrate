@@ -100,8 +100,10 @@ export function createAgentsRouter() {
         // list output is directly usable as `{scope}` path-param input — one
         // operation's output must be valid input for the next (issue #629).
         scope: parsed ? `@${parsed.scope}` : null,
-        version: manifest.version,
-        type: manifest.type,
+        // `version` from the manifest may be absent on a partial draft; the DB
+        // `type` column is NOT NULL and authoritative (manifest JSONB can lie).
+        version: manifest.version ?? null,
+        type: row.type,
       };
     });
 

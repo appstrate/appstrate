@@ -276,6 +276,7 @@ export const applicationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: {
