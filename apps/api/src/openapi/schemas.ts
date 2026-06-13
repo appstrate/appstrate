@@ -418,14 +418,58 @@ export const schemas = {
   },
   Run: {
     type: "object",
+    // Every field a run response carries unconditionally. The list/detail/
+    // create handlers all route through `mapEnrichedRun` (services/state/runs.ts),
+    // so the enriched join fields (`user_name`, `connections_used`, …) are as
+    // guaranteed as the base columns. Only `inline_manifest` / `inline_prompt`
+    // are detail-only (added by `getRunFull`) and stay optional. Keeping this
+    // list exhaustive lets the SPA consume the generated `Run` type with no
+    // cast and lets verify-openapi step 7 guard it against `EnrichedRun` drift.
     required: [
       "id",
+      "packageId",
+      "userId",
+      "endUserId",
+      "apiKeyId",
       "orgId",
       "applicationId",
+      "scheduleId",
       "status",
+      "input",
+      "result",
+      "checkpoint",
+      "error",
+      "metadata",
+      "config",
+      "config_override",
+      "started_at",
+      "completed_at",
+      "duration",
+      "cost",
+      "notifiedAt",
+      "readAt",
+      "runNumber",
+      "token_usage",
+      "version_label",
       "version_dirty",
       "version_ref",
-      "started_at",
+      "proxy_label",
+      "model_label",
+      "model_source",
+      "runner_name",
+      "runner_kind",
+      "agent_scope",
+      "agent_name",
+      "runOrigin",
+      "contextSnapshot",
+      "modelCredentialId",
+      "connection_overrides",
+      "user_name",
+      "end_user_name",
+      "api_key_name",
+      "schedule_name",
+      "connections_used",
+      "package_ephemeral",
     ],
     properties: {
       id: { type: "string" },
@@ -466,7 +510,7 @@ export const schemas = {
         },
       },
       checkpoint: { type: "object" },
-      error: { type: "string" },
+      error: { type: ["string", "null"] },
       token_usage: {
         type: ["object", "null"],
         description:
@@ -479,10 +523,10 @@ export const schemas = {
         },
         additionalProperties: false,
       },
-      started_at: { type: "string", format: "date-time" },
-      completed_at: { type: "string", format: "date-time" },
-      duration: { type: "integer", description: "Duration in milliseconds" },
-      scheduleId: { type: "string" },
+      started_at: { type: ["string", "null"], format: "date-time" },
+      completed_at: { type: ["string", "null"], format: "date-time" },
+      duration: { type: ["integer", "null"], description: "Duration in milliseconds" },
+      scheduleId: { type: ["string", "null"] },
       version_label: {
         type: ["string", "null"],
         description:
@@ -515,7 +559,7 @@ export const schemas = {
         description: "API key ID that triggered the run (null for dashboard/schedule runs)",
       },
       applicationId: {
-        type: ["string", "null"],
+        type: "string",
         description: "Application ID (app_ prefix) that owns this run",
       },
       metadata: {
@@ -663,15 +707,34 @@ export const schemas = {
   },
   Schedule: {
     type: "object",
+    // Every schedule response routes through `toSchedule` + `enrichSchedules`
+    // (services/scheduler.ts) — list, detail, create, and update all return the
+    // actor-enriched shape — so the full field set is guaranteed. Exhaustive
+    // `required` lets the SPA drop its `as EnrichedSchedule` casts and lets
+    // verify-openapi step 7 guard it against `EnrichedSchedule` drift.
     required: [
       "id",
       "packageId",
+      "userId",
+      "endUserId",
       "orgId",
       "applicationId",
+      "name",
       "enabled",
       "cron_expression",
+      "timezone",
+      "input",
+      "config_override",
+      "model_id_override",
+      "proxy_id_override",
+      "version_override",
+      "connection_overrides",
+      "last_run_at",
+      "next_run_at",
       "createdAt",
       "updatedAt",
+      "actor_name",
+      "actor_type",
     ],
     properties: {
       id: { type: "string" },
@@ -687,8 +750,8 @@ export const schemas = {
       enabled: { type: "boolean" },
       cron_expression: { type: "string" },
       timezone: { type: ["string", "null"] },
-      input: { type: "object" },
-      config_override: { type: ["object", "null"] },
+      input: { type: ["object", "null"], additionalProperties: true },
+      config_override: { type: ["object", "null"], additionalProperties: true },
       model_id_override: { type: ["string", "null"] },
       proxy_id_override: { type: ["string", "null"] },
       version_override: { type: ["string", "null"] },

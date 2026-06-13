@@ -21,14 +21,12 @@ export function useRuns(packageId: string | undefined) {
     // Key pinned to the legacy shape: use-global-run-sync patches this cache
     // in place (setQueryData) on SSE run_update events.
     queryKey: runsKeys.forAgent(orgId, applicationId, packageId),
-    queryFn: async () => {
+    queryFn: async (): Promise<EnrichedRun[]> => {
       const { scope, name } = splitPackageRef(packageId!);
       const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
         params: { path: { scope, name } },
       });
-      // The spec `Run` under-declares requiredness vs the enriched wire DTO
-      // the server returns (the legacy helper blind-cast the same payload).
-      return (data?.data ?? []) as EnrichedRun[];
+      return data?.data ?? [];
     },
     enabled: !!packageId && !!applicationId,
   });
@@ -41,13 +39,12 @@ export function useRun(runId: string | undefined) {
     // Key pinned to the legacy shape: use-global-run-sync and run-detail patch
     // this cache in place (setQueryData) on SSE events.
     queryKey: runKeys.detail(orgId, applicationId, runId),
-    queryFn: async () => {
+    queryFn: async (): Promise<EnrichedRun> => {
       const { data } = await client.GET("/api/runs/{id}", {
         params: { path: { id: runId! } },
       });
       // Non-2xx throws via the client middleware, so `data` is defined here.
-      // Same spec-vs-wire requiredness caveat as useRuns above.
-      return data as EnrichedRun;
+      return data!;
     },
     enabled: !!runId && !!applicationId,
   });

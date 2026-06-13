@@ -233,7 +233,13 @@ export interface ContainerOrchestrator {
 // Realtime SSE — event shape
 // ---------------------------------------------------------------------------
 
-/** Event delivered to realtime subscribers (matches the SSE wire format). */
+/**
+ * Generic event envelope for realtime subscribers, part of the published
+ * `@appstrate/core/platform-types` surface. The platform's own SSE pipeline
+ * now uses the typed discriminated union in
+ * `@appstrate/shared-types` (`realtime-events`); this loose shape is retained
+ * for external `@appstrate/core` consumers and module authors.
+ */
 export interface RealtimeEvent {
   event: string;
   data: Record<string, unknown>;

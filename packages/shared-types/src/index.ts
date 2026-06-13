@@ -83,7 +83,7 @@ export interface RunWireDto {
   runNumber: number | null;
   token_usage: unknown;
   version_label: string | null;
-  version_dirty: boolean | null;
+  version_dirty: boolean;
   /**
    * Unambiguous reference to the agent definition the run executed (#636):
    * `"draft"` when the mutable draft ran with unpublished changes (or no
@@ -254,7 +254,7 @@ export interface ScheduleWireDto {
   orgId: string;
   applicationId: string;
   name: string | null;
-  enabled: boolean | null;
+  enabled: boolean;
   cron_expression: string;
   timezone: string | null;
   input: Record<string, unknown> | null;

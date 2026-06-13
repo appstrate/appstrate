@@ -52,30 +52,28 @@ export function usePaginatedRuns({
       limit,
       offset,
     ),
-    // The spec `Run` under-declares requiredness vs the enriched wire DTO the
-    // server returns (the legacy helper blind-cast the same payload), hence
-    // the single-step casts below. `user`/`kind`/`status` are only declared
-    // (and only ever passed by callers) on the global /api/runs view.
+    // `user`/`kind`/`status` are only declared (and only ever passed by
+    // callers) on the global /api/runs view.
     queryFn: async (): Promise<ListEnvelope<EnrichedRun>> => {
       if (scheduleId) {
         const { data } = await client.GET("/api/schedules/{id}/runs", {
           params: { path: { id: scheduleId }, query: { limit, offset } },
         });
-        return data as ListEnvelope<EnrichedRun>;
+        return data!;
       }
       if (packageId) {
         const { scope, name } = splitPackageRef(packageId);
         const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
           params: { path: { scope, name }, query: { limit, offset } },
         });
-        return data as ListEnvelope<EnrichedRun>;
+        return data!;
       }
       const { data } = await client.GET("/api/runs", {
         params: {
           query: { limit, offset, user, kind: kind && kind !== "all" ? kind : undefined, status },
         },
       });
-      return data as ListEnvelope<EnrichedRun>;
+      return data!;
     },
     placeholderData: (prev) => prev,
     enabled: !!applicationId && (scheduleId ? !!scheduleId : packageId ? !!packageId : true),

@@ -51,11 +51,19 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     sharedTypeName: "IntegrationAgentResolution",
     description: "GET .../agent-resolution/... 200 ↔ IntegrationAgentResolution",
   },
-  // Future expansion targets — intentionally NOT seeded because their response
-  // schemas deliberately keep fields spec-optional that the type marks required
-  // (~10 fields across AgentDetail and the Run/EnrichedRun DTOs). Adding them
-  // requires either tightening the spec `required` arrays to match the types or
-  // recording the divergence in KNOWN_DRIFT below with a justification.
+  {
+    specSchemaName: "Run",
+    sharedTypeName: "EnrichedRun",
+    description: "Run ↔ EnrichedRun (every run response is enriched via mapEnrichedRun)",
+  },
+  {
+    specSchemaName: "Schedule",
+    sharedTypeName: "EnrichedSchedule",
+    description: "Schedule ↔ EnrichedSchedule (every schedule response is actor-enriched)",
+  },
+  // Future expansion target: AgentDetail still keeps a few fields spec-optional
+  // that the type marks required. Tighten its `required` array (or record the
+  // divergence in KNOWN_DRIFT below with a justification) before seeding it.
 ];
 
 /**

@@ -1279,9 +1279,16 @@ for (const entry of responseTypeRegistry) {
   const issues: string[] = [];
 
   for (const field of sharedTypeRequired) {
-    // Only compare fields the spec declares as properties.
-    if (!specProps.has(field)) continue;
     if (known.has(field)) continue;
+    if (!specProps.has(field)) {
+      // Worst drift class: the consuming type reads `.field` unconditionally
+      // but the spec doesn't declare it at all → the generated client type
+      // never has it, so the frontend reads `undefined`.
+      issues.push(
+        `Field "${field}": shared-type=required, OpenAPI=absent (not a declared property)`,
+      );
+      continue;
+    }
     if (!specRequired.has(field)) {
       issues.push(`Field "${field}": shared-type=required, OpenAPI=optional`);
     }

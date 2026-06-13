@@ -4628,15 +4628,15 @@ export interface components {
         Run: {
             id: string;
             /** @description Source agent ID. NULL when the source agent has been deleted — the run row survives via `runs.package_id ON DELETE SET NULL` (migration 0017). Read `agent_scope` / `agent_name` for display in that case; re-running is not possible. */
-            packageId?: string | null;
+            packageId: string | null;
             /** @description Dashboard user ID that triggered the run (null for end-user/schedule runs) */
-            userId?: string | null;
+            userId: string | null;
             orgId: string;
             /** @enum {string} */
             status: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
-            input?: Record<string, never>;
+            input: Record<string, never>;
             /** @description What the run produced — the stable API contract for the run's deliverable, set when the run reaches a terminal status. `null` while the run is in flight, and on terminal runs that emitted neither structured output nor a report. Persisted even on failed runs (a run that reported and then failed keeps its partial deliverable). */
-            result?: {
+            result: {
                 /** @description Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped. */
                 output?: unknown;
                 /** @description Markdown report emitted via the agent's `report` runtime tool. Multiple report calls are concatenated in call order, joined with newlines. Capped at 256 KiB of UTF-8 — see `text_truncated`. The full untruncated report remains available as individual run-log entries (type='result', event='report'). */
@@ -4644,72 +4644,72 @@ export interface components {
                 /** @description Present and `true` when `text` exceeded the 256 KiB cap and was truncated at a UTF-8 character boundary. Absent otherwise. */
                 text_truncated?: boolean;
             } | null;
-            checkpoint?: Record<string, never>;
-            error?: string;
+            checkpoint: Record<string, never>;
+            error: string | null;
             /** @description Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action) and stored verbatim in JSONB. */
-            token_usage?: {
+            token_usage: {
                 input_tokens?: number;
                 output_tokens?: number;
                 cache_creation_input_tokens?: number;
                 cache_read_input_tokens?: number;
             } | null;
             /** Format: date-time */
-            started_at: string;
+            started_at: string | null;
             /** Format: date-time */
-            completed_at?: string;
+            completed_at: string | null;
             /** @description Duration in milliseconds */
-            duration?: number;
-            scheduleId?: string;
+            duration: number | null;
+            scheduleId: string | null;
             /** @description Version label at run time (e.g. '1.0.0'). For draft runs this is the latest published version the draft sits on top of — read `version_ref` to know which definition actually executed. */
-            version_label?: string | null;
+            version_label: string | null;
             /** @description Whether the draft had unpublished changes at run time. Kept for backward compatibility — prefer `version_ref`, which states unambiguously what executed. */
             version_dirty: boolean;
             /** @description Unambiguous reference to the agent definition the run executed: 'draft' when the mutable draft ran with unpublished changes (or the agent has no published version), or the concrete semver (e.g. '2.1.0') when the run executed that published definition (or a draft identical to it). */
             version_ref: string;
             /** @description Proxy label used at run time */
-            proxy_label?: string | null;
+            proxy_label: string | null;
             /** @description Model label used at run time */
-            model_label?: string | null;
+            model_label: string | null;
             /** @description Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override. */
-            model_source?: string | null;
+            model_source: string | null;
             /** @description Run cost in dollars */
-            cost?: number | null;
+            cost: number | null;
             /** @description End-user ID (eu_ prefix) if executed on behalf of an end-user */
-            endUserId?: string | null;
+            endUserId: string | null;
             /** @description API key ID that triggered the run (null for dashboard/schedule runs) */
-            apiKeyId?: string | null;
+            apiKeyId: string | null;
             /** @description Application ID (app_ prefix) that owns this run */
-            applicationId: string | null;
+            applicationId: string;
             /** @description Additional metadata (e.g. creditsUsed in cloud mode) */
-            metadata?: {
+            metadata: {
                 [key: string]: unknown;
             } | null;
             /** @description Snapshot of the effective agent config (merged overrides) at run creation */
-            config?: {
+            config: {
                 [key: string]: unknown;
             } | null;
             /** @description Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `config_override` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim. */
-            config_override?: {
+            config_override: {
                 [key: string]: unknown;
             } | null;
             /** @description Display name of the dashboard user who triggered the run (from profiles table) */
-            user_name?: string | null;
+            user_name: string | null;
             /** @description Display name of the end-user (name or externalId fallback) */
-            end_user_name?: string | null;
+            end_user_name: string | null;
             /** @description Name of the API key that triggered the run */
-            api_key_name?: string | null;
+            api_key_name: string | null;
             /** @description Name of the schedule that triggered the run */
-            schedule_name?: string | null;
+            schedule_name: string | null;
             /** @description Human-friendly label for the runner that triggered the run — CLI host (`os.hostname()`), GitHub Action workflow, or whatever the caller passes via `X-Appstrate-Runner-Name`. Stamped at INSERT and never updated. */
-            runner_name?: string | null;
+            runner_name: string | null;
             /** @description Free-form classifier driving the dashboard icon (`cli`, `github-action`, …). Sourced from `X-Appstrate-Runner-Kind` or inferred from the auth context. */
-            runner_kind?: string | null;
+            runner_kind: string | null;
             /** @description Denormalized agent scope at run creation, including the leading `@` (e.g. `@myorg`). Survives rename, delete, or shadow compaction — the global run view falls back to this when the source package is gone. */
-            agent_scope?: string | null;
+            agent_scope: string | null;
             /** @description Denormalized agent name at run creation (see agent_scope). */
-            agent_name?: string | null;
+            agent_name: string | null;
             /** @description Present on enriched run responses. True when the source package is an inline-run shadow (POST /api/runs/inline). */
-            package_ephemeral?: boolean;
+            package_ephemeral: boolean;
             /** @description Inline runs only. Snapshot of the manifest submitted at run time. Null once the shadow has been compacted (see INLINE_RUN_LIMITS.retention_days). */
             inline_manifest?: {
                 [key: string]: unknown;
@@ -4720,31 +4720,31 @@ export interface components {
              * Format: date-time
              * @description When the user was notified of run completion (in-app notification). Null until notification fires.
              */
-            notifiedAt?: string | null;
+            notifiedAt: string | null;
             /**
              * Format: date-time
              * @description When the user marked the run notification as read. Null until acknowledged.
              */
-            readAt?: string | null;
+            readAt: string | null;
             /** @description Per-(app, package) monotonic counter assigned at run creation. Stable identifier for UI display. */
-            runNumber?: number | null;
+            runNumber: number | null;
             /**
              * @description Which runner drives this run: 'platform' (server-managed Docker container) or 'remote' (caller's host via signed events).
              * @enum {string|null}
              */
-            runOrigin?: "platform" | "remote" | null;
+            runOrigin: "platform" | "remote" | null;
             /** @description Runner-provided execution environment metadata (os, cli version, git sha, ...) stamped at run creation. */
-            contextSnapshot?: {
+            contextSnapshot: {
                 [key: string]: unknown;
             } | null;
             /** @description ID of the model_provider_credentials row resolved at run creation (audit + cost-attribution). */
-            modelCredentialId?: string | null;
+            modelCredentialId: string | null;
             /** @description Per-integration connection picks for this run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (#1). */
-            connection_overrides?: {
+            connection_overrides: {
                 [key: string]: string;
             } | null;
             /** @description Connections resolved for this run, projected from the internal snapshot for display. Null when the agent declares no integrations. */
-            connections_used?: {
+            connections_used: {
                 integration_id: string;
                 label: string | null;
                 account_id: string | null;
@@ -4771,37 +4771,41 @@ export interface components {
             id: string;
             packageId: string;
             /** @description Member actor the schedule runs as */
-            userId?: string | null;
+            userId: string | null;
             /** @description End-user actor the schedule runs as */
-            endUserId?: string | null;
+            endUserId: string | null;
             orgId: string;
             /** @description Application ID (app_ prefix) that owns this schedule */
             applicationId: string;
-            name?: string | null;
+            name: string | null;
             enabled: boolean;
             cron_expression: string;
-            timezone?: string | null;
-            input?: Record<string, never>;
-            config_override?: Record<string, never> | null;
-            model_id_override?: string | null;
-            proxy_id_override?: string | null;
-            version_override?: string | null;
+            timezone: string | null;
+            input: {
+                [key: string]: unknown;
+            } | null;
+            config_override: {
+                [key: string]: unknown;
+            } | null;
+            model_id_override: string | null;
+            proxy_id_override: string | null;
+            version_override: string | null;
             /** @description Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Flat map: `{ "@scope/integration": "<connection_id>" }`. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4). */
-            connection_overrides?: {
+            connection_overrides: {
                 [key: string]: string;
             } | null;
             /** Format: date-time */
-            last_run_at?: string | null;
+            last_run_at: string | null;
             /** Format: date-time */
-            next_run_at?: string | null;
+            next_run_at: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
             /** @description Display name of the schedule actor */
-            actor_name?: string | null;
+            actor_name: string | null;
             /** @enum {string|null} */
-            actor_type?: "user" | "end_user" | null;
+            actor_type: "user" | "end_user" | null;
         };
         /** @description AFPS Skill manifest. See https://schemas.afps.dev for field reference. */
         SkillManifest: components["schemas"]["skill.schema"];

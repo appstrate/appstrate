@@ -13,10 +13,6 @@ import { onMutationError } from "./use-mutations";
 import { scheduleKeys } from "../lib/query-keys";
 import type { ScheduleWireDto, EnrichedSchedule, EnrichedRun } from "@appstrate/shared-types";
 
-// The spec `Run`/`Schedule` schemas under-declare requiredness vs the
-// enriched wire DTOs the server returns (the legacy helper blind-cast the
-// same payloads), hence the single-step casts to the shared-types DTOs below.
-
 export function useScheduleRuns(scheduleId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
@@ -24,11 +20,11 @@ export function useScheduleRuns(scheduleId: string | undefined) {
     // Key pinned to the legacy shape: use-global-run-sync invalidates
     // ["schedule-runs", orgId, applicationId, scheduleId] on SSE events.
     queryKey: scheduleKeys.runs(orgId, applicationId, scheduleId),
-    queryFn: async () => {
+    queryFn: async (): Promise<EnrichedRun[]> => {
       const { data } = await client.GET("/api/schedules/{id}/runs", {
         params: { path: { id: scheduleId! } },
       });
-      return (data?.data ?? []) as EnrichedRun[];
+      return data?.data ?? [];
     },
     enabled: !!scheduleId && !!applicationId,
   });
@@ -41,9 +37,9 @@ export function useAllSchedules() {
     // Key pinned to the legacy shape: use-global-run-sync invalidates by the
     // ["schedules", orgId, applicationId] prefix on SSE events.
     queryKey: scheduleKeys.list(orgId, applicationId),
-    queryFn: async () => {
+    queryFn: async (): Promise<EnrichedSchedule[]> => {
       const { data } = await client.GET("/api/schedules");
-      return (data?.data ?? []) as EnrichedSchedule[];
+      return data?.data ?? [];
     },
     enabled: !!orgId && !!applicationId,
   });
@@ -56,12 +52,12 @@ export function useScheduleById(id: string | undefined) {
     // Key pinned to the legacy shape: use-global-run-sync invalidates
     // ["schedule", orgId, applicationId, scheduleId] on SSE events.
     queryKey: scheduleKeys.detail(orgId, applicationId, id),
-    queryFn: async () => {
+    queryFn: async (): Promise<EnrichedSchedule> => {
       const { data } = await client.GET("/api/schedules/{id}", {
         params: { path: { id: id! } },
       });
       // Non-2xx throws via the client middleware, so `data` is defined here.
-      return data as EnrichedSchedule;
+      return data!;
     },
     enabled: !!id && !!applicationId,
   });
@@ -74,12 +70,12 @@ export function useSchedules(packageId: string | undefined) {
     // Key pinned to the legacy shape (under the ["schedules", orgId,
     // applicationId] prefix invalidated by use-global-run-sync).
     queryKey: scheduleKeys.listForAgent(orgId, applicationId, packageId),
-    queryFn: async () => {
+    queryFn: async (): Promise<EnrichedSchedule[]> => {
       const { scope, name } = splitPackageRef(packageId!);
       const { data } = await client.GET("/api/agents/{scope}/{name}/schedules", {
         params: { path: { scope, name } },
       });
-      return (data?.data ?? []) as EnrichedSchedule[];
+      return data?.data ?? [];
     },
     enabled: !!packageId && !!applicationId,
   });
@@ -108,14 +104,14 @@ export function useCreateSchedule(packageId: string) {
       proxy_id_override?: string | null;
       version_override?: string | null;
       connection_overrides?: Record<string, string> | null;
-    }) => {
+    }): Promise<ScheduleWireDto> => {
       const { scope, name } = splitPackageRef(packageId);
       const { data: created } = await client.POST("/api/agents/{scope}/{name}/schedules", {
         params: { path: { scope, name } },
         // Spec body types `input`/`config_override` as bare objects.
         body: data as CreateScheduleBody,
       });
-      return created as ScheduleWireDto;
+      return created!;
     },
     onSuccess: () => invalidateSchedules(qc),
     onError: onMutationError,
@@ -140,13 +136,13 @@ export function useUpdateSchedule() {
       proxy_id_override?: string | null;
       version_override?: string | null;
       connection_overrides?: Record<string, string> | null;
-    }) => {
+    }): Promise<ScheduleWireDto> => {
       const { data: updated } = await client.PUT("/api/schedules/{id}", {
         params: { path: { id } },
         // Spec body types `input`/`config_override` as bare objects.
         body: data as UpdateScheduleBody,
       });
-      return updated as ScheduleWireDto;
+      return updated!;
     },
     onSuccess: () => invalidateSchedules(qc),
     onError: onMutationError,
