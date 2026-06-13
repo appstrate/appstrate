@@ -108,10 +108,10 @@ export function useEditorState<S extends EditorStateBase>(
     // the NEW `lock_version` so a subsequent save doesn't go stale.
     const { data: updated } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {
       params: { path: splitPackageRef(packageId) },
-      // Same spec gap as useUpdatePackage (use-mutations.ts): update bodies
-      // under-declare `manifest`/`lock_version`, and the agent variant embeds
-      // the recursive JSON-Schema meta-schema (TS2590). Wire unchanged; the
-      // server validates.
+      // Same TS2590 union as useUpdatePackage (use-mutations.ts): `cfg.path`
+      // is dynamic, so the agent variant's recursive `AgentManifest`
+      // meta-schema poisons the body union and forces the cast. Wire shape is
+      // spec-declared on every update operation; the server validates.
       body: {
         ...toWireBody(state),
         lock_version: state.lock_version!,

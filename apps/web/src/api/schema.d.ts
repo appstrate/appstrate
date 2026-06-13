@@ -5456,6 +5456,8 @@ export interface components {
         PackageScope: string;
         /** @description Package name */
         PackageName: string;
+        /** @description When `true`, narrows the list to packages installed and enabled in the current application. */
+        PackageActiveFilter: "true";
     };
     requestBodies: never;
     headers: {
@@ -12790,7 +12792,10 @@ export interface operations {
     };
     listAgentPackages: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description When `true`, narrows the list to packages installed and enabled in the current application. */
+                active?: components["parameters"]["PackageActiveFilter"];
+            };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -13588,7 +13593,10 @@ export interface operations {
     };
     listIntegrationPackages: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description When `true`, narrows the list to packages installed and enabled in the current application. */
+                active?: components["parameters"]["PackageActiveFilter"];
+            };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -14150,7 +14158,10 @@ export interface operations {
     };
     listMcpServerPackages: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description When `true`, narrows the list to packages installed and enabled in the current application. */
+                active?: components["parameters"]["PackageActiveFilter"];
+            };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -14726,7 +14737,10 @@ export interface operations {
     };
     listSkills: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description When `true`, narrows the list to packages installed and enabled in the current application. */
+                active?: components["parameters"]["PackageActiveFilter"];
+            };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -14867,12 +14881,13 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Display name */
-                    name?: string;
-                    description?: string;
-                    content?: string;
-                    /** @description Semver version (X.Y.Z) */
-                    version?: string;
+                    /** @description Package manifest */
+                    manifest: {
+                        [key: string]: unknown;
+                    };
+                    content: string;
+                    /** @description Optimistic lock version */
+                    lock_version: number;
                 };
             };
         };
@@ -14987,12 +15002,13 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Display name */
-                    name?: string;
-                    description?: string;
-                    content?: string;
-                    /** @description Semver version (X.Y.Z) */
-                    version?: string;
+                    /** @description Package manifest */
+                    manifest: {
+                        [key: string]: unknown;
+                    };
+                    content: string;
+                    /** @description Optimistic lock version */
+                    lock_version: number;
                 };
             };
         };

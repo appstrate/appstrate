@@ -11489,7 +11489,13 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["imported", "root_installed", "root_package_id", "root_version"],
+                  "required": [
+                    "imported",
+                    "root_installed",
+                    "root_package_id",
+                    "root_version",
+                    "warnings"
+                  ],
                   "properties": {
                     "imported": {
                       "type": "array",
@@ -11526,6 +11532,13 @@
                     },
                     "root_version": {
                       "type": "string"
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Non-blocking install-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate. Empty when nothing is degraded."
                     }
                   }
                 }
@@ -11882,6 +11895,9 @@
           },
           {
             "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageActiveFilter"
           }
         ],
         "responses": {
@@ -12474,20 +12490,19 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "required": ["manifest", "content", "lock_version"],
                 "properties": {
-                  "name": {
-                    "type": "string",
-                    "description": "Display name"
-                  },
-                  "description": {
-                    "type": "string"
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Package manifest"
                   },
                   "content": {
                     "type": "string"
                   },
-                  "version": {
-                    "type": "string",
-                    "description": "Semver version (X.Y.Z)"
+                  "lock_version": {
+                    "type": "integer",
+                    "description": "Optimistic lock version"
                   }
                 }
               }
@@ -12590,6 +12605,9 @@
           },
           {
             "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageActiveFilter"
           }
         ],
         "responses": {
@@ -13448,20 +13466,19 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "required": ["manifest", "content", "lock_version"],
                 "properties": {
-                  "name": {
-                    "type": "string",
-                    "description": "Display name"
-                  },
-                  "description": {
-                    "type": "string"
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Package manifest"
                   },
                   "content": {
                     "type": "string"
                   },
-                  "version": {
-                    "type": "string",
-                    "description": "Semver version (X.Y.Z)"
+                  "lock_version": {
+                    "type": "integer",
+                    "description": "Optimistic lock version"
                   }
                 }
               }
@@ -13756,6 +13773,9 @@
           },
           {
             "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageActiveFilter"
           }
         ],
         "responses": {
@@ -14634,6 +14654,9 @@
           },
           {
             "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageActiveFilter"
           }
         ],
         "responses": {
@@ -15638,6 +15661,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
                     "object": {
                       "type": "string",
@@ -15648,6 +15672,10 @@
                       "items": {
                         "$ref": "#/components/schemas/ApplicationObject"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean",
+                      "description": "Whether more results exist beyond this page"
                     }
                   }
                 },
@@ -16296,6 +16324,9 @@
                   },
                   "metadata": {
                     "type": "object",
+                    "additionalProperties": {
+                      "type": ["string", "number", "boolean", "null"]
+                    },
                     "description": "Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null."
                   }
                 }
@@ -16483,6 +16514,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
                     "object": {
                       "type": "string",
@@ -16650,6 +16682,9 @@
                   },
                   "metadata": {
                     "type": "object",
+                    "additionalProperties": {
+                      "type": ["string", "number", "boolean", "null"]
+                    },
                     "description": "Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null."
                   }
                 }
@@ -16829,6 +16864,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "id", "uri", "url", "method", "headers", "expiresAt"],
                   "properties": {
                     "object": {
                       "type": "string",
@@ -18479,6 +18515,16 @@
         "description": "Package name",
         "schema": {
           "type": "string"
+        }
+      },
+      "PackageActiveFilter": {
+        "name": "active",
+        "in": "query",
+        "required": false,
+        "description": "When `true`, narrows the list to packages installed and enabled in the current application.",
+        "schema": {
+          "type": "string",
+          "enum": ["true"]
         }
       }
     },
@@ -20217,7 +20263,17 @@
       },
       "EndUserObject": {
         "type": "object",
-        "required": ["id", "object", "applicationId", "createdAt", "updatedAt"],
+        "required": [
+          "id",
+          "object",
+          "applicationId",
+          "name",
+          "email",
+          "externalId",
+          "metadata",
+          "createdAt",
+          "updatedAt"
+        ],
         "properties": {
           "id": {
             "type": "string",
@@ -20247,6 +20303,7 @@
           },
           "metadata": {
             "type": ["object", "null"],
+            "additionalProperties": true,
             "description": "Arbitrary key-value metadata"
           },
           "createdAt": {

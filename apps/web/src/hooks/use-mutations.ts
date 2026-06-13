@@ -326,12 +326,13 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     }): Promise<{ id: string; lock_version: number }> => {
       const { data } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {
         params: { path: splitPackageRef(packageId) },
-        // Spec gap: the skill/integration/mcp-server update operations
-        // under-declare the body — the handler accepts `{manifest?, content?,
-        // source_code?, lock_version}` and REQUIRES `lock_version`
-        // (apps/api/src/routes/packages.ts), while the spec omits both
-        // `manifest` and `lock_version`. Wire shape unchanged from the
-        // legacy helper; the server validates.
+        // `cfg.path` is dynamic, so the body type is the union of all four
+        // package update operations. The agent variant embeds the recursive
+        // `AgentManifest` JSON-Schema meta-schema, which TS cannot instantiate
+        // through the union (TS2590) — hence the cast. The wire shape is the
+        // mutationFn arg (`{manifest, content, source_code?, lock_version}`),
+        // which every update operation's spec body now declares; the server
+        // validates.
         body: body as never,
       });
       // 200 → the updated package resource, bare (issue #657). The resource

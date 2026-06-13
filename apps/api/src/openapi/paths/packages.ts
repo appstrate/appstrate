@@ -420,6 +420,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {
@@ -808,11 +809,15 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
+              required: ["manifest", "content", "lock_version"],
               properties: {
-                name: { type: "string", description: "Display name" },
-                description: { type: "string" },
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
+                  description: "Package manifest",
+                },
                 content: { type: "string" },
-                version: { type: "string", description: "Semver version (X.Y.Z)" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
             },
           },
@@ -880,6 +885,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {
@@ -1445,11 +1451,15 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
+              required: ["manifest", "content", "lock_version"],
               properties: {
-                name: { type: "string", description: "Display name" },
-                description: { type: "string" },
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
+                  description: "Package manifest",
+                },
                 content: { type: "string" },
-                version: { type: "string", description: "Semver version (X.Y.Z)" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
             },
           },
@@ -1656,6 +1666,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {
@@ -2243,6 +2254,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {

@@ -158,10 +158,7 @@ function usePackageList(type: PackageType, opts?: { activeOnly?: boolean }) {
     queryKey: ["packages", cfg.path, orgId, applicationId, activeOnly ? "active" : "all"],
     queryFn: async (): Promise<OrgPackageItem[]> => {
       const { data } = await client.GET(`/api/packages/${cfg.path}`, {
-        // Spec gap: `?active=true` is handled by the API (it narrows to
-        // packages installed + enabled in the current application) but the
-        // list operations declare `query` as `never` — hence the cast.
-        params: { query: (activeOnly ? { active: "true" } : undefined) as never },
+        params: { query: activeOnly ? { active: "true" } : undefined },
       });
       // The spec marks most item fields optional — normalize to the
       // non-optional shape consumers have always used. `scope` is not
