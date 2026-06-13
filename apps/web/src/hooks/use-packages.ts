@@ -107,9 +107,8 @@ function normalizePackageItemDetail(
     forked_from: d.forked_from ?? null,
     created_by: d.created_by ?? null,
     created_by_name: null,
-    used_by_agents: 0,
     auto_installed: d.auto_installed ?? false,
-    content: d.content ?? "",
+    content: d.content ?? null,
     source_code: d.source_code ?? null,
     manifest: d.manifest,
     agents: (d.agents ?? []).map((a) => ({

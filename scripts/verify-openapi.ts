@@ -34,6 +34,7 @@ import { buildZodSchemaRegistry } from "../apps/api/src/openapi/zod-schema-regis
 import {
   responseTypeRegistry,
   KNOWN_DRIFT,
+  EXEMPT_SCHEMAS,
 } from "../apps/api/src/openapi/response-type-registry.ts";
 import { collectModuleOpenApi } from "./lib/module-openapi.ts";
 import { getInterfaceKeys } from "./lib/ts-interface-required-keys.ts";
@@ -1384,6 +1385,51 @@ if (responseDrifts.length === 0) {
       `or record the divergence in KNOWN_DRIFT in ` +
       `apps/api/src/openapi/response-type-registry.ts with a justification.`,
   );
+}
+
+// Coverage enforcement — every named component schema must be either registered
+// (a shared-type pair, checked above) or explicitly EXEMPT (no shared-type
+// consumer). This makes step 7 fail-closed: a new response schema can't slip
+// in unchecked. The opt-in gap (a schema nobody registers is never compared)
+// is closed by requiring an explicit, justified decision for every schema.
+{
+  const registeredSpecNames = new Set(
+    responseTypeRegistry.map((e) => e.specSchemaName).filter((n): n is string => !!n),
+  );
+  const allSchemaNames = Object.keys(
+    (openApiSpec.components.schemas ?? {}) as Record<string, unknown>,
+  );
+  const uncovered = allSchemaNames
+    .filter((n) => !registeredSpecNames.has(n) && !(n in EXEMPT_SCHEMAS))
+    .sort();
+  // A stale EXEMPT entry (schema renamed/removed) is also a failure — keep the
+  // list honest.
+  const staleExempt = Object.keys(EXEMPT_SCHEMAS)
+    .filter((n) => !allSchemaNames.includes(n))
+    .sort();
+
+  console.log(`\n  7b. Step 7 coverage (every component schema registered or exempt)`);
+  console.log(`  ----------------------------------------------------------------`);
+  if (uncovered.length === 0 && staleExempt.length === 0) {
+    console.log(
+      `  OK — all ${allSchemaNames.length} component schemas are registered ` +
+        `(${registeredSpecNames.size}) or exempt (${Object.keys(EXEMPT_SCHEMAS).length}).`,
+    );
+  } else {
+    exitCode = 1;
+    if (uncovered.length > 0) {
+      console.log(`  Component schema(s) neither registered nor exempt (${uncovered.length}):`);
+      for (const n of uncovered) console.log(`    - ${n}`);
+      console.log(
+        `\n  Add each to responseTypeRegistry (with its shared-type) or to ` +
+          `EXEMPT_SCHEMAS (with a reason) in apps/api/src/openapi/response-type-registry.ts.`,
+      );
+    }
+    if (staleExempt.length > 0) {
+      console.log(`\n  Stale EXEMPT_SCHEMAS entries (schema no longer exists):`);
+      for (const n of staleExempt) console.log(`    - ${n}`);
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════

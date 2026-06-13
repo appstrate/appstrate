@@ -369,17 +369,22 @@ export interface MeConnectionSourceGroup {
  */
 export interface BasePackageListItem {
   id: string;
-  description: string | null;
   source: "system" | "local";
-  scope: string | null;
   version: string | null;
-  forked_from: string | null;
+  // `description`/`scope`/`forked_from` are emitted by some package shapes but
+  // not others (the agent list omits `forked_from`; the org-package list omits
+  // `scope`; manifest-derived `description` may be absent), so they are
+  // optional at the base and re-required on the concrete shapes that always
+  // emit them.
+  description?: string | null;
+  scope?: string | null;
+  forked_from?: string | null;
 }
 
 export interface AgentListItem extends BasePackageListItem {
-  display_name: string;
-  schema_version: string;
-  author: string;
+  display_name?: string;
+  schema_version?: string;
+  author?: string;
   keywords: string[];
   dependencies: {
     skills?: Record<string, string>;
@@ -388,14 +393,15 @@ export interface AgentListItem extends BasePackageListItem {
   };
   running_runs: number;
   type: PackageType;
-  /** Always non-null on agents — narrowed for ergonomics. */
-  description: string;
+  /** Always emitted by the agent-list mapper (`@scope` or null). */
+  scope: string | null;
 }
 
 export interface AgentDetail {
   id: string;
-  display_name: string;
-  description: string;
+  /** Manifest-derived; may be absent (the SPA falls back to the id). */
+  display_name?: string;
+  description?: string;
   source: "system" | "local";
   dependencies: {
     skills: { id: string; version: string; name?: string; description?: string }[];
@@ -423,8 +429,10 @@ export interface AgentDetail {
     started_at: Date | string | null;
     duration: number | null;
   } | null;
-  updatedAt: string | null;
-  lock_version: number;
+  /** Omitted for system agents (the SPA treats absence as "no timestamp"). */
+  updatedAt?: string | null;
+  /** Omitted for system agents — absence means "no optimistic-lock token". */
+  lock_version?: number;
   prompt?: string;
   scope: string | null;
   version: string | null;
@@ -441,16 +449,24 @@ export interface AgentDetail {
 export interface OrgPackageItem extends BasePackageListItem {
   /** Display name from the manifest, may be missing on legacy rows. */
   name: string | null;
+  /** Always emitted by the org-package list/detail mappers. */
+  description: string | null;
+  forked_from: string | null;
   created_by: string | null;
-  created_by_name: string | null;
+  /** Omitted when the creating user is unknown. */
+  created_by_name?: string | null;
   createdAt: string;
   updatedAt: string;
   used_by_agents: number;
   auto_installed: boolean;
 }
 
-export interface OrgPackageItemDetail extends OrgPackageItem {
-  content: string;
+// The detail endpoint does not emit the list-only `used_by_agents`, so it is
+// dropped from the base via Omit (a sub-interface can't loosen a required
+// field to optional).
+export interface OrgPackageItemDetail extends Omit<OrgPackageItem, "used_by_agents"> {
+  /** Present but nullable — the draft_content column is nullable. */
+  content: string | null;
   /** Secondary source file content (e.g. .ts for tools). */
   source_code?: string | null;
   agents: { id: string; display_name: string }[];

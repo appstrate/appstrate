@@ -49,8 +49,8 @@ export function DashboardPage() {
   if (agents) {
     for (const f of agents) {
       agentMap.set(f.id, {
-        displayName: f.display_name,
-        description: f.description,
+        displayName: f.display_name ?? f.id,
+        description: f.description ?? null,
         source: f.source,
         keywords: f.keywords,
         running_runs: f.running_runs,

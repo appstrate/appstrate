@@ -90,7 +90,22 @@ export const schemas = {
   ApplicationPackage: {
     type: "object",
     description: "A package installed in an application with its config and overrides.",
-    required: ["packageId", "enabled", "installed_at", "updatedAt"],
+    // The installedPackageSelect projection emits every field unconditionally
+    // (config is the raw JSONB column; package_type/package_source come from
+    // the join). `object` is spec-only (not on the InstalledPackage type).
+    required: [
+      "packageId",
+      "config",
+      "modelId",
+      "proxyId",
+      "version_id",
+      "enabled",
+      "installed_at",
+      "updatedAt",
+      "package_type",
+      "package_source",
+      "draft_manifest",
+    ],
     properties: {
       object: { type: "string", enum: ["application_package"] },
       packageId: { type: "string", description: "Package ID from org catalog" },
@@ -209,7 +224,20 @@ export const schemas = {
   },
   AgentListItem: {
     type: "object",
-    required: ["id", "source", "type"],
+    // `running_runs`/`dependencies`/`scope`/`keywords`/`version` are always
+    // emitted by the GET /api/agents mapper. `display_name`/`description`/
+    // `schema_version`/`author` stay optional (manifest-derived, may be absent);
+    // `forked_from` is not emitted by the list endpoint (shared-type optional).
+    required: [
+      "id",
+      "source",
+      "type",
+      "running_runs",
+      "dependencies",
+      "scope",
+      "keywords",
+      "version",
+    ],
     properties: {
       id: { type: "string" },
       display_name: { type: "string" },
@@ -242,7 +270,21 @@ export const schemas = {
   },
   AgentDetail: {
     type: "object",
-    required: ["id", "source"],
+    // Always emitted by buildAgentDetailDto. `display_name`/`description`/
+    // `updatedAt`/`lock_version` stay optional: system agents omit the last two,
+    // and the manifest-derived display_name/description may be absent (the
+    // shared-type marks them optional to match).
+    required: [
+      "id",
+      "source",
+      "scope",
+      "version",
+      "dependencies",
+      "config",
+      "running_runs",
+      "last_run",
+      "forked_from",
+    ],
     properties: {
       id: { type: "string" },
       display_name: { type: "string" },
@@ -270,6 +312,7 @@ export const schemas = {
       },
       config: {
         type: "object",
+        required: ["current"],
         description: "AFPS schema wrapper for agent configuration (set once, reused across runs).",
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
@@ -375,6 +418,7 @@ export const schemas = {
   },
   AgentVersion: {
     type: "object",
+    required: ["id", "version", "integrity", "artifact_size", "yanked", "created_by", "createdAt"],
     properties: {
       id: { type: "integer" },
       packageId: { type: "string" },
@@ -392,6 +436,17 @@ export const schemas = {
   // responses so they echo the resulting version resource — issue #646).
   PackageVersionDetail: {
     type: "object",
+    required: [
+      "id",
+      "version",
+      "manifest",
+      "integrity",
+      "artifact_size",
+      "yanked",
+      "yanked_reason",
+      "createdAt",
+      "dist_tags",
+    ],
     properties: {
       id: { type: "integer", description: "Version row id" },
       version: { type: "string", description: "Semver version string (e.g. 1.0.0)" },
@@ -771,7 +826,20 @@ export const schemas = {
   },
   ApiKeyInfo: {
     type: "object",
-    required: ["id", "name", "keyPrefix", "scopes", "createdAt"],
+    // created_by/expiresAt/lastUsedAt/revokedAt are always emitted by
+    // listApiKeys (nullable columns, always selected). created_by_name stays
+    // optional (omitted when the creator is unknown).
+    required: [
+      "id",
+      "name",
+      "keyPrefix",
+      "scopes",
+      "created_by",
+      "expiresAt",
+      "lastUsedAt",
+      "revokedAt",
+      "createdAt",
+    ],
     properties: {
       id: { type: "string" },
       name: { type: "string" },
@@ -791,7 +859,22 @@ export const schemas = {
   },
   OrgPackageItem: {
     type: "object",
-    required: ["id", "source", "createdAt", "updatedAt"],
+    // Always emitted by the listOrgItems mapper. `created_by_name` stays
+    // optional (omitted when there's no creator); `scope` is not emitted by
+    // the org-package list (shared-type marks it optional).
+    required: [
+      "id",
+      "source",
+      "createdAt",
+      "updatedAt",
+      "name",
+      "description",
+      "created_by",
+      "used_by_agents",
+      "version",
+      "auto_installed",
+      "forked_from",
+    ],
     properties: {
       id: { type: "string" },
       orgId: {
@@ -813,7 +896,24 @@ export const schemas = {
   },
   OrgPackageItemDetail: {
     type: "object",
-    required: ["id", "source", "createdAt", "updatedAt"],
+    // Always emitted by buildPackageDetailDto. `content` is present but the
+    // draft_content column is nullable, so it is required-but-nullable. The
+    // detail endpoint does not emit `used_by_agents`/`created_by_name`/`scope`
+    // (the shared-type marks those optional on the detail shape).
+    required: [
+      "id",
+      "source",
+      "createdAt",
+      "updatedAt",
+      "name",
+      "description",
+      "content",
+      "created_by",
+      "version",
+      "auto_installed",
+      "forked_from",
+      "agents",
+    ],
     properties: {
       id: { type: "string" },
       orgId: {
@@ -822,7 +922,7 @@ export const schemas = {
       },
       name: { type: ["string", "null"] },
       description: { type: ["string", "null"] },
-      content: { type: "string", description: "Package item content" },
+      content: { type: ["string", "null"], description: "Package item content" },
       source_code: {
         type: ["string", "null"],
         description: "Secondary source file content (e.g. .ts for tools)",
@@ -850,6 +950,7 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
+          required: ["id", "display_name"],
           properties: {
             id: { type: "string" },
             display_name: { type: "string" },
@@ -869,6 +970,7 @@ export const schemas = {
       "baseUrl",
       "source",
       "authMode",
+      "created_by",
       "createdAt",
       "updatedAt",
     ],
@@ -903,6 +1005,7 @@ export const schemas = {
       "isDefault",
       "source",
       "credentialId",
+      "created_by",
       "createdAt",
       "updatedAt",
     ],
@@ -1035,6 +1138,7 @@ export const schemas = {
     required: [
       "id",
       "label",
+      "urlPrefix",
       "enabled",
       "isDefault",
       "source",
@@ -1056,7 +1160,17 @@ export const schemas = {
   },
   ApplicationObject: {
     type: "object",
-    required: ["id", "object", "orgId", "name", "isDefault", "settings", "createdAt", "updatedAt"],
+    required: [
+      "id",
+      "object",
+      "orgId",
+      "name",
+      "isDefault",
+      "settings",
+      "created_by",
+      "createdAt",
+      "updatedAt",
+    ],
     properties: {
       id: { type: "string", description: "Application ID (app_ prefix)" },
       object: { type: "string", enum: ["application"], description: "Object type" },

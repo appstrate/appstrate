@@ -179,6 +179,7 @@ export const modelProviderCredentialsPaths = {
                     baseUrl: "https://api.openai.com",
                     source: "custom",
                     authMode: "api_key",
+                    created_by: "usr_cm3abc123",
                     createdAt: "2026-01-10T08:00:00Z",
                     updatedAt: "2026-01-10T08:00:00Z",
                   },

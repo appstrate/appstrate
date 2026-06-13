@@ -72,6 +72,29 @@ function getProgram(): {
 }
 
 /**
+ * List every type/interface name exported from `@appstrate/shared-types`.
+ * Used by verify-openapi step #7 to auto-discover spec-schema ↔ shared-type
+ * pairs so a response schema with a matching type can't silently escape the
+ * required-field gate.
+ */
+export function listExportedTypes(): Set<string> {
+  const { checker, source } = getProgram();
+  const moduleSymbol = checker.getSymbolAtLocation(source);
+  if (!moduleSymbol) {
+    throw new Error(`ts-interface-required-keys: no module symbol for ${ENTRY}`);
+  }
+  const names = new Set<string>();
+  for (const exp of checker.getExportsOfModule(moduleSymbol)) {
+    const sym = exp.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exp) : exp;
+    // Keep only type-space exports (interfaces + type aliases), not values.
+    if (sym.flags & (ts.SymbolFlags.Interface | ts.SymbolFlags.TypeAlias)) {
+      names.add(exp.getName());
+    }
+  }
+  return names;
+}
+
+/**
  * Return the property keys of the exported type `typeName`, split into the
  * required subset and the full set. Throws if the type is not an exported
  * member of `@appstrate/shared-types`.

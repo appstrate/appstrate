@@ -296,7 +296,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const unifiedForHeader = {
     id: packageId,
     displayName,
-    description: type === "agent" ? agentDetail!.description : (pkgDetail?.description ?? ""),
+    description:
+      type === "agent" ? (agentDetail!.description ?? "") : (pkgDetail?.description ?? ""),
     source: source ?? ("local" as const),
     type,
     version,
@@ -540,8 +541,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 <PackageCard
                   key={agent.id}
                   id={agent.id}
-                  displayName={agent.display_name}
-                  description={agent.description}
+                  displayName={agent.display_name ?? agent.id}
+                  description={agent.description ?? null}
                   type="agent"
                   source={agent.source}
                   keywords={agent.keywords}

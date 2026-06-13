@@ -4048,9 +4048,9 @@ export interface components {
             /** @enum {string} */
             source: "system" | "local";
             /** @description Scope from manifest name, including the leading `@` (e.g. `@myorg`). Directly usable as the `{scope}` path parameter of package/agent operations. */
-            scope?: string | null;
+            scope: string | null;
             /** @description Version from manifest */
-            version?: string | null;
+            version: string | null;
             /** @description Full manifest object (user agents only) */
             manifest?: components["schemas"]["AgentManifest"];
             /** @description Agent prompt markdown (user agents only) */
@@ -4063,11 +4063,11 @@ export interface components {
             /** @description Optimistic lock version (user agents only) */
             lock_version?: number;
             /** @description AFPS schema wrapper for agent configuration (set once, reused across runs). */
-            config?: {
+            config: {
                 /** @description Pure JSON Schema 2020-12 object */
                 schema?: Record<string, never>;
                 /** @description Current configuration values */
-                current?: Record<string, never>;
+                current: Record<string, never>;
                 file_constraints?: components["schemas"]["FileConstraintsMap"];
                 ui_hints?: components["schemas"]["UIHintsMap"];
                 /** @description Presentation order for schema properties */
@@ -4089,7 +4089,7 @@ export interface components {
                 /** @description Presentation order for schema properties */
                 property_order?: string[];
             };
-            dependencies?: {
+            dependencies: {
                 skills?: components["schemas"]["AgentSkillRef"][];
                 /** @description AFPS §4.1 mcp_servers dependency group */
                 mcp_servers?: {
@@ -4106,18 +4106,18 @@ export interface components {
                 }[];
             };
             /** @description Summary of the most recent run (null if never run) */
-            last_run?: {
+            last_run: {
                 id?: string;
                 status?: string;
                 /** Format: date-time */
                 started_at?: string;
                 duration?: number | null;
             } | null;
-            running_runs?: number;
+            running_runs: number;
             /** @description Number of published versions (0 for built-in agents) */
             version_count?: number;
             /** @description Source package ID if forked */
-            forked_from?: string | null;
+            forked_from: string | null;
             /** @description Whether the active version has changes not yet archived as a version */
             has_unarchived_changes?: boolean;
         };
@@ -4127,20 +4127,20 @@ export interface components {
             description?: string;
             schema_version?: string;
             author?: string;
-            keywords?: string[];
+            keywords: string[];
             /** @enum {string} */
             source: "system" | "local";
             /** @description Scope from manifest name, including the leading `@` (e.g. `@myorg` from `@myorg/name`). Directly usable as the `{scope}` path parameter of package/agent operations. */
-            scope?: string | null;
+            scope: string | null;
             /** @description Version from manifest */
-            version?: string | null;
+            version: string | null;
             /**
              * @description Package type from manifest
              * @enum {string}
              */
             type: "agent" | "skill" | "mcp-server" | "integration";
-            running_runs?: number;
-            dependencies?: {
+            running_runs: number;
+            dependencies: {
                 skills?: {
                     [key: string]: string;
                 };
@@ -4164,19 +4164,19 @@ export interface components {
             description?: string;
         };
         AgentVersion: {
-            id?: number;
+            id: number;
             packageId?: string;
             /** @description Semver version string (e.g. 1.0.0) */
-            version?: string;
+            version: string;
             /** @description SRI integrity hash (sha256-...) */
-            integrity?: string;
+            integrity: string;
             /** @description Artifact ZIP size in bytes */
-            artifact_size?: number;
+            artifact_size: number;
             /** @description Whether this version has been yanked */
-            yanked?: boolean;
-            created_by?: string | null;
+            yanked: boolean;
+            created_by: string | null;
             /** Format: date-time */
-            createdAt?: string | null;
+            createdAt: string | null;
         };
         ApiKeyInfo: {
             id: string;
@@ -4185,14 +4185,14 @@ export interface components {
             keyPrefix: string;
             /** @description Permission scopes granted to this API key. */
             scopes: string[];
-            created_by?: string | null;
+            created_by: string | null;
             created_by_name?: string;
             /** Format: date-time */
-            expiresAt?: string | null;
+            expiresAt: string | null;
             /** Format: date-time */
-            lastUsedAt?: string | null;
+            lastUsedAt: string | null;
             /** Format: date-time */
-            revokedAt?: string | null;
+            revokedAt: string | null;
             /** Format: date-time */
             createdAt: string;
         };
@@ -4215,7 +4215,7 @@ export interface components {
                 allowedRedirectDomains?: string[];
             };
             /** @description ID of the user who created the application */
-            created_by?: string | null;
+            created_by: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -4228,24 +4228,24 @@ export interface components {
             /** @description Package ID from org catalog */
             packageId: string;
             /** @description Application-specific configuration */
-            config?: Record<string, never>;
+            config: Record<string, never>;
             /** @description Model override for this app */
-            modelId?: string | null;
+            modelId: string | null;
             /** @description Proxy override for this app */
-            proxyId?: string | null;
+            proxyId: string | null;
             /** @description Pinned version (null = latest) */
-            version_id?: number | null;
+            version_id: number | null;
             enabled: boolean;
             /** Format: date-time */
             installed_at: string;
             /** Format: date-time */
             updatedAt: string;
             /** @enum {string} */
-            package_type?: "agent" | "skill" | "mcp-server" | "integration";
+            package_type: "agent" | "skill" | "mcp-server" | "integration";
             /** @enum {string} */
-            package_source?: "system" | "local";
+            package_source: "system" | "local";
             /** @description Raw draft manifest JSONB for the installed package. */
-            draft_manifest?: Record<string, never> | null;
+            draft_manifest: Record<string, never> | null;
         };
         EndUserObject: {
             /** @description End-user ID (eu_ prefix) */
@@ -4350,7 +4350,7 @@ export interface components {
             providerId?: string | null;
             oauth_email?: string | null;
             needs_reconnection?: boolean;
-            created_by?: string | null;
+            created_by: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -4455,7 +4455,7 @@ export interface components {
                 cacheRead?: number;
                 cacheWrite?: number;
             } | null;
-            created_by?: string | null;
+            created_by: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -4465,18 +4465,18 @@ export interface components {
             id: string;
             /** @description Owning organization ID (null for system packages) */
             orgId?: string | null;
-            name?: string | null;
-            description?: string | null;
+            name: string | null;
+            description: string | null;
             /** @enum {string} */
             source: "system" | "local";
-            created_by?: string | null;
+            created_by: string | null;
             created_by_name?: string;
-            used_by_agents?: number;
+            used_by_agents: number;
             /** @description Manifest version (semver) */
-            version?: string | null;
-            auto_installed?: boolean;
+            version: string | null;
+            auto_installed: boolean;
             /** @description Source package ID if forked */
-            forked_from?: string | null;
+            forked_from: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -4486,20 +4486,20 @@ export interface components {
             id: string;
             /** @description Owning organization ID (null for system packages) */
             orgId?: string | null;
-            name?: string | null;
-            description?: string | null;
+            name: string | null;
+            description: string | null;
             /** @description Package item content */
-            content?: string;
+            content: string | null;
             /** @description Secondary source file content (e.g. .ts for tools) */
             source_code?: string | null;
             /** @enum {string} */
             source: "system" | "local";
-            created_by?: string | null;
-            auto_installed?: boolean;
+            created_by: string | null;
+            auto_installed: boolean;
             /** @description Optimistic lock version */
             lock_version?: number;
             /** @description Manifest version (semver) */
-            version?: string | null;
+            version: string | null;
             /** @description Full manifest object */
             manifest?: Record<string, never>;
             /** @description Manifest name (@scope/name) — may differ from package ID */
@@ -4509,10 +4509,10 @@ export interface components {
             /** @description Whether the active version has changes not yet archived as a version */
             has_unarchived_changes?: boolean;
             /** @description Source package ID if forked */
-            forked_from?: string | null;
-            agents?: {
-                id?: string;
-                display_name?: string;
+            forked_from: string | null;
+            agents: {
+                id: string;
+                display_name: string;
             }[];
             /** Format: date-time */
             createdAt: string;
@@ -4523,7 +4523,7 @@ export interface components {
             id: string;
             label: string;
             /** @description Masked proxy URL for display */
-            urlPrefix?: string;
+            urlPrefix: string;
             enabled: boolean;
             isDefault: boolean;
             /** @enum {string} */
@@ -4555,11 +4555,11 @@ export interface components {
         };
         PackageVersionDetail: {
             /** @description Version row id */
-            id?: number;
+            id: number;
             /** @description Semver version string (e.g. 1.0.0) */
-            version?: string;
+            version: string;
             /** @description Full version manifest (AFPS) */
-            manifest?: {
+            manifest: {
                 [key: string]: unknown;
             };
             /** @description Primary content file extracted from the version ZIP */
@@ -4567,15 +4567,15 @@ export interface components {
             /** @description Secondary source file content (e.g. .ts), when present */
             source_code?: string | null;
             /** @description Whether this version has been yanked */
-            yanked?: boolean;
-            yanked_reason?: string | null;
+            yanked: boolean;
+            yanked_reason: string | null;
             /** @description SRI integrity hash (sha256-...) */
-            integrity?: string;
+            integrity: string;
             /** @description Artifact ZIP size in bytes */
-            artifact_size?: number;
+            artifact_size: number;
             /** Format: date-time */
-            createdAt?: string | null;
-            dist_tags?: string[];
+            createdAt: string | null;
+            dist_tags: string[];
         };
         /** @description RFC 9457 Problem Details for HTTP APIs */
         ProblemDetail: {
@@ -10723,6 +10723,7 @@ export interface operations {
                      *           "baseUrl": "https://api.openai.com",
                      *           "source": "custom",
                      *           "authMode": "api_key",
+                     *           "created_by": "usr_cm3abc123",
                      *           "createdAt": "2026-01-10T08:00:00Z",
                      *           "updatedAt": "2026-01-10T08:00:00Z"
                      *         }
@@ -14693,6 +14694,10 @@ export interface operations {
                      *           "description": "Summarizes long text into key points",
                      *           "source": "local",
                      *           "version": "1.0.0",
+                     *           "created_by": "usr_cm3abc123",
+                     *           "used_by_agents": 2,
+                     *           "auto_installed": false,
+                     *           "forked_from": null,
                      *           "createdAt": "2026-01-10T08:00:00Z",
                      *           "updatedAt": "2026-01-10T08:00:00Z"
                      *         }
