@@ -219,7 +219,34 @@ const codexProvider: ModelProviderDefinition = {
   // (`apps/api/src/data/subscription-watch/chatgpt.json`) — review this
   // list when that snapshot drifts.
   catalogProviderId: "openai",
-  featuredModels: ["gpt-5.5", "gpt-5.4-mini", "gpt-5.4-nano"],
+  // Per https://developers.openai.com/codex/models (ChatGPT sign-in):
+  // gpt-5.5, gpt-5.4, gpt-5.4-mini. `gpt-5.3-codex-spark` (Pro-only
+  // research preview) is also served but absent from openai.json, so it
+  // can't be listed here (boot check). gpt-5.2 / gpt-5.3-codex are
+  // deprecated on ChatGPT sign-in.
+  featuredModels: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
+  // Probed against the live credential after import (and on manual
+  // refresh) — what THIS account's plan serves lands on the credential's
+  // `available_model_ids`. Superset of `featuredModels`: includes
+  // Pro-only previews and recently-deprecated ids so plans that still
+  // serve them keep them selectable. Source: featured ∪ LiteLLM's
+  // `chatgpt` provider snapshot
+  // (apps/api/src/data/subscription-watch/chatgpt.json) — review when
+  // the weekly drift PR flags that snapshot.
+  modelDiscoveryCandidates: [
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.4-pro",
+    "gpt-5.3-codex-spark",
+    "gpt-5.3-instant",
+    "gpt-5.3-chat-latest",
+    "gpt-5.3-codex",
+    "gpt-5.2",
+    "gpt-5.2-codex",
+    "gpt-5.1-codex-max",
+    "gpt-5.1-codex-mini",
+  ],
   hooks: codexHooks,
   // The chatgpt.com Codex backend rejects requests without a
   // `chatgpt-account-id` header. The platform refuses to persist a

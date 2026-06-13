@@ -24,7 +24,10 @@ import {
 import { getModelProvider } from "../services/model-providers/registry.ts";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
-import { loadInferenceCredentials } from "../services/model-providers/credentials.ts";
+import {
+  getOrgModelProviderCredential,
+  loadInferenceCredentials,
+} from "../services/model-providers/credentials.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import {
@@ -216,15 +219,27 @@ export function createModelsRouter() {
     // we accept any id that lives in the resolved catalog.
     const catalogKey = registry.catalogProviderId ?? creds.providerId;
     const catalogById = new Map(listCatalogModels(catalogKey).map((m) => [m.id, m]));
-    const featuredSet = new Set(registry.featuredModels);
+    // Foreign-catalog (subscription OAuth) gate: a model is seedable when
+    // it's in the static featured list OR empirically verified against
+    // this credential by the discovery probe (`available_model_ids`) —
+    // the probe knows the account's plan, the static list doesn't.
+    const credentialInfo = registry.catalogProviderId
+      ? await getOrgModelProviderCredential(orgId, data.credentialId)
+      : undefined;
+    const allowedSet = new Set([
+      ...registry.featuredModels,
+      ...(credentialInfo?.available_model_ids ?? []),
+    ]);
     const models: Array<CatalogModelEntry & { id: string }> = [];
     for (const modelId of data.modelIds) {
       const cat = catalogById.get(modelId);
       if (!cat) {
         throw invalidRequest(`Model ${modelId} is not in the ${catalogKey} catalog`);
       }
-      if (registry.catalogProviderId && !featuredSet.has(modelId)) {
-        throw invalidRequest(`Model ${modelId} is not featured for provider ${creds.providerId}`);
+      if (registry.catalogProviderId && !allowedSet.has(modelId)) {
+        throw invalidRequest(
+          `Model ${modelId} is not featured or verified for provider ${creds.providerId}`,
+        );
       }
       models.push(cat);
     }

@@ -40,13 +40,15 @@ describe("claude-code module", () => {
     ]);
   });
 
-  it("declares no hooks — Anthropic OAuth tokens are not JWTs", () => {
+  it("declares no identity hook — Anthropic OAuth tokens are not JWTs", () => {
     // Identity comes from the token endpoint response body (the CLI
     // surfaces `email` / `subscriptionType`), not from a self-describing
-    // access token. Wire-format quirks live declaratively on
-    // `oauthWireFormat`.
+    // access token. The only hook is `buildInferenceProbe` (OAuth wire
+    // fingerprint for connection test + model discovery); wire-format
+    // quirks live declaratively on `oauthWireFormat`.
     const cc = claudeCodeModule.modelProviders?.()[0];
-    expect(cc?.hooks).toBeUndefined();
+    expect(cc?.hooks?.extractTokenIdentity).toBeUndefined();
+    expect(cc?.hooks?.buildInferenceProbe).toBeFunction();
   });
 
   it("ships the third-party-tier identity prelude verbatim", () => {

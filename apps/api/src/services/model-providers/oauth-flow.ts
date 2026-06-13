@@ -30,6 +30,7 @@ import {
   type CreateOAuthCredentialInput,
 } from "./credentials.ts";
 import { getModelProvider } from "./registry.ts";
+import { discoverAvailableModels } from "./model-discovery.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 
@@ -109,6 +110,19 @@ export async function importOAuthModelProviderConnection(
     label,
     ...(accountId ? { accountId } : {}),
     ...(email ? { email } : {}),
+  });
+
+  // Fire-and-forget empirical discovery — probes which models THIS
+  // account/plan actually serves and persists them on the credential row
+  // (`available_model_ids`). The import response below answers
+  // immediately with the static featured list; the UI picks up the
+  // verified list when the probe lands (seconds later).
+  void discoverAvailableModels(input.orgId, credentialId).catch((err) => {
+    logger.warn("post-import model discovery failed", {
+      credentialId,
+      providerId: input.providerId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   });
 
   return {

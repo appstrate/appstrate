@@ -679,6 +679,21 @@ export interface ModelProviderDefinition {
    */
   featuredModels: readonly string[];
 
+  /**
+   * Candidate model ids for **empirical discovery** — the platform
+   * probes each one against the connected credential (1-token inference
+   * request) and persists the ids that respond 2xx as the credential's
+   * `availableModelIds`. Lets subscription-backed OAuth providers
+   * (codex, claude-code) surface the models a *specific account/plan*
+   * actually serves, which no static catalog can know.
+   *
+   * Unlike {@link featuredModels}, ids here do NOT have to exist in the
+   * resolved catalog — the probe is the validation. When omitted, the
+   * platform probes `featuredModels` only. Irrelevant for api_key
+   * providers whose full catalog is exposed.
+   */
+  modelDiscoveryCandidates?: readonly string[];
+
   // — Behavior —
   /** Provider-scoped hooks (header injection, identity extraction). */
   hooks?: ModelProviderHooks;

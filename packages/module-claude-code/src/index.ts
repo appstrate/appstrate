@@ -46,7 +46,58 @@
  * claude-cli/<v>`, so this module does NOT inject those.
  */
 
-import type { AppstrateModule, ModelProviderDefinition } from "@appstrate/core/module";
+import type {
+  AppstrateModule,
+  InferenceProbeRequest,
+  ModelProviderDefinition,
+  ModelProviderHooks,
+} from "@appstrate/core/module";
+
+/**
+ * 1-token `/v1/messages` probe with the exact OAuth wire fingerprint
+ * the sidecar uses at runtime: bearer token (NOT `x-api-key` — the
+ * generic anthropic-messages test request would send the wrong header
+ * for a subscription token), the static identity headers, the
+ * third-party-tier `system` prelude, and the oauth beta token. Used by
+ * the connection test AND per-model discovery (`available_model_ids`).
+ */
+function buildClaudeCodeInferenceRequest(config: {
+  baseUrl: string;
+  modelId: string;
+  apiKey: string;
+}): InferenceProbeRequest {
+  return {
+    url: `${config.baseUrl.replace(/\/+$/, "")}/v1/messages`,
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "oauth-2025-04-20",
+      "anthropic-dangerous-direct-browser-access": "true",
+      "x-app": "cli",
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: config.modelId,
+      max_tokens: 1,
+      // Same prelude as `oauthWireFormat.systemPrepend` — Anthropic's
+      // third-party tier filter requires it verbatim.
+      system: [{ type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." }],
+      messages: [{ role: "user", content: "ping" }],
+    }),
+  };
+}
+
+const claudeCodeHooks: ModelProviderHooks = {
+  buildInferenceProbe(ctx) {
+    return buildClaudeCodeInferenceRequest({
+      baseUrl: ctx.baseUrl,
+      modelId: ctx.modelId,
+      apiKey: ctx.apiKey,
+    });
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Provider definition
@@ -76,10 +127,26 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // the Anthropic catalog — metadata flows through anthropic.json.
   catalogProviderId: "anthropic",
   featuredModels: ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"],
-  // Anthropic OAuth tokens are not JWTs and the upstream `/v1/messages`
-  // surface accepts the agent's declared body verbatim — no Codex-style
-  // stream/store coercion, no JWT identity decoding, no inference probe.
-  // Every Claude-Code-specific wire fingerprint lives below.
+  // Probed against the live credential after import (and on manual
+  // refresh) — what THIS account's plan actually serves (Pro vs Max vs
+  // Team differ, e.g. Opus/Fable access) lands on the credential's
+  // `available_model_ids`. No machine-readable source describes the
+  // Claude subscription tiers, so this superset is curated from
+  // anthropic.json's current generation; the probe sorts out the rest.
+  modelDiscoveryCandidates: [
+    "claude-fable-5",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "claude-sonnet-4-5",
+    "claude-haiku-4-5",
+  ],
+  // Anthropic OAuth tokens are not JWTs — no JWT identity decoding. The
+  // inference probe above carries the OAuth wire fingerprint (bearer +
+  // beta token + tier prelude); the sidecar's runtime fingerprint lives
+  // in `oauthWireFormat` below.
+  hooks: claudeCodeHooks,
   oauthWireFormat: {
     // Static identity headers Anthropic enforces on every OAuth-authenticated
     // `/v1/messages` call. `accept`/`content-type` are NOT pinned — the agent
