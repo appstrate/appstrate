@@ -39,7 +39,7 @@ export const modelProviderCredentialsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["object", "data", "hasMore"],
+                required: ["object", "data", "total", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: {
@@ -121,6 +121,7 @@ export const modelProviderCredentialsPaths = {
                       },
                     },
                   },
+                  total: { type: "integer" },
                   hasMore: { type: "boolean" },
                 },
               },

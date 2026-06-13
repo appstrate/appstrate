@@ -145,7 +145,10 @@ export const schemas = {
     required: ["id"],
     properties: {
       id: { type: "string" },
-      displayName: { type: "string" },
+      // Nullable: `profiles.display_name` has no NOT NULL constraint, so a
+      // member who never set a display name serializes `null` here. Mirrors
+      // the sibling `UserProfile.displayName`.
+      displayName: { type: ["string", "null"] },
     },
   },
   UserProfile: {
@@ -768,9 +771,12 @@ export const schemas = {
         enum: ["debug", "info", "warn", "error"],
         description: "Log severity level. Non-admin users only receive info, warn, and error logs.",
       },
-      event: { type: "string" },
-      message: { type: "string" },
-      data: { type: "object" },
+      // `event` / `message` / `data` are nullable columns on `run_logs`
+      // (no NOT NULL) — a breadcrumb may carry only a message, only structured
+      // data, or only an event kind. Mirror that on the wire.
+      event: { type: ["string", "null"] },
+      message: { type: ["string", "null"] },
+      data: { type: ["object", "null"] },
       createdAt: { type: "string", format: "date-time" },
     },
   },

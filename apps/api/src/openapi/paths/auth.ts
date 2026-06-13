@@ -48,6 +48,10 @@ export const authPaths = {
           },
         },
         "400": { description: "Validation error" },
+        "403": {
+          description:
+            "Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required. Body shape is owned by Better Auth.",
+        },
       },
     },
   },

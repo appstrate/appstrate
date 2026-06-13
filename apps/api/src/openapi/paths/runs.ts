@@ -92,7 +92,7 @@ export const runsPaths = {
       responses: {
         "201": {
           description:
-            "Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed. Under a rare concurrent-teardown race (the run is deleted between creation and serialization) the body may degrade to `{id}` only.",
+            "Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed.",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -375,7 +375,7 @@ export const runsPaths = {
       responses: {
         "201": {
           description:
-            "Inline run created — stream via SSE. The body is the created run resource (same shape as `GET /runs/{id}`); under a rare concurrent-teardown race (the run is deleted between creation and serialization) it may degrade to `{id}` only.",
+            "Inline run created — stream via SSE. The body is the created run resource (same shape as `GET /runs/{id}`).",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },

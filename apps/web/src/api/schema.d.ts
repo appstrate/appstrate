@@ -4623,7 +4623,7 @@ export interface components {
         };
         ProfileBatchItem: {
             id: string;
-            displayName?: string;
+            displayName?: string | null;
         };
         Run: {
             id: string;
@@ -4765,9 +4765,9 @@ export interface components {
              * @enum {string}
              */
             level: "debug" | "info" | "warn" | "error";
-            event?: string;
-            message?: string;
-            data?: Record<string, never>;
+            event?: string | null;
+            message?: string | null;
+            data?: Record<string, never> | null;
             /** Format: date-time */
             createdAt: string;
         };
@@ -6067,7 +6067,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed. Under a rare concurrent-teardown race (the run is deleted between creation and serialization) the body may degrade to `{id}` only. */
+            /** @description Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed. */
             201: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -8075,6 +8075,13 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required. Body shape is owned by Better Auth. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     credentialProxyGet: {
@@ -8890,6 +8897,7 @@ export interface operations {
                             active?: boolean;
                             block_user_connections?: boolean;
                         }[];
+                        total: number;
                         hasMore: boolean;
                     };
                 };
@@ -10787,6 +10795,7 @@ export interface operations {
                                 featured: boolean;
                             }[];
                         }[];
+                        total: number;
                         hasMore: boolean;
                     };
                 };
@@ -15817,7 +15826,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Inline run created — stream via SSE. The body is the created run resource (same shape as `GET /runs/{id}`); under a rare concurrent-teardown race (the run is deleted between creation and serialization) it may degrade to `{id}` only. */
+            /** @description Inline run created — stream via SSE. The body is the created run resource (same shape as `GET /runs/{id}`). */
             201: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
