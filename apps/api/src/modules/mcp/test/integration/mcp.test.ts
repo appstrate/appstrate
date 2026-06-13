@@ -92,6 +92,32 @@ describe("mcp discovery + auth gate", () => {
     }
   });
 
+  it("advertises an authorization_servers entry that byte-matches the live AS issuer (RFC 8414 §3.3)", async () => {
+    // Cross-document contract: the `authorization_servers` entry in the
+    // protected-resource metadata is an AS *issuer identifier*. A strict client
+    // (the claude.ai connector) discovers the AS metadata from it and rejects
+    // the handshake unless the `issuer` it reads back is byte-identical
+    // (RFC 8414 §3.3). The two surfaces were previously verified in isolation —
+    // the AS issuer was `${APP_URL}/api/auth`, the PRM advertised the bare
+    // origin, and nothing asserted they matched, so the mismatch shipped.
+    //
+    // Assert equality against the issuer the AS actually serves at its
+    // well-known (proxied from Better Auth) rather than a hard-coded suffix, so
+    // the contract holds even if Better Auth's `basePath` ever moves.
+    const prmRes = await app.request("/.well-known/oauth-protected-resource/api/mcp");
+    expect(prmRes.status).toBe(200);
+    const prm = (await prmRes.json()) as { authorization_servers: string[] };
+    const advertisedAs = prm.authorization_servers[0];
+    expect(typeof advertisedAs).toBe("string");
+
+    const asRes = await app.request("/.well-known/oauth-authorization-server");
+    expect(asRes.status).toBe(200);
+    const asMeta = (await asRes.json()) as { issuer: string };
+    expect(typeof asMeta.issuer).toBe("string");
+
+    expect(advertisedAs).toBe(asMeta.issuer);
+  });
+
   it("rejects unauthenticated /api/mcp with 401 + RFC 9728 WWW-Authenticate challenge", async () => {
     const res = await app.request("/api/mcp", {
       method: "POST",
