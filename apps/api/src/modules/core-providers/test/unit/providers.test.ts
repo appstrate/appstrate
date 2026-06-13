@@ -12,13 +12,18 @@ describe("core-providers module", () => {
     expect(ids).toEqual([
       "anthropic",
       "cerebras",
+      "deepseek",
+      "fireworks-ai",
       "google-ai",
       "groq",
       "mistral",
+      "moonshot",
       "openai",
       "openai-compatible",
       "openrouter",
+      "together-ai",
       "xai",
+      "zai",
     ]);
   });
 
