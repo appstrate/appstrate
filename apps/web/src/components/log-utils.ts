@@ -67,7 +67,7 @@ export function buildLogEntries(rawLogs: RawLog[]): {
     } else if (log.event === "run_completed") {
       lastWasPlainText = false;
     } else {
-      const logData = (log.data ?? {}) as Record<string, unknown>;
+      const logData = log.data ?? {};
       const message = (logData.message as string) || log.message || "";
       if (message) {
         const args = logData.args as Record<string, unknown> | undefined;

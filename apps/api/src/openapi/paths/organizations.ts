@@ -81,6 +81,7 @@ export const organizationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["id", "name", "slug", "role", "createdAt"],
                 properties: {
                   id: { type: "string", format: "uuid" },
                   name: { type: "string" },

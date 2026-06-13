@@ -130,7 +130,7 @@ export function NotificationBell() {
 
   const agentNameMap = new Map<string, string>();
   if (agents) {
-    for (const f of agents) agentNameMap.set(f.id, f.display_name);
+    for (const f of agents) agentNameMap.set(f.id, f.display_name ?? f.id);
   }
 
   const unreadRuns = (runsData?.data.filter((e) => e.notifiedAt != null && e.readAt == null) ??
@@ -140,7 +140,7 @@ export function NotificationBell() {
   >[];
 
   const handleClick = (runId: string) => {
-    markRead.mutate(runId);
+    markRead.mutate({ params: { path: { runId } } });
     setOpen(false);
   };
 
@@ -168,7 +168,7 @@ export function NotificationBell() {
     agentNameMap,
     onItemClick: handleClick,
     onClose: () => setOpen(false),
-    markAllRead: () => markAllRead.mutate(),
+    markAllRead: () => markAllRead.mutate({}),
   };
 
   if (isMobile) {

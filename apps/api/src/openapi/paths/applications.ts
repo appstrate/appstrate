@@ -89,11 +89,16 @@ export const applicationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/ApplicationObject" },
+                  },
+                  hasMore: {
+                    type: "boolean",
+                    description: "Whether more results exist beyond this page",
                   },
                 },
               },
@@ -123,6 +128,7 @@ export const applicationsPaths = {
                     updatedAt: "2026-01-15T10:30:00Z",
                   },
                 ],
+                hasMore: false,
               },
             },
           },
@@ -270,6 +276,7 @@ export const applicationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: {

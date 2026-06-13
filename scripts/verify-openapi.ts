@@ -14,6 +14,10 @@
  *    plus apps/api/src/index.ts, composes the mount prefix from app.route(prefix, factory) calls,
  *    normalises Hono path syntax, and asserts every code-registered endpoint is documented in
  *    the OpenAPI spec or in the explicit allowlist.
+ * 6. Response schema presence — every 2xx JSON response (except 204) must declare a schema
+ * 7. Shared-type ↔ OpenAPI response required-field comparison — for each registered
+ *    (spec-schema ↔ @appstrate/shared-types interface) pair, asserts every type-required field
+ *    is also required in the spec response schema (catches spec-optional / type-required drift)
  *
  * Module-owned paths and schemas are loaded dynamically from built-in modules.
  * The set of modules validated matches `MODULES` (default: all built-in).
@@ -27,7 +31,13 @@ import { lintFromString, createConfig } from "@redocly/openapi-core";
 import type { OpenApiSchemaEntry } from "@appstrate/core/module";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
 import { buildZodSchemaRegistry } from "../apps/api/src/openapi/zod-schema-registry.ts";
+import {
+  responseTypeRegistry,
+  KNOWN_DRIFT,
+  EXEMPT_SCHEMAS,
+} from "../apps/api/src/openapi/response-type-registry.ts";
 import { collectModuleOpenApi } from "./lib/module-openapi.ts";
+import { getTypeShape, type TypeShape } from "./lib/ts-interface-required-keys.ts";
 
 // ---------------------------------------------------------------------------
 // Auto-discover built-in modules and collect their OpenAPI contributions
@@ -527,6 +537,99 @@ function resolveRef(ref: string): Record<string, unknown> | undefined {
   return current as Record<string, unknown> | undefined;
 }
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * Deref (`$ref`) and merge (`allOf`) a spec schema node into a normalized view
+ * for the recursive step-7 comparison. `oneOf`/`anyOf` schemas are treated as
+ * open (their required set is ambiguous) so the comparison never false-positives
+ * on a polymorphic schema.
+ */
+function normalizeSpecSchema(
+  schema: any,
+  depth = 0,
+): {
+  properties: Record<string, any>;
+  required: Set<string>;
+  open: boolean; // additionalProperties:true, an open object, or a polymorphic schema
+  items?: any;
+} | null {
+  if (!schema || typeof schema !== "object" || depth > 12) return null;
+  let s = schema;
+  if (typeof s.$ref === "string") {
+    const r = resolveRef(s.$ref);
+    if (!r) return null;
+    s = r;
+  }
+  let properties: Record<string, any> = { ...(s.properties ?? {}) };
+  const required = new Set<string>(Array.isArray(s.required) ? (s.required as string[]) : []);
+  let open = s.additionalProperties === true;
+  let items = s.items;
+  if (Array.isArray(s.allOf)) {
+    for (const sub of s.allOf) {
+      const n = normalizeSpecSchema(sub, depth + 1);
+      if (!n) continue;
+      properties = { ...properties, ...n.properties };
+      for (const r of n.required) required.add(r);
+      open = open || n.open;
+      if (!items && n.items) items = n.items;
+    }
+  }
+  if (Array.isArray(s.oneOf) || Array.isArray(s.anyOf)) open = true;
+  // A node declaring no properties is an open/dynamic object (JSON Schema
+  // `additionalProperties` defaults to true) — e.g. a bare `{type:"object"}`
+  // for a JSONB/JSON-Schema payload. Can't introspect it, so don't descend.
+  if (Object.keys(properties).length === 0) open = true;
+  return { properties, required, open, items };
+}
+
+/**
+ * Recursively compare a shared-type {@link TypeShape} against a spec schema,
+ * collecting required-field drift at every nesting level (nested objects and
+ * array element types — not just the top level). Recursion descends only where
+ * the shared-type exposes a closed nested shape AND the spec side is a closed
+ * object; open objects (`additionalProperties:true` / JSONB / Record) short-
+ * circuit so dynamic payloads never false-positive.
+ */
+function compareShapeToSchema(
+  shape: TypeShape,
+  specSchema: any,
+  prefix: string,
+  known: Set<string>,
+  issues: string[],
+  depth = 0,
+): void {
+  if (depth > 8) return;
+  const norm = normalizeSpecSchema(specSchema);
+  if (!norm) return;
+  const specProps = new Set(Object.keys(norm.properties));
+  for (const field of shape.required) {
+    const label = prefix ? `${prefix}.${field}` : field;
+    if (known.has(label) || (!prefix && known.has(field))) continue;
+    if (!specProps.has(field)) {
+      // An open object (additionalProperties / Record) legitimately omits the key.
+      if (!norm.open) {
+        issues.push(
+          `Field "${label}": shared-type=required, OpenAPI=absent (not a declared property)`,
+        );
+      }
+      continue;
+    }
+    if (!norm.required.has(field)) {
+      issues.push(`Field "${label}": shared-type=required, OpenAPI=optional`);
+    }
+    const childShape = shape.nested.get(field);
+    if (childShape) {
+      const childNorm = normalizeSpecSchema(norm.properties[field]);
+      if (childNorm?.items) {
+        compareShapeToSchema(childShape, childNorm.items, `${label}[]`, known, issues, depth + 1);
+      } else {
+        compareShapeToSchema(childShape, norm.properties[field], label, known, issues, depth + 1);
+      }
+    }
+  }
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 /**
  * Extract the request-body JSON Schema from the OpenAPI spec for a given path+method.
  * Returns undefined if the endpoint has no requestBody or no application/json content.
@@ -823,13 +926,142 @@ function extractFunctionBody(src: string, fnName: string): string | null {
 }
 
 /**
- * Extract all `router.METHOD("path", …)` registrations from a slice of source.
+ * Templated `router.METHOD(`…${ident}…`)` registrations that could not be
+ * resolved from in-file literals. Populated by `extractRouterRegistrations`
+ * and turned into a hard failure after step 5 — a `${…}` route the extractor
+ * can't expand would otherwise silently escape the Code ⊆ Spec check (a new
+ * undocumented config-loop route would pass CI). Fail closed instead.
  */
-function extractRouterRegistrations(slice: string): RouteRegistration[] {
+const unresolvedTemplatedRoutes: { file: string; verb: string; raw: string }[] = [];
+
+/**
+ * Look up the string/template-literal value(s) bound to `ident` in a source
+ * file, via either a top-level const (`const <ident> = "lit"`) or an
+ * object-literal field (`<ident>: "lit"`). The captured value may itself be a
+ * template literal that still contains `${…}` (e.g. `const MCP_PATH =
+ * \`${MCP_PREFIX}/:org\``) — callers must recurse to fully resolve it.
+ */
+function lookupIdentLiterals(ident: string, fullSrc: string): string[] {
+  const literals = new Set<string>();
+  const constRe = new RegExp(`\\bconst\\s+${ident}\\s*=\\s*["'\`]([^"'\`]+)["'\`]`, "g");
+  for (const m of fullSrc.matchAll(constRe)) literals.add(m[1]!);
+  const fieldRe = new RegExp(`\\b${ident}\\s*:\\s*["'\`]([^"'\`]+)["'\`]`, "g");
+  for (const m of fullSrc.matchAll(fieldRe)) literals.add(m[1]!);
+  return [...literals];
+}
+
+/**
+ * Resolve `${ident}` interpolations in a templated route path against literals
+ * declared in the same source file:
+ *   - `const <ident> = "literal"`              (top-level const)
+ *   - `<ident>: "literal"`                     (object-literal field, e.g. the
+ *     `path:` members of a config table the route loop destructures —
+ *     `for (const rcfg of Object.values(ROUTE_CONFIGS)) { const { path } = rcfg; router.get(`/${path}/…`) }`)
+ * Resolution is recursive: a resolved literal may itself be a template that
+ * references further consts (e.g. `PRM_PATH` → `\`${PRM_PATH_PREFIX}${MCP_PATH}\``
+ * → `${PRM_PATH_PREFIX}${MCP_PREFIX}/:org`). Returns every concrete path
+ * (cross-product across multi-valued idents), or `null` if any `${…}` can't be
+ * resolved or the nesting exceeds `depth` (caller fails closed).
+ */
+function resolveTemplatedPath(rawPath: string, fullSrc: string, depth = 0): string[] | null {
+  if (depth > 10) return null; // cycle / runaway guard
+  const idents = [...rawPath.matchAll(/\$\{([a-zA-Z_$][\w$]*)\}/g)].map((m) => m[1]!);
+  if (idents.length === 0) return [rawPath];
+  let paths = [rawPath];
+  for (const ident of idents) {
+    const literals = lookupIdentLiterals(ident, fullSrc);
+    if (literals.length === 0) return null;
+    paths = paths.flatMap((p) =>
+      literals.map((lit) => p.replace(new RegExp(`\\$\\{${ident}\\}`, "g"), lit)),
+    );
+  }
+  // A resolved literal may still contain `${…}` (nested template consts) — recurse.
+  const out: string[] = [];
+  for (const p of paths) {
+    if (p.includes("${")) {
+      const nested = resolveTemplatedPath(p, fullSrc, depth + 1);
+      if (!nested) return null;
+      out.push(...nested);
+    } else {
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+/**
+ * Identifiers bound to a `new Hono(...)` instance in a source file. Route
+ * registrations are matched against these exact names, so a router declared as
+ * `const profileRouter = new Hono()` or a module's `const app = new Hono()` is
+ * caught — not just the `router` convention. This also avoids false positives
+ * from unrelated `.get(` calls on Maps/Headers/etc., which are never Hono
+ * instances.
+ */
+function honoInstanceIdents(src: string): string[] {
+  const out = new Set<string>();
+  for (const m of src.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*new\s+Hono\b/g)) out.add(m[1]!);
+  return [...out];
+}
+
+/**
+ * Resolve a route registration's path argument (literal or bare identifier) to
+ * concrete path(s), or `null` if unresolvable (caller fails closed). `lit` is
+ * the captured string/template body (may contain `${…}`); `ref` is a bare
+ * identifier path argument (e.g. `app.get(PRM_PATH, …)`) resolved against
+ * in-file const/field literals.
+ */
+function resolvePathArg(
+  lit: string | undefined,
+  ref: string | undefined,
+  fullSrc: string,
+): string[] | null {
+  if (lit !== undefined) {
+    return lit.includes("${") ? resolveTemplatedPath(lit, fullSrc) : [lit];
+  }
+  if (ref !== undefined) {
+    const literals = lookupIdentLiterals(ref, fullSrc);
+    if (literals.length === 0) return null;
+    const out: string[] = [];
+    for (const l of literals) {
+      const resolved = l.includes("${") ? resolveTemplatedPath(l, fullSrc) : [l];
+      if (!resolved) return null;
+      out.push(...resolved);
+    }
+    return out;
+  }
+  return null;
+}
+
+/**
+ * Extract all `<honoInstance>.METHOD(path, …)` registrations from a slice of
+ * source. `fullSrc` is the whole file (the slice may be a single function body)
+ * so Hono-instance identifiers and `${ident}` / bare-identifier path arguments
+ * can be resolved against file-level declarations. A path argument that can't
+ * be resolved to a literal is pushed to `unresolvedTemplatedRoutes` so the run
+ * fails closed rather than silently dropping the route.
+ */
+function extractRouterRegistrations(
+  slice: string,
+  fullSrc: string,
+  file: string,
+): RouteRegistration[] {
   const out: RouteRegistration[] = [];
-  const re = new RegExp(`router\\.(${ROUTE_VERB_PATTERN})\\s*\\(\\s*["'\`]([^"'\`]*)["'\`]`, "g");
+  const idents = honoInstanceIdents(fullSrc);
+  if (idents.length === 0) idents.push("router"); // pre-bound imported router fallback
+  const identAlt = idents.join("|");
+  // Path arg is either a quoted/template literal (group 2) or a bare identifier (group 3).
+  const re = new RegExp(
+    `\\b(?:${identAlt})\\.(${ROUTE_VERB_PATTERN})\\s*\\(\\s*(?:["'\`]([^"'\`]*)["'\`]|([A-Za-z_$][\\w$]*))`,
+    "g",
+  );
   for (const m of slice.matchAll(re)) {
-    out.push({ verb: m[1]!, path: m[2]! });
+    const verb = m[1]!;
+    const resolved = resolvePathArg(m[2], m[3], fullSrc);
+    if (!resolved) {
+      unresolvedTemplatedRoutes.push({ file, verb, raw: m[2] ?? m[3] ?? "<unknown>" });
+      continue;
+    }
+    for (const p of resolved) out.push({ verb, path: p });
   }
   return out;
 }
@@ -953,16 +1185,42 @@ for (const m of indexSrc.matchAll(
 // 4b. Route files referenced by mounts — parse each factory body or default body
 //     and combine with the mount prefix.
 const SKIP_FILES = new Set<string>([
-  // Routes registered via runtime config (config-driven `for` loop). The
-  // emitted endpoints are already covered by check #1; static analysis can't
-  // see them.
+  // Routes registered via runtime config with a VARIABLE path
+  // (`router.post(entry.urlPath, …)` — a bare identifier, not a string/template
+  // literal). The path can't be captured at all, so the emitted endpoints are
+  // covered by check #1. (packages.ts is NOT skipped: its template-literal
+  // `${path}` routes are now expanded by resolveTemplatedPath against the
+  // in-file ROUTE_CONFIGS `path:` literals and verified against the spec like
+  // any literal route; an unresolvable `${…}` fails the run.)
   "routes/llm-proxy",
-  // packages.ts iterates ROUTE_CONFIGS with template-literal paths
-  // (router.get(`/${path}/...`, …) where `path` ∈ {skills, agents,
-  // integrations}). All concrete paths are already enumerated in
-  // expectedEndpoints, so check #1 catches drift on this file.
-  "routes/packages",
 ]);
+
+// Meta-guard: a whole-file skip lets every endpoint in that file escape the
+// Code ⊆ Spec check (above), so adding one must be a deliberate, reviewed act.
+// The only sanctioned skip is `routes/llm-proxy` (variable-path config loop).
+// If anyone widens this set, fail loudly here and force per-route handling or
+// an explicit, justified decision instead of a silent coverage hole.
+const ALLOWED_SKIP_FILES = new Set<string>(["routes/llm-proxy"]);
+const unexpectedSkips = [...SKIP_FILES].filter((f) => !ALLOWED_SKIP_FILES.has(f));
+if (SKIP_FILES.size > ALLOWED_SKIP_FILES.size || unexpectedSkips.length > 0) {
+  exitCode = 1;
+  console.log(`\n  5. Code ⊆ Spec — SKIP_FILES guard`);
+  console.log(`  ---------------------------------`);
+  console.log(
+    `  ERROR  SKIP_FILES must contain only the sanctioned whole-file skip ` +
+      `(${[...ALLOWED_SKIP_FILES].join(", ")}).`,
+  );
+  if (unexpectedSkips.length > 0) {
+    console.log(`  Unexpected skip(s) that would hide endpoints from the Code ⊆ Spec check:`);
+    for (const f of unexpectedSkips) console.log(`    - ${f}`);
+  }
+  console.log(
+    `\n  A whole-file skip silently excludes every route in that file. Don't widen ` +
+      `SKIP_FILES — verify the file's literal-path routes against the spec individually, ` +
+      `or, if a skip is genuinely unavoidable, add the file to ALLOWED_SKIP_FILES in this ` +
+      `file with a justifying comment so the decision is reviewed.`,
+  );
+}
 
 const routeFileCache = new Map<string, string>();
 function readRouteFile(relPath: string): string {
@@ -988,24 +1246,41 @@ for (const mount of mounts) {
     scope = body;
   }
 
-  for (const reg of extractRouterRegistrations(scope)) {
+  for (const reg of extractRouterRegistrations(scope, src, mount.file)) {
     const fullPath = normaliseHonoPath(joinMountPath(mount.prefix, reg.path));
     for (const ep of expandRegistration(reg.verb, fullPath)) codeEndpoints.add(ep);
   }
 }
 
-// 4c. Built-in module routes — files at `apps/api/src/modules/<name>/routes.ts`
-//     mounted at `/` (paths are absolute in module routes).
+// 4c. Built-in module routes — ANY `.ts` file in a module dir that constructs a
+//     Hono instance (not just `routes.ts`: the mcp module registers on a
+//     `const app = new Hono()` in `router.ts`). Module routers mount at `/`
+//     (paths are absolute in module routes).
 const modulesDir = join(REPO_ROOT, "apps/api/src/modules");
+function collectModuleRouteFiles(dir: string): string[] {
+  const found: string[] = [];
+  for (const ent of readdirSync(dir, { withFileTypes: true })) {
+    if (ent.isDirectory()) {
+      // Skip non-route subtrees: tests, openapi specs, vendored deps.
+      if (ent.name === "test" || ent.name === "openapi" || ent.name === "node_modules") continue;
+      found.push(...collectModuleRouteFiles(join(dir, ent.name)));
+    } else if (ent.name.endsWith(".ts") && !ent.name.endsWith(".test.ts")) {
+      found.push(join(dir, ent.name));
+    }
+  }
+  return found;
+}
 if (existsSync(modulesDir)) {
   for (const name of readdirSync(modulesDir, { withFileTypes: true })) {
     if (!name.isDirectory()) continue;
-    const routesPath = join(modulesDir, name.name, "routes.ts");
-    if (!existsSync(routesPath)) continue;
-    const src = readFileSync(routesPath, "utf8");
-    for (const reg of extractRouterRegistrations(src)) {
-      const fullPath = normaliseHonoPath(reg.path);
-      for (const ep of expandRegistration(reg.verb, fullPath)) codeEndpoints.add(ep);
+    for (const filePath of collectModuleRouteFiles(join(modulesDir, name.name))) {
+      const src = readFileSync(filePath, "utf8");
+      if (!src.includes("new Hono")) continue; // only files that define a router
+      const rel = "modules/" + filePath.slice(modulesDir.length + 1);
+      for (const reg of extractRouterRegistrations(src, src, rel)) {
+        const fullPath = normaliseHonoPath(reg.path);
+        for (const ep of expandRegistration(reg.verb, fullPath)) codeEndpoints.add(ep);
+      }
     }
   }
 }
@@ -1046,6 +1321,12 @@ const CODE_TO_SPEC_ALLOWLIST = new Set<string>([
   "GET /*",
   // Dev-time docs page served as plain text, not part of the JSON API.
   "GET /llms.txt",
+  // MCP per-org endpoint method-not-allowed catch-all: `app.all(MCP_PATH, …)`
+  // throws 405 for every verb other than the documented POST + GET channels.
+  // These three are the catch-all, not real endpoints.
+  "PUT /api/mcp/o/{org}",
+  "PATCH /api/mcp/o/{org}",
+  "DELETE /api/mcp/o/{org}",
 ]);
 
 const orphans = [...codeEndpoints]
@@ -1066,6 +1347,259 @@ if (orphans.length === 0) {
     `\n  Either document the endpoint in apps/api/src/openapi/paths/ + add it to ` +
       `expectedEndpoints, or add a justified entry to CODE_TO_SPEC_ALLOWLIST in this file.`,
   );
+}
+
+// Fail closed on any templated registration the resolver couldn't expand —
+// an unresolved `${…}` route would otherwise vanish from `codeEndpoints` and
+// silently escape the Code ⊆ Spec check.
+if (unresolvedTemplatedRoutes.length > 0) {
+  exitCode = 1;
+  console.log(
+    `\n  Templated route registrations the extractor could not resolve (${unresolvedTemplatedRoutes.length}):`,
+  );
+  for (const r of unresolvedTemplatedRoutes) {
+    console.log(`    - ${r.file}: router.${r.verb}(\`${r.raw}\`)`);
+  }
+  console.log(
+    `\n  Declare the interpolated identifier's literal value(s) in the same file ` +
+      `(a top-level \`const x = "…"\` or an object \`x: "…"\` field the route loop ` +
+      `destructures) so the verifier can expand and check it, or use a literal path.`,
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// 6. Response Schema Presence
+// ═══════════════════════════════════════════════════
+//
+// Every 2xx response (except 204 No Content) must declare `content`, and every
+// JSON media type must carry a `schema`. Without one, the generated frontend
+// types (scripts/generate-api-types.ts) degrade to `unknown` and response
+// validation has nothing to check against — a silent hole in the contract.
+// Non-JSON media types (SSE, binary, HTML) are exempt; fully body-less or
+// otherwise justified responses go through the allowlist below.
+
+console.log(`\n  6. Response Schema Presence`);
+console.log(`  -----------------------------`);
+
+// "METHOD /path STATUS" entries allowed to omit content/schema, with a reason.
+const RESPONSE_SCHEMA_ALLOWLIST = new Set<string>([
+  // OAuth/OIDC discovery metadata — shape owned by Better Auth, not consumed
+  // by the SPA's typed client.
+  "GET /.well-known/oauth-authorization-server 200",
+  "GET /.well-known/openid-configuration 200",
+  "GET /api/auth/oauth2/authorize 200",
+  "GET /api/auth/oauth2/userinfo 200",
+  "POST /api/auth/oauth2/revoke 200",
+  "GET /api/oauth/logout 200",
+  // Server-rendered HTML pages (device-flow activation, OAuth callback).
+  "GET /activate 200",
+  "POST /activate/approve 200",
+  "POST /activate/deny 200",
+  "GET /api/integrations/callback 200",
+  // LLM proxy passthrough — the body is the upstream provider's response,
+  // verbatim; there is no stable schema to declare.
+  "POST /api/llm-proxy/anthropic-messages/v1/messages 200",
+  "POST /api/llm-proxy/mistral-conversations/v1/chat/completions 200",
+  "POST /api/llm-proxy/openai-completions/v1/chat/completions 200",
+]);
+
+const JSON_MEDIA_TYPE = /^application\/([a-z0-9.+-]+\+)?json$/;
+
+const schemaGaps: string[] = [];
+for (const [specPath, pathItem] of Object.entries(
+  openApiSpec.paths as Record<string, Record<string, unknown>>,
+)) {
+  for (const verb of ROUTE_VERBS) {
+    const op = (pathItem as Record<string, unknown>)[verb] as Record<string, unknown> | undefined;
+    if (!op || typeof op !== "object") continue;
+    const responses = (op.responses ?? {}) as Record<string, unknown>;
+    for (const [status, rawResp] of Object.entries(responses)) {
+      if (!/^2\d\d$/.test(status) || status === "204") continue;
+      const key = `${verb.toUpperCase()} ${specPath} ${status}`;
+      if (RESPONSE_SCHEMA_ALLOWLIST.has(key)) continue;
+
+      let resp = rawResp as Record<string, unknown>;
+      if (typeof resp.$ref === "string") {
+        resp = resolveRef(resp.$ref) ?? {};
+      }
+      const content = resp.content as Record<string, Record<string, unknown>> | undefined;
+      if (!content || Object.keys(content).length === 0) {
+        schemaGaps.push(`${key} — no content declared (use 204 if truly body-less)`);
+        continue;
+      }
+      for (const [mediaType, media] of Object.entries(content)) {
+        if (!JSON_MEDIA_TYPE.test(mediaType)) continue;
+        if (!media || typeof media.schema !== "object" || media.schema === null) {
+          schemaGaps.push(`${key} — ${mediaType} has no schema`);
+        }
+      }
+    }
+  }
+}
+
+if (schemaGaps.length === 0) {
+  console.log(
+    `  OK — every 2xx JSON response declares a schema (allowlist: ${RESPONSE_SCHEMA_ALLOWLIST.size}).`,
+  );
+} else {
+  exitCode = 1;
+  console.log(`\n  2xx responses without a schema (${schemaGaps.length}):`);
+  for (const gap of schemaGaps.sort()) console.log(`    - ${gap}`);
+  console.log(
+    `\n  Declare a response schema in apps/api/src/openapi/paths/, switch the ` +
+      `response to 204, or add a justified entry to RESPONSE_SCHEMA_ALLOWLIST in this file.`,
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// 7. Shared-Type ↔ OpenAPI Response Required-Field Comparison
+// ═══════════════════════════════════════════════════
+//
+// Catches the "spec marks a response field optional that the shared-type marks
+// required" class of drift: the SPA trusts the generated type and reads the
+// field unconditionally, but the spec permits the server to omit it. For each
+// registered (spec-schema ↔ shared-type) pair, assert that every type-required
+// field is also required in the spec — restricted to fields the spec declares
+// as properties, and skipping accepted exceptions in KNOWN_DRIFT.
+
+console.log(`\n  7. Shared-Type <> OpenAPI Response Required-Field Comparison`);
+console.log(`  ------------------------------------------------------------`);
+
+interface ResponseDrift {
+  description: string;
+  issues: string[];
+}
+
+const responseDrifts: ResponseDrift[] = [];
+let responseCompared = 0;
+
+for (const entry of responseTypeRegistry) {
+  // Resolve the spec schema (named component or inline response).
+  let specSchema: Record<string, unknown> | undefined;
+  let driftKey: string;
+
+  if (entry.specSchemaName) {
+    driftKey = entry.specSchemaName;
+    specSchema = (openApiSpec.components.schemas as Record<string, Record<string, unknown>>)[
+      entry.specSchemaName
+    ];
+  } else if (entry.path && entry.method && entry.status) {
+    driftKey = entry.path;
+    const pathObj = (openApiSpec.paths as Record<string, Record<string, unknown>>)[entry.path];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const op = pathObj?.[entry.method.toLowerCase()] as any;
+    let resp = op?.responses?.[entry.status] as Record<string, unknown> | undefined;
+    if (resp && typeof resp.$ref === "string") resp = resolveRef(resp.$ref);
+    let schema = (resp?.content as Record<string, Record<string, unknown>> | undefined)?.[
+      "application/json"
+    ]?.schema as Record<string, unknown> | undefined;
+    if (schema && typeof schema.$ref === "string") schema = resolveRef(schema.$ref);
+    specSchema = schema;
+  } else {
+    responseDrifts.push({
+      description: entry.description,
+      issues: [
+        `Invalid registry entry: needs either specSchemaName or path+method+status (sharedType=${entry.sharedTypeName})`,
+      ],
+    });
+    continue;
+  }
+
+  if (!specSchema) {
+    responseDrifts.push({
+      description: entry.description,
+      issues: [`No OpenAPI response schema resolved (sharedType=${entry.sharedTypeName})`],
+    });
+    continue;
+  }
+
+  // Resolve the shared-type's recursive shape (nested objects + array elements).
+  let shape: TypeShape;
+  try {
+    shape = getTypeShape(entry.sharedTypeName);
+  } catch (err) {
+    responseDrifts.push({
+      description: entry.description,
+      issues: [`Failed to resolve shared type "${entry.sharedTypeName}": ${String(err)}`],
+    });
+    continue;
+  }
+
+  const known = new Set<string>(KNOWN_DRIFT[driftKey] ?? []);
+
+  responseCompared++;
+  const issues: string[] = [];
+  compareShapeToSchema(shape, specSchema, "", known, issues);
+
+  if (issues.length > 0) {
+    responseDrifts.push({ description: entry.description, issues });
+  }
+}
+
+console.log(`  Compared: ${responseCompared}/${responseTypeRegistry.length} registry entries\n`);
+
+if (responseDrifts.length === 0) {
+  console.log(`  OK — every registered response schema requires what its shared-type requires.`);
+} else {
+  exitCode = 1;
+  console.log(`  ${responseDrifts.length} entry(ies) with required-field drift:\n`);
+  for (const d of responseDrifts) {
+    console.log(`  ERROR  ${d.description}`);
+    for (const issue of d.issues) {
+      console.log(`          - ${issue}`);
+    }
+    console.log();
+  }
+  console.log(
+    `  Tighten the spec response schema's required array to match the shared-type, ` +
+      `or record the divergence in KNOWN_DRIFT in ` +
+      `apps/api/src/openapi/response-type-registry.ts with a justification.`,
+  );
+}
+
+// Coverage enforcement — every named component schema must be either registered
+// (a shared-type pair, checked above) or explicitly EXEMPT (no shared-type
+// consumer). This makes step 7 fail-closed: a new response schema can't slip
+// in unchecked. The opt-in gap (a schema nobody registers is never compared)
+// is closed by requiring an explicit, justified decision for every schema.
+{
+  const registeredSpecNames = new Set(
+    responseTypeRegistry.map((e) => e.specSchemaName).filter((n): n is string => !!n),
+  );
+  const allSchemaNames = Object.keys(
+    (openApiSpec.components.schemas ?? {}) as Record<string, unknown>,
+  );
+  const uncovered = allSchemaNames
+    .filter((n) => !registeredSpecNames.has(n) && !(n in EXEMPT_SCHEMAS))
+    .sort();
+  // A stale EXEMPT entry (schema renamed/removed) is also a failure — keep the
+  // list honest.
+  const staleExempt = Object.keys(EXEMPT_SCHEMAS)
+    .filter((n) => !allSchemaNames.includes(n))
+    .sort();
+
+  console.log(`\n  7b. Step 7 coverage (every component schema registered or exempt)`);
+  console.log(`  ----------------------------------------------------------------`);
+  if (uncovered.length === 0 && staleExempt.length === 0) {
+    console.log(
+      `  OK — all ${allSchemaNames.length} component schemas are registered ` +
+        `(${registeredSpecNames.size}) or exempt (${Object.keys(EXEMPT_SCHEMAS).length}).`,
+    );
+  } else {
+    exitCode = 1;
+    if (uncovered.length > 0) {
+      console.log(`  Component schema(s) neither registered nor exempt (${uncovered.length}):`);
+      for (const n of uncovered) console.log(`    - ${n}`);
+      console.log(
+        `\n  Add each to responseTypeRegistry (with its shared-type) or to ` +
+          `EXEMPT_SCHEMAS (with a reason) in apps/api/src/openapi/response-type-registry.ts.`,
+      );
+    }
+    if (staleExempt.length > 0) {
+      console.log(`\n  Stale EXEMPT_SCHEMAS entries (schema no longer exists):`);
+      for (const n of staleExempt) console.log(`    - ${n}`);
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════

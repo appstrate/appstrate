@@ -4,7 +4,10 @@ import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { useInitiateIntegrationOAuth } from "../../hooks/use-integrations";
+import {
+  invalidateIntegrationQueries,
+  useInitiateIntegrationOAuth,
+} from "../../hooks/use-integrations";
 
 const OAUTH_POPUP_TIMEOUT_MS = 5 * 60_000;
 const POPUP_POLL_INTERVAL_MS = 500;
@@ -50,11 +53,12 @@ export function useIntegrationOAuthPopup() {
         }
         try {
           const session = await initiateOAuth.mutateAsync({
-            packageId: input.packageId,
-            authKey: input.authKey,
-            ...(input.scopes ? { scopes: input.scopes } : {}),
-            ...(input.forceAccountSelect ? { forceAccountSelect: true } : {}),
-            ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+            params: { path: { packageId: input.packageId, authKey: input.authKey } },
+            body: {
+              scopes: input.scopes ?? [],
+              ...(input.forceAccountSelect ? { force_account_select: true } : {}),
+              ...(input.connectionId ? { connection_id: input.connectionId } : {}),
+            },
           });
           popup.location.href = session.auth_url;
           await new Promise<void>((resolve, reject) => {
@@ -89,8 +93,10 @@ export function useIntegrationOAuthPopup() {
         // without waiting for a window-focus refetch. `useInitiateIntegrationOAuth`
         // only kicks off the redirect — the connection is created in the popup.
         await Promise.all([
-          qc.invalidateQueries({ queryKey: ["integrations"] }),
+          invalidateIntegrationQueries(qc),
+          // Both keys while use-me-connections migrates concurrently.
           qc.invalidateQueries({ queryKey: ["me-connections"] }),
+          qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] }),
         ]);
       } catch (err) {
         if (err instanceof Error && err.message === "popup_blocked") {

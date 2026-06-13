@@ -114,11 +114,12 @@ function OAuthClientForm({
     e.preventDefault();
     upsert.mutate(
       {
-        packageId,
-        authKey,
-        clientId,
-        clientSecret: publicClient ? "" : clientSecret,
-        ...(redirectUri ? { redirectUri } : {}),
+        params: { path: { packageId, authKey } },
+        body: {
+          client_id: clientId,
+          client_secret: publicClient ? "" : clientSecret,
+          ...(redirectUri ? { redirect_uri: redirectUri } : {}),
+        },
       },
       {
         onSuccess: () => {
@@ -273,7 +274,10 @@ function OAuthClientForm({
         description={t("integration.oauthClient.delete.confirm")}
         isPending={del.isPending}
         onConfirm={() =>
-          del.mutate({ packageId, authKey }, { onSuccess: () => setConfirmDelete(false) })
+          del.mutate(
+            { params: { path: { packageId, authKey } } },
+            { onSuccess: () => setConfirmDelete(false) },
+          )
         }
       />
     </>
@@ -472,8 +476,8 @@ function BlockUserConnectionsToggle({
   // Drives the checkbox from server state — pending mutation reads the
   // about-to-be-applied value, idle reads the latest fetched value.
   const blocked =
-    updateSettings.isPending && updateSettings.variables?.packageId === packageId
-      ? updateSettings.variables.blockUserConnections
+    updateSettings.isPending && updateSettings.variables?.params.path.packageId === packageId
+      ? updateSettings.variables.body.block_user_connections
       : initialBlocked;
   return (
     <div
@@ -486,7 +490,10 @@ function BlockUserConnectionsToggle({
           checked={blocked}
           disabled={updateSettings.isPending}
           onChange={(e) =>
-            updateSettings.mutate({ packageId, blockUserConnections: e.target.checked })
+            updateSettings.mutate({
+              params: { path: { packageId } },
+              body: { block_user_connections: e.target.checked },
+            })
           }
           data-testid="block-user-connections-toggle"
           className="mt-0.5"
@@ -582,7 +589,13 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
           </label>
           <Button
             size="sm"
-            onClick={() => connectionId && upsert.mutate({ packageId, connectionId, enforce })}
+            onClick={() =>
+              connectionId &&
+              upsert.mutate({
+                params: { path: { packageId } },
+                body: { connection_id: connectionId, enforce },
+              })
+            }
             disabled={!connectionId || upsert.isPending}
             data-testid="org-default-save"
           >
@@ -592,7 +605,7 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => remove.mutate({ packageId })}
+              onClick={() => remove.mutate({ params: { path: { packageId } } })}
               disabled={remove.isPending}
               data-testid="org-default-clear"
             >
@@ -637,9 +650,8 @@ function PinManagementSection({ packageId }: { packageId: string }) {
     if (!newAgent || !newConnectionId) return;
     upsertPin.mutate(
       {
-        packageId,
-        agentPackageId: newAgent,
-        connectionId: newConnectionId,
+        params: { path: { packageId, agentPackageId: newAgent } },
+        body: { connection_id: newConnectionId },
       },
       {
         onSuccess: () => {
@@ -710,8 +722,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
                       disabled={deletePin.isPending}
                       onClick={() =>
                         deletePin.mutate({
-                          packageId,
-                          agentPackageId: p.packageId,
+                          params: { path: { packageId, agentPackageId: p.packageId } },
                         })
                       }
                       title={t("integration.admin.pinManagement.delete")}
@@ -835,9 +846,8 @@ function ConnectionRow({
     }
     updateConnection.mutate(
       {
-        packageId,
-        connectionId: connection.id,
-        label: next === "" ? null : next,
+        params: { path: { packageId, connectionId: connection.id } },
+        body: { label: next === "" ? null : next },
       },
       { onSuccess: () => setEditing(false) },
     );
@@ -953,9 +963,8 @@ function ConnectionRow({
               disabled={updateConnection.isPending}
               onChange={(e) =>
                 updateConnection.mutate({
-                  packageId,
-                  connectionId: connection.id,
-                  sharedWithOrg: e.target.checked,
+                  params: { path: { packageId, connectionId: connection.id } },
+                  body: { shared_with_org: e.target.checked },
                 })
               }
               data-testid={`share-toggle-${connection.id}`}
@@ -986,7 +995,7 @@ function ConnectionRow({
         isPending={disconnect.isPending}
         onConfirm={() =>
           disconnect.mutate(
-            { connectionId: connection.id },
+            { params: { path: { connectionId: connection.id } } },
             { onSuccess: () => setConfirmDelete(false) },
           )
         }
@@ -1155,7 +1164,7 @@ export function IntegrationDetailPage() {
   const isBuiltIn = source === "system";
   // Org-owned packages are editable regardless of scope name; only system packages are read-only.
   const isOwned = !isBuiltIn;
-  const onActivate = () => activate.mutate(packageId);
+  const onActivate = () => activate.mutate({ params: { path: { packageId } } });
 
   return (
     <div className="p-6">
@@ -1195,7 +1204,7 @@ export function IntegrationDetailPage() {
             <PackageActionsDropdown
               packageId={packageId}
               type="integration"
-              manifest={m as unknown as Record<string, unknown>}
+              manifest={m}
               isOwned={isOwned}
               isBuiltIn={isBuiltIn}
               isHistoricalVersion={false}
@@ -1398,7 +1407,10 @@ export function IntegrationDetailPage() {
         variant="default"
         isPending={deactivate.isPending}
         onConfirm={() =>
-          deactivate.mutate(packageId, { onSuccess: () => setConfirmDeactivate(false) })
+          deactivate.mutate(
+            { params: { path: { packageId } } },
+            { onSuccess: () => setConfirmDeactivate(false) },
+          )
         }
       />
 

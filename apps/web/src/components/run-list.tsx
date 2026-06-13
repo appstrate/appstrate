@@ -64,7 +64,7 @@ export function RunList({
   const agentNameMap = new Map<string, string>();
   if (!hideAgentName && !fixedAgentName && agents) {
     for (const f of agents) {
-      agentNameMap.set(f.id, f.display_name);
+      agentNameMap.set(f.id, f.display_name ?? f.id);
     }
   }
 

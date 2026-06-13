@@ -19,10 +19,12 @@ import type {
   AgentPinnedSlotItem,
   PersistenceActorType,
 } from "@appstrate/shared-types";
-import { api, buildQs } from "../api";
+import { client } from "../api/client";
+import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { onMutationError } from "./use-mutations";
+import { persistenceKeys } from "../lib/query-keys";
 import type { PersistenceScopeFilter } from "../components/persistence/scope-filter";
 
 interface PersistenceResponse {
@@ -39,18 +41,21 @@ interface PersistenceResponse {
 function usePersistenceQuery<T>(
   packageId: string | undefined,
   scopeTag: string,
-  params: Record<string, string | undefined>,
+  query: { kind: "pinned" | "memory"; runId?: string },
   pick: (res: PersistenceResponse) => T,
 ) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agent-persistence", scopeTag, orgId, applicationId, packageId, params],
+    // Key pinned to the legacy "agent-persistence" prefix: use-mutations and
+    // the app-switch reset invalidate by that prefix.
+    queryKey: persistenceKeys.list(scopeTag, orgId, applicationId, packageId, query),
     queryFn: async () => {
-      const res = await api<PersistenceResponse>(
-        `/agents/${packageId}/persistence${buildQs(params)}`,
-      );
-      return pick(res);
+      const { scope, name } = splitPackageRef(packageId!);
+      const { data } = await client.GET("/api/agents/{scope}/{name}/persistence", {
+        params: { path: { scope, name }, query },
+      });
+      return pick(data ?? {});
     },
     enabled: !!orgId && !!applicationId && !!packageId,
   });
@@ -120,12 +125,13 @@ export function useDeletePinnedSlot(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (slotId: number) => {
-      return api(`/agents/${packageId}/persistence/pinned/${slotId}`, {
-        method: "DELETE",
+      const { scope, name } = splitPackageRef(packageId);
+      await client.DELETE("/api/agents/{scope}/{name}/persistence/pinned/{id}", {
+        params: { path: { scope, name, id: slotId } },
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agent-persistence"] });
+      qc.invalidateQueries({ queryKey: persistenceKeys.all });
     },
     onError: onMutationError,
   });

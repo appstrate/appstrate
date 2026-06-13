@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
 import { useWebhookDeliveries } from "../hooks/use-webhooks";
 import type { WebhookDelivery } from "../hooks/use-webhooks";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 function formatRelativeTime(
   dateStr: string,
@@ -38,7 +39,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
   const { data: deliveries, isLoading, error } = useWebhookDeliveries(webhookId);
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   if (!deliveries || deliveries.length === 0) {
     return <EmptyState message={t("settings:webhooks.noDeliveries")} icon={Send} compact />;

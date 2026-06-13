@@ -6,16 +6,18 @@ import { useTranslation } from "react-i18next";
 import { Building } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api } from "../../api";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Spinner } from "../../components/spinner";
 import { EmptyState } from "../../components/page-states";
+import { orgKeys } from "../../lib/query-keys";
 import { toast } from "sonner";
 
 export function OrgSettingsGeneralPage() {
@@ -35,33 +37,25 @@ export function OrgSettingsGeneralPage() {
   const [newName, setNewName] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const updateNameMutation = useMutation({
-    mutationFn: async (name: string) => {
-      return api(`/orgs/${orgId}`, {
-        method: "PUT",
-        body: JSON.stringify({ name }),
-      });
-    },
+  const updateNameMutation = $api.useMutation("put", "/api/orgs/{orgId}", {
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["orgs"] });
+      // The org list lives under the legacy ["orgs"] key (see use-org.ts).
+      void queryClient.invalidateQueries({ queryKey: orgKeys.all });
       setEditingName(false);
     },
-    onError: (err: Error) => {
-      toast.error(t("error.prefix", { message: err.message }));
+    onError: (err) => {
+      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
     },
   });
 
-  const deleteOrgMutation = useMutation({
-    mutationFn: async () => {
-      return api(`/orgs/${orgId}`, { method: "DELETE" });
-    },
+  const deleteOrgMutation = $api.useMutation("delete", "/api/orgs/{orgId}", {
     onSuccess: () => {
-      queryClient.removeQueries({ queryKey: ["orgs"] });
+      queryClient.removeQueries({ queryKey: orgKeys.all });
       navigate("/");
       window.location.reload();
     },
-    onError: (err: Error) => {
-      toast.error(t("error.prefix", { message: err.message }));
+    onError: (err) => {
+      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
     },
   });
 
@@ -72,8 +66,8 @@ export function OrgSettingsGeneralPage() {
   const handleSaveName = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const trimmed = newName.trim();
-    if (!trimmed) return;
-    updateNameMutation.mutate(trimmed);
+    if (!trimmed || !orgId) return;
+    updateNameMutation.mutate({ params: { path: { orgId } }, body: { name: trimmed } });
   };
 
   const mcpCommand = `claude mcp add --transport http appstrate-${currentOrg.slug} ${window.location.origin}/api/mcp/o/${currentOrg.id}`;
@@ -141,7 +135,10 @@ export function OrgSettingsGeneralPage() {
                 disabled={updateSettingsMutation.isPending}
                 onClick={() =>
                   updateSettingsMutation.mutate(
-                    { dashboard_sso_enabled: !orgSettings?.dashboard_sso_enabled },
+                    {
+                      params: { path: { orgId: currentOrg.id } },
+                      body: { dashboard_sso_enabled: !orgSettings?.dashboard_sso_enabled },
+                    },
                     {
                       onSuccess: (data) => {
                         toast.success(
@@ -150,8 +147,8 @@ export function OrgSettingsGeneralPage() {
                             : t("orgSettings.dashboardSsoDisabled"),
                         );
                       },
-                      onError: (err: Error) => {
-                        toast.error(t("error.prefix", { message: err.message }));
+                      onError: (err) => {
+                        toast.error(t("error.prefix", { message: getErrorMessage(err) }));
                       },
                     },
                   )
@@ -223,7 +220,7 @@ export function OrgSettingsGeneralPage() {
         title={t("orgSettings.deleteOrg")}
         description={t("orgSettings.deleteConfirm", { name: currentOrg.name })}
         isPending={deleteOrgMutation.isPending}
-        onConfirm={() => deleteOrgMutation.mutate()}
+        onConfirm={() => deleteOrgMutation.mutate({ params: { path: { orgId: currentOrg.id } } })}
       />
     </>
   );

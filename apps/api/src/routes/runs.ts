@@ -21,7 +21,7 @@ import { mergeAndValidateConfigOverride } from "../services/agent-readiness.ts";
 import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { notFound, conflict } from "../lib/errors.ts";
+import { notFound, conflict, internalError } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { requireAgent } from "../middleware/guards.ts";
@@ -191,10 +191,14 @@ export function createRunsRouter() {
         // No legacy `runId` alias (#657): the run id is `id`.
         const row = await getRunFull(getAppScope(c), runId);
         if (!row) {
-          // The run was just created above; a miss here means a concurrent
-          // teardown raced us. Fall back to a minimal id-only resource
-          // rather than 500-ing a successfully launched run.
-          return c.json({ id: runId }, 201);
+          // The run row was inserted by `prepareAndExecuteRun` above and is
+          // read back on the same scope, so a miss means it was deleted out
+          // from under us (a concurrent teardown raced creation) — the
+          // resource genuinely no longer exists. A 201 must carry the full
+          // `Run`; returning a partial body would lie to the typed client.
+          // This is a server-side anomaly, so surface a 500 rather than a
+          // half-resource. Effectively unreachable in normal operation.
+          throw internalError();
         }
         return c.json(row, 201);
       } catch (err) {
@@ -476,9 +480,12 @@ export function createRunsRouter() {
       // (`prepareAndExecuteRun` inserts it before returning).
       const row = await getRunFull(getAppScope(c), runId);
       if (!row) {
-        // Concurrent teardown raced us — fall back to a minimal id-only
-        // resource rather than 500-ing a successfully launched run.
-        return c.json({ id: runId }, 201);
+        // The shadow run was inserted by `triggerInlineRun` and read back on
+        // the same scope; a miss means a concurrent teardown deleted it. The
+        // 201 contract is the full `Run`, so surface a 500 rather than a
+        // partial id-only body that would lie to the typed client.
+        // Effectively unreachable in normal operation.
+        throw internalError();
       }
       return c.json(row, 201);
     },

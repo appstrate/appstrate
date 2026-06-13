@@ -1,69 +1,67 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
-import { useCurrentOrgId } from "./use-org";
+import { useQueryClient } from "@tanstack/react-query";
+import { $api } from "../api/client";
 import { useCurrentApplicationId } from "./use-current-application";
+import { useOrgScope } from "./use-org-scope";
+import { paginatedRunsKeys, runsKeys, runKeys } from "../lib/query-keys";
 
 export function useUnreadCount() {
-  const orgId = useCurrentOrgId();
+  const scope = useOrgScope();
+  // Badge counters only need an application context (legacy behavior).
   const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: ["unread-count", orgId, applicationId],
-    queryFn: async () => {
-      const data = await api<{ count: number }>("/notifications/unread-count");
-      return data.count;
+  return $api.useQuery(
+    "get",
+    "/api/notifications/unread-count",
+    { params: { header: scope.header } },
+    {
+      refetchInterval: 30_000,
+      enabled: !!applicationId,
+      select: (d) => d.count,
     },
-    refetchInterval: 30_000,
-    enabled: !!applicationId,
-  });
+  );
 }
 
 export function useUnreadCountsByAgent() {
-  const orgId = useCurrentOrgId();
+  const scope = useOrgScope();
+  // Badge counters only need an application context (legacy behavior).
   const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: ["unread-counts-by-agent", orgId, applicationId],
-    queryFn: async () => {
-      const data = await api<{ counts: Record<string, number> }>(
-        "/notifications/unread-counts-by-agent",
-      );
-      return data.counts;
+  return $api.useQuery(
+    "get",
+    "/api/notifications/unread-counts-by-agent",
+    { params: { header: scope.header } },
+    {
+      refetchInterval: 30_000,
+      enabled: !!applicationId,
+      select: (d) => d.counts,
     },
-    refetchInterval: 30_000,
-    enabled: !!applicationId,
-  });
+  );
 }
 
 /** Notification badge counters only — no run-list invalidation. */
 export function invalidateNotificationQueries(qc: ReturnType<typeof useQueryClient>) {
-  qc.invalidateQueries({ queryKey: ["unread-count"] });
-  qc.invalidateQueries({ queryKey: ["unread-counts-by-agent"] });
+  qc.invalidateQueries({ queryKey: ["get", "/api/notifications/unread-count"] });
+  qc.invalidateQueries({ queryKey: ["get", "/api/notifications/unread-counts-by-agent"] });
 }
 
 export function invalidateRunAndNotificationQueries(qc: ReturnType<typeof useQueryClient>) {
   invalidateNotificationQueries(qc);
-  qc.invalidateQueries({ queryKey: ["paginated-runs"] });
-  qc.invalidateQueries({ queryKey: ["runs"] });
-  qc.invalidateQueries({ queryKey: ["run"] });
+  // Legacy keys — the run hooks are not migrated to the typed client yet.
+  qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
+  qc.invalidateQueries({ queryKey: runsKeys.all });
+  qc.invalidateQueries({ queryKey: runKeys.all });
 }
 
 export function useMarkRead() {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (runId: string) => {
-      return api<void>(`/notifications/read/${runId}`, { method: "PUT" });
-    },
+  return $api.useMutation("put", "/api/notifications/read/{runId}", {
     onSuccess: () => invalidateRunAndNotificationQueries(qc),
   });
 }
 
 export function useMarkAllRead() {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
-      return api<{ updated_count: number }>("/notifications/read-all", { method: "PUT" });
-    },
+  return $api.useMutation("put", "/api/notifications/read-all", {
     onSuccess: () => invalidateRunAndNotificationQueries(qc),
   });
 }

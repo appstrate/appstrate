@@ -18,7 +18,7 @@ import {
   useTestWebhook,
   useRotateWebhookSecret,
 } from "../hooks/use-webhooks";
-import type { WebhookInfo } from "../hooks/use-webhooks";
+import type { WebhookEvent, WebhookInfo } from "../hooks/use-webhooks";
 
 /**
  * Settings tab for a webhook detail page.
@@ -42,8 +42,10 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
   function handleSave() {
     updateMutation.mutate(
       {
-        id: webhook.id,
-        data: { events: selectedEvents, payloadMode, enabled: active },
+        params: { path: { id: webhook.id } },
+        // Form state holds plain strings; the wire enum cast is the same
+        // trust boundary as the legacy untyped helper.
+        body: { events: selectedEvents as WebhookEvent[], payloadMode, enabled: active },
       },
       {
         onSuccess: () => {
@@ -54,31 +56,40 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
   }
 
   function handleTest() {
-    testMutation.mutate(webhook.id, {
-      onSuccess: () => {
-        toast.success(t("settings:webhooks.testSuccess"));
+    testMutation.mutate(
+      { params: { path: { id: webhook.id } } },
+      {
+        onSuccess: () => {
+          toast.success(t("settings:webhooks.testSuccess"));
+        },
+        onError: () => {
+          toast.error(t("settings:webhooks.testFailed"));
+        },
       },
-      onError: () => {
-        toast.error(t("settings:webhooks.testFailed"));
-      },
-    });
+    );
   }
 
   function handleRotate() {
-    rotateMutation.mutate(webhook.id, {
-      onSuccess: (result) => {
-        setRotateOpen(false);
-        setRotatedSecret(result.secret);
+    rotateMutation.mutate(
+      { params: { path: { id: webhook.id } } },
+      {
+        onSuccess: (result) => {
+          setRotateOpen(false);
+          setRotatedSecret(result.secret);
+        },
       },
-    });
+    );
   }
 
   function handleDelete() {
-    deleteMutation.mutate(webhook.id, {
-      onSuccess: () => {
-        navigate("/webhooks");
+    deleteMutation.mutate(
+      { params: { path: { id: webhook.id } } },
+      {
+        onSuccess: () => {
+          navigate("/webhooks");
+        },
       },
-    });
+    );
   }
 
   return (

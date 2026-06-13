@@ -23,8 +23,8 @@ export const libraryPaths = {
         "The response also includes the org's applications (id, name, isDefault) so the UI " +
         "can render a single grid keyed by app without an additional `/api/applications` call.",
       parameters: [
+        // `/api/library` is org-scoped, not app-scoped — no X-Application-Id.
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
       ],
       responses: {
         "200": {

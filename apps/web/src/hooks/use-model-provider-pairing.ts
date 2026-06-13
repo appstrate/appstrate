@@ -12,34 +12,18 @@
  * the safety net if the DELETE never lands.
  */
 
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { api } from "../api";
+import { $api, type paths } from "../api/client";
 
-export interface PairingCreateResponse {
-  id: string;
-  token: string;
-  command: string;
-  expiresAt: string;
-}
+/** Wire shape of `POST /api/model-providers-oauth/pairing` (200). */
+export type PairingCreateResponse =
+  paths["/api/model-providers-oauth/pairing"]["post"]["responses"][200]["content"]["application/json"];
 
-export interface PairingStatus {
-  id: string;
-  status: "pending" | "consumed" | "expired";
-  consumedAt: string | null;
-  expiresAt: string;
-  /** Set after the helper consumed the pairing — null while pending. */
-  credentialId: string | null;
-}
+/** Wire shape of `GET /api/model-providers-oauth/pairing/{id}` (200). */
+export type PairingStatus =
+  paths["/api/model-providers-oauth/pairing/{id}"]["get"]["responses"][200]["content"]["application/json"];
 
 export function useCreateModelProviderPairing() {
-  return useMutation({
-    mutationFn: async (data: { providerId: string }) => {
-      return api<PairingCreateResponse>("/model-providers-oauth/pairing", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-    },
-  });
+  return $api.useMutation("post", "/api/model-providers-oauth/pairing");
 }
 
 /**
@@ -51,28 +35,27 @@ export function useCreateModelProviderPairing() {
  * as the status transitions to a terminal state (consumed / expired).
  */
 export function useModelProviderPairingStatus(id: string | null, options: { enabled: boolean }) {
-  return useQuery({
-    queryKey: ["model-provider-pairing", id],
-    queryFn: () => api<PairingStatus>(`/model-providers-oauth/pairing/${id}`),
-    enabled: options.enabled && !!id,
-    refetchInterval: (q) => {
-      const data = q.state.data;
-      if (!data) return 2500;
-      if (data.status === "pending") return 2500;
-      return false;
+  return $api.useQuery(
+    "get",
+    "/api/model-providers-oauth/pairing/{id}",
+    { params: { path: { id: id ?? "" } } },
+    {
+      enabled: options.enabled && !!id,
+      refetchInterval: (q) => {
+        const data = q.state.data;
+        if (!data) return 2500;
+        if (data.status === "pending") return 2500;
+        return false;
+      },
+      // Pairing rows are short-lived ephemera — no point caching beyond the
+      // polling window. Always refetch on mount so closing+reopening the
+      // modal can't see a stale "consumed" hit from a prior session.
+      staleTime: 0,
+      gcTime: 0,
     },
-    // Pairing rows are short-lived ephemera — no point caching beyond the
-    // polling window. Always refetch on mount so closing+reopening the
-    // modal can't see a stale "consumed" hit from a prior session.
-    staleTime: 0,
-    gcTime: 0,
-  });
+  );
 }
 
 export function useCancelModelProviderPairing() {
-  return useMutation({
-    mutationFn: async (id: string) => {
-      return api<void>(`/model-providers-oauth/pairing/${id}`, { method: "DELETE" });
-    },
-  });
+  return $api.useMutation("delete", "/api/model-providers-oauth/pairing/{id}");
 }

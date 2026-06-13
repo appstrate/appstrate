@@ -5,6 +5,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { ApiError, client, type paths } from "../api/client";
 import { refreshAuth, useAuth } from "../hooks/use-auth";
 import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
@@ -12,16 +13,11 @@ import { AuthLayout } from "../components/auth-layout";
 import { RegisterForm } from "../components/register-form";
 import { LoginForm } from "../components/login-form";
 import { roleI18nKey } from "../hooks/use-permissions";
-import type { OrgRole } from "@appstrate/shared-types";
+import { orgKeys } from "../lib/query-keys";
 
-interface InviteInfo {
-  email: string;
-  org_name: string;
-  role: OrgRole;
-  inviter_name: string;
-  expiresAt: string;
-  is_new_user: boolean;
-}
+/** Spec response of GET /invite/{token}/info (all fields required, role is an org-role enum). */
+type InviteInfo =
+  paths["/invite/{token}/info"]["get"]["responses"]["200"]["content"]["application/json"];
 
 export function InviteAcceptPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -38,21 +34,16 @@ export function InviteAcceptPage() {
 
   useEffect(() => {
     if (!token) return;
-    fetch(`/invite/${token}/info`, { credentials: "include" })
-      .then(async (res) => {
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.code || "invitation_not_found");
-        }
-        return res.json();
-      })
-      .then((data: InviteInfo) => {
-        setInfo(data);
-        setMode(data.is_new_user ? "register" : "login");
+    client
+      .GET("/invite/{token}/info", { params: { path: { token } } })
+      .then(({ data }) => {
+        // Non-2xx throws via the client middleware, so `data` is defined here.
+        setInfo(data!);
+        setMode(data!.is_new_user ? "register" : "login");
         setLoading(false);
       })
-      .catch((err) => {
-        const code = err instanceof Error ? err.message : "invitation_not_found";
+      .catch((err: unknown) => {
+        const code = err instanceof ApiError ? err.code : "invitation_not_found";
         if (code === "invitation_expired") {
           setServerError(t("invite.expired"));
         } else if (code === "invitation_accepted") {
@@ -68,29 +59,23 @@ export function InviteAcceptPage() {
 
   /** POST accept + handle success (shared by all accept flows) */
   const postAccept = useCallback(
-    async (body: Record<string, string> = {}) => {
-      const res = await fetch(`/invite/${token}/accept`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.detail || t("invite.error"));
-      }
+    async (body: { password?: string; displayName?: string } = {}) => {
+      // Non-2xx throws ApiError (RFC 9457 detail) via the client middleware.
       // The accept endpoint returns the joined org resource (same shape as
       // the GET /api/orgs list items).
-      const data = await res.json();
+      const { data } = await client.POST("/invite/{token}/accept", {
+        params: { path: { token: token ?? "" } },
+        body,
+      });
       await refreshAuth();
       // Refetch orgs so the new org is in the cache BEFORE setId triggers useAutoSelect
-      await queryClient.invalidateQueries({ queryKey: ["orgs"] });
-      if (data.id) {
+      await queryClient.invalidateQueries({ queryKey: orgKeys.all });
+      if (data?.id) {
         orgStore.getState().setId(data.id);
       }
       navigate("/");
     },
-    [token, navigate, t, queryClient],
+    [token, navigate, queryClient],
   );
 
   const handleRegisterAndAccept = useCallback(
@@ -98,7 +83,7 @@ export function InviteAcceptPage() {
       await postAccept({
         password: formData.password,
         displayName: formData.displayName || undefined,
-      } as Record<string, string>);
+      });
     },
     [postAccept],
   );

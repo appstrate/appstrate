@@ -3,18 +3,20 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useWatch } from "react-hook-form";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { useAppForm } from "../../hooks/use-app-form";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api } from "../../api";
+import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 import { OnboardingLayout, useOnboardingNav } from "../../components/onboarding-layout";
+import { orgKeys } from "../../lib/query-keys";
 
 function suggestOrgDefaults(
   user: { email: string; name?: string },
@@ -83,30 +85,27 @@ export function OnboardingCreateStep() {
     reset(suggestOrgDefaults(user, i18n.language));
   }, [fromSwitcher, orgs, user, i18n.language, reset]);
 
-  const createMutation = useMutation({
-    mutationFn: async (body: { name: string; slug: string }) => {
-      return api<{ id: string }>("/orgs", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-    },
+  const createMutation = $api.useMutation("post", "/api/orgs", {
     onSuccess: async (data) => {
-      await queryClient.invalidateQueries({ queryKey: ["orgs"] });
-      switchOrg(data.id);
+      // use-org.ts still reads the legacy ["orgs"] key; invalidate both stacks.
+      await queryClient.invalidateQueries({ queryKey: orgKeys.all });
+      await queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs"] });
+      if (data.id) switchOrg(data.id);
       if (nextRoute) navigate(nextRoute);
     },
-    onError: (err: Error) => {
-      if (err.message.toLowerCase().includes("slug")) {
+    onError: (err) => {
+      const message = getErrorMessage(err);
+      if (message.toLowerCase().includes("slug")) {
         setSlugOpen(true);
-        setError("slug", { message: err.message });
+        setError("slug", { message });
       } else {
-        setError("root", { message: err.message });
+        setError("root", { message });
       }
     },
   });
 
   const onSubmit = (data: CreateOrgFormData) => {
-    createMutation.mutate({ name: data.name.trim(), slug: data.slug.trim() });
+    createMutation.mutate({ body: { name: data.name.trim(), slug: data.slug.trim() } });
   };
 
   return (

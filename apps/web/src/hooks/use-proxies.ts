@@ -1,102 +1,71 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, apiList } from "../api";
+import { $api, client, type components } from "../api/client";
+import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
+import { useOrgOnlyScope } from "./use-org-scope";
+import { agentProxyKeys, packageKeys } from "../lib/query-keys";
+
+/** Wire shape from the OpenAPI spec (components.schemas.OrgProxy). */
+export type OrgProxyInfo = components["schemas"]["OrgProxy"];
 
 export function useProxies() {
-  const orgId = useCurrentOrgId();
-  return useQuery({
-    queryKey: ["proxies", orgId],
-    queryFn: () => apiList<OrgProxyInfo>("/proxies"),
-    enabled: !!orgId,
-  });
+  const scope = useOrgOnlyScope();
+  return $api.useQuery(
+    "get",
+    "/api/proxies",
+    { params: { header: scope.header } },
+    { enabled: scope.enabled, select: (e) => e.data },
+  );
+}
+
+/** openapi-react-query keys are [method, path, init] — invalidate the literal spec path. */
+function useInvalidateProxies() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: ["get", "/api/proxies"] });
+  };
 }
 
 export function useCreateProxy() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: { label: string; url: string }) => {
-      // Bare created proxy resource (#657).
-      return api<OrgProxyInfo>("/proxies", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["proxies"] });
-    },
-  });
+  const invalidate = useInvalidateProxies();
+  return $api.useMutation("post", "/api/proxies", { onSuccess: invalidate });
 }
 
 export function useUpdateProxy() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      id,
-      data,
-    }: {
-      id: string;
-      data: { label?: string; url?: string; enabled?: boolean };
-    }) => {
-      // Bare updated proxy resource (#657).
-      return api<OrgProxyInfo>(`/proxies/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(data),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["proxies"] });
-    },
-  });
+  const invalidate = useInvalidateProxies();
+  return $api.useMutation("put", "/api/proxies/{id}", { onSuccess: invalidate });
 }
 
 export function useDeleteProxy() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      return api(`/proxies/${id}`, { method: "DELETE" });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["proxies"] });
-    },
-  });
+  const invalidate = useInvalidateProxies();
+  return $api.useMutation("delete", "/api/proxies/{id}", { onSuccess: invalidate });
 }
 
 export function useSetDefaultProxy() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (proxyId: string | null) => {
-      // Bare effective default proxy resource, or undefined when no default
-      // remains in effect (204) (#657).
-      return api<OrgProxyInfo | undefined>("/proxies/default", {
-        method: "PUT",
-        body: JSON.stringify({ proxyId }),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["proxies"] });
-    },
-  });
+  const invalidate = useInvalidateProxies();
+  return $api.useMutation("put", "/api/proxies/default", { onSuccess: invalidate });
 }
 
 export function useTestProxy() {
-  return useMutation({
-    mutationFn: (id: string) => api<TestResult>(`/proxies/${id}/test`, { method: "POST" }),
-  });
+  return $api.useMutation("post", "/api/proxies/{id}/test");
 }
 
 export function useAgentProxy(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agent-proxy", orgId, applicationId, packageId],
-    queryFn: () =>
-      api<{ proxyId: string | null; proxyLabel?: string; resolved: boolean }>(
-        `/agents/${packageId}/proxy`,
-      ),
+    // Key kept legacy-shaped: invalidated by useSetAgentProxy below and
+    // app-switch resets.
+    queryKey: agentProxyKeys.detail(orgId, applicationId, packageId),
+    queryFn: async () => {
+      const { data } = await client.GET("/api/agents/{scope}/{name}/proxy", {
+        params: { path: splitPackageRef(packageId!) },
+      });
+      return data!;
+    },
     enabled: !!orgId && !!applicationId && !!packageId,
   });
 }
@@ -105,14 +74,15 @@ export function useSetAgentProxy(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (proxyId: string | null) => {
-      return api(`/agents/${packageId}/proxy`, {
-        method: "PUT",
-        body: JSON.stringify({ proxyId }),
+      const { data } = await client.PUT("/api/agents/{scope}/{name}/proxy", {
+        params: { path: splitPackageRef(packageId) },
+        body: { proxyId },
       });
+      return data;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agent-proxy"] });
-      qc.invalidateQueries({ queryKey: ["packages", "agent"] });
+      qc.invalidateQueries({ queryKey: agentProxyKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
     },
   });
 }

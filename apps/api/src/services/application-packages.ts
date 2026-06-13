@@ -163,6 +163,7 @@ export async function listAccessiblePackages(scope: AppScope, type: PackageType)
   return db
     .select({
       id: packages.id,
+      type: packages.type,
       draftManifest: packages.draftManifest,
       draftContent: packages.draftContent,
       source: packages.source,

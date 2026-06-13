@@ -1,32 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import type { OrgSettings } from "@appstrate/shared-types";
-import { api } from "../api";
+import { $api } from "../api/client";
 import { useCurrentOrgId } from "./use-org";
 
 export type { OrgSettings };
 
 export function useOrgSettings() {
   const orgId = useCurrentOrgId();
-  return useQuery({
-    queryKey: ["org-settings", orgId],
-    queryFn: () => api<OrgSettings>(`/orgs/${orgId}/settings`),
-    enabled: !!orgId,
-  });
+  return $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}/settings",
+    // orgId is part of the typed query key via the path param, so switching
+    // org refetches instead of serving the previous org's settings.
+    { params: { path: { orgId: orgId ?? "" } } },
+    { enabled: !!orgId },
+  );
 }
 
 export function useUpdateOrgSettings() {
   const queryClient = useQueryClient();
-  const orgId = useCurrentOrgId();
-  return useMutation({
-    mutationFn: (updates: Partial<OrgSettings>) =>
-      api<OrgSettings>(`/orgs/${orgId}/settings`, {
-        method: "PUT",
-        body: JSON.stringify(updates),
-      }),
-    onSuccess: (data) => {
-      queryClient.setQueryData(["org-settings", orgId], data);
+  return $api.useMutation("put", "/api/orgs/{orgId}/settings", {
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}/settings"] });
     },
   });
 }

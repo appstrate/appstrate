@@ -20,14 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getErrorMessage } from "@appstrate/core/errors";
-
-interface RedeemResponse {
-  bootstrap?: { orgId: string; orgSlug: string };
-  error?: { detail?: string; title?: string; code?: string };
-  detail?: string;
-  title?: string;
-  code?: string;
-}
+import { client } from "../api/client";
 
 export function ClaimPage() {
   const { t } = useTranslation(["common"]);
@@ -43,24 +36,15 @@ export function ClaimPage() {
     setErrorMsg(null);
     setSubmitting(true);
     try {
-      const res = await fetch("/api/auth/bootstrap/redeem", {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      // Non-2xx throws ApiError (RFC 9457 detail) via the client middleware.
+      await client.POST("/api/auth/bootstrap/redeem", {
+        body: {
           token: token.trim(),
           email: email.trim(),
           name: name.trim(),
           password,
-        }),
+        },
       });
-      const body = (await res.json().catch(() => ({}))) as RedeemResponse;
-      if (!res.ok) {
-        const detail = body.detail ?? body.title ?? `${res.status} ${res.statusText}`;
-        setErrorMsg(detail);
-        setSubmitting(false);
-        return;
-      }
       // Success: the redeem route already set the session cookie. Hard-reload
       // so the next request sees `bootstrapTokenPending: false` in AppConfig
       // and the SPA flows into the normal authenticated path.

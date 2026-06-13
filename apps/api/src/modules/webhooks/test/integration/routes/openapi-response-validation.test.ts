@@ -62,6 +62,7 @@ describe("OpenAPI response validation — webhooks", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
     });
   });
 
@@ -85,6 +86,7 @@ describe("OpenAPI response validation — webhooks", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect(body).toHaveProperty("data");
       expect((body as any).data).toBeArray();
       expect((body as any).data.length).toBeGreaterThanOrEqual(1);
@@ -111,6 +113,7 @@ describe("OpenAPI response validation — webhooks", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect((body as any).id).toBe(wh.id);
     });
   });
@@ -135,6 +138,7 @@ describe("OpenAPI response validation — webhooks", () => {
       }
 
       expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
       expect(body).toHaveProperty("status");
       expect((body as any).status).toBe(400);
     });

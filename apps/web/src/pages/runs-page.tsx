@@ -30,7 +30,7 @@ export function RunsPage() {
         actions={
           <Button
             variant="outline"
-            onClick={() => markAllRead.mutate()}
+            onClick={() => markAllRead.mutate({})}
             disabled={markAllRead.isPending || !unreadCount}
           >
             {t("runs.markAllRead")}

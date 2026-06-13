@@ -16,6 +16,7 @@
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach, mock } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
+import { eventData } from "../../helpers/sse.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
@@ -107,7 +108,7 @@ describe("run-metric-broadcaster (integration)", () => {
       packageId: agentId,
       tokenUsage: { input_tokens: 100, output_tokens: 50 },
     });
-    expect(evt.data.costSoFar).toBeCloseTo(0.0042, 5);
+    expect(eventData(evt, "run_metric").costSoFar).toBeCloseTo(0.0042, 5);
   });
 
   // ── trailing edge throttling ─────────────────────────────
@@ -151,7 +152,7 @@ describe("run-metric-broadcaster (integration)", () => {
     scheduleRunMetricBroadcast(runId);
     await wait(50);
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0]![0]!.data.costSoFar).toBe(0);
+    expect(eventData(send.mock.calls[0]![0]!, "run_metric").costSoFar).toBe(0);
 
     // Insert a ledger row + schedule a trailing emit. The trailing
     // emit must re-read the ledger and pick up the new total.
@@ -167,7 +168,7 @@ describe("run-metric-broadcaster (integration)", () => {
 
     await wait(350);
     expect(send).toHaveBeenCalledTimes(2);
-    expect(send.mock.calls[1]![0]!.data.costSoFar).toBeCloseTo(0.01, 5);
+    expect(eventData(send.mock.calls[1]![0]!, "run_metric").costSoFar).toBeCloseTo(0.01, 5);
   });
 
   // ── tenant isolation ─────────────────────────────────────

@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Search, Users } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -90,7 +91,7 @@ export function EndUsersPage() {
 
   if (!isAdmin) return null;
   if (!applicationId) return <EmptyState message={t("applications.noAppSelected")} icon={Users} />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   return (
     <div className="p-6">

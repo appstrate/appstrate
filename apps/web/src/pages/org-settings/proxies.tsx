@@ -14,13 +14,15 @@ import {
   useDeleteProxy,
   useSetDefaultProxy,
   useTestProxy,
+  type OrgProxyInfo,
 } from "../../hooks/use-proxies";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
-import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
+import type { TestResult } from "@appstrate/shared-types";
 
 function TestResultSpan({
   result,
@@ -59,7 +61,7 @@ export function OrgSettingsProxiesPage() {
 
   if (!isAdmin) return <Navigate to="/org-settings/general" replace />;
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   const onCreate = () => {
     setEditProxy(null);
@@ -70,8 +72,8 @@ export function OrgSettingsProxiesPage() {
     setProxyModalOpen(true);
   };
   const onDelete = (p: OrgProxyInfo) => setConfirmState({ label: p.label, id: p.id });
-  const onSetDefault = (p: OrgProxyInfo) => setDefaultMutation.mutate(p.id);
-  const onRemoveDefault = () => setDefaultMutation.mutate(null);
+  const onSetDefault = (p: OrgProxyInfo) => setDefaultMutation.mutate({ body: { proxyId: p.id } });
+  const onRemoveDefault = () => setDefaultMutation.mutate({ body: { proxyId: null } });
 
   return (
     <>
@@ -159,11 +161,11 @@ export function OrgSettingsProxiesPage() {
         onSubmit={(data) => {
           if (editProxy) {
             updateMutation.mutate(
-              { id: editProxy.id, data },
+              { params: { path: { id: editProxy.id } }, body: data },
               { onSuccess: () => setProxyModalOpen(false) },
             );
           } else {
-            createMutation.mutate(data, { onSuccess: () => setProxyModalOpen(false) });
+            createMutation.mutate({ body: data }, { onSuccess: () => setProxyModalOpen(false) });
           }
         }}
       />
@@ -176,9 +178,10 @@ export function OrgSettingsProxiesPage() {
         isPending={deleteMutation.isPending}
         onConfirm={() => {
           if (confirmState) {
-            deleteMutation.mutate(confirmState.id, {
-              onSuccess: () => setConfirmState(null),
-            });
+            deleteMutation.mutate(
+              { params: { path: { id: confirmState.id } } },
+              { onSuccess: () => setConfirmState(null) },
+            );
           }
         }}
       />

@@ -38,6 +38,8 @@ import { collectModulePermissions } from "../../src/lib/modules/module-loader.ts
 import { setModulePermissionsProvider } from "@appstrate/core/permissions";
 import { initAppConfig } from "../../src/lib/app-config.ts";
 import { notFound } from "../../src/lib/errors.ts";
+import { buildOpenApiSpec } from "../../src/openapi/index.ts";
+import { createResponseValidationMiddleware } from "./response-validation.ts";
 
 // Route imports
 import { createAgentsRouter } from "../../src/routes/agents.ts";
@@ -146,6 +148,28 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
 
   // CORS
   app.use("*", cors({ origin: "*", credentials: true }));
+
+  // Response-contract gate: validate every JSON response against its OpenAPI
+  // schema, fail-closed. The spec is assembled from the SAME module set this
+  // app mounts (core-only when `modules: []`), so module routes are checked
+  // against their own contributed paths/schemas. Registered before any route
+  // so it wraps them all. See ./response-validation.ts for scope + behavior.
+  const moduleApiPaths = Object.assign({}, ...extraModules.map((m) => m.openApiPaths?.() ?? {}));
+  const moduleApiSchemas = Object.assign(
+    {},
+    ...extraModules.map((m) => m.openApiComponentSchemas?.() ?? {}),
+  );
+  const moduleApiTags = extraModules.flatMap((m) => m.openApiTags?.() ?? []);
+  // On by default (CI enforces it). `DISABLE_RESPONSE_CONTRACT=1` is an
+  // escape hatch for debugging an unrelated failing test in isolation.
+  if (process.env.DISABLE_RESPONSE_CONTRACT !== "1") {
+    app.use(
+      "*",
+      createResponseValidationMiddleware(
+        buildOpenApiSpec(moduleApiPaths, moduleApiSchemas, moduleApiTags),
+      ),
+    );
+  }
 
   // Health check (no auth)
   app.route("/", healthRouter);

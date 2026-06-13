@@ -4,9 +4,24 @@ import { useEffect, useRef } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
+import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateNotificationQueries } from "./use-notifications";
 import { parseSSEFrames } from "../lib/sse-parser";
-import { type EnrichedRun, type RunStatus, TERMINAL_RUN_STATUSES } from "@appstrate/shared-types";
+import {
+  runKeys,
+  runsKeys,
+  paginatedRunsKeys,
+  packageKeys,
+  agentsKeys,
+  scheduleKeys,
+  billingKeys,
+} from "../lib/query-keys";
+import {
+  type EnrichedRun,
+  TERMINAL_RUN_STATUSES,
+  runUpdateEventSchema,
+  runUpdateToRunPatch,
+} from "@appstrate/shared-types";
 
 /**
  * Patch caches when an `integration_connections` row changes (INSERT /
@@ -21,19 +36,16 @@ import { type EnrichedRun, type RunStatus, TERMINAL_RUN_STATUSES } from "@appstr
  * which is acceptable because the run-time resolver gate enforces the
  * server-side truth anyway.
  */
-function handleConnectionUpdate(qc: QueryClient, orgId: string, applicationId: string) {
+function handleConnectionUpdate(qc: QueryClient) {
   // Connections page (`/preferences/connections`) — the orange
-  // "Reconnection required" badge reads off this key. The hook
-  // (`use-me-connections.ts`) keys flat, so we invalidate flat.
-  qc.invalidateQueries({ queryKey: ["me-connections"] });
+  // "Reconnection required" badge reads off this typed query.
+  qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
   // Integration list (sidebar status, integrations page count) +
   // detail subtree (auth statuses, connection lists, agent-resolution
-  // verdicts). Subtree-invalidate by ["integrations", orgId, appId] —
-  // the per-integration key shape is
-  // `[...KEY(orgId, appId), "detail" | "connections" | "agent-resolution", …]`
-  // so the prefix match cascades to every sub-key, including the
-  // resolution verdict that powers the agent picker dropdown.
-  qc.invalidateQueries({ queryKey: ["integrations", orgId, applicationId] });
+  // verdicts, the resolution verdict that powers the agent picker
+  // dropdown). The typed keys are `[method, "/api/integrations…", init]`,
+  // so the shared helper matches on the path element.
+  void invalidateIntegrationQueries(qc);
 }
 
 /**
@@ -86,51 +98,66 @@ function handleSSEMessage(
   applicationId: string,
   raw: string,
 ) {
+  let json: unknown;
   try {
-    const newRow = JSON.parse(raw) as Record<string, unknown>;
-    const packageId = newRow.packageId as string;
-    const runId = newRow.id as string;
-    const status = newRow.status as string;
-    const scheduleId = newRow.scheduleId as string | null;
-
-    qc.setQueryData<EnrichedRun>(["run", orgId, applicationId, runId], (prev) => {
-      if (!prev) return prev;
-      return { ...prev, ...newRow } as EnrichedRun;
-    });
-
-    qc.setQueryData<EnrichedRun[]>(["runs", orgId, applicationId, packageId], (prev) => {
-      if (!prev) return prev;
-      const exists = prev.some((ex) => ex.id === runId);
-      if (exists) {
-        return prev.map((ex) => (ex.id === runId ? ({ ...ex, ...newRow } as EnrichedRun) : ex));
-      }
-      return [newRow as unknown as EnrichedRun, ...prev].slice(0, 50);
-    });
-
-    // Broad invalidations are debounced (trailing ~2s) — the in-place cache
-    // patches above keep the visible run data live in the meantime.
-    broad.schedule(["agents", orgId]);
-    broad.schedule(["packages", "agent", orgId, packageId]);
-    broad.schedule(["paginated-runs"]);
-
-    // Invalidate schedule-specific caches
-    if (scheduleId) {
-      qc.invalidateQueries({ queryKey: ["schedule-runs", orgId, applicationId, scheduleId] });
-      qc.invalidateQueries({ queryKey: ["schedule", orgId, applicationId, scheduleId] });
-      qc.invalidateQueries({ queryKey: ["schedules", orgId, applicationId] });
-    }
-
-    if (TERMINAL_RUN_STATUSES.has(status as RunStatus)) {
-      // NOTE: ["paginated-runs"] is NOT invalidated here — the debounced
-      // broad invalidation above already covers it for this same event
-      // (it used to be invalidated twice per terminal run).
-      invalidateNotificationQueries(qc);
-      qc.invalidateQueries({ queryKey: ["runs"] });
-      qc.invalidateQueries({ queryKey: ["run"] });
-      qc.invalidateQueries({ queryKey: ["billing", orgId] });
-    }
+    json = JSON.parse(raw);
   } catch {
-    // Ignore malformed payloads
+    return; // malformed frame
+  }
+  const parsed = runUpdateEventSchema.safeParse(json);
+  if (!parsed.success) return;
+  const evt = parsed.data;
+  const { id: runId, packageId, status, scheduleId } = evt;
+  // Map the camelCase wire frame onto RunWireDto field names (started_at /
+  // completed_at are snake there) so the spread actually overwrites them.
+  const patch = runUpdateToRunPatch(evt);
+
+  qc.setQueryData<EnrichedRun>(runKeys.detail(orgId, applicationId, runId), (prev) =>
+    prev ? { ...prev, ...patch } : prev,
+  );
+
+  // Only the per-agent run list is keyed by packageId (nullable on the wire
+  // once a run's package is deleted — ON DELETE SET NULL).
+  if (packageId) {
+    const listKey = runsKeys.forAgent(orgId, applicationId, packageId);
+    const list = qc.getQueryData<EnrichedRun[]>(listKey);
+    if (list) {
+      if (list.some((ex) => ex.id === runId)) {
+        qc.setQueryData<EnrichedRun[]>(listKey, (prev) =>
+          prev?.map((ex) => (ex.id === runId ? { ...ex, ...patch } : ex)),
+        );
+      } else {
+        // A run not yet in this list (its first event) — refetch the full
+        // enriched row instead of inserting a 13-field partial as a full one.
+        qc.invalidateQueries({ queryKey: listKey });
+      }
+    }
+  }
+
+  // Broad invalidations are debounced (trailing ~2s) — the in-place cache
+  // patches above keep the visible run data live in the meantime.
+  broad.schedule(agentsKeys.inOrg(orgId));
+  // Agent detail caches are keyed ["packages","agents",orgId,applicationId,id]
+  // (plural path, applicationId before id) — invalidate by the org-scoped
+  // prefix so a run status change refreshes the agent's config/model tabs.
+  broad.schedule(packageKeys.familyInOrg("agents", orgId));
+  broad.schedule(paginatedRunsKeys.all);
+
+  // Invalidate schedule-specific caches
+  if (scheduleId) {
+    qc.invalidateQueries({ queryKey: scheduleKeys.runs(orgId, applicationId, scheduleId) });
+    qc.invalidateQueries({ queryKey: scheduleKeys.detail(orgId, applicationId, scheduleId) });
+    qc.invalidateQueries({ queryKey: scheduleKeys.list(orgId, applicationId) });
+  }
+
+  if (TERMINAL_RUN_STATUSES.has(status)) {
+    // NOTE: ["paginated-runs"] is NOT invalidated here — the debounced
+    // broad invalidation above already covers it for this same event
+    // (it used to be invalidated twice per terminal run).
+    invalidateNotificationQueries(qc);
+    qc.invalidateQueries({ queryKey: runsKeys.all });
+    qc.invalidateQueries({ queryKey: runKeys.all });
+    qc.invalidateQueries({ queryKey: billingKeys.forOrg(orgId) });
   }
 }
 
@@ -178,7 +205,7 @@ export function useGlobalRunSync() {
             if (event === "run_update" && data) {
               handleSSEMessage(qcRef.current, broad, orgId, applicationId, data);
             } else if (event === "connection_update" && data) {
-              handleConnectionUpdate(qcRef.current, orgId, applicationId);
+              handleConnectionUpdate(qcRef.current);
             }
           }
         }
