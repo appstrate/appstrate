@@ -77,6 +77,22 @@
       "cacheWrite": 3.75
     }
   },
+  "claude-fable-5": {
+    "label": "Claude Fable 5",
+    "contextWindow": 1000000,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 10,
+      "output": 50,
+      "cacheRead": 1,
+      "cacheWrite": 12.5
+    }
+  },
   "claude-haiku-4-5": {
     "label": "Claude Haiku 4 5",
     "contextWindow": 200000,

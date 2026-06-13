@@ -5,12 +5,20 @@
  * shipped with every Appstrate deployment.
  *
  * Each entry is a `ModelProviderDefinition` carrying wire format, auth
- * metadata, and a curated featured list (just catalog ids). All per-
- * model metadata (label, contextWindow, maxTokens, capabilities, cost)
- * comes from the vendored LiteLLM catalog
+ * metadata, and a featured list (just catalog ids). All per-model
+ * metadata (label, contextWindow, maxTokens, capabilities, cost) comes
+ * from the vendored LiteLLM catalog
  * (`apps/api/src/services/pricing-catalog.ts`). A boot-time check fails
  * loudly if any featured id is absent from the catalog — there are no
  * inline overrides.
+ *
+ * Featured lists are AUTO-GENERATED (`data/featured-models.json`): the
+ * newest tool-calling models per provider, computed weekly by
+ * `scripts/refresh-pricing-catalog.ts` from the LiteLLM catalog ∩
+ * models.dev release dates, regenerated atomically with the catalogs
+ * so every id is guaranteed present. To pin an editorial choice,
+ * replace `featured("<id>")` with a hardcoded string[] on that
+ * definition — the weekly diff then leaves it untouched.
  *
  * Featured semantics: any id present in `featuredModels` is marked
  * `featured: true` in the registry response. For catalog-covered
@@ -35,6 +43,16 @@
  */
 
 import type { AppstrateModule, ModelProviderDefinition } from "@appstrate/core/module";
+import autoFeatured from "../../data/featured-models.json" with { type: "json" };
+
+/**
+ * Generated featured lists — see module docstring. Lookup is total: a
+ * provider absent from the JSON (models.dev coverage gap) gets an empty
+ * featured group, which the picker and onboarding auto-seed both
+ * tolerate.
+ */
+const FEATURED = autoFeatured as Record<string, string[]>;
+const featured = (providerId: string): string[] => FEATURED[providerId] ?? [];
 
 const anthropic: ModelProviderDefinition = {
   providerId: "anthropic",
@@ -47,7 +65,7 @@ const anthropic: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
-  featuredModels: ["claude-haiku-4-5-20251001", "claude-opus-4-6", "claude-sonnet-4-6"],
+  featuredModels: featured("anthropic"),
 };
 
 const cerebras: ModelProviderDefinition = {
@@ -60,7 +78,33 @@ const cerebras: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.cerebras.ai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  featuredModels: ["llama-3.3-70b", "gpt-oss-120b"],
+  featuredModels: featured("cerebras"),
+};
+
+const deepseek: ModelProviderDefinition = {
+  providerId: "deepseek",
+  displayName: "DeepSeek",
+  iconUrl: "deepseek",
+  description: "Bring your own DeepSeek API key.",
+  docsUrl: "https://api-docs.deepseek.com/",
+  apiShape: "openai-completions",
+  defaultBaseUrl: "https://api.deepseek.com/v1",
+  baseUrlOverridable: false,
+  authMode: "api_key",
+  featuredModels: featured("deepseek"),
+};
+
+const fireworksAi: ModelProviderDefinition = {
+  providerId: "fireworks-ai",
+  displayName: "Fireworks AI",
+  iconUrl: "fireworks-ai",
+  description: "Bring your own Fireworks AI API key.",
+  docsUrl: "https://docs.fireworks.ai/api-reference/post-chatcompletions",
+  apiShape: "openai-completions",
+  defaultBaseUrl: "https://api.fireworks.ai/inference/v1",
+  baseUrlOverridable: false,
+  authMode: "api_key",
+  featuredModels: featured("fireworks-ai"),
 };
 
 const googleAi: ModelProviderDefinition = {
@@ -74,7 +118,7 @@ const googleAi: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
-  featuredModels: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.1-pro-preview"],
+  featuredModels: featured("google-ai"),
 };
 
 const groq: ModelProviderDefinition = {
@@ -87,7 +131,9 @@ const groq: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.groq.com/openai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  featuredModels: ["llama-3.3-70b-versatile", "kimi-k2-instruct-0905"],
+  // Groq serves several models under namespaced ids (`openai/gpt-oss-120b`,
+  // `moonshotai/kimi-k2-instruct-0905`) — the catalog vendors them verbatim.
+  featuredModels: featured("groq"),
 };
 
 const mistral: ModelProviderDefinition = {
@@ -101,13 +147,20 @@ const mistral: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
-  featuredModels: [
-    "codestral-latest",
-    "devstral-2512",
-    "mistral-large-latest",
-    "mistral-medium-latest",
-    "mistral-small-latest",
-  ],
+  featuredModels: featured("mistral"),
+};
+
+const moonshot: ModelProviderDefinition = {
+  providerId: "moonshot",
+  displayName: "Moonshot AI",
+  iconUrl: "moonshot",
+  description: "Bring your own Moonshot AI (Kimi) API key.",
+  docsUrl: "https://platform.moonshot.ai/docs",
+  apiShape: "openai-completions",
+  defaultBaseUrl: "https://api.moonshot.ai/v1",
+  baseUrlOverridable: false,
+  authMode: "api_key",
+  featuredModels: featured("moonshot"),
 };
 
 const openai: ModelProviderDefinition = {
@@ -121,7 +174,7 @@ const openai: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
-  featuredModels: ["gpt-5-mini", "gpt-5.4", "o4-mini"],
+  featuredModels: featured("openai"),
 };
 
 const openrouter: ModelProviderDefinition = {
@@ -138,6 +191,19 @@ const openrouter: ModelProviderDefinition = {
   featuredModels: [],
 };
 
+const togetherAi: ModelProviderDefinition = {
+  providerId: "together-ai",
+  displayName: "Together AI",
+  iconUrl: "together-ai",
+  description: "Bring your own Together AI API key.",
+  docsUrl: "https://docs.together.ai/reference/chat-completions-1",
+  apiShape: "openai-completions",
+  defaultBaseUrl: "https://api.together.xyz/v1",
+  baseUrlOverridable: false,
+  authMode: "api_key",
+  featuredModels: featured("together-ai"),
+};
+
 const xai: ModelProviderDefinition = {
   providerId: "xai",
   displayName: "xAI",
@@ -148,7 +214,20 @@ const xai: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.x.ai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  featuredModels: ["grok-3", "grok-3-mini", "grok-4"],
+  featuredModels: featured("xai"),
+};
+
+const zai: ModelProviderDefinition = {
+  providerId: "zai",
+  displayName: "Z.ai",
+  iconUrl: "zai",
+  description: "Bring your own Z.ai (GLM) API key.",
+  docsUrl: "https://docs.z.ai/api-reference",
+  apiShape: "openai-completions",
+  defaultBaseUrl: "https://api.z.ai/api/paas/v4",
+  baseUrlOverridable: false,
+  authMode: "api_key",
+  featuredModels: featured("zai"),
 };
 
 const openaiCompatible: ModelProviderDefinition = {
@@ -175,12 +254,17 @@ const coreProvidersModule: AppstrateModule = {
     return [
       anthropic,
       cerebras,
+      deepseek,
+      fireworksAi,
       googleAi,
       groq,
       mistral,
+      moonshot,
       openai,
       openrouter,
+      togetherAi,
       xai,
+      zai,
       openaiCompatible,
     ];
   },

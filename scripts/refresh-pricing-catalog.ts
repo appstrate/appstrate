@@ -64,6 +64,66 @@ const LITELLM_TO_OURS: Record<string, string> = {
   cerebras: "cerebras",
   groq: "groq",
   xai: "xai",
+  deepseek: "deepseek",
+  moonshot: "moonshot",
+  together_ai: "together-ai",
+  fireworks_ai: "fireworks-ai",
+  zai: "zai",
+};
+
+/**
+ * LiteLLM providers we snapshot WITHOUT vendoring into the pricing
+ * catalog. `chatgpt` is the ChatGPT subscription backend (flat-fee — no
+ * per-token pricing, entries carry no cost fields). The codex module is
+ * a foreign-catalog provider exposing a curated `featuredModels` list,
+ * never a full catalog, because the subscription serves a restricted,
+ * moving set of models. The weekly diff on this snapshot is the review
+ * signal for that curation (new subscription models, deprecations).
+ * No Anthropic equivalent exists — LiteLLM carries no claude-
+ * subscription provider, so the claude-code module's curation stays
+ * manual.
+ *
+ * Snapshots land in `apps/api/src/data/subscription-watch/<name>.json`
+ * as a sorted id array. Nothing imports them at runtime.
+ */
+const SUBSCRIPTION_WATCH: readonly string[] = ["chatgpt"];
+const WATCH_DIR = resolve(REPO_ROOT, "apps/api/src/data/subscription-watch");
+
+/**
+ * Auto-featured generation — second source: [models.dev](https://models.dev)
+ * (open data from the opencode project, no auth). LiteLLM carries no
+ * release dates, so "newest models per provider" is not derivable from
+ * it alone. models.dev carries `release_date` + `tool_call` per model.
+ *
+ * Featured = the {@link FEATURED_COUNT} newest models per provider in
+ * the **intersection** of the vendored LiteLLM snapshot (pricing must
+ * exist) and models.dev, filtered to `tool_call: true` (Appstrate
+ * agents require tool-calling — a hard compatibility criterion, not an
+ * editorial one). Output: `apps/api/src/data/featured-models.json`,
+ * consumed by `core-providers` at boot. Hardcoding a list on a
+ * provider definition still overrides (see core-providers/index.ts).
+ *
+ * Subscription-OAuth modules (codex, claude-code) keep manual curation
+ * — models.dev doesn't describe subscription backends.
+ */
+const MODELSDEV_URL = "https://models.dev/api.json";
+const FEATURED_PATH = resolve(REPO_ROOT, "apps/api/src/data/featured-models.json");
+const FEATURED_COUNT = 3;
+
+/** Our providerId → models.dev provider key (identity unless mapped). */
+const OURS_TO_MODELSDEV: Record<string, string> = {
+  openai: "openai",
+  anthropic: "anthropic",
+  mistral: "mistral",
+  "google-ai": "google",
+  cerebras: "cerebras",
+  groq: "groq",
+  xai: "xai",
+  deepseek: "deepseek",
+  moonshot: "moonshotai",
+  "together-ai": "togetherai",
+  "fireworks-ai": "fireworks-ai",
+  zai: "zai",
 };
 
 const PROVIDERS = Object.values(LITELLM_TO_OURS) as readonly string[];
@@ -110,8 +170,19 @@ interface Summary {
  * Strip the routing namespace prefix LiteLLM uses for some entries
  * (`mistral/codestral-latest`, `azure/gpt-4o`, …). Our pricing lookup
  * keys on the canonical model id only.
+ *
+ * Only the `<litellm_provider>/` prefix is stripped — the remainder IS
+ * the model id. Several providers use multi-segment ids their API
+ * actually expects (`together_ai/meta-llama/Llama-3.3-70B…` →
+ * `meta-llama/Llama-3.3-70B…`, `fireworks_ai/accounts/fireworks/models/x`
+ * → `accounts/fireworks/models/x`); collapsing to the last segment
+ * would vendor ids the upstream API rejects. Keys namespaced under a
+ * different prefix keep the last-segment fallback (identical output
+ * for every single-segment-namespace provider).
  */
-function canonicalId(rawKey: string): string {
+function canonicalId(rawKey: string, litellmProvider: string): string {
+  const prefix = `${litellmProvider}/`;
+  if (rawKey.startsWith(prefix)) return rawKey.slice(prefix.length);
   const slash = rawKey.lastIndexOf("/");
   return slash === -1 ? rawKey : rawKey.slice(slash + 1);
 }
@@ -199,13 +270,48 @@ function buildProviderSnapshot(
     if (entry.litellm_provider !== litellmProvider) continue;
     if (entry.mode !== "chat") continue;
     if (!key.includes("/")) continue;
-    const id = canonicalId(key);
+    const id = canonicalId(key, litellmProvider);
     if (out[id]) continue;
     const projected = projectEntry(id, entry);
     if (projected) out[id] = projected;
   }
   // Stable key order for clean diffs in pricing-drift PRs.
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+/** Subset of one models.dev model entry we consume. */
+interface ModelsDevModel {
+  release_date?: string;
+  tool_call?: boolean;
+}
+
+interface ModelsDevProvider {
+  models?: Record<string, ModelsDevModel>;
+}
+
+async function fetchModelsDev(): Promise<Record<string, ModelsDevProvider>> {
+  const res = await fetch(MODELSDEV_URL);
+  if (!res.ok) throw new Error(`fetch ${MODELSDEV_URL} → HTTP ${res.status}`);
+  return (await res.json()) as Record<string, ModelsDevProvider>;
+}
+
+/**
+ * Newest {@link FEATURED_COUNT} tool-calling models for one provider:
+ * vendored snapshot ∩ models.dev, sorted by `release_date` desc (id asc
+ * as deterministic tie-break).
+ */
+function buildFeatured(
+  snapshot: Record<string, CompactEntry>,
+  modelsDevModels: Record<string, ModelsDevModel>,
+): string[] {
+  return Object.entries(modelsDevModels)
+    .filter(([id, m]) => snapshot[id] && m.tool_call === true && typeof m.release_date === "string")
+    .sort(([idA, a], [idB, b]) => {
+      if (a.release_date !== b.release_date) return a.release_date! < b.release_date! ? 1 : -1;
+      return idA < idB ? -1 : 1;
+    })
+    .slice(0, FEATURED_COUNT)
+    .map(([id]) => id);
 }
 
 async function fetchUpstream(): Promise<Record<string, LiteLLMEntry>> {
@@ -282,11 +388,13 @@ async function main(): Promise<void> {
     mkdirSync(DATA_DIR, { recursive: true });
   }
 
-  const upstream = await fetchUpstream();
+  const [upstream, modelsDev] = await Promise.all([fetchUpstream(), fetchModelsDev()]);
   const summaries: Summary[] = [];
+  const snapshots: Record<string, Record<string, CompactEntry>> = {};
 
   for (const [litellmProvider, ourName] of Object.entries(LITELLM_TO_OURS)) {
     const upstreamSnapshot = buildProviderSnapshot(upstream, litellmProvider);
+    snapshots[ourName] = upstreamSnapshot;
     const local = readLocal(ourName);
     const diff = diffSnapshots(local, upstreamSnapshot);
     const summary: Summary = {
@@ -308,9 +416,88 @@ async function main(): Promise<void> {
     }
   }
 
+  // Auto-featured — newest tool-calling models per provider (LiteLLM ∩
+  // models.dev). One JSON for all providers; regenerated atomically with
+  // the catalogs above so every featured id is guaranteed to exist in
+  // its provider's vendored file (the boot-time check relies on this).
+  {
+    const upstreamFeatured: Record<string, string[]> = {};
+    for (const ourName of Object.keys(OURS_TO_MODELSDEV).sort()) {
+      const mdModels = modelsDev[OURS_TO_MODELSDEV[ourName]]?.models ?? {};
+      upstreamFeatured[ourName] = buildFeatured(snapshots[ourName] ?? {}, mdModels);
+      if (upstreamFeatured[ourName].length === 0) {
+        console.log(`    ⚠ featured: empty intersection for ${ourName} (models.dev coverage gap)`);
+      }
+    }
+    const localFeatured = existsSync(FEATURED_PATH)
+      ? (JSON.parse(readFileSync(FEATURED_PATH, "utf8")) as Record<string, string[]>)
+      : {};
+    const changed = Object.keys(upstreamFeatured).filter(
+      (p) => JSON.stringify(localFeatured[p] ?? []) !== JSON.stringify(upstreamFeatured[p]),
+    );
+    const summary: Summary = {
+      provider: "featured",
+      localSize: Object.values(localFeatured).flat().length,
+      upstreamSize: Object.values(upstreamFeatured).flat().length,
+      added: [],
+      removed: [],
+      changed,
+      unchanged: changed.length === 0,
+    };
+    summaries.push(summary);
+    summarize(summary);
+    for (const p of changed) {
+      console.log(
+        `    ${p}: [${(localFeatured[p] ?? []).join(", ")}] → [${upstreamFeatured[p].join(", ")}]`,
+      );
+    }
+    if (apply && !summary.unchanged) {
+      writeFileSync(FEATURED_PATH, JSON.stringify(upstreamFeatured, null, 2) + "\n", "utf8");
+      console.log(`    → wrote ${FEATURED_PATH}`);
+    }
+  }
+
+  // Subscription-backend watch — ids only, never vendored as pricing.
+  for (const litellmProvider of SUBSCRIPTION_WATCH) {
+    const upstreamIds = [
+      ...new Set(
+        Object.entries(upstream)
+          .filter(([, entry]) => entry.litellm_provider === litellmProvider)
+          .map(([key]) => canonicalId(key, litellmProvider)),
+      ),
+    ].sort();
+    const path = `${WATCH_DIR}/${litellmProvider}.json`;
+    const localIds = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as string[]) : [];
+    const localSet = new Set(localIds);
+    const upstreamSet = new Set(upstreamIds);
+    const added = upstreamIds.filter((id) => !localSet.has(id));
+    const removed = localIds.filter((id) => !upstreamSet.has(id));
+    const summary: Summary = {
+      provider: `watch:${litellmProvider}`,
+      localSize: localIds.length,
+      upstreamSize: upstreamIds.length,
+      added,
+      removed,
+      changed: [],
+      unchanged: added.length === 0 && removed.length === 0,
+    };
+    summaries.push(summary);
+    summarize(summary);
+    if (!summary.unchanged) {
+      console.log(
+        `    ↳ subscription backend changed — review the curated featuredModels of the matching OAuth module(s)`,
+      );
+      if (apply) {
+        if (!existsSync(WATCH_DIR)) mkdirSync(WATCH_DIR, { recursive: true });
+        writeFileSync(path, JSON.stringify(upstreamIds, null, 2) + "\n", "utf8");
+        console.log(`    → wrote ${path}`);
+      }
+    }
+  }
+
   const drift = summaries.some((s) => !s.unchanged);
   console.log(
-    `\n${drift ? "DRIFT" : "OK"} — ${summaries.filter((s) => !s.unchanged).length}/${PROVIDERS.length} provider(s) changed`,
+    `\n${drift ? "DRIFT" : "OK"} — ${summaries.filter((s) => !s.unchanged).length}/${summaries.length} snapshot(s) changed`,
   );
 
   if (drift && !apply) {

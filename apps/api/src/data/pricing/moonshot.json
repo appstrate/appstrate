@@ -1,0 +1,292 @@
+{
+  "kimi-k2-0711-preview": {
+    "label": "Kimi K2 0711 Preview",
+    "contextWindow": 131072,
+    "maxTokens": 131072,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 0.6,
+      "output": 2.5,
+      "cacheRead": 0.15
+    }
+  },
+  "kimi-k2-0905-preview": {
+    "label": "Kimi K2 0905 Preview",
+    "contextWindow": 262144,
+    "maxTokens": 262144,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 0.6,
+      "output": 2.5,
+      "cacheRead": 0.15
+    }
+  },
+  "kimi-k2-thinking": {
+    "label": "Kimi K2 Thinking",
+    "contextWindow": 262144,
+    "maxTokens": 262144,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.6,
+      "output": 2.5,
+      "cacheRead": 0.15
+    }
+  },
+  "kimi-k2-thinking-turbo": {
+    "label": "Kimi K2 Thinking Turbo",
+    "contextWindow": 262144,
+    "maxTokens": 262144,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 1.15,
+      "output": 8,
+      "cacheRead": 0.15
+    }
+  },
+  "kimi-k2-turbo-preview": {
+    "label": "Kimi K2 Turbo Preview",
+    "contextWindow": 262144,
+    "maxTokens": 262144,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 1.15,
+      "output": 8,
+      "cacheRead": 0.15
+    }
+  },
+  "kimi-k2.5": {
+    "label": "Kimi K2.5",
+    "contextWindow": 262144,
+    "maxTokens": 262144,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.6,
+      "output": 3,
+      "cacheRead": 0.1
+    }
+  },
+  "kimi-k2.6": {
+    "label": "Kimi K2.6",
+    "contextWindow": 262144,
+    "maxTokens": 262144,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.95,
+      "output": 4,
+      "cacheRead": 0.16
+    }
+  },
+  "kimi-latest": {
+    "label": "Kimi Latest",
+    "contextWindow": 131072,
+    "maxTokens": 131072,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 2,
+      "output": 5,
+      "cacheRead": 0.15
+    }
+  },
+  "kimi-latest-128k": {
+    "label": "Kimi Latest 128k",
+    "contextWindow": 131072,
+    "maxTokens": 131072,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 2,
+      "output": 5,
+      "cacheRead": 0.15
+    }
+  },
+  "kimi-latest-32k": {
+    "label": "Kimi Latest 32k",
+    "contextWindow": 32768,
+    "maxTokens": 32768,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 1,
+      "output": 3,
+      "cacheRead": 0.15
+    }
+  },
+  "kimi-latest-8k": {
+    "label": "Kimi Latest 8k",
+    "contextWindow": 8192,
+    "maxTokens": 8192,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 0.2,
+      "output": 2,
+      "cacheRead": 0.15
+    }
+  },
+  "kimi-thinking-preview": {
+    "label": "Kimi Thinking Preview",
+    "contextWindow": 131072,
+    "maxTokens": 131072,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 0.6,
+      "output": 2.5,
+      "cacheRead": 0.15
+    }
+  },
+  "moonshot-v1-128k": {
+    "label": "Moonshot V1 128k",
+    "contextWindow": 131072,
+    "maxTokens": 131072,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 2,
+      "output": 5
+    }
+  },
+  "moonshot-v1-128k-0430": {
+    "label": "Moonshot V1 128k 0430",
+    "contextWindow": 131072,
+    "maxTokens": 131072,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 2,
+      "output": 5
+    }
+  },
+  "moonshot-v1-128k-vision-preview": {
+    "label": "Moonshot V1 128k Vision Preview",
+    "contextWindow": 131072,
+    "maxTokens": 131072,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 2,
+      "output": 5
+    }
+  },
+  "moonshot-v1-32k": {
+    "label": "Moonshot V1 32k",
+    "contextWindow": 32768,
+    "maxTokens": 32768,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 1,
+      "output": 3
+    }
+  },
+  "moonshot-v1-32k-0430": {
+    "label": "Moonshot V1 32k 0430",
+    "contextWindow": 32768,
+    "maxTokens": 32768,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 1,
+      "output": 3
+    }
+  },
+  "moonshot-v1-32k-vision-preview": {
+    "label": "Moonshot V1 32k Vision Preview",
+    "contextWindow": 32768,
+    "maxTokens": 32768,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 1,
+      "output": 3
+    }
+  },
+  "moonshot-v1-8k": {
+    "label": "Moonshot V1 8k",
+    "contextWindow": 8192,
+    "maxTokens": 8192,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 0.2,
+      "output": 2
+    }
+  },
+  "moonshot-v1-8k-0430": {
+    "label": "Moonshot V1 8k 0430",
+    "contextWindow": 8192,
+    "maxTokens": 8192,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 0.2,
+      "output": 2
+    }
+  },
+  "moonshot-v1-8k-vision-preview": {
+    "label": "Moonshot V1 8k Vision Preview",
+    "contextWindow": 8192,
+    "maxTokens": 8192,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 0.2,
+      "output": 2
+    }
+  },
+  "moonshot-v1-auto": {
+    "label": "Moonshot V1 Auto",
+    "contextWindow": 131072,
+    "maxTokens": 131072,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 2,
+      "output": 5
+    }
+  }
+}

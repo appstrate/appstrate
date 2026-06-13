@@ -66,7 +66,7 @@ describe("listCatalogModels", () => {
     }
   });
 
-  it("covers the 7 providers we vendor", () => {
+  it("covers the 12 providers we vendor", () => {
     // Pin the providerId surface — adding/removing a vendored JSON
     // without updating PROVIDER_INDEX silently drops coverage.
     for (const providerId of [
@@ -77,6 +77,11 @@ describe("listCatalogModels", () => {
       "cerebras",
       "groq",
       "xai",
+      "deepseek",
+      "moonshot",
+      "together-ai",
+      "fireworks-ai",
+      "zai",
     ]) {
       const models = listCatalogModels(providerId);
       expect(models.length).toBeGreaterThan(0);
@@ -92,7 +97,7 @@ describe("listCatalogModels", () => {
 });
 
 describe("_catalogSize", () => {
-  it("indexes at least 200 chat models across the 7 vendored providers", () => {
-    expect(_catalogSize()).toBeGreaterThan(200);
+  it("indexes at least 400 chat models across the 12 vendored providers", () => {
+    expect(_catalogSize()).toBeGreaterThan(400);
   });
 });
