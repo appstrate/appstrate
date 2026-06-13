@@ -1204,7 +1204,7 @@ export function IntegrationDetailPage() {
             <PackageActionsDropdown
               packageId={packageId}
               type="integration"
-              manifest={m as unknown as Record<string, unknown>}
+              manifest={m}
               isOwned={isOwned}
               isBuiltIn={isBuiltIn}
               isHistoricalVersion={false}

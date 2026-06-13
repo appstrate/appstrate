@@ -177,5 +177,21 @@ export default tseslint.config(
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
     },
   },
+  {
+    // Type-aware guard (web only): flag `x as T` assertions that don't change
+    // the type — these are pure noise that also hide where a value's real type
+    // silently drifted from what the cast claims. Scoped to the SPA so the
+    // type-checked program stays cheap. Only this one type-aware rule is on.
+    files: ["apps/web/src/**/*.{ts,tsx}"],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-unnecessary-type-assertion": "error",
+    },
+  },
   eslintConfigPrettier,
 );

@@ -15,7 +15,6 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type {
   ConsumingAgentSummary,
-  IntegrationAgentResolution,
   IntegrationConnection,
   IntegrationDetail,
   IntegrationOAuthClient,
@@ -144,11 +143,10 @@ export function agentResolutionQueryOptions(
     },
     {
       enabled: Boolean(orgId && applicationId && integrationId && agentPackageId),
-      // Bridge the generated inline response type to the named shared wire
-      // type used across consumers. The spec now marks every resolver field
-      // (incl. org_default_*) required, so this is a structural no-op, not a
-      // widening — the resolver always returns the full shape.
-      select: (data) => data as IntegrationAgentResolution,
+      // No cast needed: now that the spec marks every resolver field required
+      // (incl. org_default_*), the generated response type already matches the
+      // shared `IntegrationAgentResolution` shape that consumers rely on.
+      select: (data) => data,
     },
   );
 }

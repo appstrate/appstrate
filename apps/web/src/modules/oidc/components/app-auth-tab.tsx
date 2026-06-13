@@ -99,7 +99,7 @@ function SmtpSection() {
           toast.success(t("settings:appAuth.smtpSaved"));
           setForm((f) => ({ ...f, pass: "" }));
         },
-        onError: (err) => toast.error((err as Error).message),
+        onError: (err) => toast.error(err.message),
       },
     );
   }
@@ -247,7 +247,7 @@ function SmtpSection() {
               toast.success(t("settings:appAuth.smtpTestOk"));
               setTestOpen(false);
             },
-            onError: (err) => toast.error((err as Error).message),
+            onError: (err) => toast.error(err.message),
           })
         }
       />
@@ -334,7 +334,7 @@ function SocialSection({
           toast.success(t("settings:appAuth.socialSaved"));
           setForm((f) => ({ ...f, clientSecret: "" }));
         },
-        onError: (err) => toast.error((err as Error).message),
+        onError: (err) => toast.error(err.message),
       },
     );
   }

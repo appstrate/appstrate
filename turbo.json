@@ -64,6 +64,9 @@
     "//#verify:api-types": {
       "cache": false
     },
+    "//#verify:type-coverage": {
+      "inputs": ["apps/web/src/**", "apps/web/tsconfig.json", "tsconfig.base.json"]
+    },
     "//#build:system-packages:check": {
       "cache": false
     },

@@ -150,7 +150,7 @@ export function ScheduleForm({
   const labels = useSchemaFormLabels();
 
   const [inputValues, setInputValues] = useState<Record<string, unknown>>(
-    () => (defaultValues?.input ?? {}) as Record<string, unknown>,
+    () => defaultValues?.input ?? {},
   );
 
   // Override-layer state — mirrors the Run modal's accordion, except

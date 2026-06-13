@@ -15,7 +15,7 @@ import { useRunRealtime, type RunMetricEvent, type RunLogEvent } from "../hooks/
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LogViewer } from "../components/log-viewer";
-import { buildLogEntries, type RawLog } from "../components/log-utils";
+import { buildLogEntries } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
@@ -65,12 +65,12 @@ export function RunDetailPage() {
     }
   }, [run?.notifiedAt, run?.readAt, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const runAgent = useRunAgent(packageId!);
+  const runAgent = useRunAgent(packageId);
   const cancelRun = useCancelRun();
   const [inputOpen, setInputOpen] = useState(false);
   const { historicalLogs, structuredOutput, structuredReport } = useMemo(() => {
     if (!logs) return { historicalLogs: [], structuredOutput: null, structuredReport: null };
-    const { entries, output, report } = buildLogEntries(logs as RawLog[]);
+    const { entries, output, report } = buildLogEntries(logs);
     return { historicalLogs: entries, structuredOutput: output, structuredReport: report };
   }, [logs]);
 
@@ -140,7 +140,7 @@ export function RunDetailPage() {
             ...prev,
             token_usage: metric.tokenUsage ?? prev.token_usage,
             cost: metric.costSoFar,
-          } as EnrichedRun;
+          };
         });
       },
       [qc, orgId, applicationId, runId],
@@ -299,17 +299,17 @@ export function RunDetailPage() {
 
           {resultSubTab === "report" && hasReport && (
             <div className="border-border bg-muted/30 overflow-auto rounded-lg border p-4">
-              <Markdown>{structuredReport!}</Markdown>
+              <Markdown>{structuredReport}</Markdown>
             </div>
           )}
 
-          {resultSubTab === "data" && hasOutput && <JsonView data={finalOutput!} />}
+          {resultSubTab === "data" && hasOutput && <JsonView data={finalOutput} />}
         </div>
       )}
 
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
 
-      {activeTab === "memory" && <MemoryPanel packageId={packageId!} runId={runId!} />}
+      {activeTab === "memory" && <MemoryPanel packageId={packageId} runId={runId} />}
 
       {activeTab === "info" && <RunInfoTab run={enrichedRun} />}
     </div>

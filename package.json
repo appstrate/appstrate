@@ -38,6 +38,7 @@
     "prettier": "^3.8.3",
     "prettier-plugin-tailwindcss": "^0.8.0",
     "turbo": "^2",
+    "type-coverage": "^2.29.7",
     "typescript-eslint": "^8.59.1"
   },
   "peerDependencies": {
@@ -72,7 +73,7 @@
     "lint:manifest-casing": "bun scripts/lint-manifest-casing.ts",
     "conformance:check": "bun scripts/conformance/run.ts --tier gate",
     "test:system-packages": "bun scripts/conformance/run.ts",
-    "check": "turbo typecheck lint format:check verify:openapi verify:api-types verify:compose-defaults detect:breaking build:system-packages:check lint:manifest-casing conformance:check verify:module-isolation typecheck:scripts verify:module-contract",
+    "check": "turbo typecheck lint format:check verify:openapi verify:api-types verify:type-coverage verify:compose-defaults detect:breaking build:system-packages:check lint:manifest-casing conformance:check verify:module-isolation typecheck:scripts verify:module-contract",
     "verify:module-isolation": "bun scripts/verify-module-isolation.ts",
     "verify:module-contract": "bun scripts/verify-module-contract.ts",
     "typecheck:scripts": "tsc --noEmit -p scripts/tsconfig.json",
@@ -103,6 +104,7 @@
     "test:integration": "bun test apps/api/test/integration/",
     "db:studio": "cd packages/db && bunx drizzle-kit studio",
     "verify:openapi": "bun scripts/verify-openapi.ts",
+    "verify:type-coverage": "type-coverage --project apps/web/tsconfig.json --strict --at-least 98.5 --ignore-files \"src/api/schema.d.ts\"",
     "verify:compose-defaults": "bun scripts/verify-compose-defaults.ts",
     "openapi:baseline": "bun scripts/detect-breaking-changes.ts --update-baseline",
     "openapi:diff": "bun scripts/detect-breaking-changes.ts",

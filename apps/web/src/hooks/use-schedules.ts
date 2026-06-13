@@ -199,7 +199,7 @@ export function useScheduleFormDeps(packageId: string | undefined): ScheduleForm
   return {
     inputSchema,
     configSchema: agentDetail?.config?.schema ?? undefined,
-    persistedConfig: (agentDetail?.config?.current ?? {}) as Record<string, unknown>,
+    persistedConfig: agentDetail?.config?.current ?? {},
     persistedModelId: agentModel?.modelId ?? null,
     persistedProxyId: agentProxy?.proxyId ?? null,
     persistedVersion: agentDetail?.version ?? null,

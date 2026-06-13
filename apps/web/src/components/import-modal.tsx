@@ -106,7 +106,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
     if (hasFile) {
       const force = !!confirmOverwrite || !!confirmIntegrity;
       importPackage.mutate(
-        { file: file!, force },
+        { file: file, force },
         {
           onSuccess: () => {
             resetAndClose();

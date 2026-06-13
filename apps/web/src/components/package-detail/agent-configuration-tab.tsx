@@ -36,7 +36,7 @@ function ConfigSection({
   const { t } = useTranslation(["agents", "common"]);
   const { data: detail } = usePackageDetail("agent", packageId);
 
-  const current = (detail?.config?.current ?? {}) as Record<string, unknown>;
+  const current = detail?.config?.current ?? {};
   const mutation = useSaveConfig(detail?.id ?? "");
   const wrapper: SchemaWrapper = { schema };
 

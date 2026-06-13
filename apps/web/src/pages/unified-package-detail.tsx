@@ -275,9 +275,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // When viewing a historical version, use that version's config schema (or empty if none).
   // An empty schema means "no config fields" — distinct from undefined which means "use draft".
   const versionConfigSchema = (() => {
-    const config = (versionDetail?.manifest as Record<string, unknown> | undefined)?.config as
-      | { schema?: JSONSchemaObject }
-      | undefined;
+    const config = versionDetail?.manifest?.config as { schema?: JSONSchemaObject } | undefined;
     return config?.schema;
   })();
   const effectiveConfigSchema = isHistoricalVersion
@@ -359,11 +357,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           type === "agent" ? (
             <AgentActions
               packageId={packageId}
-              manifest={
-                (isHistoricalVersion ? versionDetail?.manifest : agentDetail?.manifest) as
-                  | Record<string, unknown>
-                  | undefined
-              }
+              manifest={isHistoricalVersion ? versionDetail?.manifest : agentDetail?.manifest}
               companionFile={companionFile}
               isOwned={isOwned}
               isHistoricalVersion={isHistoricalVersion}
@@ -378,11 +372,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               <PackageActionsDropdown
                 packageId={packageId}
                 type={type}
-                manifest={
-                  (isHistoricalVersion ? versionDetail?.manifest : pkgDetail?.manifest) as
-                    | Record<string, unknown>
-                    | undefined
-                }
+                manifest={isHistoricalVersion ? versionDetail?.manifest : pkgDetail?.manifest}
                 companionFile={companionFile}
                 isOwned={isOwned}
                 isBuiltIn={isBuiltIn}
