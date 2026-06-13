@@ -23,9 +23,8 @@ export function PreferencesDevicesPage() {
     "/api/auth/cli/sessions",
     {},
     {
-      // Unwrap the list envelope (legacy apiFetch behavior). The spec declares
-      // the item fields optional, but the route always serializes them.
-      select: (envelope) => envelope.data as CliSessionDisplay[] | undefined,
+      // Unwrap the list envelope (legacy apiFetch behavior).
+      select: (envelope) => envelope.data,
     },
   );
 

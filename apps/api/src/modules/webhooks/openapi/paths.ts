@@ -483,11 +483,22 @@ export const webhooksPaths = {
                     type: "array",
                     items: {
                       type: "object",
+                      required: [
+                        "id",
+                        "eventId",
+                        "eventType",
+                        "status",
+                        "statusCode",
+                        "latency",
+                        "attempt",
+                        "error",
+                        "createdAt",
+                      ],
                       properties: {
                         id: { type: "string" },
                         eventId: { type: "string" },
                         eventType: { type: "string" },
-                        status: { type: "string", enum: ["success", "failed"] },
+                        status: { type: "string", enum: ["pending", "success", "failed"] },
                         statusCode: { type: ["integer", "null"] },
                         latency: {
                           type: ["integer", "null"],

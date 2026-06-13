@@ -34,9 +34,8 @@ export function OrgSettingsCliSessionsPage() {
     { params: { path: { orgId: orgId ?? "" } } },
     {
       enabled: !!orgId,
-      // Unwrap the list envelope (legacy apiList behavior). The spec declares
-      // the item fields optional, but the route always serializes them.
-      select: (envelope) => envelope.data as AdminCliSession[],
+      // Unwrap the list envelope (legacy apiList behavior).
+      select: (envelope) => envelope.data,
     },
   );
 

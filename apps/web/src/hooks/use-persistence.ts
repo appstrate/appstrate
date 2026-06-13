@@ -55,9 +55,7 @@ function usePersistenceQuery<T>(
       const { data } = await client.GET("/api/agents/{scope}/{name}/persistence", {
         params: { path: { scope, name }, query },
       });
-      // The spec marks row fields optional; the server always returns the
-      // full wire DTOs (AgentPinnedSlotItem / AgentMemoryItem).
-      return pick((data ?? {}) as PersistenceResponse);
+      return pick(data ?? {});
     },
     enabled: !!orgId && !!applicationId && !!packageId,
   });

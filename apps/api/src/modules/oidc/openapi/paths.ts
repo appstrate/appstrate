@@ -963,12 +963,24 @@ export const oidcPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: {
                     type: "array",
                     items: {
                       type: "object",
+                      required: [
+                        "familyId",
+                        "deviceName",
+                        "userAgent",
+                        "createdIp",
+                        "lastUsedIp",
+                        "lastUsedAt",
+                        "createdAt",
+                        "expiresAt",
+                        "current",
+                      ],
                       properties: {
                         familyId: { type: "string" },
                         deviceName: { type: ["string", "null"] },
@@ -1153,6 +1165,20 @@ export const oidcPaths = {
                     type: "array",
                     items: {
                       type: "object",
+                      required: [
+                        "familyId",
+                        "userId",
+                        "userEmail",
+                        "userName",
+                        "deviceName",
+                        "userAgent",
+                        "createdIp",
+                        "lastUsedIp",
+                        "lastUsedAt",
+                        "createdAt",
+                        "expiresAt",
+                        "current",
+                      ],
                       properties: {
                         familyId: { type: "string" },
                         userId: { type: "string" },

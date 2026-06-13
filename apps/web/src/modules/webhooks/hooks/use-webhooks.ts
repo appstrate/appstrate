@@ -147,10 +147,7 @@ export function useWebhookDeliveries(webhookId: string) {
     { params: { path: { id: webhookId }, header: scope.header } },
     {
       enabled: scope.enabled && !!webhookId,
-      // The generated delivery type is all-optional; the server always sends
-      // full rows, so keep the legacy shape (same trust boundary as the
-      // legacy `apiList<WebhookDelivery>`).
-      select: (e) => (e.data ?? []) as WebhookDelivery[],
+      select: (e) => e.data ?? [],
     },
   );
 }

@@ -14,16 +14,10 @@ import { RegisterForm } from "../components/register-form";
 import { LoginForm } from "../components/login-form";
 import { roleI18nKey } from "../hooks/use-permissions";
 import { orgKeys } from "../lib/query-keys";
-import type { OrgRole } from "@appstrate/shared-types";
 
-/**
- * Spec response of GET /invite/{token}/info, tightened: the spec declares
- * every field optional with `role: string`, but the route always returns the
- * full object with a valid org role.
- */
-type InviteInfo = Required<
-  paths["/invite/{token}/info"]["get"]["responses"]["200"]["content"]["application/json"]
-> & { role: OrgRole };
+/** Spec response of GET /invite/{token}/info (all fields required, role is an org-role enum). */
+type InviteInfo =
+  paths["/invite/{token}/info"]["get"]["responses"]["200"]["content"]["application/json"];
 
 export function InviteAcceptPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -43,9 +37,9 @@ export function InviteAcceptPage() {
     client
       .GET("/invite/{token}/info", { params: { path: { token } } })
       .then(({ data }) => {
-        const inviteInfo = data as InviteInfo;
-        setInfo(inviteInfo);
-        setMode(inviteInfo.is_new_user ? "register" : "login");
+        // Non-2xx throws via the client middleware, so `data` is defined here.
+        setInfo(data!);
+        setMode(data!.is_new_user ? "register" : "login");
         setLoading(false);
       })
       .catch((err: unknown) => {

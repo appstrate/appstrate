@@ -5859,27 +5859,27 @@ export interface operations {
                 content: {
                     "application/json": {
                         pinned?: {
-                            id?: number;
-                            key?: string;
-                            content?: unknown;
-                            runId?: string | null;
+                            id: number;
+                            key: string;
+                            content: unknown;
+                            runId: string | null;
                             /** @enum {string} */
-                            actor_type?: "user" | "end_user" | "shared";
-                            actor_id?: string | null;
+                            actor_type: "user" | "end_user" | "shared";
+                            actor_id: string | null;
                             /** Format: date-time */
-                            createdAt?: string | null;
+                            createdAt: string | null;
                             /** Format: date-time */
-                            updatedAt?: string | null;
+                            updatedAt: string | null;
                         }[];
                         memories?: {
-                            id?: number;
-                            content?: unknown;
-                            runId?: string | null;
+                            id: number;
+                            content: string;
+                            runId: string | null;
                             /** @enum {string} */
-                            actor_type?: "user" | "end_user" | "shared";
-                            actor_id?: string | null;
+                            actor_type: "user" | "end_user" | "shared";
+                            actor_id: string | null;
                             /** Format: date-time */
-                            createdAt?: string | null;
+                            createdAt: string | null;
                             pinned?: boolean;
                         }[];
                     };
@@ -6157,18 +6157,53 @@ export interface operations {
                      *       "id": "run_cm1abc123def456",
                      *       "packageId": "@acme/email-sorter",
                      *       "userId": "usr_k7x9m2p4q1",
+                     *       "endUserId": null,
+                     *       "apiKeyId": null,
                      *       "orgId": "org_r3t5w8y1z6",
                      *       "applicationId": "app_m4n5o6p7",
+                     *       "scheduleId": null,
                      *       "status": "pending",
                      *       "input": {
                      *         "message": "Summarize my latest emails"
                      *       },
+                     *       "result": null,
+                     *       "checkpoint": {},
+                     *       "error": null,
+                     *       "metadata": null,
+                     *       "config": {
+                     *         "dryRun": true
+                     *       },
+                     *       "config_override": {
+                     *         "dryRun": true
+                     *       },
+                     *       "started_at": "2026-01-15T10:30:00Z",
+                     *       "completed_at": null,
+                     *       "duration": null,
+                     *       "cost": null,
+                     *       "notifiedAt": null,
+                     *       "readAt": null,
+                     *       "runNumber": 17,
+                     *       "token_usage": null,
                      *       "version_label": "1.2.0",
                      *       "version_dirty": false,
                      *       "version_ref": "1.2.0",
+                     *       "proxy_label": null,
                      *       "model_label": "Claude Sonnet 4",
                      *       "model_source": "org",
-                     *       "started_at": "2026-01-15T10:30:00Z"
+                     *       "runner_name": null,
+                     *       "runner_kind": null,
+                     *       "agent_scope": "@acme",
+                     *       "agent_name": "email-sorter",
+                     *       "runOrigin": "platform",
+                     *       "contextSnapshot": null,
+                     *       "modelCredentialId": "mpc_8h2k4m6n",
+                     *       "connection_overrides": null,
+                     *       "user_name": null,
+                     *       "end_user_name": null,
+                     *       "api_key_name": null,
+                     *       "schedule_name": null,
+                     *       "connections_used": null,
+                     *       "package_ephemeral": false
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -6430,6 +6465,11 @@ export interface operations {
                      *         "folder": "inbox",
                      *         "maxEmails": 50
                      *       },
+                     *       "config_override": null,
+                     *       "model_id_override": null,
+                     *       "proxy_id_override": null,
+                     *       "version_override": null,
+                     *       "connection_overrides": null,
                      *       "last_run_at": null,
                      *       "next_run_at": "2026-01-16T09:00:00Z",
                      *       "createdAt": "2026-01-15T10:30:00Z",
@@ -7563,22 +7603,22 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        object?: "list";
-                        data?: {
-                            familyId?: string;
-                            deviceName?: string | null;
-                            userAgent?: string | null;
-                            createdIp?: string | null;
-                            lastUsedIp?: string | null;
+                        object: "list";
+                        data: {
+                            familyId: string;
+                            deviceName: string | null;
+                            userAgent: string | null;
+                            createdIp: string | null;
+                            lastUsedIp: string | null;
                             /** Format: date-time */
-                            lastUsedAt?: string | null;
+                            lastUsedAt: string | null;
                             /** Format: date-time */
-                            createdAt?: string;
+                            createdAt: string;
                             /** Format: date-time */
-                            expiresAt?: string;
-                            current?: boolean;
+                            expiresAt: string;
+                            current: boolean;
                         }[];
-                        hasMore?: boolean;
+                        hasMore: boolean;
                     };
                 };
             };
@@ -12351,21 +12391,21 @@ export interface operations {
                         /** @enum {string} */
                         object: "list";
                         data: {
-                            familyId?: string;
-                            userId?: string;
-                            userEmail?: string | null;
-                            userName?: string | null;
-                            deviceName?: string | null;
-                            userAgent?: string | null;
-                            createdIp?: string | null;
-                            lastUsedIp?: string | null;
+                            familyId: string;
+                            userId: string;
+                            userEmail: string | null;
+                            userName: string | null;
+                            deviceName: string | null;
+                            userAgent: string | null;
+                            createdIp: string | null;
+                            lastUsedIp: string | null;
                             /** Format: date-time */
-                            lastUsedAt?: string | null;
+                            lastUsedAt: string | null;
                             /** Format: date-time */
-                            createdAt?: string;
+                            createdAt: string;
                             /** Format: date-time */
-                            expiresAt?: string;
-                            current?: boolean;
+                            expiresAt: string;
+                            current: boolean;
                         }[];
                         hasMore: boolean;
                     };
@@ -15915,17 +15955,59 @@ export interface operations {
                      *       "id": "run_cm1abc123",
                      *       "packageId": "@inline/r-abc12345-6789-4cde-8f01-23456789abcd",
                      *       "userId": "usr_k7x9m2p4q1",
+                     *       "endUserId": null,
+                     *       "apiKeyId": null,
                      *       "orgId": "org_r3t5w8y1z6",
                      *       "applicationId": "app_m4n5o6p7",
+                     *       "scheduleId": null,
                      *       "status": "pending",
                      *       "input": {
                      *         "docId": "doc_123"
                      *       },
+                     *       "result": null,
+                     *       "checkpoint": {},
+                     *       "error": null,
+                     *       "metadata": null,
+                     *       "config": null,
+                     *       "config_override": null,
+                     *       "started_at": "2026-01-15T10:30:00Z",
+                     *       "completed_at": null,
+                     *       "duration": null,
+                     *       "cost": null,
+                     *       "notifiedAt": null,
+                     *       "readAt": null,
+                     *       "runNumber": 1,
+                     *       "token_usage": null,
+                     *       "version_label": null,
                      *       "version_dirty": true,
                      *       "version_ref": "draft",
+                     *       "proxy_label": null,
                      *       "model_label": "Claude Sonnet 4",
                      *       "model_source": "org",
-                     *       "started_at": "2026-01-15T10:30:00Z"
+                     *       "runner_name": null,
+                     *       "runner_kind": null,
+                     *       "agent_scope": "@inline",
+                     *       "agent_name": "one-shot",
+                     *       "runOrigin": "platform",
+                     *       "contextSnapshot": null,
+                     *       "modelCredentialId": "mpc_8h2k4m6n",
+                     *       "connection_overrides": null,
+                     *       "user_name": null,
+                     *       "end_user_name": null,
+                     *       "api_key_name": null,
+                     *       "schedule_name": null,
+                     *       "connections_used": null,
+                     *       "package_ephemeral": true,
+                     *       "inline_manifest": {
+                     *         "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
+                     *         "name": "@inline/one-shot",
+                     *         "display_name": "One-shot summary",
+                     *         "version": "0.0.0",
+                     *         "type": "agent",
+                     *         "schema_version": "0.1",
+                     *         "dependencies": {}
+                     *       },
+                     *       "inline_prompt": "Summarize the attached document in three bullet points."
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -16183,7 +16265,11 @@ export interface operations {
                      *       "id": "run_cm1abc123def456",
                      *       "packageId": "@acme/email-sorter",
                      *       "userId": "usr_k7x9m2p4q1",
+                     *       "endUserId": null,
+                     *       "apiKeyId": null,
                      *       "orgId": "org_r3t5w8y1z6",
+                     *       "applicationId": "app_m4n5o6p7",
+                     *       "scheduleId": "sched_cm1abc456def789",
                      *       "status": "success",
                      *       "input": {
                      *         "folder": "inbox",
@@ -16199,26 +16285,45 @@ export interface operations {
                      *       "checkpoint": {
                      *         "lastProcessedId": "msg_99f2a"
                      *       },
+                     *       "error": null,
+                     *       "metadata": null,
+                     *       "config": {
+                     *         "folder": "inbox"
+                     *       },
+                     *       "config_override": null,
+                     *       "started_at": "2026-01-15T10:30:00Z",
+                     *       "completed_at": "2026-01-15T10:31:12Z",
+                     *       "duration": 72000,
+                     *       "cost": 0.0034,
+                     *       "notifiedAt": "2026-01-15T10:31:12Z",
+                     *       "readAt": null,
+                     *       "runNumber": 17,
                      *       "token_usage": {
                      *         "input_tokens": 8200,
                      *         "output_tokens": 4250,
                      *         "cache_creation_input_tokens": 0,
                      *         "cache_read_input_tokens": 1024
                      *       },
-                     *       "started_at": "2026-01-15T10:30:00Z",
-                     *       "completed_at": "2026-01-15T10:31:12Z",
-                     *       "duration": 72000,
-                     *       "scheduleId": "sched_cm1abc456def789",
                      *       "version_label": "1.2.0",
                      *       "version_dirty": false,
                      *       "version_ref": "1.2.0",
                      *       "proxy_label": null,
                      *       "model_label": "Claude Sonnet 4",
                      *       "model_source": "system",
-                     *       "cost": 0.0034,
-                     *       "endUserId": null,
-                     *       "applicationId": "app_m4n5o6p7",
-                     *       "metadata": null
+                     *       "runner_name": null,
+                     *       "runner_kind": null,
+                     *       "agent_scope": "@acme",
+                     *       "agent_name": "email-sorter",
+                     *       "runOrigin": "platform",
+                     *       "contextSnapshot": null,
+                     *       "modelCredentialId": null,
+                     *       "connection_overrides": null,
+                     *       "user_name": "Pierre",
+                     *       "end_user_name": null,
+                     *       "api_key_name": null,
+                     *       "schedule_name": "Weekday morning sort",
+                     *       "connections_used": null,
+                     *       "package_ephemeral": false
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -16276,19 +16381,50 @@ export interface operations {
                      *       "id": "run_cm1abc123def456",
                      *       "packageId": "@acme/email-sorter",
                      *       "userId": "usr_k7x9m2p4q1",
+                     *       "endUserId": null,
+                     *       "apiKeyId": null,
                      *       "orgId": "org_r3t5w8y1z6",
                      *       "applicationId": "app_m4n5o6p7",
+                     *       "scheduleId": null,
                      *       "status": "cancelled",
+                     *       "input": {
+                     *         "folder": "inbox",
+                     *         "maxEmails": 50
+                     *       },
+                     *       "result": null,
+                     *       "checkpoint": {},
                      *       "error": "Cancelled by user",
+                     *       "metadata": null,
+                     *       "config": null,
+                     *       "config_override": null,
+                     *       "started_at": "2026-01-15T10:30:00Z",
+                     *       "completed_at": "2026-01-15T10:30:45Z",
+                     *       "duration": 45000,
+                     *       "cost": 0.0012,
+                     *       "notifiedAt": null,
+                     *       "readAt": null,
+                     *       "runNumber": 18,
+                     *       "token_usage": null,
                      *       "version_label": "1.2.0",
                      *       "version_dirty": false,
                      *       "version_ref": "1.2.0",
+                     *       "proxy_label": null,
                      *       "model_label": "Claude Sonnet 4",
                      *       "model_source": "org",
-                     *       "cost": 0.0012,
-                     *       "started_at": "2026-01-15T10:30:00Z",
-                     *       "completed_at": "2026-01-15T10:30:45Z",
-                     *       "duration": 45000
+                     *       "runner_name": null,
+                     *       "runner_kind": null,
+                     *       "agent_scope": "@acme",
+                     *       "agent_name": "email-sorter",
+                     *       "runOrigin": "platform",
+                     *       "contextSnapshot": null,
+                     *       "modelCredentialId": null,
+                     *       "connection_overrides": null,
+                     *       "user_name": "Pierre",
+                     *       "end_user_name": null,
+                     *       "api_key_name": null,
+                     *       "schedule_name": null,
+                     *       "connections_used": null,
+                     *       "package_ephemeral": false
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -16836,6 +16972,11 @@ export interface operations {
                      *         "folder": "inbox",
                      *         "maxEmails": 50
                      *       },
+                     *       "config_override": null,
+                     *       "model_id_override": null,
+                     *       "proxy_id_override": null,
+                     *       "version_override": "1.2.0",
+                     *       "connection_overrides": null,
                      *       "last_run_at": "2026-01-15T09:00:00Z",
                      *       "next_run_at": "2026-01-16T09:00:00Z",
                      *       "createdAt": "2026-01-14T14:00:00Z",
@@ -17434,18 +17575,18 @@ export interface operations {
                         /** @enum {string} */
                         object?: "list";
                         data?: {
-                            id?: string;
-                            eventId?: string;
-                            eventType?: string;
+                            id: string;
+                            eventId: string;
+                            eventType: string;
                             /** @enum {string} */
-                            status?: "success" | "failed";
-                            statusCode?: number | null;
+                            status: "pending" | "success" | "failed";
+                            statusCode: number | null;
                             /** @description Delivery latency in ms */
-                            latency?: number | null;
-                            attempt?: number;
-                            error?: string | null;
+                            latency: number | null;
+                            attempt: number;
+                            error: string | null;
                             /** Format: date-time */
-                            createdAt?: string;
+                            createdAt: string;
                         }[];
                         hasMore?: boolean;
                     };
@@ -18096,12 +18237,13 @@ export interface operations {
                      *     }
                      */
                     "application/json": {
-                        email?: string;
-                        org_name?: string;
-                        role?: string;
-                        inviter_name?: string;
-                        expiresAt?: string;
-                        is_new_user?: boolean;
+                        email: string;
+                        org_name: string;
+                        /** @enum {string} */
+                        role: "owner" | "admin" | "member" | "viewer";
+                        inviter_name: string;
+                        expiresAt: string;
+                        is_new_user: boolean;
                     };
                 };
             };

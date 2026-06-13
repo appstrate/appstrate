@@ -832,19 +832,67 @@ function extractFunctionBody(src: string, fnName: string): string | null {
 }
 
 /**
- * Extract all `router.METHOD("path", …)` registrations from a slice of source.
+ * Templated `router.METHOD(`…${ident}…`)` registrations that could not be
+ * resolved from in-file literals. Populated by `extractRouterRegistrations`
+ * and turned into a hard failure after step 5 — a `${…}` route the extractor
+ * can't expand would otherwise silently escape the Code ⊆ Spec check (a new
+ * undocumented config-loop route would pass CI). Fail closed instead.
  */
-function extractRouterRegistrations(slice: string): RouteRegistration[] {
+const unresolvedTemplatedRoutes: { file: string; verb: string; raw: string }[] = [];
+
+/**
+ * Resolve `${ident}` interpolations in a templated route path against literals
+ * declared in the same source file:
+ *   - `const <ident> = "literal"`              (top-level const)
+ *   - `<ident>: "literal"`                     (object-literal field, e.g. the
+ *     `path:` members of a config table the route loop destructures —
+ *     `for (const rcfg of Object.values(ROUTE_CONFIGS)) { const { path } = rcfg; router.get(`/${path}/…`) }`)
+ * Returns every concrete path (cross-product across multi-valued idents), or
+ * `null` if any `${…}` can't be resolved (caller fails closed).
+ */
+function resolveTemplatedPath(rawPath: string, fullSrc: string): string[] | null {
+  const idents = [...rawPath.matchAll(/\$\{([a-zA-Z_$][\w$]*)\}/g)].map((m) => m[1]!);
+  if (idents.length === 0) return [rawPath];
+  let paths = [rawPath];
+  for (const ident of idents) {
+    const literals = new Set<string>();
+    const constRe = new RegExp(`\\bconst\\s+${ident}\\s*=\\s*["'\`]([^"'\`]+)["'\`]`, "g");
+    for (const m of fullSrc.matchAll(constRe)) literals.add(m[1]!);
+    const fieldRe = new RegExp(`\\b${ident}\\s*:\\s*["'\`]([^"'\`]+)["'\`]`, "g");
+    for (const m of fullSrc.matchAll(fieldRe)) literals.add(m[1]!);
+    if (literals.size === 0) return null;
+    paths = paths.flatMap((p) =>
+      [...literals].map((lit) => p.replace(new RegExp(`\\$\\{${ident}\\}`, "g"), lit)),
+    );
+  }
+  return paths;
+}
+
+/**
+ * Extract all `router.METHOD("path", …)` registrations from a slice of source.
+ * `fullSrc` is the whole file (the slice may be a single function body) so
+ * `${ident}` interpolations can be resolved against file-level literals.
+ */
+function extractRouterRegistrations(
+  slice: string,
+  fullSrc: string,
+  file: string,
+): RouteRegistration[] {
   const out: RouteRegistration[] = [];
   const re = new RegExp(`router\\.(${ROUTE_VERB_PATTERN})\\s*\\(\\s*["'\`]([^"'\`]*)["'\`]`, "g");
   for (const m of slice.matchAll(re)) {
+    const verb = m[1]!;
     const path = m[2]!;
-    // Skip interpolated template-literal paths (`router.get(\`/${cfg}/...\`)`):
-    // the captured text still holds the `${…}` expression, which can't be
-    // resolved statically. These config-driven registrations are covered by
-    // check #1 (expectedEndpoints). Literal paths in the same file ARE parsed.
-    if (path.includes("${")) continue;
-    out.push({ verb: m[1]!, path });
+    if (path.includes("${")) {
+      const resolved = resolveTemplatedPath(path, fullSrc);
+      if (!resolved) {
+        unresolvedTemplatedRoutes.push({ file, verb, raw: path });
+        continue;
+      }
+      for (const p of resolved) out.push({ verb, path: p });
+      continue;
+    }
+    out.push({ verb, path });
   }
   return out;
 }
@@ -969,12 +1017,12 @@ for (const m of indexSrc.matchAll(
 //     and combine with the mount prefix.
 const SKIP_FILES = new Set<string>([
   // Routes registered via runtime config with a VARIABLE path
-  // (`router.post(entry.urlPath, …)`). The path isn't a string literal, so
-  // static analysis can't see it; the emitted endpoints are covered by check
-  // #1. (packages.ts is NOT skipped: its template-literal `${path}` routes are
-  // ignored by extractRouterRegistrations, while its literal-path routes —
-  // /import, /import-github, /import-bundle, fork, download — ARE statically
-  // verified against the spec.)
+  // (`router.post(entry.urlPath, …)` — a bare identifier, not a string/template
+  // literal). The path can't be captured at all, so the emitted endpoints are
+  // covered by check #1. (packages.ts is NOT skipped: its template-literal
+  // `${path}` routes are now expanded by resolveTemplatedPath against the
+  // in-file ROUTE_CONFIGS `path:` literals and verified against the spec like
+  // any literal route; an unresolvable `${…}` fails the run.)
   "routes/llm-proxy",
 ]);
 
@@ -1029,7 +1077,7 @@ for (const mount of mounts) {
     scope = body;
   }
 
-  for (const reg of extractRouterRegistrations(scope)) {
+  for (const reg of extractRouterRegistrations(scope, src, mount.file)) {
     const fullPath = normaliseHonoPath(joinMountPath(mount.prefix, reg.path));
     for (const ep of expandRegistration(reg.verb, fullPath)) codeEndpoints.add(ep);
   }
@@ -1044,7 +1092,7 @@ if (existsSync(modulesDir)) {
     const routesPath = join(modulesDir, name.name, "routes.ts");
     if (!existsSync(routesPath)) continue;
     const src = readFileSync(routesPath, "utf8");
-    for (const reg of extractRouterRegistrations(src)) {
+    for (const reg of extractRouterRegistrations(src, src, `modules/${name.name}/routes.ts`)) {
       const fullPath = normaliseHonoPath(reg.path);
       for (const ep of expandRegistration(reg.verb, fullPath)) codeEndpoints.add(ep);
     }
@@ -1106,6 +1154,24 @@ if (orphans.length === 0) {
   console.log(
     `\n  Either document the endpoint in apps/api/src/openapi/paths/ + add it to ` +
       `expectedEndpoints, or add a justified entry to CODE_TO_SPEC_ALLOWLIST in this file.`,
+  );
+}
+
+// Fail closed on any templated registration the resolver couldn't expand —
+// an unresolved `${…}` route would otherwise vanish from `codeEndpoints` and
+// silently escape the Code ⊆ Spec check.
+if (unresolvedTemplatedRoutes.length > 0) {
+  exitCode = 1;
+  console.log(
+    `\n  Templated route registrations the extractor could not resolve (${unresolvedTemplatedRoutes.length}):`,
+  );
+  for (const r of unresolvedTemplatedRoutes) {
+    console.log(`    - ${r.file}: router.${r.verb}(\`${r.raw}\`)`);
+  }
+  console.log(
+    `\n  Declare the interpolated identifier's literal value(s) in the same file ` +
+      `(a top-level \`const x = "…"\` or an object \`x: "…"\` field the route loop ` +
+      `destructures) so the verifier can expand and check it, or use a literal path.`,
   );
 }
 
