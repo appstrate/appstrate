@@ -45,21 +45,12 @@ type PackageDetailMap = {
 };
 
 /**
- * Spec AgentDetail with `manifest` loosened: the generated `AgentManifest`
- * type is deeply recursive (raw JSON Schema) and TS cannot compare it across
- * openapi-fetch's response mapping (TS2590) — consumers only need the
- * `Record<string, unknown>` view anyway.
+ * Normalize a spec AgentDetail (most fields optional on the wire) to the
+ * asserted, non-optional shape consumers use. Every dependency group is mapped
+ * explicitly — the spec fully declares the response, so no spread is needed to
+ * carry "undeclared" fields.
  */
-type AgentDetailWire = Omit<components["schemas"]["AgentDetail"], "manifest"> & {
-  manifest?: Record<string, unknown>;
-};
-
-/**
- * Normalize a spec AgentDetail (every field optional) to the asserted shape
- * consumers have always used. Spreads keep spec-undeclared fields (e.g.
- * `auth_key` on integration entries, `mcp_servers` deps) at runtime.
- */
-function normalizeAgentDetail(d: AgentDetailWire): AgentDetail {
+function normalizeAgentDetail(d: components["schemas"]["AgentDetail"]): AgentDetail {
   return {
     ...d,
     display_name: d.display_name ?? "",
@@ -72,8 +63,8 @@ function normalizeAgentDetail(d: AgentDetailWire): AgentDetail {
     running_runs: d.running_runs ?? 0,
     forked_from: d.forked_from ?? null,
     dependencies: {
-      ...(d.dependencies ?? {}),
       skills: (d.dependencies?.skills ?? []).map((s) => ({ ...s, version: s.version ?? "" })),
+      mcp_servers: d.dependencies?.mcp_servers ?? [],
       integrations: d.dependencies?.integrations ?? [],
     },
     config: {

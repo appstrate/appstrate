@@ -14,7 +14,8 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedEndUser, seedApiKey } from "../../helpers/seed.ts";
+import { seedEndUser, seedApiKey, seedAgent } from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/application-packages.ts";
 import { buildOpenApiSpec } from "../../../src/openapi/index.ts";
 import { createOpenApiValidator } from "../../helpers/openapi-validator.ts";
 
@@ -144,6 +145,58 @@ describe("OpenAPI response validation", () => {
       expect((body as any).object).toBe("list");
       expect(body).toHaveProperty("data");
       expect((body as any).data).toBeArray();
+    });
+  });
+
+  // ── Agent detail (auth + app-scoped) ───────────────────────
+  // Detail endpoints carry richer projections than the list envelopes — cover
+  // one here so the AgentDetail schema is exercised against a real response,
+  // including the AFPS dependency groups (skills / mcp_servers / integrations).
+
+  describe("GET /api/packages/agents/{scope}/{name} -> 200", () => {
+    it("agent detail response conforms to OpenAPI schema (incl. mcp_servers deps)", async () => {
+      const pkg = await seedAgent({
+        id: "@openapi-test/detail-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@openapi-test/detail-agent",
+          version: "1.2.0",
+          type: "agent",
+          display_name: "Detail Agent",
+          description: "Agent with an mcp_server dependency",
+          dependencies: {
+            mcp_servers: { "@openapi-test/some-mcp": "1.0.0" },
+          },
+        },
+      });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, pkg.id);
+
+      const schema = getResponseSchema("/api/packages/agents/{scope}/{name}", "GET", "200");
+      expect(schema).not.toBeNull();
+
+      const res = await app.request("/api/packages/agents/@openapi-test/detail-agent", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+
+      const body = await res.json();
+      const result = validateResponse(body, schema);
+
+      if (!result.valid) {
+        console.error("GET agent detail validation errors:", result.errors);
+      }
+      if (result.extraFields.length > 0) {
+        console.warn("GET agent detail extra fields not in spec:", result.extraFields);
+      }
+
+      expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
+      // The mcp_servers dependency declared in the manifest must surface in the
+      // detail response (regression guard: the mapper previously dropped it).
+      expect((body as any).dependencies.mcp_servers).toEqual([
+        { id: "@openapi-test/some-mcp", version: "1.0.0" },
+      ]);
     });
 
     it("each application item conforms to ApplicationObject schema", async () => {

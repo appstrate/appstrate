@@ -399,6 +399,8 @@ export interface AgentDetail {
   source: "system" | "local";
   dependencies: {
     skills: { id: string; version: string; name?: string; description?: string }[];
+    /** AFPS §4.1 mcp_servers dependency group (`{ id, version }` per entry). */
+    mcp_servers: { id: string; version: string }[];
     /**
      * Niveau 2 — agent's integration declarations (`dependencies.integrations`
      * + `integrations_configuration`) flattened by `parseManifestIntegrations`.

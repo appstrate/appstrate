@@ -49,6 +49,11 @@ export function createOpenApiValidator(spec: unknown): OpenApiValidator {
     const obj = schema as Record<string, unknown>;
     if (typeof obj.$ref === "string") {
       const ref = obj.$ref;
+      // External refs (e.g. the AFPS `https://schemas.afps.dev/...` manifest
+      // schema) can't be resolved in-process — treat as permissive `{}` so
+      // validation covers the response envelope without fetching the network
+      // schema. Same fallback as the circular-ref guard below.
+      if (!ref.startsWith("#/")) return {};
       if (seen.has(ref)) return {};
       seen.add(ref);
       return dereferenceSchema(resolveRef(ref), new Set(seen));
