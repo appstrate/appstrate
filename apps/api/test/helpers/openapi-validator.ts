@@ -123,8 +123,22 @@ export function createOpenApiValidator(spec: unknown): OpenApiValidator {
       }
     }
 
-    const schemaObj = schema as { properties?: Record<string, unknown> };
-    if (schemaObj.properties && typeof body === "object" && body !== null) {
+    // Undeclared-field detection is strict by default (a response field the
+    // SPA's generated type can't see is drift), UNLESS the schema explicitly
+    // opts into an open shape via `additionalProperties: true` — e.g. an
+    // RFC 7662 introspection response that echoes arbitrary token claims, or a
+    // JSONB column. Honor that opt-out so genuinely dynamic bodies don't
+    // false-positive.
+    const schemaObj = schema as {
+      properties?: Record<string, unknown>;
+      additionalProperties?: unknown;
+    };
+    if (
+      schemaObj.properties &&
+      schemaObj.additionalProperties !== true &&
+      typeof body === "object" &&
+      body !== null
+    ) {
       const schemaKeys = new Set(Object.keys(schemaObj.properties));
       const bodyKeys = Object.keys(body as Record<string, unknown>);
       for (const key of bodyKeys) {

@@ -7743,7 +7743,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Session info */
+            /** @description Session info, or `null` when there is no active session. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7752,7 +7752,7 @@ export interface operations {
                     "application/json": {
                         user?: components["schemas"]["User"] | null;
                         session?: Record<string, never> | null;
-                    };
+                    } | null;
                 };
             };
         };
@@ -7842,8 +7842,17 @@ export interface operations {
                         client_id?: string;
                         exp?: number;
                         sub?: string;
+                    } & {
+                        [key: string]: unknown;
                     };
                 };
+            };
+            /** @description Malformed request (missing/invalid `token` parameter). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -7909,6 +7918,7 @@ export interface operations {
                         /** @enum {string} */
                         token_type: "Bearer";
                         expires_in: number;
+                        expires_at: number;
                         refresh_token?: string;
                         /** @description Present when `openid` scope is granted. */
                         id_token?: string;
@@ -7918,6 +7928,20 @@ export interface operations {
             };
             /** @description `invalid_grant`, `invalid_request`, or RFC 8707 mismatch. */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid client credentials (unknown client or secret mismatch). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Access denied — realm guard, signup gate, or resource mismatch. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7982,6 +8006,7 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "redirect": false,
                      *       "user": {
                      *         "id": "usr_abc123",
                      *         "email": "alice@example.com",
@@ -7991,6 +8016,7 @@ export interface operations {
                      *     }
                      */
                     "application/json": {
+                        redirect?: boolean;
                         user?: components["schemas"]["User"];
                         token?: string | null;
                     };
@@ -11785,6 +11811,7 @@ export interface operations {
                         /** @enum {string} */
                         object: "list";
                         data: components["schemas"]["OAuthClientObject"][];
+                        hasMore: boolean;
                     };
                 };
             };
