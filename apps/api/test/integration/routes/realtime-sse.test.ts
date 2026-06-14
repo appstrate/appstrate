@@ -22,9 +22,47 @@ import { collectSSEEvents } from "../../helpers/sse.ts";
 
 const app = getTestApp();
 
-/** Fire a PG NOTIFY on a channel with a JSON payload. */
+/**
+ * Per-channel required-field defaults so a NOTIFY payload matches the real
+ * producer shape the realtime service validates against (the
+ * `runUpdateEventSchema` / `runLogEventSchema` in @appstrate/shared-types — a
+ * payload missing a required key fails `safeParse` and is silently dropped,
+ * never reaching the SSE stream). Tests override only the fields they assert
+ * on. Mirrors NOTIFY_DEFAULTS in services/realtime.test.ts.
+ */
+const NOTIFY_DEFAULTS: Record<string, Record<string, unknown>> = {
+  run_update: {
+    operation: "UPDATE",
+    id: "exec-default",
+    package_id: null,
+    status: "running",
+    user_id: null,
+    end_user_id: null,
+    org_id: "org-default",
+    application_id: "app-default",
+    schedule_id: null,
+    error: null,
+    started_at: null,
+    completed_at: null,
+    duration: null,
+  },
+  run_log_insert: {
+    id: 1,
+    run_id: "exec-default",
+    org_id: "org-default",
+    application_id: "app-default",
+    type: "progress",
+    level: "info",
+    event: null,
+    message: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+  },
+};
+
+/** Fire a PG NOTIFY on a channel with a JSON payload (required fields filled). */
 async function pgNotify(channel: string, payload: Record<string, unknown>) {
-  await db.execute(sql`SELECT pg_notify(${channel}, ${JSON.stringify(payload)})`);
+  const full = { ...(NOTIFY_DEFAULTS[channel] ?? {}), ...payload };
+  await db.execute(sql`SELECT pg_notify(${channel}, ${JSON.stringify(full)})`);
 }
 
 /** Small delay to let PG LISTEN dispatch events to subscribers. */
@@ -318,7 +356,9 @@ describe("realtime SSE routes (integration)", () => {
         ignoreEvents: ["ping"],
       });
       const data = JSON.parse(events[0]!.data);
-      // stripPayload removes "result" for run_update in non-verbose mode
+      // run_update never carries a `result` field — `runUpdateEventSchema`
+      // doesn't model one, so the realtime service drops any stray key like
+      // this during validation before it can reach the client.
       expect(data).not.toHaveProperty("result");
       expect(data.id).toBe(run.id);
     });
@@ -349,18 +389,20 @@ describe("realtime SSE routes (integration)", () => {
       expect(data.message).toBe("processing");
     });
 
-    it("verbose mode includes all fields", async () => {
+    it("verbose mode passes the full run_update frame through", async () => {
       const res = await sseRequest(`/api/realtime/runs/${run.id}?verbose=true`, ctx);
       expect(res.body).not.toBeNull();
 
       await wait();
       await pgNotify("run_update", {
+        operation: "UPDATE",
         org_id: ctx.orgId,
         application_id: ctx.defaultAppId,
         id: run.id,
         status: "success",
         package_id: agentPkg.id,
-        result: { output: "data" },
+        started_at: "2026-01-01T00:00:00.000Z",
+        duration: 1234,
       });
 
       const events = await collectSSEEvents(res.body!, 1, {
@@ -368,9 +410,17 @@ describe("realtime SSE routes (integration)", () => {
         ignoreEvents: ["ping"],
       });
       const data = JSON.parse(events[0]!.data);
-      // In verbose mode, result is NOT stripped
-      expect(data.result).toEqual({ output: "data" });
+      // run_update is never stripped (it carries no large user-content field),
+      // so verbose mode delivers the complete validated frame untouched —
+      // including non-default and nullable fields.
       expect(data.id).toBe(run.id);
+      expect(data.status).toBe("success");
+      expect(data.operation).toBe("UPDATE");
+      expect(data.packageId).toBe(agentPkg.id);
+      expect(data.startedAt).toBe("2026-01-01T00:00:00.000Z");
+      expect(data.duration).toBe(1234);
+      expect(data.scheduleId).toBeNull();
+      expect(data.error).toBeNull();
     });
 
     it("verbose mode includes data field for run_log", async () => {
