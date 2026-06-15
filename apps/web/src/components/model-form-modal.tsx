@@ -350,8 +350,9 @@ function ModelFormBody({
   const probeCredential = (id: string) => {
     if (probeAttempted.current.has(id)) return;
     probeAttempted.current.add(id);
-    // Mutation invalidates the registry + credentials queries on success →
-    // the catalog metadata for the freshly verified ids lands too.
+    // Mutation invalidates the credentials list (refreshes the "{n} verified
+    // models" badge); the dropdown reads the verified ids straight off the
+    // mutation response below, not the registry (which stays a pure catalog).
     refreshModels.mutate(
       { params: { path: { id } } },
       {
@@ -401,10 +402,14 @@ function ModelFormBody({
     if (!isOauthProvider) return selectedProvider.models;
     // Only THIS session's fresh probe (matching the selected credential)
     // drives the list — the persisted `available_model_ids` is never used
-    // for display, so a drifted plan can't leak stale models.
+    // for display, so a drifted plan can't leak stale models. Map each
+    // verified id to its catalog metadata; a verified id absent from the
+    // catalog (modelDiscoveryCandidates may list non-catalog ids) falls back
+    // to an id-only entry so it stays selectable instead of vanishing —
+    // otherwise an all-non-catalog plan would hang the detector spinner.
     const verifiedIds = probeResult?.id === credentialId ? probeResult.modelIds : [];
-    const verified = new Set(verifiedIds);
-    return selectedProvider.models.filter((m) => verified.has(m.id));
+    const byId = new Map(selectedProvider.models.map((m) => [m.id, m]));
+    return verifiedIds.map((id) => byId.get(id) ?? { id, label: id, featured: false });
   }, [selectedProvider, isOauthProvider, probeResult, credentialId]);
 
   const resetModelFields = () => {
