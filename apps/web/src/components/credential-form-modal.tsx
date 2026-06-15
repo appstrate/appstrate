@@ -49,6 +49,7 @@ import { getProviderById, resolveProviderId } from "@/lib/provider-registry-help
 import { PROVIDER_ICONS } from "./icons";
 import { ProviderPickerGroups } from "./provider-picker-groups";
 import { OAuthPairingBody } from "./oauth-pairing-body";
+import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 
 /**
  * Canonical payload shape submitted to `POST /api/model-provider-credentials`.
@@ -228,6 +229,8 @@ function CredentialFormBody({
     });
   });
 
+  const oauthDismiss = usePairingDismissConfirm(onClose);
+
   const title = credential ? t("credentials.form.editTitle") : t("credentials.form.title");
 
   // OAuth-selected: the pairing body owns submission (helper POSTs creds
@@ -236,10 +239,10 @@ function CredentialFormBody({
     return (
       <Modal
         open
-        onClose={onClose}
+        onClose={oauthDismiss.requestClose}
         title={title}
         actions={
-          <Button type="button" variant="outline" onClick={onClose}>
+          <Button type="button" variant="outline" onClick={oauthDismiss.requestClose}>
             {t("credentials.oauth.close")}
           </Button>
         }
@@ -269,8 +272,10 @@ function CredentialFormBody({
             key={selectedOption.providerId}
             providerId={selectedOption.providerId}
             onConnected={() => onClose()}
+            onBusyChange={oauthDismiss.onBusyChange}
           />
         </div>
+        {oauthDismiss.confirmDialog}
       </Modal>
     );
   }

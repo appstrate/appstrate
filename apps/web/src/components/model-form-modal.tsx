@@ -38,6 +38,7 @@ import {
   useRefreshCredentialModels,
 } from "../hooks/use-model-provider-credentials";
 import { OAuthPairingBody } from "./oauth-pairing-body";
+import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 import {
   CUSTOM_ID,
   PI_ADAPTER_TYPES,
@@ -332,6 +333,7 @@ function ModelFormBody({
   // credentialId directly via `onConnected`, so we auto-select it in the
   // form without diffing the credential list.
   const [oauthDialogOpen, setOauthDialogOpen] = useState(false);
+  const oauthDismiss = usePairingDismissConfirm(() => setOauthDialogOpen(false));
 
   // Synchronous model discovery. The model dropdown for OAuth providers is
   // sourced from THIS credential's verified ids (the account's plan), so the
@@ -882,10 +884,10 @@ function ModelFormBody({
         {oauthDialogOpen && (
           <Modal
             open
-            onClose={() => setOauthDialogOpen(false)}
+            onClose={oauthDismiss.requestClose}
             title={t("credentials.oauth.cliStageTitle")}
             actions={
-              <Button variant="ghost" onClick={() => setOauthDialogOpen(false)}>
+              <Button variant="ghost" onClick={oauthDismiss.requestClose}>
                 {t("credentials.oauth.close")}
               </Button>
             }
@@ -896,9 +898,11 @@ function ModelFormBody({
                 handleOauthConnected(newId);
                 setOauthDialogOpen(false);
               }}
+              onBusyChange={oauthDismiss.onBusyChange}
             />
           </Modal>
         )}
+        {oauthDismiss.confirmDialog}
 
         {/* Custom fields — visible for custom provider or custom model */}
         {isCustom && (

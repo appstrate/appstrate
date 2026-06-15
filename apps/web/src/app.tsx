@@ -24,6 +24,7 @@ import { ErrorBoundary } from "./components/error-boundary";
 import { AppSidebar } from "./components/app-sidebar";
 import { NotificationBell } from "./components/notification-bell";
 import { LoadingState } from "./components/page-states";
+import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
 
 import { useAuth } from "./hooks/use-auth";
 import { useAppConfig } from "./hooks/use-app-config";
@@ -407,6 +408,12 @@ export function App() {
   return (
     <ErrorBoundary>
       <Toaster />
+      {/*
+       * Mounted outside OrgGate/MainLayout so an in-flight OAuth pairing
+       * completes (toast + credential invalidation) even when the user is
+       * on an onboarding route or closed the modal that started it.
+       */}
+      <PendingPairingsWatcher />
       <OrgGate>
         <Routes>
           <Route path="/login" element={<Navigate to="/" replace />} />
