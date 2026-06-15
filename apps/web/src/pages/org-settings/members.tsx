@@ -14,8 +14,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../../api";
+import { useQueryClient } from "@tanstack/react-query";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions, roleI18nKey, INVITE_ROLES, ALL_ROLES } from "../../hooks/use-permissions";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -23,7 +24,9 @@ import { CopyLinkButton } from "../../components/copy-link-button";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
 import { toast } from "sonner";
-import type { OrganizationMember, OrgRole, OrgInvitation } from "@appstrate/shared-types";
+import type { OrgRole } from "@appstrate/shared-types";
+
+type OrgMember = components["schemas"]["OrgMember"];
 
 export function OrgSettingsMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -43,103 +46,84 @@ export function OrgSettingsMembersPage() {
     data: orgData,
     isLoading,
     error,
-  } = useQuery({
-    queryKey: ["org-members", orgId],
-    queryFn: async () => {
-      return api<{ members: OrganizationMember[]; invitations: OrgInvitation[] }>(`/orgs/${orgId}`);
-    },
-    enabled: !!orgId,
-  });
+  } = $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}",
+    { params: { path: { orgId: orgId ?? "" } } },
+    { enabled: !!orgId },
+  );
 
   const members = orgData?.members ?? [];
   const invitations = orgData?.invitations ?? [];
 
-  const addMemberMutation = useMutation({
-    mutationFn: async ({ email, role }: { email: string; role: "viewer" | "member" | "admin" }) => {
-      // Polymorphic bare resource: the created member (has `userId`) or the
-      // created invitation (has `id` + `token`).
-      return api<OrganizationMember | OrgInvitation>(`/orgs/${orgId}/members`, {
-        method: "POST",
-        body: JSON.stringify({ email, role }),
-      });
-    },
+  const invalidateOrg = () => {
+    void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
+  };
+
+  // Polymorphic bare resource: the created member (has `userId`) or the
+  // created invitation (has `id` + `token`).
+  const addMemberMutation = $api.useMutation("post", "/api/orgs/{orgId}/members", {
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
+      invalidateOrg();
       inviteForm.reset();
     },
-    onError: (err: Error) => {
-      inviteForm.setError("root", { message: err.message });
+    onError: (err) => {
+      inviteForm.setError("root", { message: getErrorMessage(err) });
     },
   });
 
-  const cancelInvitationMutation = useMutation({
-    mutationFn: async (invitationId: string) => {
-      return api(`/orgs/${orgId}/invitations/${invitationId}`, { method: "DELETE" });
+  const cancelInvitationMutation = $api.useMutation(
+    "delete",
+    "/api/orgs/{orgId}/invitations/{invitationId}",
+    {
+      onSuccess: invalidateOrg,
+      onError: (err) => toast.error(t("error.prefix", { message: getErrorMessage(err) })),
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
+  );
+
+  const changeInvitationRoleMutation = $api.useMutation(
+    "put",
+    "/api/orgs/{orgId}/invitations/{invitationId}",
+    {
+      onSuccess: invalidateOrg,
+      onError: (err) => toast.error(t("error.prefix", { message: getErrorMessage(err) })),
     },
-    onError: (err: Error) => toast.error(t("error.prefix", { message: err.message })),
+  );
+
+  const removeMemberMutation = $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
+    onSuccess: invalidateOrg,
+    onError: (err) => toast.error(t("error.prefix", { message: getErrorMessage(err) })),
   });
 
-  const changeInvitationRoleMutation = useMutation({
-    mutationFn: async ({
-      invitationId,
-      role,
-    }: {
-      invitationId: string;
-      role: "viewer" | "member" | "admin";
-    }) => {
-      return api(`/orgs/${orgId}/invitations/${invitationId}`, {
-        method: "PUT",
-        body: JSON.stringify({ role }),
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
-    },
-    onError: (err: Error) => toast.error(t("error.prefix", { message: err.message })),
-  });
-
-  const removeMemberMutation = useMutation({
-    mutationFn: async (userId: string) => {
-      return api(`/orgs/${orgId}/members/${userId}`, { method: "DELETE" });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
-    },
-    onError: (err: Error) => toast.error(t("error.prefix", { message: err.message })),
-  });
-
-  const changeRoleMutation = useMutation({
-    mutationFn: async ({ userId, role }: { userId: string; role: OrgRole }) => {
-      return api(`/orgs/${orgId}/members/${userId}`, {
-        method: "PUT",
-        body: JSON.stringify({ role }),
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
-    },
-    onError: (err: Error) => toast.error(t("error.prefix", { message: err.message })),
+  const changeRoleMutation = $api.useMutation("put", "/api/orgs/{orgId}/members/{userId}", {
+    onSuccess: invalidateOrg,
+    onError: (err) => toast.error(t("error.prefix", { message: getErrorMessage(err) })),
   });
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   const handleInvite = (data: { email: string; role: "viewer" | "member" | "admin" }) => {
     const trimmed = data.email.trim();
-    if (!trimmed) return;
-    addMemberMutation.mutate({ email: trimmed, role: data.role });
+    if (!trimmed || !orgId) return;
+    addMemberMutation.mutate({
+      params: { path: { orgId } },
+      body: { email: trimmed, role: data.role },
+    });
   };
 
-  const handleRemove = (member: OrganizationMember) => {
+  const handleRemove = (member: OrgMember) => {
     const label = member.displayName || member.email || member.userId;
     setConfirmState({ label, id: member.userId });
   };
 
   const handleRoleChange = (userId: string, role: OrgRole) => {
-    changeRoleMutation.mutate({ userId, role });
+    if (!orgId) return;
+    // The wire enum excludes "owner"; the owner row never renders this select.
+    changeRoleMutation.mutate({
+      params: { path: { orgId, userId } },
+      body: { role: role as "viewer" | "member" | "admin" },
+    });
   };
 
   return (
@@ -268,8 +252,8 @@ export function OrgSettingsMembersPage() {
                       value={inv.role}
                       onValueChange={(v) =>
                         changeInvitationRoleMutation.mutate({
-                          invitationId: inv.id,
-                          role: v as "viewer" | "member" | "admin",
+                          params: { path: { orgId: orgId ?? "", invitationId: inv.id } },
+                          body: { role: v as "viewer" | "member" | "admin" },
                         })
                       }
                       disabled={changeInvitationRoleMutation.isPending}
@@ -292,7 +276,11 @@ export function OrgSettingsMembersPage() {
                       variant="destructive"
                       size="sm"
                       className="ml-auto"
-                      onClick={() => cancelInvitationMutation.mutate(inv.id)}
+                      onClick={() =>
+                        cancelInvitationMutation.mutate({
+                          params: { path: { orgId: orgId ?? "", invitationId: inv.id } },
+                        })
+                      }
                       disabled={cancelInvitationMutation.isPending}
                     >
                       {t("btn.cancel")}
@@ -324,9 +312,10 @@ export function OrgSettingsMembersPage() {
         isPending={removeMemberMutation.isPending}
         onConfirm={() => {
           if (confirmState) {
-            removeMemberMutation.mutate(confirmState.id, {
-              onSuccess: () => setConfirmState(null),
-            });
+            removeMemberMutation.mutate(
+              { params: { path: { orgId: orgId ?? "", userId: confirmState.id } } },
+              { onSuccess: () => setConfirmState(null) },
+            );
           }
         }}
       />

@@ -275,9 +275,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // When viewing a historical version, use that version's config schema (or empty if none).
   // An empty schema means "no config fields" — distinct from undefined which means "use draft".
   const versionConfigSchema = (() => {
-    const config = (versionDetail?.manifest as Record<string, unknown> | undefined)?.config as
-      | { schema?: JSONSchemaObject }
-      | undefined;
+    const config = versionDetail?.manifest?.config as { schema?: JSONSchemaObject } | undefined;
     return config?.schema;
   })();
   const effectiveConfigSchema = isHistoricalVersion
@@ -298,7 +296,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const unifiedForHeader = {
     id: packageId,
     displayName,
-    description: type === "agent" ? agentDetail!.description : (pkgDetail?.description ?? ""),
+    description:
+      type === "agent" ? (agentDetail!.description ?? "") : (pkgDetail?.description ?? ""),
     source: source ?? ("local" as const),
     type,
     version,
@@ -359,11 +358,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           type === "agent" ? (
             <AgentActions
               packageId={packageId}
-              manifest={
-                (isHistoricalVersion ? versionDetail?.manifest : agentDetail?.manifest) as
-                  | Record<string, unknown>
-                  | undefined
-              }
+              manifest={isHistoricalVersion ? versionDetail?.manifest : agentDetail?.manifest}
               companionFile={companionFile}
               isOwned={isOwned}
               isHistoricalVersion={isHistoricalVersion}
@@ -378,11 +373,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               <PackageActionsDropdown
                 packageId={packageId}
                 type={type}
-                manifest={
-                  (isHistoricalVersion ? versionDetail?.manifest : pkgDetail?.manifest) as
-                    | Record<string, unknown>
-                    | undefined
-                }
+                manifest={isHistoricalVersion ? versionDetail?.manifest : pkgDetail?.manifest}
                 companionFile={companionFile}
                 isOwned={isOwned}
                 isBuiltIn={isBuiltIn}
@@ -550,8 +541,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 <PackageCard
                   key={agent.id}
                   id={agent.id}
-                  displayName={agent.display_name}
-                  description={agent.description}
+                  displayName={agent.display_name ?? agent.id}
+                  description={agent.description ?? null}
                   type="agent"
                   source={agent.source}
                   keywords={agent.keywords}

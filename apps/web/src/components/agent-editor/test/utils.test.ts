@@ -376,7 +376,7 @@ describe("fieldsToSchema — JSON Schema purity", () => {
         maxFiles: "5",
       },
     ];
-    const result = fieldsToSchema(fields as SchemaField[], "input");
+    const result = fieldsToSchema(fields, "input");
     expect(result).not.toBeNull();
 
     // Check the schema object (not the wrapper) for banned keywords
@@ -401,7 +401,7 @@ describe("fieldsToSchema — JSON Schema purity", () => {
         maxFiles: "",
       },
     ];
-    const result = fieldsToSchema(fields as SchemaField[], "input");
+    const result = fieldsToSchema(fields, "input");
     expect(result).not.toBeNull();
 
     const violations = findKeywordInObject(result!.schema, "type")
@@ -430,7 +430,7 @@ describe("fieldsToSchema — JSON Schema purity", () => {
         default: "",
       },
     ];
-    const result = fieldsToSchema(fields as SchemaField[], "input");
+    const result = fieldsToSchema(fields, "input");
     expect(result).not.toBeNull();
 
     // Not in schema
@@ -454,7 +454,7 @@ describe("fieldsToSchema — JSON Schema purity", () => {
         maxFiles: "",
       },
     ];
-    const result = fieldsToSchema(fields as SchemaField[], "input");
+    const result = fieldsToSchema(fields, "input");
     expect(result).not.toBeNull();
 
     // Not in schema
@@ -489,7 +489,7 @@ describe("fieldsToSchema — JSON Schema purity", () => {
         default: "",
       },
     ];
-    const result = fieldsToSchema(fields as SchemaField[], "input");
+    const result = fieldsToSchema(fields, "input");
     expect(result).not.toBeNull();
 
     // Not in schema

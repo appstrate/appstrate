@@ -61,7 +61,9 @@ const integrationOrgDefaultSchema = {
 
 const integrationSummarySchema = {
   type: "object",
-  required: ["id", "manifest", "orgId", "source"],
+  // Only `id` is guaranteed: this list supports the `?fields=` projection
+  // (projectFields forces `id`, drops every other key on request).
+  required: ["id"],
   properties: {
     id: { type: "string" },
     manifest: { type: "object", additionalProperties: true },
@@ -259,10 +261,11 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["object", "data", "hasMore"],
+                required: ["object", "data", "total", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: { type: "array", items: integrationSummarySchema },
+                  total: { type: "integer" },
                   hasMore: { type: "boolean" },
                 },
               },
@@ -650,6 +653,8 @@ export const integrationsPaths = {
                   "resolved_owned_by_actor",
                   "admin_pinned_connection_id",
                   "member_pinned_connection_id",
+                  "org_default_connection_id",
+                  "org_default_enforced",
                   "can_add_connection",
                   "candidates",
                 ],

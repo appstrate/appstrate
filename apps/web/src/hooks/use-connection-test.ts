@@ -1,10 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useRef, useEffect } from "react";
-import type { UseMutationResult } from "@tanstack/react-query";
-import type { TestResult } from "@appstrate/shared-types";
+import type { components } from "../api/client";
 
-export function useConnectionTest(mutation: UseMutationResult<TestResult, Error, string>) {
+type TestResult = components["schemas"]["TestResult"];
+
+/**
+ * Structural subset of the typed `$api.useMutation` result for the
+ * `POST .../{id}/test` endpoints (models, proxies, credentials) — variables
+ * follow the openapi-react-query `{ params: { path: { id } } }` shape.
+ */
+interface TestMutation {
+  mutate: (
+    variables: { params: { path: { id: string } } },
+    options: {
+      onSuccess: (result: TestResult) => void;
+      onError: () => void;
+    },
+  ) => void;
+}
+
+export function useConnectionTest(mutation: TestMutation) {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, TestResult | null>>({});
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -28,21 +44,24 @@ export function useConnectionTest(mutation: UseMutationResult<TestResult, Error,
 
   const handleTest = (id: string) => {
     setTestingId(id);
-    mutation.mutate(id, {
-      onSuccess: (result) => {
-        setTestResults((prev) => ({ ...prev, [id]: result }));
-        setTestingId(null);
-        scheduleClear(id);
+    mutation.mutate(
+      { params: { path: { id } } },
+      {
+        onSuccess: (result) => {
+          setTestResults((prev) => ({ ...prev, [id]: result }));
+          setTestingId(null);
+          scheduleClear(id);
+        },
+        onError: () => {
+          setTestResults((prev) => ({
+            ...prev,
+            [id]: { ok: false, latency: 0, error: "INTERNAL_ERROR", message: "Test failed" },
+          }));
+          setTestingId(null);
+          scheduleClear(id);
+        },
       },
-      onError: () => {
-        setTestResults((prev) => ({
-          ...prev,
-          [id]: { ok: false, latency: 0, error: "INTERNAL_ERROR", message: "Test failed" },
-        }));
-        setTestingId(null);
-        scheduleClear(id);
-      },
-    });
+    );
   };
 
   return { testingId, testResults, handleTest };

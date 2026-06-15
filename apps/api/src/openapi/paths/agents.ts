@@ -279,6 +279,16 @@ export const agentsPaths = {
                     type: "array",
                     items: {
                       type: "object",
+                      required: [
+                        "id",
+                        "key",
+                        "content",
+                        "runId",
+                        "actor_type",
+                        "actor_id",
+                        "createdAt",
+                        "updatedAt",
+                      ],
                       properties: {
                         id: { type: "integer" },
                         key: { type: "string" },
@@ -295,9 +305,10 @@ export const agentsPaths = {
                     type: "array",
                     items: {
                       type: "object",
+                      required: ["id", "content", "runId", "actor_type", "actor_id", "createdAt"],
                       properties: {
                         id: { type: "integer" },
-                        content: {},
+                        content: { type: "string" },
                         runId: { type: ["string", "null"] },
                         actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
                         actor_id: { type: ["string", "null"] },

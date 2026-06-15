@@ -3,11 +3,15 @@
 import { listenClient } from "@appstrate/db/client";
 import { logger } from "../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import {
+  runUpdateEventSchema,
+  runLogEventSchema,
+  runMetricEventSchema,
+  connectionUpdateEventSchema,
+  type RealtimeEvent,
+} from "@appstrate/shared-types";
 
-export type RealtimeEvent = {
-  event: string;
-  data: Record<string, unknown>;
-};
+export type { RealtimeEvent };
 
 type Subscriber = {
   id: string;
@@ -55,13 +59,19 @@ export async function initRealtime(): Promise<void> {
   await listenClient.listen("run_update", (payload) => {
     try {
       const raw = JSON.parse(payload) as Record<string, unknown>;
-      const data = snakeToCamel(raw);
+      const parsed = runUpdateEventSchema.safeParse(snakeToCamel(raw));
+      if (!parsed.success) {
+        logger.error("run_update payload failed schema validation", {
+          issues: parsed.error.issues,
+        });
+        return;
+      }
       for (const sub of subscribers.values()) {
         if (sub.filter.orgId !== raw.org_id) continue;
         if (sub.filter.applicationId !== raw.application_id) continue;
         if (sub.filter.runId && sub.filter.runId !== raw.id) continue;
         if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
-        sub.send({ event: "run_update", data });
+        sub.send({ event: "run_update", data: parsed.data });
       }
     } catch (err) {
       logger.error("Failed to parse run_update payload", {
@@ -73,13 +83,19 @@ export async function initRealtime(): Promise<void> {
   await listenClient.listen("run_log_insert", (payload) => {
     try {
       const raw = JSON.parse(payload) as Record<string, unknown>;
-      const data = snakeToCamel(raw);
+      const parsed = runLogEventSchema.safeParse(snakeToCamel(raw));
+      if (!parsed.success) {
+        logger.error("run_log payload failed schema validation", {
+          issues: parsed.error.issues,
+        });
+        return;
+      }
       for (const sub of subscribers.values()) {
         if (sub.filter.orgId !== raw.org_id) continue;
         if (sub.filter.applicationId !== raw.application_id) continue;
         if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
         if (!sub.filter.isAdmin && raw.level === "debug") continue;
-        sub.send({ event: "run_log", data });
+        sub.send({ event: "run_log", data: parsed.data });
       }
     } catch (err) {
       logger.error("Failed to parse run_log_insert payload", {
@@ -98,13 +114,19 @@ export async function initRealtime(): Promise<void> {
   await listenClient.listen("run_metric", (payload) => {
     try {
       const raw = JSON.parse(payload) as Record<string, unknown>;
-      const data = snakeToCamel(raw);
+      const parsed = runMetricEventSchema.safeParse(snakeToCamel(raw));
+      if (!parsed.success) {
+        logger.error("run_metric payload failed schema validation", {
+          issues: parsed.error.issues,
+        });
+        return;
+      }
       for (const sub of subscribers.values()) {
         if (sub.filter.orgId !== raw.org_id) continue;
         if (sub.filter.applicationId !== raw.application_id) continue;
         if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
         if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
-        sub.send({ event: "run_metric", data });
+        sub.send({ event: "run_metric", data: parsed.data });
       }
     } catch (err) {
       logger.error("Failed to parse run_metric payload", {
@@ -127,7 +149,14 @@ export async function initRealtime(): Promise<void> {
   await listenClient.listen("connection_update", (payload) => {
     try {
       const raw = JSON.parse(payload) as Record<string, unknown>;
-      const data = snakeToCamel(raw);
+      const parsed = connectionUpdateEventSchema.safeParse(snakeToCamel(raw));
+      if (!parsed.success) {
+        logger.error("connection_update payload failed schema validation", {
+          issues: parsed.error.issues,
+        });
+        return;
+      }
+      const data = parsed.data;
       for (const sub of subscribers.values()) {
         if (sub.filter.applicationId !== raw.application_id) continue;
         // Actor filter: only fan out rows the subscriber owns. Without

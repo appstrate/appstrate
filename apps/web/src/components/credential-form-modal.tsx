@@ -42,8 +42,9 @@ import {
   useProvidersRegistry,
   useTestModelProviderCredentialInline,
   type ProviderRegistryEntry,
+  type ModelProviderCredentialInfo,
 } from "../hooks/use-model-provider-credentials";
-import type { ModelProviderCredentialInfo, TestResult } from "@appstrate/shared-types";
+import type { TestResult } from "@appstrate/shared-types";
 import { getProviderById, resolveProviderId } from "@/lib/provider-registry-helpers";
 import { PROVIDER_ICONS } from "./icons";
 import { ProviderPickerGroups } from "./provider-picker-groups";
@@ -177,10 +178,12 @@ function CredentialFormBody({
     setTestResult(null);
     testMutation.mutate(
       {
-        apiShape: testApiShape,
-        baseUrl: testBaseUrl,
-        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-        ...(credential ? { existingKeyId: credential.id } : {}),
+        body: {
+          apiShape: testApiShape,
+          baseUrl: testBaseUrl,
+          ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+          ...(credential ? { existingKeyId: credential.id } : {}),
+        },
       },
       {
         onSuccess: (result) => setTestResult(result),

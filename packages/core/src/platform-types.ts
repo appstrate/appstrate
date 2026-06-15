@@ -230,16 +230,6 @@ export interface ContainerOrchestrator {
 }
 
 // ---------------------------------------------------------------------------
-// Realtime SSE — event shape
-// ---------------------------------------------------------------------------
-
-/** Event delivered to realtime subscribers (matches the SSE wire format). */
-export interface RealtimeEvent {
-  event: string;
-  data: Record<string, unknown>;
-}
-
-// ---------------------------------------------------------------------------
 // Inline run — request body
 // ---------------------------------------------------------------------------
 

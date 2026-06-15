@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -20,10 +21,9 @@ import {
   useOnboardingNav,
 } from "../../components/onboarding-layout";
 import { CopyLinkButton } from "../../components/copy-link-button";
-import { api } from "../../api";
+import { $api } from "../../api/client";
 import { roleI18nKey, INVITE_ROLES } from "../../hooks/use-permissions";
 import { Spinner } from "../../components/spinner";
-import type { OrganizationMember, OrgInvitation } from "@appstrate/shared-types";
 
 export function OnboardingMembersStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -36,29 +36,24 @@ export function OnboardingMembersStep() {
   const [role, setRole] = useState<"viewer" | "member" | "admin">("member");
   const [error, setError] = useState<string | null>(null);
 
-  const { data: orgData } = useQuery({
-    queryKey: ["org-members", orgId],
-    queryFn: () => api<{ invitations: OrgInvitation[] }>(`/orgs/${orgId}`),
-    enabled: !!orgId,
-  });
+  const { data: orgData } = $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}",
+    { params: { path: { orgId: orgId ?? "" } } },
+    { enabled: !!orgId },
+  );
 
   const invitations = orgData?.invitations ?? [];
 
-  const addMemberMutation = useMutation({
-    mutationFn: async ({ email, role }: { email: string; role: "viewer" | "member" | "admin" }) => {
-      return api<OrganizationMember | OrgInvitation>(`/orgs/${orgId}/members`, {
-        method: "POST",
-        body: JSON.stringify({ email, role }),
-      });
-    },
+  const addMemberMutation = $api.useMutation("post", "/api/orgs/{orgId}/members", {
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
       setEmail("");
       setRole("member");
       setError(null);
     },
-    onError: (err: Error) => {
-      setError(err.message);
+    onError: (err) => {
+      setError(getErrorMessage(err));
     },
   });
 
@@ -68,8 +63,11 @@ export function OnboardingMembersStep() {
     e.preventDefault();
     setError(null);
     const trimmed = email.trim();
-    if (!trimmed) return;
-    addMemberMutation.mutate({ email: trimmed, role });
+    if (!trimmed || !orgId) return;
+    addMemberMutation.mutate({
+      params: { path: { orgId } },
+      body: { email: trimmed, role },
+    });
   };
 
   if (!orgId) return null;

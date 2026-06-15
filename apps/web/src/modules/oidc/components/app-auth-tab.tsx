@@ -99,7 +99,7 @@ function SmtpSection() {
           toast.success(t("settings:appAuth.smtpSaved"));
           setForm((f) => ({ ...f, pass: "" }));
         },
-        onError: (err) => toast.error((err as Error).message),
+        onError: (err) => toast.error(err.message),
       },
     );
   }
@@ -241,15 +241,13 @@ function SmtpSection() {
         isPending={test.isPending}
         onSend={(to) =>
           test.mutate(to, {
-            onSuccess: (r) => {
-              if (r.ok) {
-                toast.success(t("settings:appAuth.smtpTestOk"));
-                setTestOpen(false);
-              } else {
-                toast.error(r.error ?? "SMTP test failed");
-              }
+            // A failed SMTP send is a non-2xx response (the server surfaces
+            // the SMTP error verbatim), so it lands in onError.
+            onSuccess: () => {
+              toast.success(t("settings:appAuth.smtpTestOk"));
+              setTestOpen(false);
             },
-            onError: (err) => toast.error((err as Error).message),
+            onError: (err) => toast.error(err.message),
           })
         }
       />
@@ -336,7 +334,7 @@ function SocialSection({
           toast.success(t("settings:appAuth.socialSaved"));
           setForm((f) => ({ ...f, clientSecret: "" }));
         },
-        onError: (err) => toast.error((err as Error).message),
+        onError: (err) => toast.error(err.message),
       },
     );
   }

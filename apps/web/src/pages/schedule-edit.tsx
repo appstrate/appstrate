@@ -51,15 +51,12 @@ export function ScheduleEditPage() {
           cron_expression: schedule.cron_expression,
           timezone: schedule.timezone ?? "UTC",
           enabled: schedule.enabled ?? true,
-          input: (schedule.input ?? {}) as Record<string, unknown>,
-          config_override: (schedule.config_override ?? null) as Record<string, unknown> | null,
+          input: schedule.input ?? {},
+          config_override: schedule.config_override ?? null,
           model_id_override: schedule.model_id_override ?? null,
           proxy_id_override: schedule.proxy_id_override ?? null,
           version_override: schedule.version_override ?? null,
-          connection_overrides: (schedule.connection_overrides ?? null) as Record<
-            string,
-            string
-          > | null,
+          connection_overrides: schedule.connection_overrides ?? null,
         }}
         inputSchema={deps?.inputSchema}
         configSchema={deps?.configSchema}

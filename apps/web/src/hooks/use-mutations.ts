@@ -3,11 +3,25 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import type { EnrichedRun } from "@appstrate/shared-types";
+import { getErrorMessage } from "@appstrate/core/errors";
 import i18n from "../i18n";
-import { api, ApiError, buildQs, uploadFormData } from "../api";
+import { ApiError, client, type components } from "../api/client";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
-import { packageDetailPath } from "../lib/package-paths";
+import { invalidateIntegrationQueries } from "./use-integrations";
+import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
+import {
+  packageKeys,
+  agentsKeys,
+  runsKeys,
+  runKeys,
+  paginatedRunsKeys,
+  persistenceKeys,
+} from "../lib/query-keys";
+
+// NOTE on query keys: run-cache keys (["runs"], ["paginated-runs"], ["run"])
+// are PINNED legacy keys — use-global-run-sync.ts patches them from SSE
+// events, and the runs hooks are migrated with the same pinned keys. The
+// package/agent keys stay legacy too (see the note in use-packages.ts).
 
 export function onMutationError(err: Error) {
   // Skip the generic toast for missing_integration_connection (412) —
@@ -17,20 +31,21 @@ export function onMutationError(err: Error) {
   if (err instanceof ApiError && err.code === "missing_integration_connection") {
     return;
   }
-  toast.error(i18n.t("error.prefix", { message: err.message }));
+  toast.error(i18n.t("error.prefix", { message: getErrorMessage(err) }));
 }
 
 export function useSaveConfig(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (config: Record<string, unknown>) => {
-      return api(`/agents/${packageId}/config`, {
-        method: "PUT",
-        body: JSON.stringify(config),
+      const { data } = await client.PUT("/api/agents/{scope}/{name}/config", {
+        params: { path: splitPackageRef(packageId) },
+        body: config,
       });
+      return data!;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packages", "agent"] });
+      qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
     },
     onError: onMutationError,
   });
@@ -62,22 +77,31 @@ export function useRunAgent(packageId: string) {
   return useMutation({
     mutationFn: async (params?: RunAgentParams) => {
       const { input, version, connectionOverrides } = params ?? {};
-      // Editor default: run the draft the user is editing. Explicit so the
-      // server-side published-by-default (#636) never changes UI behavior.
-      const qs = buildQs({ version: version ?? "draft" });
-      const body: Record<string, unknown> = {};
-      if (input !== undefined) body.input = input;
-      if (connectionOverrides !== undefined) body.connection_overrides = connectionOverrides;
+      const { data } = await client.POST("/api/agents/{scope}/{name}/run", {
+        params: {
+          path: splitPackageRef(packageId),
+          // Editor default: run the draft the user is editing. Explicit so
+          // the server-side published-by-default (#636) never changes UI
+          // behavior.
+          query: { version: version ?? "draft" },
+        },
+        body: {
+          // The spec types the free-form input object as `Record<string,
+          // never>` — narrow the editor-built input; the server validates it
+          // against the agent's input schema.
+          ...(input !== undefined ? { input: input as Record<string, never> } : {}),
+          ...(connectionOverrides !== undefined
+            ? { connection_overrides: connectionOverrides }
+            : {}),
+        },
+      });
       // 201 + the bare created Run resource (same shape as GET /runs/:id) —
       // the legacy `runId` alias was removed (#657).
-      return api<EnrichedRun>(`/agents/${packageId}/run${qs}`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
+      return data!;
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["runs"] });
-      qc.invalidateQueries({ queryKey: ["paginated-runs"] });
+      qc.invalidateQueries({ queryKey: runsKeys.all });
+      qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
       navigate(`/agents/${packageId}/runs/${data.id}`);
     },
     onError: onMutationError,
@@ -88,33 +112,43 @@ export function useImportPackage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
-    mutationFn: async ({ file, force }: { file: File; force?: boolean }) => {
+    mutationFn: async ({
+      file,
+      force,
+    }: {
+      file: File;
+      force?: boolean;
+    }): Promise<{ packageId: string; type: string; warnings?: string[] }> => {
       const fd = new FormData();
       fd.append("file", file);
       // Multi-package bundles route to a different endpoint; the
       // single-package import endpoint can't decode them. Detect by
       // extension so users can drag both kinds into the same modal.
       if (file.name.toLowerCase().endsWith(".afps-bundle")) {
-        const res = await uploadFormData<{
-          root_package_id: string;
-          root_version: string;
-          warnings?: string[];
-        }>("/packages/import-bundle", fd);
+        const { data } = await client.POST("/api/packages/import-bundle", {
+          // Multipart gap: the generated body types the binary part as
+          // `string`. The FormData passes through the serializer untouched;
+          // the browser sets the multipart boundary.
+          body: { file },
+          bodySerializer: () => fd,
+        });
         return {
-          packageId: res.root_package_id,
+          packageId: data!.root_package_id,
           type: "agent" as const,
-          warnings: res.warnings,
+          warnings: data!.warnings,
         };
       }
-      const qs = force ? "?force=true" : "";
-      return uploadFormData<{ packageId: string; type: string; warnings?: string[] }>(
-        `/packages/import${qs}`,
-        fd,
-      );
+      const { data } = await client.POST("/api/packages/import", {
+        params: { query: force ? { force: true } : undefined },
+        // Multipart gap — see above.
+        body: { file },
+        bodySerializer: () => fd,
+      });
+      return data!;
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["agents"] });
-      qc.invalidateQueries({ queryKey: ["packages"] });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
       // Non-blocking install-time warnings (AFPS §7.7) —
       // surface each one as a sonner warning toast so publishers see them
       // immediately after a successful import.
@@ -134,15 +168,12 @@ export function useImportFromGithub() {
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async (url: string) => {
-      return api<{ packageId: string; type: string }>("/packages/import-github", {
-        method: "POST",
-        body: JSON.stringify({ url }),
-        headers: { "Content-Type": "application/json" },
-      });
+      const { data } = await client.POST("/api/packages/import-github", { body: { url } });
+      return data!;
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["agents"] });
-      qc.invalidateQueries({ queryKey: ["packages"] });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
       navigate(`/${data.type === "agent" ? "agent" : data.type}s/${data.packageId}`);
     },
     onError: onMutationError,
@@ -153,12 +184,15 @@ export function useCancelRun() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (runId: string) => {
-      return api(`/runs/${runId}/cancel`, { method: "POST" });
+      const { data } = await client.POST("/api/runs/{id}/cancel", {
+        params: { path: { id: runId } },
+      });
+      return data!;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["run"] });
-      qc.invalidateQueries({ queryKey: ["runs"] });
-      qc.invalidateQueries({ queryKey: ["paginated-runs"] });
+      qc.invalidateQueries({ queryKey: runKeys.all });
+      qc.invalidateQueries({ queryKey: runsKeys.all });
+      qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
     },
     onError: onMutationError,
   });
@@ -168,13 +202,16 @@ export function useDeleteAgentRuns(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      return api<{ deleted_count: number }>(`/agents/${packageId}/runs`, { method: "DELETE" });
+      const { data } = await client.DELETE("/api/agents/{scope}/{name}/runs", {
+        params: { path: splitPackageRef(packageId) },
+      });
+      return data!;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["runs"] });
-      qc.invalidateQueries({ queryKey: ["paginated-runs"] });
-      qc.invalidateQueries({ queryKey: ["packages", "agent"] });
-      qc.invalidateQueries({ queryKey: ["agents"] });
+      qc.invalidateQueries({ queryKey: runsKeys.all });
+      qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
     },
     onError: onMutationError,
   });
@@ -185,10 +222,12 @@ export function useDeleteAgent() {
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async (packageId: string) => {
-      await api(`/packages/agents/${packageId}`, { method: "DELETE" });
+      await client.DELETE("/api/packages/agents/{scope}/{name}", {
+        params: { path: splitPackageRef(packageId) },
+      });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agents"] });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
       navigate("/");
     },
     onError: onMutationError,
@@ -201,10 +240,12 @@ export function useDeleteMemory(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (memoryId: number) => {
-      return api(`/agents/${packageId}/persistence/memories/${memoryId}`, { method: "DELETE" });
+      await client.DELETE("/api/agents/{scope}/{name}/persistence/memories/{id}", {
+        params: { path: { ...splitPackageRef(packageId), id: memoryId } },
+      });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agent-persistence"] });
+      qc.invalidateQueries({ queryKey: persistenceKeys.all });
     },
     onError: onMutationError,
   });
@@ -214,13 +255,13 @@ export function useDeleteAllMemories(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      return api<{ memories_deleted: number; checkpoint_deleted: boolean }>(
-        `/agents/${packageId}/persistence?kind=memory`,
-        { method: "DELETE" },
-      );
+      const { data } = await client.DELETE("/api/agents/{scope}/{name}/persistence", {
+        params: { path: splitPackageRef(packageId), query: { kind: "memory" } },
+      });
+      return data!;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agent-persistence"] });
+      qc.invalidateQueries({ queryKey: persistenceKeys.all });
     },
     onError: onMutationError,
   });
@@ -231,24 +272,52 @@ export function useDeleteAllMemories(packageId: string) {
 export function useCreatePackage(type: PackageType) {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const cfg = PACKAGE_CONFIG[type];
   return useMutation({
     mutationFn: async (body: {
       id?: string;
       manifest: Record<string, unknown>;
       content: string;
       source_code?: string;
-    }) => {
+    }): Promise<{ id: string }> => {
       // 201 → the created package resource, bare (issue #657).
-      return api<{ id: string }>(`/packages/${cfg.path}`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
+      switch (type) {
+        case "agent": {
+          const { data } = await client.POST("/api/packages/agents", {
+            // The editor builds the manifest as a plain `Record<string,
+            // unknown>`; createAgent's body keeps the strict AFPS
+            // `AgentManifest` (the documented SDK contract). Assert only the
+            // manifest field across that dynamic-object → typed boundary —
+            // `content` stays checked, and the server validates the manifest
+            // against the AFPS schema.
+            body: {
+              manifest: body.manifest as components["schemas"]["AgentManifest"],
+              content: body.content,
+            },
+          });
+          return { id: data!.id };
+        }
+        case "skill": {
+          const { data } = await client.POST("/api/packages/skills", { body });
+          return { id: data!.id };
+        }
+        case "integration": {
+          const { data } = await client.POST("/api/packages/integrations", { body });
+          return { id: data!.id };
+        }
+        case "mcp-server": {
+          const { data } = await client.POST("/api/packages/mcp-servers", {
+            // The JSON create variant requires an explicit kebab-case id —
+            // the editor always supplies one for MCP-server packages.
+            body: { ...body, id: body.id! },
+          });
+          return { id: data!.id };
+        }
+      }
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["packages"] });
-      if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
-      if (type === "integration") qc.invalidateQueries({ queryKey: ["integrations"] });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
+      if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
+      if (type === "integration") void invalidateIntegrationQueries(qc);
       if (data.id) {
         navigate(packageDetailPath(type, data.id));
       }
@@ -267,24 +336,29 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       content: string;
       source_code?: string;
       lock_version: number;
-    }) => {
+    }): Promise<{ id: string; lock_version: number }> => {
+      const { data } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {
+        params: { path: splitPackageRef(packageId) },
+        // No cast needed: the body's explicit `{manifest, content,
+        // source_code?, lock_version}` keys satisfy the skill/integration/
+        // mcp-server update operations (generic-object manifest) in the
+        // dynamic-path union, so the assignment typechecks directly.
+        body,
+      });
       // 200 → the updated package resource, bare (issue #657). The resource
       // carries the NEW `lock_version` optimistic-lock token.
-      return api<{ id: string; lock_version: number }>(`/packages/${cfg.path}/${packageId}`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      });
+      return { id: data!.id, lock_version: data!.lock_version ?? 0 };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packages"] });
-      if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
+      if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       // An agent's tools drive the required OAuth scopes, so editing them
       // changes the per-integration agent-resolution verdict (e.g. a connection
       // flips to insufficient_scopes / needs reconnection). Invalidate the
       // integrations subtree on agent edits too, not only integration edits, so
       // the Connections tab verdict + badges refresh without a page reload.
       if (type === "agent" || type === "integration") {
-        qc.invalidateQueries({ queryKey: ["integrations"] });
+        void invalidateIntegrationQueries(qc);
       }
       qc.invalidateQueries({ queryKey: ["version-info"] });
       navigate(packageDetailPath(type, packageId));

@@ -101,15 +101,17 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
 
     createMutation.mutate(
       {
-        name: data.name.trim(),
-        expiresAt,
-        scopes: allSelected ? undefined : effectiveScopes,
+        body: {
+          name: data.name.trim(),
+          expiresAt,
+          scopes: allSelected ? undefined : effectiveScopes,
+        },
       },
       {
         onSuccess: (result) => {
-          setCreatedKey(result.key);
-          setCreatedScopes(result.scopes);
-          onKeyCreated?.(result.key);
+          setCreatedKey(result.key ?? null);
+          setCreatedScopes(result.scopes ?? []);
+          if (result.key) onKeyCreated?.(result.key);
         },
         onError: (err) => {
           setError("root", { message: getErrorMessage(err) });

@@ -1,108 +1,103 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
-import { api, apiList } from "../api";
-import { useCurrentOrgId } from "./use-org";
-import type {
-  ModelProviderCredentialInfo,
-  ProviderRegistryEntry,
-  TestResult,
-} from "@appstrate/shared-types";
+import { $api, type components, type paths } from "../api/client";
+import { useOrgOnlyScope } from "./use-org-scope";
 
-export type { ProviderRegistryEntry } from "@appstrate/shared-types";
+/** Wire shape from the OpenAPI spec (components.schemas.ModelProviderCredential). */
+export type ModelProviderCredentialInfo = components["schemas"]["ModelProviderCredential"];
+
+/**
+ * Wire shape of a `GET /api/model-provider-credentials/registry` list item.
+ *
+ * The endpoint supports the `?fields=` projection (which is why every field but
+ * `providerId` is optional in the generated type). This hook never projects, so
+ * the server always returns the full catalog entry — the projectable fields are
+ * re-required here, asserted at the `select` trust boundary below (same pattern
+ * as the integrations summary list).
+ */
+type RawProviderRegistryEntry =
+  paths["/api/model-provider-credentials/registry"]["get"]["responses"][200]["content"]["application/json"]["data"][number];
+export type ProviderRegistryEntry = RawProviderRegistryEntry &
+  Required<
+    Pick<
+      RawProviderRegistryEntry,
+      | "displayName"
+      | "iconUrl"
+      | "apiShape"
+      | "defaultBaseUrl"
+      | "baseUrlOverridable"
+      | "authMode"
+      | "featured"
+      | "models"
+    >
+  >;
 
 export function useModelProviderCredentials() {
-  const orgId = useCurrentOrgId();
-  return useQuery({
-    queryKey: ["model-provider-credentials", orgId],
-    queryFn: () => apiList<ModelProviderCredentialInfo>("/model-provider-credentials"),
-    enabled: !!orgId,
-  });
+  const scope = useOrgOnlyScope();
+  return $api.useQuery(
+    "get",
+    "/api/model-provider-credentials",
+    { params: { header: scope.header } },
+    { enabled: scope.enabled, select: (e) => e.data },
+  );
 }
 
 export function useProvidersRegistry() {
-  const orgId = useCurrentOrgId();
-  return useQuery({
-    queryKey: ["model-provider-credentials", orgId, "registry"],
-    queryFn: () => apiList<ProviderRegistryEntry>("/model-provider-credentials/registry"),
-    enabled: !!orgId,
-    staleTime: 5 * 60 * 1000,
-  });
+  const scope = useOrgOnlyScope();
+  return $api.useQuery(
+    "get",
+    "/api/model-provider-credentials/registry",
+    { params: { header: scope.header } },
+    {
+      enabled: scope.enabled,
+      staleTime: 5 * 60 * 1000,
+      // This hook never sends `?fields=`, so the server returns full entries —
+      // narrow the projection-loosened wire type to the full catalog shape.
+      select: (e) => e.data as ProviderRegistryEntry[],
+    },
+  );
+}
+
+/**
+ * openapi-react-query keys are [method, path, init] with the literal spec
+ * path — the registry is the static in-code catalog, so only the
+ * credentials list needs invalidating after a write.
+ */
+function useInvalidateModelProviderCredentials() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] });
+  };
 }
 
 export function useCreateModelProviderCredential() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: {
-      /** Optional — server derives from registry `displayName` + org dedup when absent. */
-      label?: string;
-      providerId: string;
-      apiKey: string;
-      baseUrlOverride?: string | null;
-    }) => {
-      // Bare created credential resource (non-secret projection) (#657).
-      return api<ModelProviderCredentialInfo>("/model-provider-credentials", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["model-provider-credentials"] });
-    },
-  });
+  const invalidate = useInvalidateModelProviderCredentials();
+  return $api.useMutation("post", "/api/model-provider-credentials", { onSuccess: invalidate });
 }
 
+// `apiShape` / `baseUrl` are pinned by `providerId` at create time and cannot
+// be mutated — delete and re-create to switch providers.
 export function useUpdateModelProviderCredential() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      id,
-      data,
-    }: {
-      id: string;
-      // `apiShape` / `baseUrl` are pinned by `providerId` at create time and cannot
-      // be mutated — delete and re-create to switch providers.
-      data: {
-        label?: string;
-        apiKey?: string;
-      };
-    }) => {
-      // Bare updated credential resource (non-secret projection) (#657).
-      return api<ModelProviderCredentialInfo>(`/model-provider-credentials/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(data),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["model-provider-credentials"] });
-    },
+  const invalidate = useInvalidateModelProviderCredentials();
+  return $api.useMutation("put", "/api/model-provider-credentials/{id}", {
+    onSuccess: invalidate,
   });
 }
 
 export function useDeleteModelProviderCredential() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      return api(`/model-provider-credentials/${id}`, { method: "DELETE" });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["model-provider-credentials"] });
-    },
+  const invalidate = useInvalidateModelProviderCredentials();
+  return $api.useMutation("delete", "/api/model-provider-credentials/{id}", {
+    onSuccess: invalidate,
   });
 }
 
 export function useTestModelProviderCredential() {
-  return useMutation({
-    mutationFn: (id: string) =>
-      api<TestResult>(`/model-provider-credentials/${id}/test`, { method: "POST" }),
-  });
+  return $api.useMutation("post", "/api/model-provider-credentials/{id}/test");
 }
 
-export function deduplicateLabel(
-  label: string,
-  existingKeys: ModelProviderCredentialInfo[],
-): string {
+export function deduplicateLabel(label: string, existingKeys: { label: string }[]): string {
   return dedupeLabel(
     label,
     existingKeys.map((k) => k.label),
@@ -110,16 +105,5 @@ export function deduplicateLabel(
 }
 
 export function useTestModelProviderCredentialInline() {
-  return useMutation({
-    mutationFn: (data: {
-      apiShape: string;
-      baseUrl: string;
-      apiKey?: string;
-      existingKeyId?: string;
-    }) =>
-      api<TestResult>("/model-provider-credentials/test", {
-        method: "POST",
-        body: JSON.stringify(data),
-      }),
-  });
+  return $api.useMutation("post", "/api/model-provider-credentials/test");
 }

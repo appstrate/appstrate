@@ -92,6 +92,14 @@ export async function buildAgentDetailDto(
         ...(s.name ? { name: s.name } : {}),
         ...(s.description ? { description: s.description } : {}),
       })),
+      // AFPS §4.1 mcp_servers dependency group ({ id: version-range }). Agents
+      // can declare these via an imported manifest even though the dashboard
+      // editor doesn't surface them — return them so the detail response is a
+      // faithful projection of the manifest.
+      mcp_servers: Object.entries(
+        (m as { dependencies?: { mcp_servers?: Record<string, string> } }).dependencies
+          ?.mcp_servers ?? {},
+      ).map(([id, version]) => ({ id, version })),
       integrations: parseManifestIntegrations(m as Record<string, unknown>).map((e) => ({
         id: e.id,
         version: e.version,

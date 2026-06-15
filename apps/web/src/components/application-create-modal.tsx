@@ -39,7 +39,7 @@ export function ApplicationCreateModal({ open, onClose }: Props) {
 
   const onFormSubmit = (data: FormData) => {
     createMutation.mutate(
-      { name: data.name.trim() },
+      { body: { name: data.name.trim() } },
       {
         onSuccess: () => handleClose(),
         onError: (err) => {

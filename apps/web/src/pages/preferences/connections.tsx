@@ -437,7 +437,7 @@ export function PreferencesConnectionsPage() {
         onConfirm={() => {
           if (!confirmState) return;
           disconnectIntegration.mutate(
-            { connectionId: confirmState.connectionId },
+            { params: { path: { connectionId: confirmState.connectionId } } },
             { onSuccess: () => setConfirmState(null) },
           );
         }}

@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "./spinner";
 import { useForkPackage } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
-import { ApiError } from "../api";
+import { ApiError } from "../api/errors";
 import { packageDetailPath } from "../lib/package-paths";
 
 interface Props {

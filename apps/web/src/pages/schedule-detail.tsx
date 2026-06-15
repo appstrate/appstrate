@@ -150,7 +150,7 @@ function ScheduleParams({
   const { data: agents } = useAgents();
   const agentDisplayName =
     agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
-  const input = schedule.input as Record<string, unknown> | null;
+  const input = schedule.input;
 
   return (
     <>

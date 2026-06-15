@@ -17,16 +17,13 @@ import type { OrgRole } from "../types/index.ts";
 
 /** Strip large user-content fields from SSE payloads for non-verbose consumers. */
 function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
-  if (evt.event === "run_update") {
-    const { result: _result, ...rest } = evt.data;
-    return rest;
-  }
   if (evt.event === "run_log") {
     const { data: _data, ...rest } = evt.data;
     return rest;
   }
-  // `run_metric` carries only bounded numeric fields + four small
-  // identifiers — no user content to strip. Pass through unmodified.
+  // `run_update` carries no user-content field (the trigger never emits
+  // `result`); `run_metric` is bounded numerics + four ids; `connection_update`
+  // is identifiers + flags — all pass through unmodified.
   return evt.data;
 }
 

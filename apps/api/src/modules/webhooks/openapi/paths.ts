@@ -104,6 +104,8 @@ export const webhooksPaths = {
                   { $ref: "#/components/schemas/WebhookObject" },
                   {
                     type: "object",
+                    // The create handler always returns the freshly-minted secret.
+                    required: ["secret"],
                     properties: {
                       secret: {
                         type: "string",
@@ -173,6 +175,7 @@ export const webhooksPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: { type: "array", items: { $ref: "#/components/schemas/WebhookObject" } },
@@ -196,6 +199,7 @@ export const webhooksPaths = {
                     updatedAt: "2026-01-15T10:30:00Z",
                   },
                 ],
+                hasMore: false,
               },
             },
           },
@@ -477,17 +481,29 @@ export const webhooksPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: {
                     type: "array",
                     items: {
                       type: "object",
+                      required: [
+                        "id",
+                        "eventId",
+                        "eventType",
+                        "status",
+                        "statusCode",
+                        "latency",
+                        "attempt",
+                        "error",
+                        "createdAt",
+                      ],
                       properties: {
                         id: { type: "string" },
                         eventId: { type: "string" },
                         eventType: { type: "string" },
-                        status: { type: "string", enum: ["success", "failed"] },
+                        status: { type: "string", enum: ["pending", "success", "failed"] },
                         statusCode: { type: ["integer", "null"] },
                         latency: {
                           type: ["integer", "null"],
@@ -517,6 +533,7 @@ export const webhooksPaths = {
                     createdAt: "2026-01-15T11:00:00Z",
                   },
                 ],
+                hasMore: false,
               },
             },
           },

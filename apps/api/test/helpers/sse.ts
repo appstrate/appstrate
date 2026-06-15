@@ -7,6 +7,32 @@
  * following the EventSource spec: fields separated by \n\n blocks.
  */
 
+import type { RealtimeEvent } from "@appstrate/shared-types";
+
+/** Maps each event name to its `data` payload type. */
+type EventDataMap = {
+  [E in RealtimeEvent["event"]]: Extract<RealtimeEvent, { event: E }>["data"];
+};
+
+/**
+ * Narrow a captured {@link RealtimeEvent} to a specific event's typed `data`.
+ *
+ * The realtime `send` payload is a discriminated union, so a test that reads
+ * `frame.data.costSoFar` must first prove `frame.event === "run_metric"`. This
+ * asserts the event name and returns the narrowed, typed `data`. (The return
+ * type indexes a mapped type by `E` rather than `Extract<…>["data"]` directly,
+ * which TS collapses to an intersection over a generic discriminant.)
+ */
+export function eventData<E extends RealtimeEvent["event"]>(
+  frame: RealtimeEvent,
+  event: E,
+): EventDataMap[E] {
+  if (frame.event !== event) {
+    throw new Error(`expected SSE event "${event}", got "${frame.event}"`);
+  }
+  return frame.data as EventDataMap[E];
+}
+
 export interface SSEEvent {
   event: string;
   data: string;

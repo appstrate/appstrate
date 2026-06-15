@@ -39,24 +39,17 @@ export const modelProviderCredentialsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["object", "data", "hasMore"],
+                required: ["object", "data", "total", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: {
                     type: "array",
                     items: {
                       type: "object",
-                      required: [
-                        "providerId",
-                        "displayName",
-                        "iconUrl",
-                        "apiShape",
-                        "defaultBaseUrl",
-                        "baseUrlOverridable",
-                        "authMode",
-                        "featured",
-                        "models",
-                      ],
+                      // Only `providerId` is guaranteed: this registry list
+                      // supports the `?fields=` projection (projectFields forces
+                      // `providerId`, drops every other key on request).
+                      required: ["providerId"],
                       properties: {
                         providerId: { type: "string" },
                         displayName: { type: "string" },
@@ -128,6 +121,7 @@ export const modelProviderCredentialsPaths = {
                       },
                     },
                   },
+                  total: { type: "integer" },
                   hasMore: { type: "boolean" },
                 },
               },
@@ -179,6 +173,7 @@ export const modelProviderCredentialsPaths = {
                     baseUrl: "https://api.openai.com",
                     source: "custom",
                     authMode: "api_key",
+                    created_by: "usr_cm3abc123",
                     createdAt: "2026-01-10T08:00:00Z",
                     updatedAt: "2026-01-10T08:00:00Z",
                   },

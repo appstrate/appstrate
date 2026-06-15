@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **BREAKING: `RealtimeEvent` removed from `@appstrate/core/platform-types`.**
+  The loose `{ event: string; data: Record<string, unknown> }` envelope was
+  dead — the platform's SSE pipeline uses the typed discriminated union in
+  `@appstrate/shared-types` (`realtime-events`). External consumers that
+  imported it should define their own equivalent or adopt the typed union.
+  Requires a major version bump on next publish.
+
 ### Changed
 
 - **`dist-tags` `isProtectedTag` now also protects `draft` and `published`**

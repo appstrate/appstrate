@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Package } from "lucide-react";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useLibrary, useTogglePackageInstall } from "../hooks/use-library";
@@ -24,7 +25,7 @@ import { Badge } from "@/components/ui/badge";
 const TABS = ["agents", "skills", "integrations"] as const;
 type Tab = (typeof TABS)[number];
 
-const TYPE_MAP: Record<Tab, string> = {
+const TYPE_MAP: Record<Tab, "agent" | "skill" | "integration"> = {
   agents: "agent",
   skills: "skill",
   integrations: "integration",
@@ -42,7 +43,7 @@ export function LibraryPage() {
   const [activeTab, setActiveTab] = useTabWithHash(TABS, "agents");
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
   if (!data) return null;
 
   return (

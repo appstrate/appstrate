@@ -42,15 +42,21 @@ export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
   const scriptDir = dirname(fileURLToPath(import.meta.url));
   const modulesDir = resolve(scriptDir, "../../apps/api/src/modules");
 
+  // Sorted for determinism: readdir order is filesystem-dependent (ext4
+  // returns hash order, APFS roughly lexicographic), and the contribution
+  // order shapes the merged spec's key order — which generate-api-types.ts
+  // byte-compares across machines.
   const discoveredModules: string[] = existsSync(modulesDir)
-    ? readdirSync(modulesDir).filter((name) => {
-        const subdir = join(modulesDir, name);
-        try {
-          return statSync(subdir).isDirectory() && existsSync(join(subdir, "index.ts"));
-        } catch {
-          return false;
-        }
-      })
+    ? readdirSync(modulesDir)
+        .filter((name) => {
+          const subdir = join(modulesDir, name);
+          try {
+            return statSync(subdir).isDirectory() && existsSync(join(subdir, "index.ts"));
+          } catch {
+            return false;
+          }
+        })
+        .sort()
     : [];
 
   const paths: Record<string, unknown> = {};

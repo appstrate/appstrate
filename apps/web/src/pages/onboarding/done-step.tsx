@@ -2,7 +2,6 @@
 
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
 import {
   OnboardingLayout,
   useOnboardingGuard,
@@ -12,9 +11,8 @@ import { useOrg } from "../../hooks/use-org";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useModels } from "../../hooks/use-models";
 import { useBilling } from "../../hooks/use-billing";
-import { api } from "../../api";
+import { $api } from "../../api/client";
 import { CheckCircle2 } from "lucide-react";
-import type { OrgInvitation } from "@appstrate/shared-types";
 
 export function OnboardingDoneStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -26,11 +24,12 @@ export function OnboardingDoneStep() {
 
   const { data: models } = useModels();
   const { data: billing } = useBilling({ enabled: features.billing && !!orgId });
-  const { data: orgData } = useQuery({
-    queryKey: ["org-members", orgId],
-    queryFn: () => api<{ invitations: OrgInvitation[] }>(`/orgs/${orgId}`),
-    enabled: !!orgId,
-  });
+  const { data: orgData } = $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}",
+    { params: { path: { orgId: orgId ?? "" } } },
+    { enabled: !!orgId },
+  );
 
   const defaultModel = models?.find((m) => m.isDefault);
   const invitationCount = orgData?.invitations?.length ?? 0;

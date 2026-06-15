@@ -1,39 +1,38 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { parseScopedName } from "@appstrate/core/naming";
+import { $api, client, type components, type paths } from "../api/client";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
+import { agentsKeys, packageKeys } from "../lib/query-keys";
 
-export interface LibraryPackageItem {
-  id: string;
-  type: string;
-  source: "system" | "local";
-  name: string;
-  description: string;
-  installed_in: string[];
-}
+/** Wire shape from the OpenAPI spec (GET /api/library response). */
+type LibraryResponse =
+  paths["/api/library"]["get"]["responses"][200]["content"]["application/json"];
 
-export interface LibraryApp {
-  id: string;
-  name: string;
-  isDefault: boolean;
-}
+export type LibraryPackageItem = components["schemas"]["LibraryPackageList"][number];
 
-interface LibraryResponse {
-  object: "library";
-  applications: LibraryApp[];
-  packages: Record<string, LibraryPackageItem[]>;
+export type LibraryApp = LibraryResponse["applications"][number];
+
+/**
+ * Org context for the library query. The header is a spec-declared param
+ * passed explicitly (instead of relying on the client middleware alone) so it
+ * is part of the React Query key — switching org refetches instead of serving
+ * another org's cached library.
+ */
+function useLibraryScope() {
+  const orgId = useCurrentOrgId();
+  return {
+    enabled: !!orgId,
+    init: { params: { header: { "X-Org-Id": orgId ?? undefined } } },
+  };
 }
 
 export function useLibrary() {
-  const orgId = useCurrentOrgId();
-  return useQuery({
-    queryKey: ["library", orgId],
-    queryFn: () => api<LibraryResponse>("/library"),
-    enabled: !!orgId,
-  });
+  const scope = useLibraryScope();
+  return $api.useQuery("get", "/api/library", scope.init, { enabled: scope.enabled });
 }
 
 function updateLibraryCache(
@@ -43,23 +42,25 @@ function updateLibraryCache(
   action: "install" | "uninstall",
 ): LibraryResponse | undefined {
   if (!prev) return prev;
+  const mapGroup = (pkgs: LibraryPackageItem[]) =>
+    pkgs.map((pkg) => {
+      if (pkg.id !== packageId) return pkg;
+      return {
+        ...pkg,
+        installed_in:
+          action === "install"
+            ? [...pkg.installed_in, applicationId]
+            : pkg.installed_in.filter((id) => id !== applicationId),
+      };
+    });
   return {
     ...prev,
-    packages: Object.fromEntries(
-      Object.entries(prev.packages).map(([type, pkgs]) => [
-        type,
-        pkgs.map((pkg) => {
-          if (pkg.id !== packageId) return pkg;
-          return {
-            ...pkg,
-            installed_in:
-              action === "install"
-                ? [...pkg.installed_in, applicationId]
-                : pkg.installed_in.filter((id) => id !== applicationId),
-          };
-        }),
-      ]),
-    ),
+    packages: {
+      agent: mapGroup(prev.packages.agent),
+      skill: mapGroup(prev.packages.skill),
+      "mcp-server": mapGroup(prev.packages["mcp-server"]),
+      integration: mapGroup(prev.packages.integration),
+    },
   };
 }
 
@@ -95,7 +96,9 @@ export function usePackageInstallState(packageId: string) {
 
 export function useTogglePackageInstall() {
   const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
+  const scope = useLibraryScope();
+  // Exact key of the useLibrary query (same init) for the optimistic update.
+  const libraryKey = $api.queryOptions("get", "/api/library", scope.init).queryKey;
 
   return useMutation({
     mutationFn: async ({
@@ -108,29 +111,39 @@ export function useTogglePackageInstall() {
       installed: boolean;
     }) => {
       if (installed) {
-        return api(`/applications/${applicationId}/packages/${packageId}`, { method: "DELETE" });
+        // The uninstall route splits the `@scope/name` package id into two
+        // path params — required so the typed client never percent-encodes
+        // the `/` separating scope from name.
+        const parsed = parseScopedName(packageId);
+        if (!parsed) throw new Error(`Invalid packageId: ${packageId}`);
+        await client.DELETE("/api/applications/{applicationId}/packages/{scope}/{name}", {
+          params: {
+            path: { applicationId, scope: `@${parsed.scope}`, name: parsed.name },
+          },
+        });
+        return;
       }
-      return api(`/applications/${applicationId}/packages`, {
-        method: "POST",
-        body: JSON.stringify({ packageId }),
+      await client.POST("/api/applications/{applicationId}/packages", {
+        params: { path: { applicationId } },
+        body: { packageId },
       });
     },
     onMutate: async ({ applicationId, packageId, installed }) => {
-      const key = ["library", orgId];
-      await qc.cancelQueries({ queryKey: key });
-      const prev = qc.getQueryData<LibraryResponse>(key);
-      qc.setQueryData<LibraryResponse>(key, (old) =>
+      await qc.cancelQueries({ queryKey: libraryKey });
+      const prev = qc.getQueryData<LibraryResponse>(libraryKey);
+      qc.setQueryData<LibraryResponse>(libraryKey, (old) =>
         updateLibraryCache(old, packageId, applicationId, installed ? "uninstall" : "install"),
       );
       return { prev };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) qc.setQueryData(["library", orgId], ctx.prev);
+      if (ctx?.prev) qc.setQueryData(libraryKey, ctx.prev);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: ["library"] });
-      qc.invalidateQueries({ queryKey: ["packages"] });
-      qc.invalidateQueries({ queryKey: ["agents"] });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
+      // Legacy keys — package/agent lists are still on the legacy cache.
+      void qc.invalidateQueries({ queryKey: packageKeys.all });
+      void qc.invalidateQueries({ queryKey: agentsKeys.all });
     },
   });
 }

@@ -80,6 +80,13 @@ export const schemas = {
   },
   User: {
     type: "object",
+    // Better-Auth-owned shape: the platform documents the three fields it
+    // relies on, but Better Auth also emits emailVerified/image/createdAt/
+    // updatedAt (+ the platform `realm` column). The SPA reads the user via the
+    // Better Auth client, not the generated OpenAPI type, so the full set is
+    // framework-owned — declare the response open rather than mirror an
+    // upstream shape that changes on Better Auth upgrades.
+    additionalProperties: true,
     required: ["id", "name", "email"],
     properties: {
       id: { type: "string" },
@@ -90,7 +97,22 @@ export const schemas = {
   ApplicationPackage: {
     type: "object",
     description: "A package installed in an application with its config and overrides.",
-    required: ["packageId", "enabled", "installed_at", "updatedAt"],
+    // The installedPackageSelect projection emits every field unconditionally
+    // (config is the raw JSONB column; package_type/package_source come from
+    // the join). `object` is spec-only (not on the InstalledPackage type).
+    required: [
+      "packageId",
+      "config",
+      "modelId",
+      "proxyId",
+      "version_id",
+      "enabled",
+      "installed_at",
+      "updatedAt",
+      "package_type",
+      "package_source",
+      "draft_manifest",
+    ],
     properties: {
       object: { type: "string", enum: ["application_package"] },
       packageId: { type: "string", description: "Package ID from org catalog" },
@@ -130,7 +152,10 @@ export const schemas = {
     required: ["id"],
     properties: {
       id: { type: "string" },
-      displayName: { type: "string" },
+      // Nullable: `profiles.display_name` has no NOT NULL constraint, so a
+      // member who never set a display name serializes `null` here. Mirrors
+      // the sibling `UserProfile.displayName`.
+      displayName: { type: ["string", "null"] },
     },
   },
   UserProfile: {
@@ -159,7 +184,9 @@ export const schemas = {
   },
   OrgMember: {
     type: "object",
-    required: ["userId", "email", "role", "joinedAt"],
+    // `email`/`displayName` are best-effort joins (getOrgMembers emits
+    // `?? undefined` when the user/profile row is missing) — NOT required.
+    required: ["userId", "role", "joinedAt"],
     properties: {
       userId: { type: "string" },
       displayName: { type: "string" },
@@ -209,7 +236,20 @@ export const schemas = {
   },
   AgentListItem: {
     type: "object",
-    required: ["id", "source", "type"],
+    // `running_runs`/`dependencies`/`scope`/`keywords`/`version` are always
+    // emitted by the GET /api/agents mapper. `display_name`/`description`/
+    // `schema_version`/`author` stay optional (manifest-derived, may be absent);
+    // `forked_from` is not emitted by the list endpoint (shared-type optional).
+    required: [
+      "id",
+      "source",
+      "type",
+      "running_runs",
+      "dependencies",
+      "scope",
+      "keywords",
+      "version",
+    ],
     properties: {
       id: { type: "string" },
       display_name: { type: "string" },
@@ -242,7 +282,21 @@ export const schemas = {
   },
   AgentDetail: {
     type: "object",
-    required: ["id", "source"],
+    // Always emitted by buildAgentDetailDto. `display_name`/`description`/
+    // `updatedAt`/`lock_version` stay optional: system agents omit the last two,
+    // and the manifest-derived display_name/description may be absent (the
+    // shared-type marks them optional to match).
+    required: [
+      "id",
+      "source",
+      "scope",
+      "version",
+      "dependencies",
+      "config",
+      "running_runs",
+      "last_run",
+      "forked_from",
+    ],
     properties: {
       id: { type: "string" },
       display_name: { type: "string" },
@@ -270,6 +324,9 @@ export const schemas = {
       },
       config: {
         type: "object",
+        // The detail serializer always emits `schema` (falls back to an empty
+        // object schema when the manifest has no config wrapper).
+        required: ["schema", "current"],
         description: "AFPS schema wrapper for agent configuration (set once, reused across runs).",
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
@@ -311,6 +368,9 @@ export const schemas = {
       },
       dependencies: {
         type: "object",
+        // The detail serializer always emits all three arrays (skills/mcp_servers
+        // from the manifest, integrations via parseManifestIntegrations).
+        required: ["skills", "mcp_servers", "integrations"],
         properties: {
           skills: { type: "array", items: { $ref: "#/components/schemas/AgentSkillRef" } },
           mcp_servers: {
@@ -354,6 +414,9 @@ export const schemas = {
       last_run: {
         type: ["object", "null"],
         description: "Summary of the most recent run (null if never run)",
+        // When present, the serializer always sets all four (id/status/started_at
+        // are NOT NULL columns; duration is nullable but always emitted).
+        required: ["id", "status", "started_at", "duration"],
         properties: {
           id: { type: "string" },
           status: { type: "string" },
@@ -375,6 +438,7 @@ export const schemas = {
   },
   AgentVersion: {
     type: "object",
+    required: ["id", "version", "integrity", "artifact_size", "yanked", "created_by", "createdAt"],
     properties: {
       id: { type: "integer" },
       packageId: { type: "string" },
@@ -392,6 +456,17 @@ export const schemas = {
   // responses so they echo the resulting version resource — issue #646).
   PackageVersionDetail: {
     type: "object",
+    required: [
+      "id",
+      "version",
+      "manifest",
+      "integrity",
+      "artifact_size",
+      "yanked",
+      "yanked_reason",
+      "createdAt",
+      "dist_tags",
+    ],
     properties: {
       id: { type: "integer", description: "Version row id" },
       version: { type: "string", description: "Semver version string (e.g. 1.0.0)" },
@@ -418,14 +493,58 @@ export const schemas = {
   },
   Run: {
     type: "object",
+    // Every field a run response carries unconditionally. The list/detail/
+    // create handlers all route through `mapEnrichedRun` (services/state/runs.ts),
+    // so the enriched join fields (`user_name`, `connections_used`, …) are as
+    // guaranteed as the base columns. Only `inline_manifest` / `inline_prompt`
+    // are detail-only (added by `getRunFull`) and stay optional. Keeping this
+    // list exhaustive lets the SPA consume the generated `Run` type with no
+    // cast and lets verify-openapi step 7 guard it against `EnrichedRun` drift.
     required: [
       "id",
+      "packageId",
+      "userId",
+      "endUserId",
+      "apiKeyId",
       "orgId",
       "applicationId",
+      "scheduleId",
       "status",
+      "input",
+      "result",
+      "checkpoint",
+      "error",
+      "metadata",
+      "config",
+      "config_override",
+      "started_at",
+      "completed_at",
+      "duration",
+      "cost",
+      "notifiedAt",
+      "readAt",
+      "runNumber",
+      "token_usage",
+      "version_label",
       "version_dirty",
       "version_ref",
-      "started_at",
+      "proxy_label",
+      "model_label",
+      "model_source",
+      "runner_name",
+      "runner_kind",
+      "agent_scope",
+      "agent_name",
+      "runOrigin",
+      "contextSnapshot",
+      "modelCredentialId",
+      "connection_overrides",
+      "user_name",
+      "end_user_name",
+      "api_key_name",
+      "schedule_name",
+      "connections_used",
+      "package_ephemeral",
     ],
     properties: {
       id: { type: "string" },
@@ -443,7 +562,9 @@ export const schemas = {
         type: "string",
         enum: ["pending", "running", "success", "failed", "timeout", "cancelled"],
       },
-      input: { type: "object" },
+      // `runs.input` is a nullable jsonb column (createFailedRun writes null);
+      // emitted verbatim, so the wire value can be null.
+      input: { type: ["object", "null"], additionalProperties: true },
       result: {
         type: ["object", "null"],
         description:
@@ -465,8 +586,10 @@ export const schemas = {
           },
         },
       },
-      checkpoint: { type: "object" },
-      error: { type: "string" },
+      // `runs.checkpoint` is a nullable jsonb column — null on every run that
+      // never emitted a checkpoint (pending/running/most terminal runs).
+      checkpoint: { type: ["object", "null"], additionalProperties: true },
+      error: { type: ["string", "null"] },
       token_usage: {
         type: ["object", "null"],
         description:
@@ -479,10 +602,10 @@ export const schemas = {
         },
         additionalProperties: false,
       },
-      started_at: { type: "string", format: "date-time" },
-      completed_at: { type: "string", format: "date-time" },
-      duration: { type: "integer", description: "Duration in milliseconds" },
-      scheduleId: { type: "string" },
+      started_at: { type: ["string", "null"], format: "date-time" },
+      completed_at: { type: ["string", "null"], format: "date-time" },
+      duration: { type: ["integer", "null"], description: "Duration in milliseconds" },
+      scheduleId: { type: ["string", "null"] },
       version_label: {
         type: ["string", "null"],
         description:
@@ -515,7 +638,7 @@ export const schemas = {
         description: "API key ID that triggered the run (null for dashboard/schedule runs)",
       },
       applicationId: {
-        type: ["string", "null"],
+        type: "string",
         description: "Application ID (app_ prefix) that owns this run",
       },
       metadata: {
@@ -655,23 +778,45 @@ export const schemas = {
         enum: ["debug", "info", "warn", "error"],
         description: "Log severity level. Non-admin users only receive info, warn, and error logs.",
       },
-      event: { type: "string" },
-      message: { type: "string" },
-      data: { type: "object" },
+      // `event` / `message` / `data` are nullable columns on `run_logs`
+      // (no NOT NULL) — a breadcrumb may carry only a message, only structured
+      // data, or only an event kind. Mirror that on the wire.
+      event: { type: ["string", "null"] },
+      message: { type: ["string", "null"] },
+      data: { type: ["object", "null"] },
       createdAt: { type: "string", format: "date-time" },
     },
   },
   Schedule: {
     type: "object",
+    // Every schedule response routes through `toSchedule` + `enrichSchedules`
+    // (services/scheduler.ts) — list, detail, create, and update all return the
+    // actor-enriched shape — so the full field set is guaranteed. Exhaustive
+    // `required` lets the SPA drop its `as EnrichedSchedule` casts and lets
+    // verify-openapi step 7 guard it against `EnrichedSchedule` drift.
     required: [
       "id",
       "packageId",
+      "userId",
+      "endUserId",
       "orgId",
       "applicationId",
+      "name",
       "enabled",
       "cron_expression",
+      "timezone",
+      "input",
+      "config_override",
+      "model_id_override",
+      "proxy_id_override",
+      "version_override",
+      "connection_overrides",
+      "last_run_at",
+      "next_run_at",
       "createdAt",
       "updatedAt",
+      "actor_name",
+      "actor_type",
     ],
     properties: {
       id: { type: "string" },
@@ -687,8 +832,8 @@ export const schemas = {
       enabled: { type: "boolean" },
       cron_expression: { type: "string" },
       timezone: { type: ["string", "null"] },
-      input: { type: "object" },
-      config_override: { type: ["object", "null"] },
+      input: { type: ["object", "null"], additionalProperties: true },
+      config_override: { type: ["object", "null"], additionalProperties: true },
       model_id_override: { type: ["string", "null"] },
       proxy_id_override: { type: ["string", "null"] },
       version_override: { type: ["string", "null"] },
@@ -708,7 +853,20 @@ export const schemas = {
   },
   ApiKeyInfo: {
     type: "object",
-    required: ["id", "name", "keyPrefix", "scopes", "createdAt"],
+    // created_by/expiresAt/lastUsedAt/revokedAt are always emitted by
+    // listApiKeys (nullable columns, always selected). created_by_name stays
+    // optional (omitted when the creator is unknown).
+    required: [
+      "id",
+      "name",
+      "keyPrefix",
+      "scopes",
+      "created_by",
+      "expiresAt",
+      "lastUsedAt",
+      "revokedAt",
+      "createdAt",
+    ],
     properties: {
       id: { type: "string" },
       name: { type: "string" },
@@ -728,14 +886,29 @@ export const schemas = {
   },
   OrgPackageItem: {
     type: "object",
-    required: ["id", "source", "createdAt", "updatedAt"],
+    // Always emitted by the listOrgItems mapper. `created_by_name` stays
+    // optional (omitted when there's no creator); `scope` is not emitted by
+    // the org-package list (shared-type marks it optional).
+    required: [
+      "id",
+      "source",
+      "createdAt",
+      "updatedAt",
+      "name",
+      "description",
+      "created_by",
+      "used_by_agents",
+      "version",
+      "auto_installed",
+      "forked_from",
+    ],
     properties: {
       id: { type: "string" },
       orgId: {
         type: ["string", "null"],
         description: "Owning organization ID (null for system packages)",
       },
-      name: { type: ["string", "null"] },
+      name: { type: "string" }, // getPackageDisplayName always returns a string (falls back to id)
       description: { type: ["string", "null"] },
       source: { type: "string", enum: ["system", "local"] },
       created_by: { type: ["string", "null"] },
@@ -750,16 +923,33 @@ export const schemas = {
   },
   OrgPackageItemDetail: {
     type: "object",
-    required: ["id", "source", "createdAt", "updatedAt"],
+    // Always emitted by buildPackageDetailDto. `content` is present but the
+    // draft_content column is nullable, so it is required-but-nullable. The
+    // detail endpoint does not emit `used_by_agents`/`created_by_name`/`scope`
+    // (the shared-type marks those optional on the detail shape).
+    required: [
+      "id",
+      "source",
+      "createdAt",
+      "updatedAt",
+      "name",
+      "description",
+      "content",
+      "created_by",
+      "version",
+      "auto_installed",
+      "forked_from",
+      "agents",
+    ],
     properties: {
       id: { type: "string" },
       orgId: {
         type: ["string", "null"],
         description: "Owning organization ID (null for system packages)",
       },
-      name: { type: ["string", "null"] },
+      name: { type: "string" }, // getPackageDisplayName always returns a string (falls back to id)
       description: { type: ["string", "null"] },
-      content: { type: "string", description: "Package item content" },
+      content: { type: ["string", "null"], description: "Package item content" },
       source_code: {
         type: ["string", "null"],
         description: "Secondary source file content (e.g. .ts for tools)",
@@ -787,6 +977,7 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
+          required: ["id", "display_name"],
           properties: {
             id: { type: "string" },
             display_name: { type: "string" },
@@ -806,6 +997,7 @@ export const schemas = {
       "baseUrl",
       "source",
       "authMode",
+      "created_by",
       "createdAt",
       "updatedAt",
     ],
@@ -840,6 +1032,7 @@ export const schemas = {
       "isDefault",
       "source",
       "credentialId",
+      "created_by",
       "createdAt",
       "updatedAt",
     ],
@@ -972,6 +1165,7 @@ export const schemas = {
     required: [
       "id",
       "label",
+      "urlPrefix",
       "enabled",
       "isDefault",
       "source",
@@ -993,7 +1187,17 @@ export const schemas = {
   },
   ApplicationObject: {
     type: "object",
-    required: ["id", "object", "orgId", "name", "isDefault", "settings", "createdAt", "updatedAt"],
+    required: [
+      "id",
+      "object",
+      "orgId",
+      "name",
+      "isDefault",
+      "settings",
+      "created_by",
+      "createdAt",
+      "updatedAt",
+    ],
     properties: {
       id: { type: "string", description: "Application ID (app_ prefix)" },
       object: { type: "string", enum: ["application"], description: "Object type" },
@@ -1020,7 +1224,19 @@ export const schemas = {
   },
   EndUserObject: {
     type: "object",
-    required: ["id", "object", "applicationId", "createdAt", "updatedAt"],
+    // Every field is always serialized (toEndUserResponse in services/end-users.ts);
+    // nullable fields are required-but-null on the wire, not omitted.
+    required: [
+      "id",
+      "object",
+      "applicationId",
+      "name",
+      "email",
+      "externalId",
+      "metadata",
+      "createdAt",
+      "updatedAt",
+    ],
     properties: {
       id: { type: "string", description: "End-user ID (eu_ prefix)" },
       object: { type: "string", enum: ["end_user"], description: "Object type" },
@@ -1028,7 +1244,11 @@ export const schemas = {
       name: { type: ["string", "null"], description: "Display name" },
       email: { type: ["string", "null"], format: "email", description: "Email address" },
       externalId: { type: ["string", "null"], description: "External system identifier" },
-      metadata: { type: ["object", "null"], description: "Arbitrary key-value metadata" },
+      metadata: {
+        type: ["object", "null"],
+        additionalProperties: true,
+        description: "Arbitrary key-value metadata",
+      },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -1052,10 +1272,6 @@ export const schemas = {
         },
       },
     ],
-  },
-  SkillManifest: {
-    description: "AFPS Skill manifest. See https://schemas.afps.dev for field reference.",
-    $ref: "https://schemas.afps.dev/v0/skill.schema.json",
   },
   FileConstraintsMap: {
     type: "object",

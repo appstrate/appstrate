@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/select";
 import { LazySchemaForm as SchemaForm } from "../lazy-schema-form";
 import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
-import { uploadClient } from "../../api";
+import { uploadClient } from "../../api/uploads";
 import { getProviderIcon } from "../icons";
 import { findProviderByApiShapeAndBaseUrl } from "@/lib/provider-registry-helpers";
 import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
@@ -36,7 +36,7 @@ function ConfigSection({
   const { t } = useTranslation(["agents", "common"]);
   const { data: detail } = usePackageDetail("agent", packageId);
 
-  const current = (detail?.config?.current ?? {}) as Record<string, unknown>;
+  const current = detail?.config?.current ?? {};
   const mutation = useSaveConfig(detail?.id ?? "");
   const wrapper: SchemaWrapper = { schema };
 

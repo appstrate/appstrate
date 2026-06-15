@@ -28,7 +28,7 @@ import {
   CommandItem,
 } from "@/components/ui/command";
 import { Check, ChevronsUpDown, KeyRound, Plug, X } from "lucide-react";
-import { type OpenRouterModel } from "../hooks/use-models";
+import { type OpenRouterModel, type OrgModelInfo } from "../hooks/use-models";
 import type { ModelCost } from "@appstrate/core/module";
 import { CapabilitiesSection } from "./model-form/capabilities-section";
 import { useOpenRouterSearch } from "./model-form/use-open-router-search";
@@ -37,7 +37,6 @@ import {
   useProvidersRegistry,
 } from "../hooks/use-model-provider-credentials";
 import { OAuthPairingBody } from "./oauth-pairing-body";
-import type { OrgModelInfo } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
   PI_ADAPTER_TYPES,
@@ -410,8 +409,8 @@ function ModelFormBody({
     setCost(
       preset.cost
         ? {
-            input: preset.cost.input,
-            output: preset.cost.output,
+            input: preset.cost.input ?? 0,
+            output: preset.cost.output ?? 0,
             cacheRead: preset.cost.cacheRead ?? 0,
             cacheWrite: preset.cost.cacheWrite ?? 0,
           }

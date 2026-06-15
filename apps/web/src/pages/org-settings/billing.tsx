@@ -25,7 +25,10 @@ const STATUS_I18N: Record<string, string> = {
 export function OrgSettingsBillingPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { features } = useAppConfig();
-  const { data: billing, isLoading, error } = useBilling();
+  // Gate the cloud fetch on the feature flag (mirrors sidebar-billing) so OSS
+  // mode never fires the cloud-only `/billing` request (404). The line-below
+  // <Navigate> still handles the visible redirect.
+  const { data: billing, isLoading, error } = useBilling({ enabled: features.billing });
   const checkoutMutation = useCheckout();
   const portalMutation = usePortal();
 

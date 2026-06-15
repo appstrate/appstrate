@@ -20,7 +20,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/component
 import { ChevronDown } from "lucide-react";
 import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
-import { uploadClient } from "../api";
+import { uploadClient } from "../api/uploads";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 
@@ -150,7 +150,7 @@ export function ScheduleForm({
   const labels = useSchemaFormLabels();
 
   const [inputValues, setInputValues] = useState<Record<string, unknown>>(
-    () => (defaultValues?.input ?? {}) as Record<string, unknown>,
+    () => defaultValues?.input ?? {},
   );
 
   // Override-layer state — mirrors the Run modal's accordion, except

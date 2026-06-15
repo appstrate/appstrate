@@ -26,8 +26,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  invalidateIntegrationQueries,
   useIntegrationAgentResolution,
-  type IntegrationAgentResolution,
   type IntegrationAuthStatus,
   type IntegrationCandidate,
   type IntegrationManifestView,
@@ -42,7 +42,7 @@ import { connectionDisplayLabel } from "./connection-label";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import { isIntegrationEntryActive, resolutionBlocksRun } from "./integration-run-readiness";
 import { requiredScopesForAgent } from "@appstrate/core/integration";
-import { api } from "../../api";
+import { client } from "../../api/client";
 
 /**
  * How the picker persists the actor's pick:
@@ -124,7 +124,7 @@ export function IntegrationConnectionPicker({
   const fieldsAuth = fieldsAuthKey ? auths[fieldsAuthKey] : null;
   // The whole verdict (cascade + scope diff) is computed server-side; a pin
   // write or scope upgrade invalidates it so the dropdown re-resolves.
-  const refresh = () => qc.invalidateQueries({ queryKey: ["integrations"] });
+  const refresh = () => invalidateIntegrationQueries(qc);
 
   if (isPending || !resolution) {
     return (
@@ -248,10 +248,11 @@ export function IntegrationConnectionPicker({
         await refresh();
         return;
       }
-      const fresh = await api<IntegrationAgentResolution>(
-        `/integrations/${encodeURI(integrationId)}/agent-resolution/${encodeURI(agentPackageId)}`,
+      const { data: fresh } = await client.GET(
+        "/api/integrations/{packageId}/agent-resolution/{agentPackageId}",
+        { params: { path: { packageId: integrationId, agentPackageId } } },
       );
-      const added = fresh.candidates.find((c) => !before.has(c.id));
+      const added = fresh?.candidates.find((c) => !before.has(c.id));
       if (added) await applyPick(added.id);
       else await refresh();
     } else {
