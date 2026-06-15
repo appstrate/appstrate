@@ -93,7 +93,13 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["imported", "root_installed", "root_package_id", "root_version"],
+                required: [
+                  "imported",
+                  "root_installed",
+                  "root_package_id",
+                  "root_version",
+                  "warnings",
+                ],
                 properties: {
                   imported: {
                     type: "array",
@@ -130,6 +136,12 @@ export const packagesPaths = {
                   },
                   root_package_id: { type: "string" },
                   root_version: { type: "string" },
+                  warnings: {
+                    type: "array",
+                    items: { type: "string" },
+                    description:
+                      "Non-blocking install-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate. Empty when nothing is degraded.",
+                  },
                 },
               },
             },
@@ -408,6 +420,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {
@@ -440,6 +453,10 @@ export const packagesPaths = {
                     description: "Summarizes long text into key points",
                     source: "local",
                     version: "1.0.0",
+                    created_by: "usr_cm3abc123",
+                    used_by_agents: 2,
+                    auto_installed: false,
+                    forked_from: null,
                     createdAt: "2026-01-10T08:00:00Z",
                     updatedAt: "2026-01-10T08:00:00Z",
                   },
@@ -564,6 +581,7 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["versions"],
                 properties: {
                   versions: {
                     type: "array",
@@ -701,21 +719,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  manifest: { $ref: "#/components/schemas/SkillManifest" },
-                  content: { type: ["string", "null"] },
-                  yanked: { type: "boolean" },
-                  yanked_reason: { type: ["string", "null"] },
-                  integrity: { type: "string" },
-                  artifact_size: { type: "integer" },
-                  createdAt: { type: ["string", "null"], format: "date-time" },
-                  dist_tags: { type: "array", items: { type: "string" } },
-                },
-              },
+              schema: { $ref: "#/components/schemas/PackageVersionDetail" },
             },
           },
         },
@@ -796,11 +800,15 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
+              required: ["manifest", "content", "lock_version"],
               properties: {
-                name: { type: "string", description: "Display name" },
-                description: { type: "string" },
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
+                  description: "Package manifest",
+                },
                 content: { type: "string" },
-                version: { type: "string", description: "Semver version (X.Y.Z)" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
             },
           },
@@ -868,6 +876,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {
@@ -1114,6 +1123,7 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["versions"],
                 properties: {
                   versions: {
                     type: "array",
@@ -1247,21 +1257,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  manifest: { $ref: "#/components/schemas/AgentManifest" },
-                  content: { type: ["string", "null"] },
-                  yanked: { type: "boolean" },
-                  yanked_reason: { type: ["string", "null"] },
-                  integrity: { type: "string" },
-                  artifact_size: { type: "integer" },
-                  createdAt: { type: ["string", "null"], format: "date-time" },
-                  dist_tags: { type: "array", items: { type: "string" } },
-                },
-              },
+              schema: { $ref: "#/components/schemas/PackageVersionDetail" },
             },
           },
         },
@@ -1433,11 +1429,15 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
+              required: ["manifest", "content", "lock_version"],
               properties: {
-                name: { type: "string", description: "Display name" },
-                description: { type: "string" },
+                manifest: {
+                  type: "object",
+                  additionalProperties: true,
+                  description: "Package manifest",
+                },
                 content: { type: "string" },
-                version: { type: "string", description: "Semver version (X.Y.Z)" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
             },
           },
@@ -1644,6 +1644,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {
@@ -1788,6 +1789,7 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["versions"],
                 properties: {
                   versions: {
                     type: "array",
@@ -1925,25 +1927,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  manifest: {
-                    type: "object",
-                    additionalProperties: true,
-                    description: "Full manifest object",
-                  },
-                  content: { type: ["string", "null"] },
-                  yanked: { type: "boolean" },
-                  yanked_reason: { type: ["string", "null"] },
-                  integrity: { type: "string" },
-                  artifact_size: { type: "integer" },
-                  createdAt: { type: ["string", "null"], format: "date-time" },
-                  dist_tags: { type: "array", items: { type: "string" } },
-                },
-              },
+              schema: { $ref: "#/components/schemas/PackageVersionDetail" },
             },
           },
         },
@@ -2231,6 +2215,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {
@@ -2393,6 +2378,7 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["versions"],
                 properties: {
                   versions: {
                     type: "array",
@@ -2530,25 +2516,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  manifest: {
-                    type: "object",
-                    additionalProperties: true,
-                    description: "Full manifest object",
-                  },
-                  content: { type: ["string", "null"] },
-                  yanked: { type: "boolean" },
-                  yanked_reason: { type: ["string", "null"] },
-                  integrity: { type: "string" },
-                  artifact_size: { type: "integer" },
-                  createdAt: { type: ["string", "null"], format: "date-time" },
-                  dist_tags: { type: "array", items: { type: "string" } },
-                },
-              },
+              schema: { $ref: "#/components/schemas/PackageVersionDetail" },
             },
           },
         },

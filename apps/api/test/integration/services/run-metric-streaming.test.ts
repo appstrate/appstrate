@@ -20,6 +20,7 @@
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach, mock } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
+import { eventData } from "../../helpers/sse.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
@@ -106,7 +107,7 @@ describe("run_metric end-to-end (event sink → SSE)", () => {
       packageId: agentId,
       tokenUsage: { input_tokens: 100, output_tokens: 50 },
     });
-    expect(frame.data.costSoFar).toBeCloseTo(0.005, 5);
+    expect(eventData(frame, "run_metric").costSoFar).toBeCloseTo(0.005, 5);
   });
 
   it("subsequent metric events deliver running totals (cost monotonically increases)", async () => {
@@ -138,9 +139,9 @@ describe("run_metric end-to-end (event sink → SSE)", () => {
     await wait(80);
 
     expect(send).toHaveBeenCalledTimes(3);
-    expect(send.mock.calls[0]![0]!.data.costSoFar).toBeCloseTo(0.001, 5);
-    expect(send.mock.calls[1]![0]!.data.costSoFar).toBeCloseTo(0.005, 5);
-    expect(send.mock.calls[2]![0]!.data.costSoFar).toBeCloseTo(0.012, 5);
+    expect(eventData(send.mock.calls[0]![0]!, "run_metric").costSoFar).toBeCloseTo(0.001, 5);
+    expect(eventData(send.mock.calls[1]![0]!, "run_metric").costSoFar).toBeCloseTo(0.005, 5);
+    expect(eventData(send.mock.calls[2]![0]!, "run_metric").costSoFar).toBeCloseTo(0.012, 5);
   });
 
   it("a regressed-cost metric event does not regress costSoFar (monotonic-max upsert)", async () => {
@@ -168,8 +169,8 @@ describe("run_metric end-to-end (event sink → SSE)", () => {
     expect(send).toHaveBeenCalledTimes(2);
     // Both broadcasts must report the higher cost — the second event
     // tried to regress but the upsert kept the higher value.
-    expect(send.mock.calls[0]![0]!.data.costSoFar).toBeCloseTo(0.01, 5);
-    expect(send.mock.calls[1]![0]!.data.costSoFar).toBeCloseTo(0.01, 5);
+    expect(eventData(send.mock.calls[0]![0]!, "run_metric").costSoFar).toBeCloseTo(0.01, 5);
+    expect(eventData(send.mock.calls[1]![0]!, "run_metric").costSoFar).toBeCloseTo(0.01, 5);
   });
 
   it("does not deliver metric events to subscribers in a different org", async () => {

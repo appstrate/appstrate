@@ -21,3 +21,13 @@ export function packageEditPath(type: PackageType | string, packageId: string): 
 export function packageNewPath(type: PackageType | string): string {
   return `/${PACKAGE_CONFIG[type as PackageType].path}/new`;
 }
+
+/**
+ * Split a package id (`@scope/name`) into the typed client's `{scope}`/`{name}`
+ * path params. The scope keeps its leading `@` — the client's pathSerializer
+ * sends it literally, matching the API's `:scope{@[^/]+}` routes.
+ */
+export function splitPackageRef(packageId: string): { scope: string; name: string } {
+  const slash = packageId.indexOf("/");
+  return { scope: packageId.slice(0, slash), name: packageId.slice(slash + 1) };
+}

@@ -94,7 +94,38 @@ describe("mcp discovery + auth gate", () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect((body.resource as string).endsWith(`/api/mcp/o/${orgId}`)).toBe(true);
     expect(Array.isArray(body.authorization_servers)).toBe(true);
+    // Must be the AS *issuer identifier* (`APP_URL/api/auth`), not the bare
+    // origin — otherwise RFC 8414 §3.3 issuer matching fails and strict OAuth
+    // clients (the claude.ai connector) reject discovery. See router.ts.
+    expect((body.authorization_servers as string[])[0]?.endsWith("/api/auth")).toBe(true);
     expect(body.scopes_supported).toEqual(["mcp:read", "mcp:invoke"]);
+  });
+
+  it("advertises an authorization_servers entry that byte-matches the live AS issuer (RFC 8414 §3.3)", async () => {
+    // Cross-document contract: the `authorization_servers` entry in the
+    // protected-resource metadata is an AS *issuer identifier*. A strict client
+    // (the claude.ai connector) discovers the AS metadata from it and rejects
+    // the handshake unless the `issuer` it reads back is byte-identical
+    // (RFC 8414 §3.3). The two surfaces were previously verified in isolation —
+    // the AS issuer was `${APP_URL}/api/auth`, the PRM advertised the bare
+    // origin, and nothing asserted they matched, so the mismatch shipped.
+    //
+    // Assert equality against the issuer the AS actually serves at its
+    // well-known (proxied from Better Auth) rather than a hard-coded suffix, so
+    // the contract holds even if Better Auth's `basePath` ever moves.
+    const orgId = "00000000-0000-0000-0000-0000000000ae";
+    const prmRes = await app.request(`/.well-known/oauth-protected-resource/api/mcp/o/${orgId}`);
+    expect(prmRes.status).toBe(200);
+    const prm = (await prmRes.json()) as { authorization_servers: string[] };
+    const advertisedAs = prm.authorization_servers[0];
+    expect(typeof advertisedAs).toBe("string");
+
+    const asRes = await app.request("/.well-known/oauth-authorization-server");
+    expect(asRes.status).toBe(200);
+    const asMeta = (await asRes.json()) as { issuer: string };
+    expect(typeof asMeta.issuer).toBe("string");
+
+    expect(advertisedAs).toBe(asMeta.issuer);
   });
 
   it("rejects an unauthenticated per-org endpoint with 401 + RFC 9728 WWW-Authenticate challenge", async () => {

@@ -86,6 +86,7 @@ export {
 export {
   MAX_REDIRECTS,
   matchesAuthorizedUri,
+  hostLiterallyAllowlisted,
   stripUserInfoAndFragment,
   redactHost,
   mergeSetCookieIntoJar,

@@ -175,7 +175,7 @@ Tier 0 (zero-install) requires only Bun.
 
 ### Development Workflow
 
-- **New API route**: route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi`.
+- **New API route**: route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi`, then `bun run generate:api` to refresh the SPA's generated types (`verify:api-types` in `check` fails otherwise). Every 2xx JSON response must declare a schema (verify-openapi step 6).
 - **DB migration (core)**: edit `packages/db/src/schema.ts` → `bun run db:generate` (needs `DATABASE_URL` for drizzle-kit). Applied automatically at boot (PGlite + PostgreSQL) — no manual `db:migrate`.
 - **Module tables**: there are none separately — a module's tables live in the core schema (`packages/db/src/schema/<domain>.ts`) and migrate with core. No per-module migration step.
 - **Quality gate**: `bun run check` (turbo check = tsc across packages + `verify-openapi`).
@@ -185,12 +185,12 @@ Tier 0 (zero-install) requires only Bun.
 
 - **i18n**: `i18next` + `react-i18next`. Default `fr`, supported `fr`/`en`. Namespaces `common`/`agents`/`settings`. Locales in `apps/web/src/locales/{lang}/`.
 - **Styling**: Tailwind 4 (`@tailwindcss/vite` + `tailwind-merge`). Single `styles.css`, `@import "tailwindcss"` + custom `@theme inline` dark theme. Utility classes only.
-- **Auth**: Better Auth React client → `credentials: "include"` on all `apiFetch()`. `X-Org-Id` + `X-Application-Id` sent automatically from `app-store` via `api.ts`.
+- **Auth**: Better Auth React client. `credentials: "include"` + `X-Org-Id`/`X-Application-Id` injected by the typed client's middleware (`api/client.ts`) from `org-store`/`app-store`.
 - **Realtime**: SSE hooks (`use-realtime.ts`) + `useGlobalRunSync` patches React Query cache directly for `run_update` AND `connection_update` events (the latter drives live `Reconnection required` badge updates across tabs). `useGlobalRunSync` uses `fetch()` + `ReadableStream` (NOT `EventSource`) to avoid Safari auto-reconnect — **do not convert**. `GlobalRealtimeSync` mounted inside `MainLayout` only (not onboarding/welcome). SSE channels emitted: `run_update`, `run_log`, `run_metric`, `connection_update` — actor-scoped server-side via subscriber filter on `userId`/`endUserId`.
 - **Feature gating**: `useAppConfig()` reads `window.__APP_CONFIG__` (injected at serve time, computed once by `buildAppConfig()`). Core keys (`googleAuth`, `githubAuth`, `smtp`) statically typed; module keys flow through `[key: string]: boolean`. No API call. Module features default `false` when absent. Sidebar/routes/tabs fully gated.
-- **API helpers** (`api.ts`): `api<T>(path)` prepends `/api` + JSON parse; `apiList<T>(path)` unwraps the Stripe-style `{ object, data, hasMore }` list envelope → returns `data` (use for ALL list endpoints); `apiFetch<T>` raw path (for `/auth/*`); `uploadFormData<T>` for files (never set `Content-Type` manually); `apiBlob` for binary; `buildQs()` for query strings. All inject org/app headers + `credentials: "include"`.
-- **React Query keys**: org-scoped `[entity, orgId, id?]` or app-scoped `[entity, orgId, applicationId, id?]`. On org switch, `queryClient.removeQueries` wipes all except `["orgs"]`.
-- **Standard components**: `<Modal>` for dialogs (never raw overlays); `<LoadingState>`/`<ErrorState>`/`<EmptyState>` from `page-states.tsx`; `<SchemaForm>` (from `@appstrate/ui/schema-form`) for JSON-Schema forms — file fields are handled inside it via the `uploadClient` upload fn (`api.ts`), not a separate component.
+- **Typed API client** (`api/client.ts`) — REQUIRED for new code: `$api.useQuery("get", "/api/end-users", { params })` / `$api.useMutation(...)` (openapi-react-query) and raw `client.GET(...)` (openapi-fetch), typed against `api/schema.d.ts` generated from the OpenAPI spec (`bun run generate:api`; `verify:api-types` in `check` fails when stale). Middleware injects org/app headers + throws `ApiError` (RFC 9457) on non-2xx — direct `client.X()` calls must try/catch, the `{ error }` branch is never populated. Query keys are `[method, path, init]`: pass the spec-declared `X-Org-Id`/`X-Application-Id` header params explicitly in queries so scope is part of the key; after writes invalidate each path string separately (list and `/{id}` differ). The legacy fetch barrel (`api.ts`) is deleted; an ESLint guard (`eslint.config.mjs`) bans its old import specifiers. Path params keep `@` (and the `/` inside `@scope/name` package ids) literal via the client's `pathSerializer` — Hono regex routes match the raw path. Specifics: list envelopes unwrap via `select: (e) => e.data`; multipart goes through `bodySerializer: () => formData` (never set `Content-Type`); blobs via `parseAs: "blob"`; the SchemaForm uploader lives in `api/uploads.ts`; the only sanctioned untyped call site is `cloudApi` in `use-billing.ts` (cloud-module routes are absent from the OSS spec by design).
+- **React Query keys**: typed-client hooks use `[method, path, init]` (scope rides in init). Run/schedule/package caches keep PINNED legacy keys (`["run", id]`, `["runs", …]`, `["paginated-runs", …]`, `["packages", …]`, `["agents", …]`, `["agent-model"/"agent-proxy", …]`) because `use-global-run-sync` (SSE) and app-switch resets patch/invalidate them by those names — don't re-key without updating the patchers. On org switch, `queryClient.removeQueries` wipes all except `["orgs"]`.
+- **Standard components**: `<Modal>` for dialogs (never raw overlays); `<LoadingState>`/`<ErrorState>`/`<EmptyState>` from `page-states.tsx`; `<SchemaForm>` (from `@appstrate/ui/schema-form`) for JSON-Schema forms — file fields are handled inside it via the `uploadClient` upload fn (`api/uploads.ts`), not a separate component.
 
 ### Backend
 
@@ -202,7 +202,7 @@ Tier 0 (zero-install) requires only Bun.
 - **Cost tracking**: `runs.cost` (doublePrecision) = sum of `llm_usage` ledger via `computeRunCost(runId)` (single read path). Ingestion paths + precision trade-off: `docs/architecture/RUN_COST.md`.
 - **Hono context** (`c.get`): `user`, `orgId`, `orgRole`, `orgSlug`, `permissions`, `authMethod`, `apiKeyId`, `applicationId`, `app`, `endUser`, `apiVersion`, `package` (set by `requireAgent` — NOT `agent`), `run`, `requestId`, `sessionRealm`.
 - **Route guards** (`middleware/guards.ts`): `requireAgent()` (no arg — reads `:scope`/`:name`, loads package, sets `c.set("package")`), `requireOrgAgent()`, `requirePackageInOrg()` (gates package mutation on DB `orgId` ownership — NOT scope identity; a foreign-scope package the org owns is freely mutable), `requireMutableAgent()` (403 system package, 409 running runs), `apiKeyOrgScopeGuard()`/`apiKeyAppScopeGuard()` (stop an API key escaping its org/app via path params). RBAC is `requirePermission(resource, action)` (`middleware/require-permission.ts`) — there is **no** `requireAdmin()`/`requireOwner()`. `requireAppContext()` (`middleware/app-context.ts`) validates `X-Application-Id` (or API-key's `applicationId`) + app∈org.
-- **Rate limiting**: Redis-backed `rate-limiter-flexible`. Keyed `method:path:identity` (`userId` / `apikey:{id}`), IP-based for public routes. IETF `RateLimit` headers. Key limits: run 20/min, import 10/min, schedule-create 10/min.
+- **Rate limiting**: Redis-backed `rate-limiter-flexible`. Keyed `method:path:identity` (`userId` / `apikey:{id}`), IP-based for public routes. IETF `RateLimit` headers. Key limits: run 20/min, import 10/min, schedule-create 10/min, run logs 120/min.
 - **Route registration order**: `userAgentsRouter` MUST register before `agentsRouter` in `index.ts` — Hono matches in order.
 - **Docker streams**: multiplexed 8-byte frame headers `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`.
 - **Package versioning**: semver across `package-versions.ts`, `package-version-deps.ts`, `package-storage.ts`. Tables: `packageVersions`, `packageDistTags`, `packageVersionDependencies`. Enforcement via `@appstrate/core/version-policy` (`validateForwardVersion` — forward-only). Resolution: exact → dist-tag → semver range (`resolveVersionFromCatalog`). Integrity: SHA256 SRI via `@appstrate/core/integrity`.
@@ -242,12 +242,13 @@ bun test apps/api/test            # Core only
 bun test apps/api/src/modules     # All modules
 bun run test:unit                 # API unit tests only (no DB)
 bun run test:e2e                  # Playwright e2e suite
+bun run test:docker               # Include slow Docker-engine (DinD) tests (TEST_DOCKER=1)
 cd apps/api/src/modules/webhooks && bun test   # Per-module (own bunfig.toml)
 bun test path/to/file.test.ts     # Single file
 bun test -t "substring"           # Filter by test name
 ```
 
-Requires Docker (PostgreSQL :5433, Redis :6380, MinIO :9012, DinD :2375 — started automatically by preload). The Tier-0 path (`TEST_TIER=0`, `bun run test:tier0`) runs against PGlite with no Docker.
+Requires Docker (PostgreSQL :5433, Redis :6380, MinIO :9012, DinD :2375 — started automatically by preload). DinD-dependent tests skip by default locally — opt in with `TEST_DOCKER=1` (or `bun run test:docker`); they always run when `CI=true` (GitHub Actions). Third-party CI that sets `CI=1` must set `TEST_DOCKER=1` explicitly (the tier helper warns). The Tier-0 path (`TEST_TIER=0`, `bun run test:tier0`) runs against PGlite with no Docker.
 
 ### Configuration
 

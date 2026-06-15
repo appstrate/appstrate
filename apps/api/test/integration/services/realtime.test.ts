@@ -9,12 +9,57 @@ import {
   initRealtime,
   type RealtimeEvent,
 } from "../../../src/services/realtime.ts";
+import { eventData } from "../../helpers/sse.ts";
+
+// Channel defaults mirror the FULL payload the production triggers/broadcaster
+// emit (every key always present, null where the column is nullable). The
+// server now validates each NOTIFY payload against the shared Zod schema and
+// drops anything incomplete, so synthetic fixtures must be complete too — these
+// defaults fill the fields a test doesn't care about; explicit fields win.
+const NOTIFY_DEFAULTS: Record<string, Record<string, unknown>> = {
+  run_update: {
+    operation: "UPDATE",
+    id: "exec-default",
+    package_id: null,
+    status: "running",
+    user_id: null,
+    end_user_id: null,
+    org_id: "org-default",
+    application_id: "app-default",
+    schedule_id: null,
+    error: null,
+    started_at: null,
+    completed_at: null,
+    duration: null,
+  },
+  run_log_insert: {
+    id: 1,
+    run_id: "exec-default",
+    org_id: "org-default",
+    application_id: "app-default",
+    type: "progress",
+    level: "info",
+    event: null,
+    message: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+  },
+  run_metric: {
+    run_id: "exec-default",
+    org_id: "org-default",
+    application_id: "app-default",
+    package_id: "pkg-default",
+    token_usage: null,
+    cost_so_far: 0,
+  },
+};
 
 /**
- * Helper: fire pg_notify on a channel with a JSON payload.
+ * Helper: fire pg_notify on a channel with a JSON payload, filling in the
+ * channel's required fields so the payload matches the real producer shape.
  */
 async function pgNotify(channel: string, payload: Record<string, unknown>) {
-  await db.execute(sql`SELECT pg_notify(${channel}, ${JSON.stringify(payload)})`);
+  const full = { ...(NOTIFY_DEFAULTS[channel] ?? {}), ...payload };
+  await db.execute(sql`SELECT pg_notify(${channel}, ${JSON.stringify(full)})`);
 }
 
 /**
@@ -107,7 +152,7 @@ describe("realtime service (integration)", () => {
       const call = send.mock.calls[0]![0]!;
       expect(call.event).toBe("run_update");
       // Verify snake_case is converted to camelCase.
-      expect(call.data).toEqual({
+      expect(eventData(call, "run_update")).toMatchObject({
         orgId: "org1",
         applicationId: "app1",
         id: "exec-1",
@@ -204,7 +249,7 @@ describe("realtime service (integration)", () => {
       });
       await wait();
       expect(send).toHaveBeenCalledTimes(1);
-      expect(send.mock.calls[0]![0]!.data.id).toBe("target-exec");
+      expect(eventData(send.mock.calls[0]![0]!, "run_update").id).toBe("target-exec");
     });
 
     it("filters by packageId when set", async () => {
@@ -239,7 +284,7 @@ describe("realtime service (integration)", () => {
       });
       await wait();
       expect(send).toHaveBeenCalledTimes(1);
-      expect(send.mock.calls[0]![0]!.data.packageId).toBe("target-pkg");
+      expect(eventData(send.mock.calls[0]![0]!, "run_update").packageId).toBe("target-pkg");
     });
   });
 
@@ -304,7 +349,7 @@ describe("realtime service (integration)", () => {
 
       expect(send).toHaveBeenCalledTimes(1);
       expect(send.mock.calls[0]![0]!.event).toBe("run_log");
-      expect(send.mock.calls[0]![0]!.data.level).toBe("debug");
+      expect(eventData(send.mock.calls[0]![0]!, "run_log").level).toBe("debug");
     });
 
     it("filters logs by runId when set", async () => {
@@ -393,7 +438,7 @@ describe("realtime service (integration)", () => {
         application_id: "app-m",
         run_id: "exec-m",
         package_id: "@scope/agent",
-        tokenUsage: { input_tokens: 10, output_tokens: 5 },
+        token_usage: { input_tokens: 10, output_tokens: 5 },
         cost_so_far: 0.0042,
       });
       await wait();
@@ -401,7 +446,7 @@ describe("realtime service (integration)", () => {
       expect(send).toHaveBeenCalledTimes(1);
       const call = send.mock.calls[0]![0]!;
       expect(call.event).toBe("run_metric");
-      expect(call.data).toEqual({
+      expect(eventData(call, "run_metric")).toEqual({
         orgId: "org-m",
         applicationId: "app-m",
         runId: "exec-m",
@@ -426,7 +471,7 @@ describe("realtime service (integration)", () => {
         application_id: "app-mr",
         run_id: "other",
         package_id: "@scope/agent",
-        tokenUsage: null,
+        token_usage: null,
         cost_so_far: 0,
       });
       await wait();
@@ -437,7 +482,7 @@ describe("realtime service (integration)", () => {
         application_id: "app-mr",
         run_id: "target",
         package_id: "@scope/agent",
-        tokenUsage: null,
+        token_usage: null,
         cost_so_far: 0,
       });
       await wait();
@@ -464,7 +509,7 @@ describe("realtime service (integration)", () => {
         application_id: "app-mp",
         run_id: "rA",
         package_id: "@scope/skip",
-        tokenUsage: null,
+        token_usage: null,
         cost_so_far: 0,
       });
       await wait();
@@ -475,7 +520,7 @@ describe("realtime service (integration)", () => {
         application_id: "app-mp",
         run_id: "rB",
         package_id: "@scope/want",
-        tokenUsage: null,
+        token_usage: null,
         cost_so_far: 0,
       });
       await wait();
@@ -503,7 +548,7 @@ describe("realtime service (integration)", () => {
         application_id: "app-A",
         run_id: "x",
         package_id: "@scope/p",
-        tokenUsage: null,
+        token_usage: null,
         cost_so_far: 0,
       });
       await wait();

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, buildQs } from "../api";
-import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
-import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
-export type { EndUserInfo } from "@appstrate/shared-types";
+import { useQueryClient } from "@tanstack/react-query";
+import { $api, type components } from "../api/client";
+import { useOrgScope } from "./use-org-scope";
+
+/** Wire shape from the OpenAPI spec (components.schemas.EndUserObject). */
+export type EndUserInfo = components["schemas"]["EndUserObject"];
 
 export interface EndUserListParams {
   limit?: number;
@@ -13,85 +13,54 @@ export interface EndUserListParams {
 }
 
 export function useEndUsers(params?: EndUserListParams) {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: ["end-users", orgId, applicationId, params?.limit, params?.startingAfter],
-    queryFn: () =>
-      api<ListEnvelope<EndUserInfo>>(
-        `/end-users${buildQs({
-          limit: params?.limit,
-          startingAfter: params?.startingAfter,
-        })}`,
-      ),
-    enabled: !!orgId && !!applicationId,
-  });
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/end-users",
+    {
+      params: {
+        query: { limit: params?.limit, startingAfter: params?.startingAfter },
+        header: scope.header,
+      },
+    },
+    { enabled: scope.enabled },
+  );
 }
 
 export function useEndUser(endUserId: string) {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: ["end-users", orgId, applicationId, endUserId],
-    queryFn: () => api<EndUserInfo>(`/end-users/${endUserId}`),
-    enabled: !!orgId && !!applicationId && !!endUserId,
-  });
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/end-users/{id}",
+    { params: { path: { id: endUserId }, header: scope.header } },
+    { enabled: scope.enabled && !!endUserId },
+  );
+}
+
+/**
+ * openapi-react-query keys are [method, path, init] with the literal spec
+ * path — list and detail live under different path strings, so both need
+ * invalidating after a write.
+ */
+function useInvalidateEndUsers() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: ["get", "/api/end-users"] });
+    void qc.invalidateQueries({ queryKey: ["get", "/api/end-users/{id}"] });
+  };
 }
 
 export function useCreateEndUser() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: {
-      name?: string;
-      email?: string;
-      externalId?: string;
-      metadata?: Record<string, unknown>;
-    }) => {
-      return api<EndUserInfo>("/end-users", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["end-users"] });
-    },
-  });
+  const invalidate = useInvalidateEndUsers();
+  return $api.useMutation("post", "/api/end-users", { onSuccess: invalidate });
 }
 
 export function useUpdateEndUser() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      id,
-      data,
-    }: {
-      id: string;
-      data: {
-        name?: string;
-        email?: string;
-        externalId?: string;
-        metadata?: Record<string, unknown>;
-      };
-    }) => {
-      return api<EndUserInfo>(`/end-users/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify(data),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["end-users"] });
-    },
-  });
+  const invalidate = useInvalidateEndUsers();
+  return $api.useMutation("patch", "/api/end-users/{id}", { onSuccess: invalidate });
 }
 
 export function useDeleteEndUser() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      return api(`/end-users/${id}`, { method: "DELETE" });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["end-users"] });
-    },
-  });
+  const invalidate = useInvalidateEndUsers();
+  return $api.useMutation("delete", "/api/end-users/{id}", { onSuccess: invalidate });
 }

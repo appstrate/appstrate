@@ -84,6 +84,7 @@ export const profilePaths = {
       tags: ["Profile"],
       summary: "Batch lookup profiles",
       description: "Retrieve display names for a list of user IDs.",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
         content: {

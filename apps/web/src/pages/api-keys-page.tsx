@@ -8,13 +8,18 @@ import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
-import { useApiKeys, useAvailableScopes, useRevokeApiKey } from "../hooks/use-api-keys";
+import {
+  useApiKeys,
+  useAvailableScopes,
+  useRevokeApiKey,
+  type ApiKeyInfo,
+} from "../hooks/use-api-keys";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
-import type { ApiKeyInfo } from "@appstrate/shared-types";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { formatDateField } from "../lib/markdown";
 
-function isExpired(expiresAt: string | null): boolean {
+function isExpired(expiresAt: string | null | undefined): boolean {
   return expiresAt ? new Date(expiresAt) < new Date() : false;
 }
 
@@ -33,7 +38,7 @@ export function ApiKeysPage() {
     return <EmptyState message={t("applications.noAppSelected")} icon={KeyRound} />;
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   const handleRevoke = (key: ApiKeyInfo) => {
     setConfirmState({ id: key.id, label: key.name });
@@ -143,9 +148,12 @@ export function ApiKeysPage() {
         isPending={revokeApiKeyMutation.isPending}
         onConfirm={() => {
           if (!confirmState) return;
-          revokeApiKeyMutation.mutate(confirmState.id, {
-            onSuccess: () => setConfirmState(null),
-          });
+          revokeApiKeyMutation.mutate(
+            { params: { path: { id: confirmState.id } } },
+            {
+              onSuccess: () => setConfirmState(null),
+            },
+          );
         }}
       />
     </div>

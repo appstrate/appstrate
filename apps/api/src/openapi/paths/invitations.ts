@@ -20,10 +20,11 @@ export const invitationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["email", "org_name", "role", "inviter_name", "expiresAt", "is_new_user"],
                 properties: {
                   email: { type: "string" },
                   org_name: { type: "string" },
-                  role: { type: "string" },
+                  role: { type: "string", enum: ["owner", "admin", "member", "viewer"] },
                   inviter_name: { type: "string" },
                   expiresAt: { type: "string" },
                   is_new_user: { type: "boolean" },

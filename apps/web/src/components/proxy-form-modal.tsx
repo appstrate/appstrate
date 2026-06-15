@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { OrgProxyInfo } from "@appstrate/shared-types";
+import type { OrgProxyInfo } from "../hooks/use-proxies";
 
 interface ProxyFormModalProps {
   open: boolean;

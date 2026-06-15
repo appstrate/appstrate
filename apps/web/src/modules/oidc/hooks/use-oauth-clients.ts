@@ -5,30 +5,33 @@
  * Mirrors the backend `/api/oauth/clients*` routes shipped in Stage 4.
  */
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, apiList } from "@/api";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { $api, client, type components, type paths } from "@/api/client";
 import { useCurrentOrgId } from "@/hooks/use-org";
 import { useCurrentApplicationId } from "@/hooks/use-current-application";
-import type {
-  OAuthClientRecord as OAuthClient,
-  OAuthClientWithSecret,
-  SignupRole,
-} from "../../../../../api/src/modules/oidc/services/oauth-admin.ts";
+import { useOrgOnlyScope } from "@/hooks/use-org-scope";
 
-export type { OAuthClient, OAuthClientWithSecret, SignupRole };
+/** Wire shapes from the OpenAPI spec. */
+export type OAuthClient = components["schemas"]["OAuthClientObject"];
+export type OAuthClientWithSecret = components["schemas"]["OAuthClientWithSecret"];
+export type SignupRole = OAuthClient["signupRole"];
+
+type CreateOAuthClientBody =
+  paths["/api/oauth/clients"]["post"]["requestBody"]["content"]["application/json"];
 
 export function useOAuthClients(level?: "org" | "application") {
-  const orgId = useCurrentOrgId();
+  const scope = useOrgOnlyScope();
   const applicationId = useCurrentApplicationId();
   const isOrg = level === "org";
-  return useQuery({
-    queryKey: ["oauth-clients", orgId, isOrg ? "org" : applicationId],
-    queryFn: () =>
-      apiList<OAuthClient>("/oauth/clients").then((rows) =>
-        level ? rows.filter((c) => c.level === level) : rows,
-      ),
-    enabled: isOrg ? !!orgId : !!orgId && !!applicationId,
-  });
+  return $api.useQuery(
+    "get",
+    "/api/oauth/clients",
+    { params: { header: scope.header } },
+    {
+      enabled: isOrg ? scope.enabled : scope.enabled && !!applicationId,
+      select: (e) => (level ? e.data.filter((c) => c.level === level) : e.data),
+    },
+  );
 }
 
 /**
@@ -37,18 +40,29 @@ export function useOAuthClients(level?: "org" | "application") {
  * scope strings.
  */
 export function useOAuthScopes() {
-  const orgId = useCurrentOrgId();
+  const scope = useOrgOnlyScope();
   const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: ["oauth-scopes", orgId, applicationId],
-    queryFn: () => apiList<string>("/oauth/scopes"),
-    enabled: !!orgId && !!applicationId,
-    staleTime: Infinity, // scope list is static within a deploy
-  });
+  return $api.useQuery(
+    "get",
+    "/api/oauth/scopes",
+    { params: { header: scope.header } },
+    {
+      enabled: scope.enabled && !!applicationId,
+      staleTime: Infinity, // scope list is static within a deploy
+      select: (e) => e.data,
+    },
+  );
+}
+
+function useInvalidateOAuthClients() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: ["get", "/api/oauth/clients"] });
+  };
 }
 
 export function useCreateOAuthClient(level?: "org" | "application") {
-  const qc = useQueryClient();
+  const invalidate = useInvalidateOAuthClients();
   const applicationId = useCurrentApplicationId();
   const orgId = useCurrentOrgId();
   const isOrg = level === "org";
@@ -63,70 +77,33 @@ export function useCreateOAuthClient(level?: "org" | "application") {
       allowSignup?: boolean;
       /** Org-level only — role assigned on auto-join. `owner` forbidden. */
       signupRole?: SignupRole;
-    }) =>
-      api<OAuthClientWithSecret>("/oauth/clients", {
-        method: "POST",
-        body: JSON.stringify(
-          isOrg
-            ? { level: "org", referencedOrgId: orgId, ...data }
-            : { level: "application", referencedApplicationId: applicationId, ...data },
-        ),
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["oauth-clients"] });
+    }) => {
+      // The level discriminator and pinned reference come from the current
+      // org/app context — call sites only provide the client fields.
+      const body: CreateOAuthClientBody = isOrg
+        ? { level: "org", referencedOrgId: orgId!, ...data }
+        : { level: "application", referencedApplicationId: applicationId!, ...data };
+      const { data: created } = await client.POST("/api/oauth/clients", { body });
+      if (!created) throw new Error("empty response");
+      return created;
     },
+    onSuccess: invalidate,
   });
 }
 
 export function useUpdateOAuthClient() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      clientId,
-      data,
-    }: {
-      clientId: string;
-      data: {
-        redirectUris?: string[];
-        postLogoutRedirectUris?: string[];
-        scopes?: string[];
-        disabled?: boolean;
-        isFirstParty?: boolean;
-        /** Unified signup opt-in (instance/org/application). */
-        allowSignup?: boolean;
-        /** Org-level only — role assigned on auto-join. `owner` forbidden. */
-        signupRole?: SignupRole;
-      };
-    }) =>
-      api<OAuthClient>(`/oauth/clients/${clientId}`, {
-        method: "PATCH",
-        body: JSON.stringify(data),
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["oauth-clients"] });
-    },
-  });
+  const invalidate = useInvalidateOAuthClients();
+  return $api.useMutation("patch", "/api/oauth/clients/{clientId}", { onSuccess: invalidate });
 }
 
 export function useDeleteOAuthClient() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (clientId: string) => api(`/oauth/clients/${clientId}`, { method: "DELETE" }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["oauth-clients"] });
-    },
-  });
+  const invalidate = useInvalidateOAuthClients();
+  return $api.useMutation("delete", "/api/oauth/clients/{clientId}", { onSuccess: invalidate });
 }
 
 export function useRotateOAuthClientSecret() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (clientId: string) =>
-      api<OAuthClientWithSecret>(`/oauth/clients/${clientId}/rotate`, {
-        method: "POST",
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["oauth-clients"] });
-    },
+  const invalidate = useInvalidateOAuthClients();
+  return $api.useMutation("post", "/api/oauth/clients/{clientId}/rotate", {
+    onSuccess: invalidate,
   });
 }

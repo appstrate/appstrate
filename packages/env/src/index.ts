@@ -308,9 +308,8 @@ const envSchema = z
     // `@appstrate/module-codex` (ChatGPT/Codex) and
     // `@appstrate/module-claude-code` (Claude Pro/Max/Team) — remove
     // either to drop that provider surface. `MODULES=none` boots with
-    // zero modules; `MODULES=""` is a legacy alias for the same thing,
-    // handled in getModuleRegistry() (the getter coalesces "" → unset,
-    // so it can't be expressed here).
+    // zero modules (the only sentinel — `""` coalesces to unset, i.e.
+    // the default set, per the compose `${VAR:-}` pattern).
     MODULES: z
       .string()
       .default(

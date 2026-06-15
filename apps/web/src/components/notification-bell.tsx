@@ -130,17 +130,15 @@ export function NotificationBell() {
 
   const agentNameMap = new Map<string, string>();
   if (agents) {
-    for (const f of agents) agentNameMap.set(f.id, f.display_name);
+    for (const f of agents) agentNameMap.set(f.id, f.display_name ?? f.id);
   }
 
-  const unreadRuns = (runsData?.data.filter((e) => e.notifiedAt != null && e.readAt == null) ??
-    []) as unknown as Pick<
-    EnrichedRun,
-    "id" | "packageId" | "agent_name" | "status" | "started_at"
-  >[];
+  // EnrichedRun[] is structurally assignable to the child's Pick<…>[] prop, so
+  // no cast is needed — the filtered list flows through spec-typed.
+  const unreadRuns = runsData?.data.filter((e) => e.notifiedAt != null && e.readAt == null) ?? [];
 
   const handleClick = (runId: string) => {
-    markRead.mutate(runId);
+    markRead.mutate({ params: { path: { runId } } });
     setOpen(false);
   };
 
@@ -168,7 +166,7 @@ export function NotificationBell() {
     agentNameMap,
     onItemClick: handleClick,
     onClose: () => setOpen(false),
-    markAllRead: () => markAllRead.mutate(),
+    markAllRead: () => markAllRead.mutate({}),
   };
 
   if (isMobile) {

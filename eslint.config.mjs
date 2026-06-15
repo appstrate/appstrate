@@ -6,7 +6,16 @@ import tseslint from "typescript-eslint";
 import eslintConfigPrettier from "eslint-config-prettier";
 
 export default tseslint.config(
-  { ignores: ["**/dist", "**/node_modules", ".claude/", "apps/web/src/components/ui"] },
+  {
+    ignores: [
+      "**/dist",
+      "**/node_modules",
+      ".claude/",
+      "apps/web/src/components/ui",
+      // Generated OpenAPI types — managed by scripts/generate-api-types.ts
+      "apps/web/src/api/schema.d.ts",
+    ],
+  },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts"],
@@ -130,6 +139,31 @@ export default tseslint.config(
     },
   },
   {
+    // Typed-client guard: all web API calls go through the typed OpenAPI
+    // client (src/api/client.ts — `$api`/`client`). The legacy fetch barrel
+    // (src/api.ts) is deleted; this rule keeps it from coming back under the
+    // old import specifiers (relative or aliased).
+    files: ["apps/web/src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              // Matches "./api", "../api" (any depth) and "@/api" — but not
+              // the typed-client modules ("./api/client", "@/api/errors", …).
+              // gitignore-style `group` can't re-include children of an
+              // excluded directory, so use a regex on the specifier instead.
+              regex: "^(?:(?:\\.{1,2}/)+|@/)api$",
+              message:
+                "Use the typed OpenAPI client from src/api/client.ts ($api / client) — the legacy fetch helpers are gone.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["apps/web/src/**/*.{ts,tsx}", "packages/ui/src/**/*.{ts,tsx}"],
     languageOptions: {
       globals: globals.browser,
@@ -141,6 +175,22 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+    },
+  },
+  {
+    // Type-aware guard (web only): flag `x as T` assertions that don't change
+    // the type — these are pure noise that also hide where a value's real type
+    // silently drifted from what the cast claims. Scoped to the SPA so the
+    // type-checked program stays cheap. Only this one type-aware rule is on.
+    files: ["apps/web/src/**/*.{ts,tsx}"],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-unnecessary-type-assertion": "error",
     },
   },
   eslintConfigPrettier,

@@ -48,6 +48,10 @@ export const authPaths = {
           },
         },
         "400": { description: "Validation error" },
+        "403": {
+          description:
+            "Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required. Body shape is owned by Better Auth.",
+        },
       },
     },
   },
@@ -81,11 +85,15 @@ export const authPaths = {
               schema: {
                 type: "object",
                 properties: {
+                  // Better Auth's sign-in response carries a `redirect` flag
+                  // (post-login redirect signalling) alongside user + token.
+                  redirect: { type: "boolean" },
                   user: { $ref: "#/components/schemas/User" },
                   token: { type: ["string", "null"] },
                 },
               },
               example: {
+                redirect: false,
                 user: {
                   id: "usr_abc123",
                   email: "alice@example.com",
@@ -217,11 +225,13 @@ export const authPaths = {
       description: "Returns the current session and user info.",
       responses: {
         "200": {
-          description: "Session info",
+          description: "Session info, or `null` when there is no active session.",
           content: {
             "application/json": {
               schema: {
-                type: "object",
+                // Better Auth returns the literal `null` body (200) when no
+                // session is active, otherwise the {user, session} envelope.
+                type: ["object", "null"],
                 properties: {
                   user: { anyOf: [{ $ref: "#/components/schemas/User" }, { type: "null" }] },
                   session: { type: ["object", "null"] },

@@ -14,7 +14,7 @@ import {
 import { useRunAgent } from "../hooks/use-mutations";
 import { usePackageDetail } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
-import { ApiError } from "../api";
+import { ApiError } from "../api/errors";
 import type { AgentDetail } from "@appstrate/shared-types";
 
 interface RunAgentButtonProps {

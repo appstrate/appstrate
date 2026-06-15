@@ -48,7 +48,10 @@
  */
 
 import { isBlockedUrl } from "@appstrate/afps-shared/ssrf";
+import { resolveAndCheckHost, type HostResolver } from "@appstrate/afps-shared/ssrf-dns";
 import { matchesAuthorizedUriSpec } from "./http-call-core.ts";
+
+export type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
 
 /** Maximum redirect hops the follower will chase before giving up. */
 export const MAX_REDIRECTS = 10;
@@ -122,24 +125,99 @@ export interface PreflightOptions {
    * metadata target).
    */
   allowAllUris?: boolean;
+  /**
+   * DNS resolver for the SSRF rebind check — injectable for tests.
+   * Production callers omit it (system resolver via `node:dns`).
+   */
+  resolveHost?: HostResolver;
 }
 
 /**
- * Validate the INITIAL target URL against the allowlist + SSRF blocklist.
- * Mirrors the three-branch logic the sidecar applied inline:
- *   - `allowAllUris` → SSRF safety-net only.
- *   - declared `authorizedUris` → must match (allowlist authoritative).
+ * True when some allowlist entry names the URL's host with a literal
+ * (wildcard-free) host component. Only then is the allowlist a
+ * host-level trust declaration that exempts the target from the SSRF
+ * gate: the operator wrote that exact host down, so an internal address
+ * behind it is their declared topology (on-prem APIs are legitimate
+ * allowlist targets). Entries whose host segment contains a glob
+ * (`https://**`, `https://*.example.com/…`) never pin — the concrete
+ * host is then chosen by the agent at call time, and the SSRF gate must
+ * still apply.
+ *
+ * The host comparison is authority-only and case-insensitive: userinfo
+ * and the port are stripped, a globbed scheme (`**://`, `*://`) and a
+ * globbed port (`:*`) are tolerated — a glob there doesn't make the HOST
+ * agent-chosen, and refusing to pin would wrongly re-gate a literal
+ * on-prem host the operator explicitly named.
+ */
+export function hostLiterallyAllowlisted(url: string, specs: string[]): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  for (const spec of specs) {
+    const m = /^(?:[a-zA-Z][a-zA-Z0-9+.-]*|\*{1,2}):\/\/([^/?#]+)/.exec(spec.trim());
+    if (!m) continue;
+    const hostPart = m[1]!.replace(/^[^@]*@/, "").replace(/:(\d+|\*)$/, "");
+    if (hostPart.includes("*")) continue;
+    if (hostPart.toLowerCase() === host) return true;
+  }
+  return false;
+}
+
+/**
+ * SSRF gate shared by every preflight branch without a literal operator
+ * host pin: the literal blocklist first (IP literals, known-internal
+ * names), then resolve every A/AAAA record and refuse if ANY lands in a
+ * blocked range (fail closed on resolution failure). A DNS name whose
+ * record points inside (10.x, 169.254.169.254, …) passes `isBlockedUrl`
+ * alone — this closes the rebind-to-internal vector. The connection is
+ * delegated to `fetch`, which re-resolves, so this is fail-closed
+ * defence-in-depth with a documented residual TOCTOU, not a full
+ * resolve-and-pin.
+ */
+async function refuseSsrfUrl(url: string, resolveHost?: HostResolver): Promise<PreflightResult> {
+  const blocked: PreflightResult = {
+    ok: false,
+    reason: "ssrf",
+    message: "URL targets a blocked network range",
+  };
+  if (isBlockedUrl(url)) return blocked;
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return blocked;
+  }
+  const check = await resolveAndCheckHost(hostname, { resolve: resolveHost });
+  if (!check.blocked) return { ok: true };
+  if (check.reason === "resolution-failed") {
+    return {
+      ok: false,
+      reason: "ssrf",
+      message: `Target host could not be resolved (${redactHost(url)})`,
+    };
+  }
+  return blocked;
+}
+
+/**
+ * Validate the INITIAL target URL against the allowlist + SSRF blocklist
+ * + DNS-rebind layer. Mirrors the sidecar's `executeApiCall` branches:
+ *   - `allowAllUris` → SSRF safety-net (literal + DNS).
+ *   - declared `authorizedUris` → must match; a glob-matched host (no
+ *     literal pin) additionally passes the SSRF safety-net — `https://**`
+ *     would otherwise let the agent pick ANY host with zero floor,
+ *     strictly weaker than allow_all.
  *   - neither → SSRF safety-net (no allowlist means "block internals").
  *
  * The per-hop equivalents live in {@link fetchFollowingRedirectsCapturingCookies}.
  */
-export function preflightUrl(url: string, opts: PreflightOptions): PreflightResult {
+export async function preflightUrl(url: string, opts: PreflightOptions): Promise<PreflightResult> {
   const authorizedUris = opts.authorizedUris ?? undefined;
   if (opts.allowAllUris) {
-    if (isBlockedUrl(url)) {
-      return { ok: false, reason: "ssrf", message: "URL targets a blocked network range" };
-    }
-    return { ok: true };
+    return refuseSsrfUrl(url, opts.resolveHost);
   }
   if (authorizedUris && authorizedUris.length) {
     if (!matchesAuthorizedUri(url, authorizedUris)) {
@@ -149,13 +227,13 @@ export function preflightUrl(url: string, opts: PreflightOptions): PreflightResu
         message: `URL not in authorized_uris allowlist. Allowed: ${authorizedUris.join(", ")}`,
       };
     }
+    if (!hostLiterallyAllowlisted(url, authorizedUris)) {
+      return refuseSsrfUrl(url, opts.resolveHost);
+    }
     return { ok: true };
   }
   // No authorized_uris and no allowAllUris — apply the SSRF safety net.
-  if (isBlockedUrl(url)) {
-    return { ok: false, reason: "ssrf", message: "URL targets a blocked network range" };
-  }
-  return { ok: true };
+  return refuseSsrfUrl(url, opts.resolveHost);
 }
 
 /** Extract hostname for audit logs, never throwing. */
@@ -406,6 +484,8 @@ export interface GuardedFetchOptions {
   injectedCredentialHeader?: string | null;
   integrationId?: string;
   logger?: RedirectLogger;
+  /** DNS resolver for the SSRF rebind preflight — injectable for tests. */
+  resolveHost?: HostResolver;
 }
 
 export class PreflightError extends Error {
@@ -422,9 +502,10 @@ export async function guardedFetch(
   opts: GuardedFetchOptions,
 ): Promise<{ response: Response; finalUrl: string; hops: number }> {
   const fetchFn = opts.fetchFn ?? fetch;
-  const pre = preflightUrl(opts.url, {
+  const pre = await preflightUrl(opts.url, {
     authorizedUris: opts.authorizedUris,
     allowAllUris: opts.allowAllUris,
+    resolveHost: opts.resolveHost,
   });
   if (!pre.ok) {
     throw new PreflightError(pre.reason, pre.message);

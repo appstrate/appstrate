@@ -2,13 +2,17 @@
 
 const clientListResponse = {
   type: "object",
-  required: ["object", "data"],
+  required: ["object", "data", "hasMore"],
   properties: {
     object: { type: "string", enum: ["list"] },
     data: {
       type: "array",
       items: { $ref: "#/components/schemas/OAuthClientObject" },
     },
+    // The handler wraps via the canonical `listResponse()` helper, which
+    // always emits `hasMore` (the list endpoint here is unpaginated, so it is
+    // constant `false`, but the field is always present).
+    hasMore: { type: "boolean" },
   },
 };
 
@@ -369,7 +373,7 @@ export const oidcPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["access_token", "token_type", "expires_in"],
+                required: ["access_token", "token_type", "expires_in", "expires_at"],
                 properties: {
                   access_token: {
                     type: "string",
@@ -378,6 +382,9 @@ export const oidcPaths = {
                   },
                   token_type: { type: "string", enum: ["Bearer"] },
                   expires_in: { type: "integer" },
+                  // Absolute expiry the oauth-provider plugin emits alongside
+                  // the relative `expires_in`.
+                  expires_at: { type: "integer" },
                   refresh_token: { type: "string" },
                   id_token: {
                     type: "string",
@@ -390,6 +397,8 @@ export const oidcPaths = {
           },
         },
         "400": { description: "`invalid_grant`, `invalid_request`, or RFC 8707 mismatch." },
+        "401": { description: "Invalid client credentials (unknown client or secret mismatch)." },
+        "403": { description: "Access denied — realm guard, signup gate, or resource mismatch." },
         "429": { description: "Rate limit exceeded." },
       },
     },
@@ -432,6 +441,12 @@ export const oidcPaths = {
               schema: {
                 type: "object",
                 required: ["active"],
+                // RFC 7662 §2.2: an active-token response echoes the token's
+                // claims (sub, aud, iat, iss, sid, plus the platform's custom
+                // org_id/application_id/actor_type/end_user_id/email/name/azp).
+                // The claim set is open by spec, so document the common ones
+                // and allow the rest rather than enumerating an evolving list.
+                additionalProperties: true,
                 properties: {
                   active: { type: "boolean" },
                   scope: { type: "string" },
@@ -443,6 +458,7 @@ export const oidcPaths = {
             },
           },
         },
+        "400": { description: "Malformed request (missing/invalid `token` parameter)." },
       },
     },
   },
@@ -481,6 +497,7 @@ export const oidcPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["keys"],
                 properties: { keys: { type: "array", items: { type: "object" } } },
               },
             },
@@ -963,12 +980,24 @@ export const oidcPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: {
                     type: "array",
                     items: {
                       type: "object",
+                      required: [
+                        "familyId",
+                        "deviceName",
+                        "userAgent",
+                        "createdIp",
+                        "lastUsedIp",
+                        "lastUsedAt",
+                        "createdAt",
+                        "expiresAt",
+                        "current",
+                      ],
                       properties: {
                         familyId: { type: "string" },
                         deviceName: { type: ["string", "null"] },
@@ -1153,6 +1182,20 @@ export const oidcPaths = {
                     type: "array",
                     items: {
                       type: "object",
+                      required: [
+                        "familyId",
+                        "userId",
+                        "userEmail",
+                        "userName",
+                        "deviceName",
+                        "userAgent",
+                        "createdIp",
+                        "lastUsedIp",
+                        "lastUsedAt",
+                        "createdAt",
+                        "expiresAt",
+                        "current",
+                      ],
                       properties: {
                         familyId: { type: "string" },
                         userId: { type: "string" },

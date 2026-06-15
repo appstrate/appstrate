@@ -42,17 +42,20 @@ export function EndUserCreateModal({ open, onClose }: Props) {
   };
 
   const onFormSubmit = (data: FormData) => {
-    const payload: Record<string, string> = {};
+    const payload: { name?: string; email?: string; externalId?: string } = {};
     if (data.name.trim()) payload.name = data.name.trim();
     if (data.email.trim()) payload.email = data.email.trim();
     if (data.externalId.trim()) payload.externalId = data.externalId.trim();
 
-    createMutation.mutate(payload, {
-      onSuccess: () => handleClose(),
-      onError: (err) => {
-        setError("root", { message: getErrorMessage(err) });
+    createMutation.mutate(
+      { body: payload },
+      {
+        onSuccess: () => handleClose(),
+        onError: (err) => {
+          setError("root", { message: getErrorMessage(err) });
+        },
       },
-    });
+    );
   };
 
   if (!open) return null;

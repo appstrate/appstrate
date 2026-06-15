@@ -557,7 +557,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
     const initialState: AgentEditorState =
       isEdit && agentDetail
         ? {
-            manifest: (agentDetail.manifest ?? {}) as Record<string, unknown>,
+            manifest: agentDetail.manifest ?? {},
             prompt: agentDetail.prompt || "",
             lock_version: agentDetail.lock_version,
           }

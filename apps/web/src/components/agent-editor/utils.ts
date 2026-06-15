@@ -355,7 +355,7 @@ export function schemaToFields(
       typeof prop.items === "object" &&
       !Array.isArray(prop.items)
     ) {
-      const items = prop.items as JSONSchema7;
+      const items = prop.items;
       if (Array.isArray(items.enum)) {
         arrayEnumItems = items.enum.join(", ");
       }
@@ -514,7 +514,7 @@ export function fieldsToSchema(
           .map((v) => v.trim())
           .filter(Boolean);
         if (items.length > 0) {
-          prop.items = { type: "string", enum: items } as JSONSchema7;
+          prop.items = { type: "string", enum: items };
         }
       }
       properties[key] = prop;

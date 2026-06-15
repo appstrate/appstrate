@@ -16,19 +16,13 @@
  */
 
 import { useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { client } from "../api/client";
 import { useProvidersRegistry, type ProviderRegistryEntry } from "./use-model-provider-credentials";
 
 interface SeedResult {
   /** Number of models created. Zero when the org already had models for this credential. */
   created: number;
   /** Whether one of the freshly-created rows was promoted to default. */
-  promotedDefault: boolean;
-}
-
-interface SeedResponse {
-  created: number;
-  ids: string[];
   promotedDefault: boolean;
 }
 
@@ -48,15 +42,16 @@ export function useAutoSeedFeaturedModels() {
     if (toSeed.length === 0) return { created: 0, promotedDefault: false };
 
     try {
-      const res = await api<SeedResponse>("/models/seed", {
-        method: "POST",
-        body: JSON.stringify({
+      const { data } = await client.POST("/api/models/seed", {
+        body: {
           credentialId,
           modelIds: toSeed.map((m) => m.id),
-        }),
+        },
       });
-      qc.invalidateQueries({ queryKey: ["models"] });
-      return { created: res.created, promotedDefault: res.promotedDefault };
+      // Non-2xx throws via the client middleware, so `data` is defined here.
+      if (!data) return { created: 0, promotedDefault: false };
+      qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
+      return { created: data.created, promotedDefault: data.promotedDefault };
     } catch {
       // Seed is best-effort — onboarding can still continue if seeding fails.
       return { created: 0, promotedDefault: false };

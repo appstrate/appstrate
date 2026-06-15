@@ -83,7 +83,7 @@ export interface RunWireDto {
   runNumber: number | null;
   token_usage: unknown;
   version_label: string | null;
-  version_dirty: boolean | null;
+  version_dirty: boolean;
   /**
    * Unambiguous reference to the agent definition the run executed (#636):
    * `"draft"` when the mutable draft ran with unpublished changes (or no
@@ -254,7 +254,7 @@ export interface ScheduleWireDto {
   orgId: string;
   applicationId: string;
   name: string | null;
-  enabled: boolean | null;
+  enabled: boolean;
   cron_expression: string;
   timezone: string | null;
   input: Record<string, unknown> | null;
@@ -369,17 +369,22 @@ export interface MeConnectionSourceGroup {
  */
 export interface BasePackageListItem {
   id: string;
-  description: string | null;
   source: "system" | "local";
-  scope: string | null;
   version: string | null;
-  forked_from: string | null;
+  // `description`/`scope`/`forked_from` are emitted by some package shapes but
+  // not others (the agent list omits `forked_from`; the org-package list omits
+  // `scope`; manifest-derived `description` may be absent), so they are
+  // optional at the base and re-required on the concrete shapes that always
+  // emit them.
+  description?: string | null;
+  scope?: string | null;
+  forked_from?: string | null;
 }
 
 export interface AgentListItem extends BasePackageListItem {
-  display_name: string;
-  schema_version: string;
-  author: string;
+  display_name?: string;
+  schema_version?: string;
+  author?: string;
   keywords: string[];
   dependencies: {
     skills?: Record<string, string>;
@@ -388,17 +393,22 @@ export interface AgentListItem extends BasePackageListItem {
   };
   running_runs: number;
   type: PackageType;
-  /** Always non-null on agents — narrowed for ergonomics. */
-  description: string;
+  /** Always emitted by the agent-list mapper (`@scope` or null). */
+  scope: string | null;
 }
 
 export interface AgentDetail {
   id: string;
-  display_name: string;
-  description: string;
+  /** Manifest-derived; may be absent (the SPA falls back to the id). */
+  display_name?: string;
+  description?: string;
   source: "system" | "local";
   dependencies: {
-    skills: { id: string; version: string; name?: string; description?: string }[];
+    // `version`/`name`/`description` are emitted only when present on the
+    // manifest skill ref (handler spreads them conditionally) — AFPS §4.1.
+    skills: { id: string; version?: string; name?: string; description?: string }[];
+    /** AFPS §4.1 mcp_servers dependency group (`{ id, version }` per entry). */
+    mcp_servers: { id: string; version: string }[];
     /**
      * Niveau 2 — agent's integration declarations (`dependencies.integrations`
      * + `integrations_configuration`) flattened by `parseManifestIntegrations`.
@@ -418,11 +428,14 @@ export interface AgentDetail {
   last_run: {
     id: string;
     status: string;
-    started_at: Date | string | null;
+    /** `runs.started_at` is NOT NULL (defaultNow); Date server-side, ISO string on the wire. */
+    started_at: Date | string;
     duration: number | null;
   } | null;
-  updatedAt: string | null;
-  lock_version: number;
+  /** Omitted for system agents (the SPA treats absence as "no timestamp"). */
+  updatedAt?: string | null;
+  /** Omitted for system agents — absence means "no optimistic-lock token". */
+  lock_version?: number;
   prompt?: string;
   scope: string | null;
   version: string | null;
@@ -437,18 +450,26 @@ export interface AgentDetail {
 // --- Organization Package Types ---
 
 export interface OrgPackageItem extends BasePackageListItem {
-  /** Display name from the manifest, may be missing on legacy rows. */
-  name: string | null;
+  /** Always a string — `getPackageDisplayName` falls back to the package id. */
+  name: string;
+  /** Always emitted by the org-package list/detail mappers. */
+  description: string | null;
+  forked_from: string | null;
   created_by: string | null;
-  created_by_name: string | null;
+  /** Omitted when the creating user is unknown. */
+  created_by_name?: string | null;
   createdAt: string;
   updatedAt: string;
   used_by_agents: number;
   auto_installed: boolean;
 }
 
-export interface OrgPackageItemDetail extends OrgPackageItem {
-  content: string;
+// The detail endpoint does not emit the list-only `used_by_agents`, so it is
+// dropped from the base via Omit (a sub-interface can't loosen a required
+// field to optional).
+export interface OrgPackageItemDetail extends Omit<OrgPackageItem, "used_by_agents"> {
+  /** Present but nullable — the draft_content column is nullable. */
+  content: string | null;
   /** Secondary source file content (e.g. .ts for tools). */
   source_code?: string | null;
   agents: { id: string; display_name: string }[];
@@ -770,3 +791,22 @@ export interface EndUserInfo {
 // existing importers keep working.
 
 export type { SocialProviderId, SmtpConfigView, SocialProviderView } from "./oidc.ts";
+
+// --- Realtime SSE event schemas (shared server↔client source of truth) ---
+//
+// Zod schemas + inferred types for every typed SSE frame, validated on emit
+// (apps/api/src/services/realtime.ts) and on receipt (apps/web realtime hooks).
+export {
+  runUpdateEventSchema,
+  runLogEventSchema,
+  runMetricEventSchema,
+  connectionUpdateEventSchema,
+  runUpdateToRunPatch,
+} from "./realtime-events.ts";
+export type {
+  RunUpdateEvent,
+  RunLogEvent,
+  RunMetricEvent,
+  ConnectionUpdateEvent,
+  RealtimeEvent,
+} from "./realtime-events.ts";

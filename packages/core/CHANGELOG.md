@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **BREAKING: `RealtimeEvent` removed from `@appstrate/core/platform-types`.**
+  The loose `{ event: string; data: Record<string, unknown> }` envelope was
+  dead — the platform's SSE pipeline uses the typed discriminated union in
+  `@appstrate/shared-types` (`realtime-events`). External consumers that
+  imported it should define their own equivalent or adopt the typed union.
+  Requires a major version bump on next publish.
+
+### Changed
+
+- **`dist-tags` `isProtectedTag` now also protects `draft` and `published`**
+  (appstrate#670) — previously only `latest`. These are reserved
+  `version_ref` selector keywords; allowing same-named dist-tags would let a
+  tag shadow the selector. Consumers that create/delete dist-tags must treat
+  all three names as reserved.
+- **`ssrf` DNS layer moved to `@appstrate/afps-shared/ssrf-dns`** —
+  `@appstrate/core/ssrf` re-exports `resolveAndCheckHost`/`HostResolver`/
+  `ResolvedHostCheck` verbatim (import paths unchanged); the implementation
+  now lives in the leaf package so `@appstrate/afps-runtime` (standalone
+  `afps` CLI) shares the exact same rebind protection. Requires
+  `@appstrate/afps-shared` ^0.2.0. The `defaultHostResolver` export was
+  dropped from `@appstrate/core/ssrf` (never consumed; inject via the
+  `deps.resolve` parameter instead).
+
 ### Fixed
 
 - **`storage-s3` presigned upload URLs no longer bind a placeholder CRC32

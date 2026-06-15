@@ -12,6 +12,7 @@ import { useAppSwitcher } from "../../hooks/use-current-application";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { ApplicationCreateModal } from "../../components/application-create-modal";
 import { formatDateField } from "../../lib/markdown";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 export function OrgSettingsApplicationsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -29,7 +30,7 @@ export function OrgSettingsApplicationsPage() {
   };
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   return (
     <>

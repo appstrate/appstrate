@@ -100,8 +100,8 @@ export function PackageList() {
 
   const items: CardItem[] | undefined = agents?.map((f) => ({
     id: f.id,
-    displayName: f.display_name,
-    description: f.description,
+    displayName: f.display_name ?? f.id,
+    description: f.description ?? null,
     type: "agent",
     source: f.source,
     runningRuns: f.running_runs,

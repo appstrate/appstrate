@@ -23,6 +23,7 @@ import { useTranslation } from "react-i18next";
 import { Check, Copy, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
 import {
@@ -65,7 +66,7 @@ export function OAuthPairingBody({ providerId, onConnected }: OAuthPairingBodyPr
       const current = pairingRef.current;
       if (!current) return;
       // Best-effort — TTL eventually reaps the row.
-      cancelMutateRef.current(current.id, { onError: () => {} });
+      cancelMutateRef.current({ params: { path: { id: current.id } } }, { onError: () => {} });
     };
   }, []);
 
@@ -83,7 +84,7 @@ export function OAuthPairingBody({ providerId, onConnected }: OAuthPairingBodyPr
   useEffect(() => {
     if (pairingStatus.data?.status !== "consumed") return;
     toast.success(t("credentials.oauth.callbackSuccess"));
-    qc.invalidateQueries({ queryKey: ["model-provider-credentials"] });
+    qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] });
     const credentialId = pairingStatus.data.credentialId;
     if (credentialId && onConnected) queueMicrotask(() => onConnected(credentialId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -94,10 +95,12 @@ export function OAuthPairingBody({ providerId, onConnected }: OAuthPairingBodyPr
 
   async function generatePairing() {
     try {
-      const res = await createPairing.mutateAsync({ providerId });
+      const res = await createPairing.mutateAsync({ body: { providerId } });
       setPairing({ id: res.id, command: res.command });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("credentials.oauth.pairingCreateFailed"));
+      toast.error(
+        err instanceof Error ? getErrorMessage(err) : t("credentials.oauth.pairingCreateFailed"),
+      );
     }
   }
 

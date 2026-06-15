@@ -11,8 +11,8 @@
  * so nothing about what the tests prove is weakened.
  *
  * Tests that exercise the sign-up HTTP flow itself (email-verification
- * interstitial, signup gates, …) should use `createTestUserViaHttp` — the
- * original implementation that POSTs `/api/auth/sign-up/email`.
+ * interstitial, signup gates, …) POST `/api/auth/sign-up/email` directly
+ * via `app.request()`.
  *
  * Organizations, memberships, and applications are seeded directly in the DB.
  */
@@ -119,8 +119,8 @@ function randomSessionToken(): string {
  *                  password still verifies (see packages/db/src/auth.ts)
  *   - `session`  — realm="platform" (denormalized, read by the realm guard)
  *
- * For tests that must exercise the real sign-up HTTP flow, use
- * `createTestUserViaHttp` instead.
+ * Tests that must exercise the real sign-up HTTP flow POST
+ * `/api/auth/sign-up/email` directly.
  */
 export async function createTestUser(
   overrides: Partial<{ email: string; name: string; password: string }> = {},
@@ -156,54 +156,6 @@ export async function createTestUser(
   ]);
 
   return { id: userId, email, name, cookie: await signSessionCookie(token) };
-}
-
-/**
- * Create a test user via Better Auth's sign-up endpoint.
- * Returns the user record and the signed session cookie.
- *
- * This goes through the real auth flow: sign-up → session creation → cookie.
- * Slower than `createTestUser` — use it only when the test depends on the
- * actual sign-up HTTP behavior (verification interstitial, signup gates,
- * BA hooks firing, …).
- */
-export async function createTestUserViaHttp(
-  overrides: Partial<{ email: string; name: string; password: string }> = {},
-): Promise<TestUser & { cookie: string }> {
-  const app = getTestApp();
-  const email = overrides.email ?? `test-${nextId()}@test.com`;
-  const name = overrides.name ?? `Test User ${nextId()}`;
-  const password = overrides.password ?? "TestPassword123!";
-
-  const res = await app.request("/api/auth/sign-up/email", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, name }),
-  });
-
-  if (res.status !== 200) {
-    const body = await res.text();
-    throw new Error(`Sign-up failed (${res.status}): ${body}`);
-  }
-
-  // Extract session cookie from Set-Cookie header
-  const setCookie = res.headers.get("set-cookie") ?? "";
-  const match = setCookie.match(/better-auth\.session_token=([^;]+)/);
-  if (!match) {
-    throw new Error(`No session cookie in sign-up response: ${setCookie}`);
-  }
-  const cookie = `better-auth.session_token=${match[1]}`;
-
-  const body = (await res.json()) as { user: { id: string; email: string; name: string } };
-  if (!body.user?.id) {
-    throw new Error(`Sign-up response missing user data: ${JSON.stringify(body)}`);
-  }
-  return {
-    id: body.user.id,
-    email: body.user.email,
-    name: body.user.name,
-    cookie,
-  };
 }
 
 /**

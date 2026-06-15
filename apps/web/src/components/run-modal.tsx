@@ -7,7 +7,7 @@ import { Spinner } from "./spinner";
 import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
 import type { SchemaWrapper, JSONSchemaObject } from "@appstrate/core/form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
-import { uploadClient } from "../api";
+import { uploadClient } from "../api/uploads";
 import { useModels, useAgentModel } from "../hooks/use-models";
 import type { AgentDetail } from "@appstrate/shared-types";
 

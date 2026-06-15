@@ -41,7 +41,7 @@ export const SYSTEM_STORAGE_NAMESPACE = "_system";
  * hold the row pass the hint so a system package costs ONE storage GET
  * instead of always paying a missed org-path GET first.
  */
-export type PackageStorageOwnership = "org" | "system";
+type PackageStorageOwnership = "org" | "system";
 
 /** Download a package item's full files from Storage. Returns normalized file map or null.
  *  With an `ownership` hint, fetches the correct path directly (org-scoped or

@@ -6,9 +6,12 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { stripScope } from "@appstrate/core/naming";
-import { api, apiList, uploadFormData, apiBlob } from "../api";
+import { asJSONSchemaObject } from "@appstrate/core/form";
+import { client, type components } from "../api/client";
+import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
+import { packageKeys, agentsKeys } from "../lib/query-keys";
 import type {
   OrgPackageItem,
   OrgPackageItemDetail,
@@ -18,6 +21,13 @@ import type {
   VersionListItem,
   VersionDetailResponse,
 } from "@appstrate/shared-types";
+
+// NOTE on query keys: these hooks keep their LEGACY React Query keys
+// (["packages", ...], ["agents", ...], ["version-*", ...]) instead of the
+// openapi-react-query [method, path, init] keys. The keys are cache-coupled
+// across files: use-editor-state / use-library / use-models / use-proxies
+// invalidate them after writes, and use-current-application resets them on
+// application switch. Only the fetch layer is migrated to the typed client.
 
 // --- Packages — config-driven factory ---
 
@@ -35,15 +45,112 @@ type PackageDetailMap = {
   integration: OrgPackageItemDetail;
 };
 
+/**
+ * Normalize a spec AgentDetail (most fields optional on the wire) to the
+ * asserted, non-optional shape consumers use. Every dependency group is mapped
+ * explicitly — the spec fully declares the response, so no spread is needed to
+ * carry "undeclared" fields.
+ */
+function normalizeAgentDetail(d: components["schemas"]["AgentDetail"]): AgentDetail {
+  return {
+    ...d,
+    display_name: d.display_name ?? "",
+    description: d.description ?? "",
+    scope: d.scope ?? null,
+    version: d.version ?? null,
+    manifest: d.manifest,
+    updatedAt: d.updatedAt ?? null,
+    lock_version: d.lock_version,
+    running_runs: d.running_runs,
+    forked_from: d.forked_from,
+    dependencies: d.dependencies,
+    config: {
+      ...d.config,
+      schema: asJSONSchemaObject(d.config.schema),
+      current: d.config.current,
+    },
+    input: d.input ? { ...d.input, schema: asJSONSchemaObject(d.input.schema ?? {}) } : undefined,
+    output: d.output
+      ? { ...d.output, schema: asJSONSchemaObject(d.output.schema ?? {}) }
+      : undefined,
+    last_run: d.last_run ?? null,
+  };
+}
+
+/**
+ * Normalize a spec OrgPackageItemDetail to the asserted detail shape.
+ * `scope` / `created_by_name` / `used_by_agents` are not returned by the
+ * detail endpoints (and never were) — defaulted like the legacy blind cast
+ * left them, but with explicit values.
+ */
+function normalizePackageItemDetail(
+  d: components["schemas"]["OrgPackageItemDetail"],
+): OrgPackageItemDetail {
+  return {
+    ...d,
+    name: d.name,
+    description: d.description,
+    scope: null,
+    version: d.version,
+    forked_from: d.forked_from,
+    created_by: d.created_by,
+    created_by_name: null,
+    auto_installed: d.auto_installed,
+    content: d.content,
+    source_code: d.source_code ?? null,
+    manifest: d.manifest,
+    agents: d.agents,
+  };
+}
+
+function fetchPackageDetail<T extends PackageType>(
+  type: T,
+  packageId: string,
+): Promise<PackageDetailMap[T]>;
+async function fetchPackageDetail(
+  type: PackageType,
+  packageId: string,
+): Promise<AgentDetail | OrgPackageItemDetail> {
+  const path = splitPackageRef(packageId);
+  if (type === "agent") {
+    const { data } = await client.GET("/api/packages/agents/{scope}/{name}", {
+      params: { path },
+    });
+    return normalizeAgentDetail(data!);
+  }
+  const { data } = await client.GET(`/api/packages/${PACKAGE_CONFIG[type].path}/{scope}/{name}`, {
+    params: { path },
+  });
+  return normalizePackageItemDetail(data!);
+}
+
 function usePackageList(type: PackageType, opts?: { activeOnly?: boolean }) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   const cfg = PACKAGE_CONFIG[type];
   const activeOnly = opts?.activeOnly ?? false;
   return useQuery({
-    queryKey: ["packages", cfg.path, orgId, applicationId, activeOnly ? "active" : "all"],
-    queryFn: () =>
-      apiList<OrgPackageItem>(`/packages/${cfg.path}${activeOnly ? "?active=true" : ""}`),
+    queryKey: packageKeys.list(cfg.path, orgId, applicationId, activeOnly ? "active" : "all"),
+    queryFn: async (): Promise<OrgPackageItem[]> => {
+      const { data } = await client.GET(`/api/packages/${cfg.path}`, {
+        params: { query: activeOnly ? { active: "true" } : undefined },
+      });
+      // The spec marks most item fields optional — normalize to the
+      // non-optional shape consumers have always used. `scope` is not
+      // returned by the list endpoints.
+      return data!.data.map((item) => ({
+        ...item,
+        name: item.name,
+        description: item.description,
+        scope: null,
+        version: item.version,
+        forked_from: item.forked_from,
+        created_by: item.created_by,
+        created_by_name: item.created_by_name ?? null,
+        used_by_agents: item.used_by_agents,
+        auto_installed: item.auto_installed,
+      }));
+    },
     enabled: !!orgId && !!applicationId,
   });
 }
@@ -58,8 +165,8 @@ function usePackageDetail<T extends PackageType>(
   const cfg = PACKAGE_CONFIG[type];
 
   return useQuery({
-    queryKey: ["packages", cfg.path, orgId, applicationId, id],
-    queryFn: () => api<PackageDetailMap[T]>(`/packages/${cfg.path}/${id}`),
+    queryKey: packageKeys.detail(cfg.path, orgId, applicationId, id!),
+    queryFn: () => fetchPackageDetail(type, id!),
     enabled: !!orgId && !!applicationId && !!id && (opts?.enabled ?? true),
   });
 }
@@ -68,15 +175,25 @@ function useUploadPackage(type: PackageType) {
   const qc = useQueryClient();
   const cfg = PACKAGE_CONFIG[type];
   return useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: async (file: File): Promise<{ id: string; version: string | null }> => {
       const fd = new FormData();
       fd.append("file", file);
-      // 201 → the created package resource, bare (issue #657). `version` is
-      // the manifest version of the created draft.
-      return uploadFormData<{ id: string; version: string | null }>(`/packages/${cfg.path}`, fd);
+      // Single-package ZIP import goes through the canonical multipart import
+      // endpoint, which type-detects the package from the archive. The per-type
+      // create endpoints are JSON-only (except mcp-server), so POSTing a ZIP to
+      // `/api/packages/{type}` fails server-side — `/import` is the correct
+      // route for every type. Concrete path → the multipart `file` body is
+      // typed (Blob), so no cast is needed.
+      const { data } = await client.POST("/api/packages/import", {
+        body: { file },
+        bodySerializer: () => fd,
+      });
+      // 201 → { packageId, type, version? }. `version` is the manifest version
+      // of the imported draft (omitted when the manifest carries none).
+      return { id: data!.packageId, version: data!.version ?? null };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
+      qc.invalidateQueries({ queryKey: packageKeys.family(cfg.path) });
     },
   });
 }
@@ -87,10 +204,12 @@ function useDeletePackage(type: PackageType) {
   const cfg = PACKAGE_CONFIG[type];
   return useMutation({
     mutationFn: async (id: string) => {
-      await api(`/packages/${cfg.path}/${id}`, { method: "DELETE" });
+      await client.DELETE(`/api/packages/${cfg.path}/{scope}/{name}`, {
+        params: { path: splitPackageRef(id) },
+      });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
+      qc.invalidateQueries({ queryKey: packageKeys.family(cfg.path) });
       navigate("/");
     },
   });
@@ -112,8 +231,25 @@ export function useAgents() {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agents", orgId, applicationId],
-    queryFn: () => apiList<AgentListItem>("/agents"),
+    queryKey: agentsKeys.list(orgId, applicationId),
+    queryFn: async (): Promise<AgentListItem[]> => {
+      const { data } = await client.GET("/api/agents");
+      // The spec marks most item fields optional — normalize to the asserted
+      // list shape. `forked_from` is not returned by the list endpoint.
+      return data!.data.map((a) => ({
+        ...a,
+        display_name: a.display_name ?? "",
+        description: a.description ?? "",
+        schema_version: a.schema_version ?? "",
+        author: a.author ?? "",
+        keywords: a.keywords ?? [],
+        scope: a.scope ?? null,
+        version: a.version ?? null,
+        forked_from: null,
+        running_runs: a.running_runs ?? 0,
+        dependencies: a.dependencies ?? {},
+      }));
+    },
     enabled: !!orgId && !!applicationId,
   });
 }
@@ -126,8 +262,11 @@ export function usePackageDownload(scope: string | undefined, name: string | und
     async (version: string) => {
       if (!scope || !name) return;
       try {
-        const blob = await apiBlob(`/packages/${scope}/${name}/${version}/download`);
-        const url = URL.createObjectURL(blob);
+        const { data } = await client.GET("/api/packages/{scope}/{name}/{version}/download", {
+          params: { path: { scope, name, version } },
+          parseAs: "blob",
+        });
+        const url = URL.createObjectURL(data!);
         const a = document.createElement("a");
         a.href = url;
         a.download = `${stripScope(scope)}-${name}-${version}.afps`;
@@ -156,11 +295,11 @@ export function useAgentBundleExport(scope: string | undefined, name: string | u
     async (version?: string) => {
       if (!scope || !name) return;
       try {
-        const path =
-          `/agents/${scope}/${name}/bundle` +
-          (version ? `?version=${encodeURIComponent(version)}` : "");
-        const blob = await apiBlob(path);
-        const url = URL.createObjectURL(blob);
+        const { data } = await client.GET("/api/agents/{scope}/{name}/bundle", {
+          params: { path: { scope, name }, query: { version } },
+          parseAs: "blob",
+        });
+        const url = URL.createObjectURL(data!);
         const a = document.createElement("a");
         a.href = url;
         a.download = `${stripScope(scope)}-${name}.afps-bundle`;
@@ -180,10 +319,6 @@ export function useAgentBundleExport(scope: string | undefined, name: string | u
 
 export type { VersionDetailResponse, VersionListItem };
 
-function packageBasePath(type: PackageType, packageId: string | undefined) {
-  return `/packages/${PACKAGE_CONFIG[type].path}/${packageId}`;
-}
-
 export function useVersionDetail(
   type: PackageType,
   packageId: string | undefined,
@@ -193,8 +328,13 @@ export function useVersionDetail(
   const applicationId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["version-detail", orgId, applicationId, type, packageId, version],
-    queryFn: () =>
-      api<VersionDetailResponse>(`${packageBasePath(type, packageId)}/versions/${version}`),
+    queryFn: async (): Promise<VersionDetailResponse> => {
+      const { data } = await client.GET(
+        `/api/packages/${PACKAGE_CONFIG[type].path}/{scope}/{name}/versions/{version}`,
+        { params: { path: { ...splitPackageRef(packageId!), version: version! } } },
+      );
+      return data!;
+    },
     enabled: !!orgId && !!applicationId && !!packageId && !!version,
   });
 }
@@ -204,11 +344,12 @@ export function usePackageVersions(type: PackageType, packageId: string | undefi
   const applicationId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["package-versions", orgId, applicationId, type, packageId],
-    queryFn: async () => {
-      const data = await api<{ versions: VersionListItem[] }>(
-        `${packageBasePath(type, packageId)}/versions`,
+    queryFn: async (): Promise<VersionListItem[]> => {
+      const { data } = await client.GET(
+        `/api/packages/${PACKAGE_CONFIG[type].path}/{scope}/{name}/versions`,
+        { params: { path: splitPackageRef(packageId!) } },
       );
-      return data.versions;
+      return data!.versions;
     },
     enabled: !!orgId && !!applicationId && !!packageId,
   });
@@ -218,53 +359,68 @@ export function usePackageVersions(type: PackageType, packageId: string | undefi
 
 export function useCreateVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
+  const cfg = PACKAGE_CONFIG[type];
   return useMutation({
-    mutationFn: async (version?: string) => {
+    mutationFn: async (version?: string): Promise<{ id: number; version: string }> => {
       // 201 → the created version resource, bare (issue #657).
-      return api<{ id: number; version: string }>(`${packageBasePath(type, packageId)}/versions`, {
-        method: "POST",
-        body: version ? JSON.stringify({ version }) : undefined,
+      const { data } = await client.POST(`/api/packages/${cfg.path}/{scope}/{name}/versions`, {
+        params: { path: splitPackageRef(packageId) },
+        body: version ? { version } : undefined,
       });
+      return { id: data!.id, version: data!.version };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["package-versions"] });
       qc.invalidateQueries({ queryKey: ["version-detail"] });
       qc.invalidateQueries({ queryKey: ["version-info"] });
-      qc.invalidateQueries({ queryKey: ["agents"] });
-      qc.invalidateQueries({ queryKey: ["packages"] });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
     },
   });
 }
 
 export function useDeleteVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
+  const cfg = PACKAGE_CONFIG[type];
   return useMutation({
-    mutationFn: async (version: string) =>
-      api<void>(`${packageBasePath(type, packageId)}/versions/${version}`, { method: "DELETE" }),
+    mutationFn: async (version: string) => {
+      await client.DELETE(`/api/packages/${cfg.path}/{scope}/{name}/versions/{version}`, {
+        params: { path: { ...splitPackageRef(packageId), version } },
+      });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["package-versions"] });
       qc.invalidateQueries({ queryKey: ["version-detail"] });
       qc.invalidateQueries({ queryKey: ["version-info"] });
-      qc.invalidateQueries({ queryKey: ["agents"] });
-      qc.invalidateQueries({ queryKey: ["packages"] });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
     },
   });
 }
 
 export function useRestoreVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
+  const cfg = PACKAGE_CONFIG[type];
   return useMutation({
-    mutationFn: async (version: string) =>
+    mutationFn: async (
+      version: string,
+    ): Promise<{ id: string; version: string | null; lock_version: number }> => {
       // 200 → the updated PACKAGE resource, bare (issue #657): the restore is
       // reflected in `version`/`manifest`/`content` and the resource carries
       // the package's NEW `lock_version`.
-      api<{ id: string; version: string | null; lock_version: number }>(
-        `${packageBasePath(type, packageId)}/versions/${version}/restore`,
-        { method: "POST" },
-      ),
+      const { data } = await client.POST(
+        `/api/packages/${cfg.path}/{scope}/{name}/versions/{version}/restore`,
+        { params: { path: { ...splitPackageRef(packageId), version } } },
+      );
+      return {
+        id: data!.id,
+        version: data!.version ?? null,
+        lock_version: data!.lock_version ?? 0,
+      };
+    },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agents"] });
-      qc.invalidateQueries({ queryKey: ["packages"] });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
     },
   });
 }
@@ -274,10 +430,19 @@ export function useVersionInfo(type: PackageType, packageId: string | undefined)
   const applicationId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["version-info", orgId, applicationId, type, packageId],
-    queryFn: () =>
-      api<{ latest_published_version: string | null; active_version: string | null }>(
-        `${packageBasePath(type, packageId!)}/versions/info`,
-      ),
+    queryFn: async (): Promise<{
+      latest_published_version: string | null;
+      active_version: string | null;
+    }> => {
+      const { data } = await client.GET(
+        `/api/packages/${PACKAGE_CONFIG[type].path}/{scope}/{name}/versions/info`,
+        { params: { path: splitPackageRef(packageId!) } },
+      );
+      return {
+        latest_published_version: data!.latest_published_version ?? null,
+        active_version: data!.active_version ?? null,
+      };
+    },
     enabled: !!orgId && !!applicationId && !!packageId,
   });
 }
@@ -290,15 +455,15 @@ export function useForkPackage() {
     mutationFn: async ({ packageId, name }: { packageId: string; name?: string }) => {
       // 201 → the forked package resource, bare (issue #657): `id` is the new
       // package ID under org scope, `forked_from` the source package ID.
-      return api<{ id: string; forked_from: string | null }>(`/packages/${packageId}/fork`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(name ? { name } : {}),
+      const { data } = await client.POST("/api/packages/{scope}/{name}/fork", {
+        params: { path: splitPackageRef(packageId) },
+        body: name ? { name } : {},
       });
+      return { id: data!.id, forked_from: data!.forked_from ?? null };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agents"] });
-      qc.invalidateQueries({ queryKey: ["packages"] });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
+      qc.invalidateQueries({ queryKey: packageKeys.all });
     },
   });
 }

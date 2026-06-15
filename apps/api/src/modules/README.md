@@ -273,6 +273,6 @@ Because discovery is filesystem-based, adding a new endpoint only requires touch
 
 ## Disabling a module
 
-`MODULES` is comma-separated. Remove the module id (or package specifier) and the platform boots without importing a single byte of its code. The module's tables remain in the database (data is preserved), but no queries, routes, hooks, events, permissions, or feature flags are wired up. To drop the tables as well, write a separate migration or run a manual `DROP TABLE`.
+`MODULES` is comma-separated. Remove the module id (or package specifier) and the platform boots without importing a single byte of its code. `MODULES=none` boots with zero modules (the empty string resolves to the default set — the env getter coalesces empty to unset, per the compose `${VAR:-}` pattern). The module's tables remain in the database (data is preserved), but no queries, routes, hooks, events, permissions, or feature flags are wired up. To drop the tables as well, write a separate migration or run a manual `DROP TABLE`.
 
 This is the "zero footprint" guarantee: the only coupling between core and a module is through the `AppstrateModule` contract. If core ever needs to special-case a specific module id, that is a design failure — use hooks, events, or feature flags instead.

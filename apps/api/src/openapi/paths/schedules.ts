@@ -21,8 +21,16 @@ export const schedulesPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "array",
-                items: { $ref: "#/components/schemas/Schedule" },
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/Schedule" },
+                  },
+                  hasMore: { type: "boolean" },
+                },
               },
             },
           },
@@ -53,8 +61,16 @@ export const schedulesPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "array",
-                items: { $ref: "#/components/schemas/Schedule" },
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/Schedule" },
+                  },
+                  hasMore: { type: "boolean" },
+                },
               },
             },
           },
@@ -142,6 +158,11 @@ export const schedulesPaths = {
                 cron_expression: "0 9 * * 1-5",
                 timezone: "Europe/Paris",
                 input: { folder: "inbox", maxEmails: 50 },
+                config_override: null,
+                model_id_override: null,
+                proxy_id_override: null,
+                version_override: null,
+                connection_overrides: null,
                 last_run_at: null,
                 next_run_at: "2026-01-16T09:00:00Z",
                 createdAt: "2026-01-15T10:30:00Z",
@@ -200,6 +221,11 @@ export const schedulesPaths = {
                 cron_expression: "0 9 * * 1-5",
                 timezone: "Europe/Paris",
                 input: { folder: "inbox", maxEmails: 50 },
+                config_override: null,
+                model_id_override: null,
+                proxy_id_override: null,
+                version_override: "1.2.0",
+                connection_overrides: null,
                 last_run_at: "2026-01-15T09:00:00Z",
                 next_run_at: "2026-01-16T09:00:00Z",
                 createdAt: "2026-01-14T14:00:00Z",

@@ -37,6 +37,7 @@ export const endUsersPaths = {
                 },
                 metadata: {
                   type: "object",
+                  additionalProperties: { type: ["string", "number", "boolean", "null"] },
                   description:
                     "Key-value metadata. Max 50 keys, key length 1\u201340 chars, values: string (max 500), number, boolean, or null.",
                 },
@@ -176,6 +177,7 @@ export const endUsersPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: {
@@ -293,6 +295,7 @@ export const endUsersPaths = {
                 },
                 metadata: {
                   type: "object",
+                  additionalProperties: { type: ["string", "number", "boolean", "null"] },
                   description:
                     "Key-value metadata. Max 50 keys, key length 1\u201340 chars, values: string (max 500), number, boolean, or null.",
                 },

@@ -28,6 +28,7 @@ import {
   type OAuthClient,
 } from "../hooks/use-oauth-clients";
 import { OAuthClientFormModal } from "./oauth-client-form-modal";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 interface OAuthClientsTabProps {
   level?: "org" | "application";
@@ -50,7 +51,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   };
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
   if (!data) return <ErrorState />;
 
   return (
@@ -105,7 +106,10 @@ function OAuthClientRow({ client, onEdit }: { client: OAuthClient; onEdit: () =>
 
   function handleToggleDisabled() {
     updateMutation.mutate(
-      { clientId: client.clientId, data: { disabled: !client.disabled } },
+      {
+        params: { path: { clientId: client.clientId } },
+        body: { disabled: !client.disabled },
+      },
       {
         onSuccess: () => {
           toast.success(
@@ -119,21 +123,27 @@ function OAuthClientRow({ client, onEdit }: { client: OAuthClient; onEdit: () =>
   }
 
   function handleRotate() {
-    rotateMutation.mutate(client.clientId, {
-      onSuccess: (result) => {
-        setRotateConfirmOpen(false);
-        setRotatedSecret(result.clientSecret);
+    rotateMutation.mutate(
+      { params: { path: { clientId: client.clientId } } },
+      {
+        onSuccess: (result) => {
+          setRotateConfirmOpen(false);
+          setRotatedSecret(result.clientSecret);
+        },
       },
-    });
+    );
   }
 
   function handleDelete() {
-    deleteMutation.mutate(client.clientId, {
-      onSuccess: () => {
-        setDeleteConfirmOpen(false);
-        toast.success(t("settings:oauthClients.deleted"));
+    deleteMutation.mutate(
+      { params: { path: { clientId: client.clientId } } },
+      {
+        onSuccess: () => {
+          setDeleteConfirmOpen(false);
+          toast.success(t("settings:oauthClients.deleted"));
+        },
       },
-    });
+    );
   }
 
   return (
@@ -166,7 +176,10 @@ function OAuthClientRow({ client, onEdit }: { client: OAuthClient; onEdit: () =>
               variant={client.isFirstParty ? "default" : "outline"}
               onClick={() =>
                 updateMutation.mutate(
-                  { clientId: client.clientId, data: { isFirstParty: !client.isFirstParty } },
+                  {
+                    params: { path: { clientId: client.clientId } },
+                    body: { isFirstParty: !client.isFirstParty },
+                  },
                   {
                     onSuccess: () => {
                       toast.success(

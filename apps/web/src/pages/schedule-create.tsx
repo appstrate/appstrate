@@ -40,7 +40,7 @@ export function ScheduleCreatePage() {
       <ScheduleForm
         key={effectiveAgentId}
         mode="create"
-        agents={agents?.map((f) => ({ id: f.id, displayName: f.display_name })) ?? []}
+        agents={agents?.map((f) => ({ id: f.id, displayName: f.display_name ?? f.id })) ?? []}
         selectedAgentId={effectiveAgentId}
         onAgentChange={setSelectedAgentId}
         inputSchema={deps?.inputSchema}

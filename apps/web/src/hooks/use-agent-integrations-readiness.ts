@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQueries } from "@tanstack/react-query";
-import type { AgentIntegrationEntry, IntegrationAgentResolution } from "@appstrate/shared-types";
-import { api } from "../api";
+import type { AgentIntegrationEntry } from "@appstrate/shared-types";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-import { agentResolutionQueryKey } from "./use-integrations";
+import { agentResolutionQueryOptions } from "./use-integrations";
 import {
   isIntegrationEntryActive,
   resolutionBlocksRun,
@@ -27,9 +26,9 @@ export interface AgentIntegrationsReadiness {
  * Calls the per-integration agent-resolution endpoint (server-authoritative,
  * the same resolver cascade the run-kickoff 412 runs) for every ACTIVE
  * integration the agent declares, then aggregates with {@link resolutionBlocksRun}.
- * The query key matches `useIntegrationAgentResolution`, so when the Connexions
- * tab is open the cache is shared — no duplicate fetches, and the badge can
- * never disagree with the tab.
+ * The query options come from the same builder as `useIntegrationAgentResolution`,
+ * so when the Connexions tab is open the cache is shared — no duplicate
+ * fetches, and the badge can never disagree with the tab.
  *
  * Inert integrations (the agent selected no tool/scope) are skipped: the
  * runtime never spawns them, so they never gate Run.
@@ -43,16 +42,11 @@ export function useAgentIntegrationsReadiness(
   const active = (entries ?? []).filter(isIntegrationEntryActive);
 
   const results = useQueries({
-    queries: active.map((entry) => ({
-      // Shared key builder → same cache entry as `useIntegrationAgentResolution`,
-      // so the badge and the Connexions tab never fetch the verdict twice.
-      queryKey: agentResolutionQueryKey(orgId, applicationId, entry.id, agentPackageId),
-      enabled: Boolean(orgId && applicationId && agentPackageId),
-      queryFn: () =>
-        api<IntegrationAgentResolution>(
-          `/integrations/${encodeURI(entry.id)}/agent-resolution/${encodeURI(agentPackageId!)}`,
-        ),
-    })),
+    // Shared options builder → same cache entry as `useIntegrationAgentResolution`,
+    // so the badge and the Connexions tab never fetch the verdict twice.
+    queries: active.map((entry) =>
+      agentResolutionQueryOptions(orgId, applicationId, entry.id, agentPackageId),
+    ),
   });
 
   const loading = results.some((r) => r.isLoading);

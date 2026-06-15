@@ -18,6 +18,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, mock 
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
+import { eventData } from "../../helpers/sse.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import {
   addSubscriber,
@@ -166,7 +167,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     expect(send).toHaveBeenCalled();
     const evt = send.mock.calls[0]![0]!;
     expect(evt.event).toBe("connection_update");
-    expect(evt.data).toMatchObject({
+    expect(eventData(evt, "connection_update")).toMatchObject({
       applicationId: ctx.defaultAppId,
       userId: ctx.user.id,
       integrationPackageId: INTEG,
@@ -262,21 +263,31 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     });
 
     const id = await insertConnection({ userId: ctx.user.id, applicationId: ctx.defaultAppId });
-    await waitFor(() => send.mock.calls.some((c) => c[0]!.data.operation === "INSERT"));
+    await waitFor(() =>
+      send.mock.calls.some((c) => eventData(c[0]!, "connection_update").operation === "INSERT"),
+    );
     await db.execute(
       sql`UPDATE integration_connections SET needs_reconnection = true WHERE id = ${id}`,
     );
-    await waitFor(() => send.mock.calls.some((c) => c[0]!.data.operation === "UPDATE"));
+    await waitFor(() =>
+      send.mock.calls.some((c) => eventData(c[0]!, "connection_update").operation === "UPDATE"),
+    );
     await db.execute(sql`DELETE FROM integration_connections WHERE id = ${id}`);
-    await waitFor(() => send.mock.calls.some((c) => c[0]!.data.operation === "DELETE"));
+    await waitFor(() =>
+      send.mock.calls.some((c) => eventData(c[0]!, "connection_update").operation === "DELETE"),
+    );
 
-    const ops = send.mock.calls.map((c) => c[0]!.data.operation);
+    const ops = send.mock.calls.map((c) => eventData(c[0]!, "connection_update").operation);
     expect(ops).toContain("INSERT");
     expect(ops).toContain("UPDATE");
     expect(ops).toContain("DELETE");
-    const update = send.mock.calls.find((c) => c[0]!.data.operation === "UPDATE")![0]!;
-    expect(update.data.needsReconnection).toBe(true);
-    const del = send.mock.calls.find((c) => c[0]!.data.operation === "DELETE")![0]!;
-    expect(del.data.deleted).toBe(true);
+    const update = send.mock.calls.find(
+      (c) => eventData(c[0]!, "connection_update").operation === "UPDATE",
+    )![0]!;
+    expect(eventData(update, "connection_update").needsReconnection).toBe(true);
+    const del = send.mock.calls.find(
+      (c) => eventData(c[0]!, "connection_update").operation === "DELETE",
+    )![0]!;
+    expect(eventData(del, "connection_update").deleted).toBe(true);
   });
 });

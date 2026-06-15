@@ -174,6 +174,9 @@ export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
     resource: config.issuer,
   });
 
+  // Untyped on purpose: end-user-realm OAuth token exchange — the typed
+  // client's middleware would inject platform X-Org-Id/X-Application-Id
+  // headers into the grant, which is wrong in this realm.
   const res = await fetch("/api/auth/oauth2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },

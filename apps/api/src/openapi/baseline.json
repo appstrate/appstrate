@@ -900,6 +900,16 @@
                       "type": "array",
                       "items": {
                         "type": "object",
+                        "required": [
+                          "id",
+                          "key",
+                          "content",
+                          "runId",
+                          "actor_type",
+                          "actor_id",
+                          "createdAt",
+                          "updatedAt"
+                        ],
                         "properties": {
                           "id": {
                             "type": "integer"
@@ -933,11 +943,21 @@
                       "type": "array",
                       "items": {
                         "type": "object",
+                        "required": [
+                          "id",
+                          "content",
+                          "runId",
+                          "actor_type",
+                          "actor_id",
+                          "createdAt"
+                        ],
                         "properties": {
                           "id": {
                             "type": "integer"
                           },
-                          "content": {},
+                          "content": {
+                            "type": "string"
+                          },
                           "runId": {
                             "type": ["string", "null"]
                           },
@@ -1580,18 +1600,53 @@
                   "id": "run_cm1abc123def456",
                   "packageId": "@acme/email-sorter",
                   "userId": "usr_k7x9m2p4q1",
+                  "endUserId": null,
+                  "apiKeyId": null,
                   "orgId": "org_r3t5w8y1z6",
                   "applicationId": "app_m4n5o6p7",
+                  "scheduleId": null,
                   "status": "pending",
                   "input": {
                     "message": "Summarize my latest emails"
                   },
+                  "result": null,
+                  "checkpoint": {},
+                  "error": null,
+                  "metadata": null,
+                  "config": {
+                    "dryRun": true
+                  },
+                  "config_override": {
+                    "dryRun": true
+                  },
+                  "started_at": "2026-01-15T10:30:00Z",
+                  "completed_at": null,
+                  "duration": null,
+                  "cost": null,
+                  "notifiedAt": null,
+                  "readAt": null,
+                  "runNumber": 17,
+                  "token_usage": null,
                   "version_label": "1.2.0",
                   "version_dirty": false,
                   "version_ref": "1.2.0",
+                  "proxy_label": null,
                   "model_label": "Claude Sonnet 4",
                   "model_source": "org",
-                  "started_at": "2026-01-15T10:30:00Z"
+                  "runner_name": null,
+                  "runner_kind": null,
+                  "agent_scope": "@acme",
+                  "agent_name": "email-sorter",
+                  "runOrigin": "platform",
+                  "contextSnapshot": null,
+                  "modelCredentialId": "mpc_8h2k4m6n",
+                  "connection_overrides": null,
+                  "user_name": null,
+                  "end_user_name": null,
+                  "api_key_name": null,
+                  "schedule_name": null,
+                  "connections_used": null,
+                  "package_ephemeral": false
                 }
               }
             }
@@ -1929,17 +1984,59 @@
                   "id": "run_cm1abc123",
                   "packageId": "@inline/r-abc12345-6789-4cde-8f01-23456789abcd",
                   "userId": "usr_k7x9m2p4q1",
+                  "endUserId": null,
+                  "apiKeyId": null,
                   "orgId": "org_r3t5w8y1z6",
                   "applicationId": "app_m4n5o6p7",
+                  "scheduleId": null,
                   "status": "pending",
                   "input": {
                     "docId": "doc_123"
                   },
+                  "result": null,
+                  "checkpoint": {},
+                  "error": null,
+                  "metadata": null,
+                  "config": null,
+                  "config_override": null,
+                  "started_at": "2026-01-15T10:30:00Z",
+                  "completed_at": null,
+                  "duration": null,
+                  "cost": null,
+                  "notifiedAt": null,
+                  "readAt": null,
+                  "runNumber": 1,
+                  "token_usage": null,
+                  "version_label": null,
                   "version_dirty": true,
                   "version_ref": "draft",
+                  "proxy_label": null,
                   "model_label": "Claude Sonnet 4",
                   "model_source": "org",
-                  "started_at": "2026-01-15T10:30:00Z"
+                  "runner_name": null,
+                  "runner_kind": null,
+                  "agent_scope": "@inline",
+                  "agent_name": "one-shot",
+                  "runOrigin": "platform",
+                  "contextSnapshot": null,
+                  "modelCredentialId": "mpc_8h2k4m6n",
+                  "connection_overrides": null,
+                  "user_name": null,
+                  "end_user_name": null,
+                  "api_key_name": null,
+                  "schedule_name": null,
+                  "connections_used": null,
+                  "package_ephemeral": true,
+                  "inline_manifest": {
+                    "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
+                    "name": "@inline/one-shot",
+                    "display_name": "One-shot summary",
+                    "version": "0.0.0",
+                    "type": "agent",
+                    "schema_version": "0.1",
+                    "dependencies": {}
+                  },
+                  "inline_prompt": "Summarize the attached document in three bullet points."
                 }
               }
             }
@@ -2161,7 +2258,7 @@
             }
           },
           {
-            "name": "startDate",
+            "name": "start_date",
             "in": "query",
             "schema": {
               "type": "string",
@@ -2169,7 +2266,7 @@
             }
           },
           {
-            "name": "endDate",
+            "name": "end_date",
             "in": "query",
             "schema": {
               "type": "string",
@@ -2295,7 +2392,11 @@
                   "id": "run_cm1abc123def456",
                   "packageId": "@acme/email-sorter",
                   "userId": "usr_k7x9m2p4q1",
+                  "endUserId": null,
+                  "apiKeyId": null,
                   "orgId": "org_r3t5w8y1z6",
+                  "applicationId": "app_m4n5o6p7",
+                  "scheduleId": "sched_cm1abc456def789",
                   "status": "success",
                   "input": {
                     "folder": "inbox",
@@ -2311,26 +2412,45 @@
                   "checkpoint": {
                     "lastProcessedId": "msg_99f2a"
                   },
+                  "error": null,
+                  "metadata": null,
+                  "config": {
+                    "folder": "inbox"
+                  },
+                  "config_override": null,
+                  "started_at": "2026-01-15T10:30:00Z",
+                  "completed_at": "2026-01-15T10:31:12Z",
+                  "duration": 72000,
+                  "cost": 0.0034,
+                  "notifiedAt": "2026-01-15T10:31:12Z",
+                  "readAt": null,
+                  "runNumber": 17,
                   "token_usage": {
                     "input_tokens": 8200,
                     "output_tokens": 4250,
                     "cache_creation_input_tokens": 0,
                     "cache_read_input_tokens": 1024
                   },
-                  "started_at": "2026-01-15T10:30:00Z",
-                  "completed_at": "2026-01-15T10:31:12Z",
-                  "duration": 72000,
-                  "scheduleId": "sched_cm1abc456def789",
                   "version_label": "1.2.0",
                   "version_dirty": false,
                   "version_ref": "1.2.0",
                   "proxy_label": null,
                   "model_label": "Claude Sonnet 4",
                   "model_source": "system",
-                  "cost": 0.0034,
-                  "endUserId": null,
-                  "applicationId": "app_m4n5o6p7",
-                  "metadata": null
+                  "runner_name": null,
+                  "runner_kind": null,
+                  "agent_scope": "@acme",
+                  "agent_name": "email-sorter",
+                  "runOrigin": "platform",
+                  "contextSnapshot": null,
+                  "modelCredentialId": null,
+                  "connection_overrides": null,
+                  "user_name": "Pierre",
+                  "end_user_name": null,
+                  "api_key_name": null,
+                  "schedule_name": "Weekday morning sort",
+                  "connections_used": null,
+                  "package_ephemeral": false
                 }
               }
             }
@@ -2367,7 +2487,7 @@
         "operationId": "getRunLogs",
         "tags": ["Runs"],
         "summary": "Get run logs",
-        "description": "Get persisted log entries for a run, wrapped in the standard list envelope `{ object: \"list\", data, hasMore }`. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI's polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). When `limit` is set and more entries follow, `hasMore` is `true` and an RFC 5988 `Link: <…?since=<lastId>>; rel=\"next\"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the unfiltered default rather than 400 so a stale cursor never breaks a polling tail. Without query parameters the full chronological history is returned. Rate-limited to 120/min per identity. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.",
+        "description": "Get persisted log entries for a run, wrapped in the standard list envelope `{ object: \"list\", data, hasMore }`. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI's polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). `limit` defaults to 1000 when omitted — the response is never unbounded; when more entries follow, `hasMore` is `true` and an RFC 5988 `Link: <…?since=<lastId>>; rel=\"next\"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the default rather than 400 so a stale cursor never breaks a polling tail. Rate-limited to 120/min per identity. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2411,9 +2531,10 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 1000
+              "maximum": 1000,
+              "default": 1000
             },
-            "description": "Maximum number of entries to return. When more entries follow, the response carries a `Link; rel=\"next\"` header whose URL re-uses `since` as the cursor. Absent means no cap (full history)."
+            "description": "Maximum number of entries to return. Defaults to 1000 when omitted. When more entries follow, the response carries a `Link; rel=\"next\"` header whose URL re-uses `since` as the cursor — page with it to read longer histories."
           }
         ],
         "responses": {
@@ -2454,7 +2575,7 @@
                     },
                     "hasMore": {
                       "type": "boolean",
-                      "description": "True when `?limit=` was set and more entries follow — the `Link; rel=\"next\"` header carries the next page's URL."
+                      "description": "True when more entries follow the current page (the server caps each page at `limit`, default 1000) — the `Link; rel=\"next\"` header carries the next page's URL."
                     }
                   }
                 }
@@ -2515,19 +2636,50 @@
                   "id": "run_cm1abc123def456",
                   "packageId": "@acme/email-sorter",
                   "userId": "usr_k7x9m2p4q1",
+                  "endUserId": null,
+                  "apiKeyId": null,
                   "orgId": "org_r3t5w8y1z6",
                   "applicationId": "app_m4n5o6p7",
+                  "scheduleId": null,
                   "status": "cancelled",
+                  "input": {
+                    "folder": "inbox",
+                    "maxEmails": 50
+                  },
+                  "result": null,
+                  "checkpoint": {},
                   "error": "Cancelled by user",
+                  "metadata": null,
+                  "config": null,
+                  "config_override": null,
+                  "started_at": "2026-01-15T10:30:00Z",
+                  "completed_at": "2026-01-15T10:30:45Z",
+                  "duration": 45000,
+                  "cost": 0.0012,
+                  "notifiedAt": null,
+                  "readAt": null,
+                  "runNumber": 18,
+                  "token_usage": null,
                   "version_label": "1.2.0",
                   "version_dirty": false,
                   "version_ref": "1.2.0",
+                  "proxy_label": null,
                   "model_label": "Claude Sonnet 4",
                   "model_source": "org",
-                  "cost": 0.0012,
-                  "started_at": "2026-01-15T10:30:00Z",
-                  "completed_at": "2026-01-15T10:30:45Z",
-                  "duration": 45000
+                  "runner_name": null,
+                  "runner_kind": null,
+                  "agent_scope": "@acme",
+                  "agent_name": "email-sorter",
+                  "runOrigin": "platform",
+                  "contextSnapshot": null,
+                  "modelCredentialId": null,
+                  "connection_overrides": null,
+                  "user_name": "Pierre",
+                  "end_user_name": null,
+                  "api_key_name": null,
+                  "schedule_name": null,
+                  "connections_used": null,
+                  "package_ephemeral": false
                 }
               }
             }
@@ -3606,9 +3758,22 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Schedule"
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Schedule"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
                   }
                 }
               }
@@ -3654,9 +3819,22 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Schedule"
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Schedule"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
                   }
                 }
               }
@@ -3768,6 +3946,11 @@
                     "folder": "inbox",
                     "maxEmails": 50
                   },
+                  "config_override": null,
+                  "model_id_override": null,
+                  "proxy_id_override": null,
+                  "version_override": null,
+                  "connection_overrides": null,
                   "last_run_at": null,
                   "next_run_at": "2026-01-16T09:00:00Z",
                   "createdAt": "2026-01-15T10:30:00Z",
@@ -3853,6 +4036,11 @@
                     "folder": "inbox",
                     "maxEmails": 50
                   },
+                  "config_override": null,
+                  "model_id_override": null,
+                  "proxy_id_override": null,
+                  "version_override": "1.2.0",
+                  "connection_overrides": null,
                   "last_run_at": "2026-01-15T09:00:00Z",
                   "next_run_at": "2026-01-16T09:00:00Z",
                   "createdAt": "2026-01-14T14:00:00Z",
@@ -5491,6 +5679,8 @@
                     "resolved_owned_by_actor",
                     "admin_pinned_connection_id",
                     "member_pinned_connection_id",
+                    "org_default_connection_id",
+                    "org_default_enforced",
                     "can_add_connection",
                     "candidates"
                   ],
@@ -7536,6 +7726,7 @@
                       "baseUrl": "https://api.openai.com",
                       "source": "custom",
                       "authMode": "api_key",
+                      "created_by": "usr_cm3abc123",
                       "createdAt": "2026-01-10T08:00:00Z",
                       "updatedAt": "2026-01-10T08:00:00Z"
                     }
@@ -10130,7 +10321,7 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "agentPackageId",
+            "name": "agent_package_id",
             "in": "query",
             "required": true,
             "schema": {
@@ -10264,7 +10455,7 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "agentPackageId",
+            "name": "agent_package_id",
             "in": "query",
             "required": true,
             "schema": {
@@ -10272,7 +10463,7 @@
             }
           },
           {
-            "name": "integrationPackageId",
+            "name": "integration_package_id",
             "in": "query",
             "required": true,
             "schema": {
@@ -10285,7 +10476,7 @@
             "description": "Pin cleared (or never existed)"
           },
           "400": {
-            "description": "Missing required query param (agentPackageId or integrationPackageId)."
+            "description": "Missing required query param (agent_package_id or integration_package_id)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -10413,6 +10604,14 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": [
+                    "email",
+                    "org_name",
+                    "role",
+                    "inviter_name",
+                    "expiresAt",
+                    "is_new_user"
+                  ],
                   "properties": {
                     "email": {
                       "type": "string"
@@ -10421,7 +10620,8 @@
                       "type": "string"
                     },
                     "role": {
-                      "type": "string"
+                      "type": "string",
+                      "enum": ["owner", "admin", "member", "viewer"]
                     },
                     "inviter_name": {
                       "type": "string"
@@ -11462,7 +11662,13 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["imported", "root_installed", "root_package_id", "root_version"],
+                  "required": [
+                    "imported",
+                    "root_installed",
+                    "root_package_id",
+                    "root_version",
+                    "warnings"
+                  ],
                   "properties": {
                     "imported": {
                       "type": "array",
@@ -11482,6 +11688,10 @@
                           "version_id": {
                             "type": ["integer", "null"],
                             "description": "DB row id for the version; null for system packages."
+                          },
+                          "type": {
+                            "type": "string",
+                            "description": "Package type (agent, skill, mcp-server, integration). Present on `inserted` entries only."
                           }
                         }
                       }
@@ -11495,6 +11705,13 @@
                     },
                     "root_version": {
                       "type": "string"
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Non-blocking install-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate. Empty when nothing is degraded."
                     }
                   }
                 }
@@ -11851,6 +12068,9 @@
           },
           {
             "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageActiveFilter"
           }
         ],
         "responses": {
@@ -11895,6 +12115,10 @@
                       "description": "Summarizes long text into key points",
                       "source": "local",
                       "version": "1.0.0",
+                      "created_by": "usr_cm3abc123",
+                      "used_by_agents": 2,
+                      "auto_installed": false,
+                      "forked_from": null,
                       "createdAt": "2026-01-10T08:00:00Z",
                       "updatedAt": "2026-01-10T08:00:00Z"
                     }
@@ -12073,6 +12297,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["versions"],
                   "properties": {
                     "versions": {
                       "type": "array",
@@ -12274,43 +12499,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "version": {
-                      "type": "string"
-                    },
-                    "manifest": {
-                      "$ref": "#/components/schemas/SkillManifest"
-                    },
-                    "content": {
-                      "type": ["string", "null"]
-                    },
-                    "yanked": {
-                      "type": "boolean"
-                    },
-                    "yanked_reason": {
-                      "type": ["string", "null"]
-                    },
-                    "integrity": {
-                      "type": "string"
-                    },
-                    "artifact_size": {
-                      "type": "integer"
-                    },
-                    "createdAt": {
-                      "type": ["string", "null"],
-                      "format": "date-time"
-                    },
-                    "dist_tags": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/PackageVersionDetail"
                 }
               }
             }
@@ -12443,20 +12632,19 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "required": ["manifest", "content", "lock_version"],
                 "properties": {
-                  "name": {
-                    "type": "string",
-                    "description": "Display name"
-                  },
-                  "description": {
-                    "type": "string"
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Package manifest"
                   },
                   "content": {
                     "type": "string"
                   },
-                  "version": {
-                    "type": "string",
-                    "description": "Semver version (X.Y.Z)"
+                  "lock_version": {
+                    "type": "integer",
+                    "description": "Optimistic lock version"
                   }
                 }
               }
@@ -12559,6 +12747,9 @@
           },
           {
             "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageActiveFilter"
           }
         ],
         "responses": {
@@ -12937,6 +13128,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["versions"],
                   "properties": {
                     "versions": {
                       "type": "array",
@@ -13146,43 +13338,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "version": {
-                      "type": "string"
-                    },
-                    "manifest": {
-                      "$ref": "#/components/schemas/AgentManifest"
-                    },
-                    "content": {
-                      "type": ["string", "null"]
-                    },
-                    "yanked": {
-                      "type": "boolean"
-                    },
-                    "yanked_reason": {
-                      "type": ["string", "null"]
-                    },
-                    "integrity": {
-                      "type": "string"
-                    },
-                    "artifact_size": {
-                      "type": "integer"
-                    },
-                    "createdAt": {
-                      "type": ["string", "null"],
-                      "format": "date-time"
-                    },
-                    "dist_tags": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/PackageVersionDetail"
                 }
               }
             }
@@ -13417,20 +13573,19 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "required": ["manifest", "content", "lock_version"],
                 "properties": {
-                  "name": {
-                    "type": "string",
-                    "description": "Display name"
-                  },
-                  "description": {
-                    "type": "string"
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Package manifest"
                   },
                   "content": {
                     "type": "string"
                   },
-                  "version": {
-                    "type": "string",
-                    "description": "Semver version (X.Y.Z)"
+                  "lock_version": {
+                    "type": "integer",
+                    "description": "Optimistic lock version"
                   }
                 }
               }
@@ -13725,6 +13880,9 @@
           },
           {
             "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageActiveFilter"
           }
         ],
         "responses": {
@@ -13932,6 +14090,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["versions"],
                   "properties": {
                     "versions": {
                       "type": "array",
@@ -14133,45 +14292,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "version": {
-                      "type": "string"
-                    },
-                    "manifest": {
-                      "type": "object",
-                      "additionalProperties": true,
-                      "description": "Full manifest object"
-                    },
-                    "content": {
-                      "type": ["string", "null"]
-                    },
-                    "yanked": {
-                      "type": "boolean"
-                    },
-                    "yanked_reason": {
-                      "type": ["string", "null"]
-                    },
-                    "integrity": {
-                      "type": "string"
-                    },
-                    "artifact_size": {
-                      "type": "integer"
-                    },
-                    "createdAt": {
-                      "type": ["string", "null"],
-                      "format": "date-time"
-                    },
-                    "dist_tags": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/PackageVersionDetail"
                 }
               }
             }
@@ -14603,6 +14724,9 @@
           },
           {
             "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageActiveFilter"
           }
         ],
         "responses": {
@@ -14836,6 +14960,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["versions"],
                   "properties": {
                     "versions": {
                       "type": "array",
@@ -15037,45 +15162,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "version": {
-                      "type": "string"
-                    },
-                    "manifest": {
-                      "type": "object",
-                      "additionalProperties": true,
-                      "description": "Full manifest object"
-                    },
-                    "content": {
-                      "type": ["string", "null"]
-                    },
-                    "yanked": {
-                      "type": "boolean"
-                    },
-                    "yanked_reason": {
-                      "type": ["string", "null"]
-                    },
-                    "integrity": {
-                      "type": "string"
-                    },
-                    "artifact_size": {
-                      "type": "integer"
-                    },
-                    "createdAt": {
-                      "type": ["string", "null"],
-                      "format": "date-time"
-                    },
-                    "dist_tags": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/PackageVersionDetail"
                 }
               }
             }
@@ -15607,6 +15694,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
                     "object": {
                       "type": "string",
@@ -15617,6 +15705,10 @@
                       "items": {
                         "$ref": "#/components/schemas/ApplicationObject"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean",
+                      "description": "Whether more results exist beyond this page"
                     }
                   }
                 },
@@ -15649,7 +15741,8 @@
                       "createdAt": "2026-01-15T10:30:00Z",
                       "updatedAt": "2026-01-15T10:30:00Z"
                     }
-                  ]
+                  ],
+                  "hasMore": false
                 }
               }
             }
@@ -16265,6 +16358,9 @@
                   },
                   "metadata": {
                     "type": "object",
+                    "additionalProperties": {
+                      "type": ["string", "number", "boolean", "null"]
+                    },
                     "description": "Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null."
                   }
                 }
@@ -16452,6 +16548,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
                     "object": {
                       "type": "string",
@@ -16619,6 +16716,9 @@
                   },
                   "metadata": {
                     "type": "object",
+                    "additionalProperties": {
+                      "type": ["string", "number", "boolean", "null"]
+                    },
                     "description": "Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null."
                   }
                 }
@@ -16798,6 +16898,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "id", "uri", "url", "method", "headers", "expiresAt"],
                   "properties": {
                     "object": {
                       "type": "string",
@@ -18449,6 +18550,16 @@
         "schema": {
           "type": "string"
         }
+      },
+      "PackageActiveFilter": {
+        "name": "active",
+        "in": "query",
+        "required": false,
+        "description": "When `true`, narrows the list to packages installed and enabled in the current application.",
+        "schema": {
+          "type": "string",
+          "enum": ["true"]
+        }
       }
     },
     "headers": {
@@ -18626,7 +18737,19 @@
       "ApplicationPackage": {
         "type": "object",
         "description": "A package installed in an application with its config and overrides.",
-        "required": ["packageId", "enabled", "installed_at", "updatedAt"],
+        "required": [
+          "packageId",
+          "config",
+          "modelId",
+          "proxyId",
+          "version_id",
+          "enabled",
+          "installed_at",
+          "updatedAt",
+          "package_type",
+          "package_source",
+          "draft_manifest"
+        ],
         "properties": {
           "object": {
             "type": "string",
@@ -18753,7 +18876,7 @@
       },
       "OrgMember": {
         "type": "object",
-        "required": ["userId", "email", "role", "joinedAt"],
+        "required": ["userId", "role", "joinedAt"],
         "properties": {
           "userId": {
             "type": "string"
@@ -18851,7 +18974,16 @@
       },
       "AgentListItem": {
         "type": "object",
-        "required": ["id", "source", "type"],
+        "required": [
+          "id",
+          "source",
+          "type",
+          "running_runs",
+          "dependencies",
+          "scope",
+          "keywords",
+          "version"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -18921,7 +19053,17 @@
       },
       "AgentDetail": {
         "type": "object",
-        "required": ["id", "source"],
+        "required": [
+          "id",
+          "source",
+          "scope",
+          "version",
+          "dependencies",
+          "config",
+          "running_runs",
+          "last_run",
+          "forked_from"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -18967,6 +19109,7 @@
           },
           "config": {
             "type": "object",
+            "required": ["current"],
             "description": "AFPS schema wrapper for agent configuration (set once, reused across runs).",
             "properties": {
               "schema": {
@@ -19034,6 +19177,7 @@
           },
           "dependencies": {
             "type": "object",
+            "required": ["skills", "mcp_servers", "integrations"],
             "properties": {
               "skills": {
                 "type": "array",
@@ -19099,6 +19243,7 @@
           "last_run": {
             "type": ["object", "null"],
             "description": "Summary of the most recent run (null if never run)",
+            "required": ["id", "status", "started_at", "duration"],
             "properties": {
               "id": {
                 "type": "string"
@@ -19134,6 +19279,15 @@
       },
       "AgentVersion": {
         "type": "object",
+        "required": [
+          "id",
+          "version",
+          "integrity",
+          "artifact_size",
+          "yanked",
+          "created_by",
+          "createdAt"
+        ],
         "properties": {
           "id": {
             "type": "integer"
@@ -19168,6 +19322,17 @@
       },
       "PackageVersionDetail": {
         "type": "object",
+        "required": [
+          "id",
+          "version",
+          "manifest",
+          "integrity",
+          "artifact_size",
+          "yanked",
+          "yanked_reason",
+          "createdAt",
+          "dist_tags"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -19221,12 +19386,49 @@
         "type": "object",
         "required": [
           "id",
+          "packageId",
+          "userId",
+          "endUserId",
+          "apiKeyId",
           "orgId",
           "applicationId",
+          "scheduleId",
           "status",
+          "input",
+          "result",
+          "checkpoint",
+          "error",
+          "metadata",
+          "config",
+          "config_override",
+          "started_at",
+          "completed_at",
+          "duration",
+          "cost",
+          "notifiedAt",
+          "readAt",
+          "runNumber",
+          "token_usage",
+          "version_label",
           "version_dirty",
           "version_ref",
-          "started_at"
+          "proxy_label",
+          "model_label",
+          "model_source",
+          "runner_name",
+          "runner_kind",
+          "agent_scope",
+          "agent_name",
+          "runOrigin",
+          "contextSnapshot",
+          "modelCredentialId",
+          "connection_overrides",
+          "user_name",
+          "end_user_name",
+          "api_key_name",
+          "schedule_name",
+          "connections_used",
+          "package_ephemeral"
         ],
         "properties": {
           "id": {
@@ -19271,7 +19473,7 @@
             "type": "object"
           },
           "error": {
-            "type": "string"
+            "type": ["string", "null"]
           },
           "token_usage": {
             "type": ["object", "null"],
@@ -19297,19 +19499,19 @@
             "additionalProperties": false
           },
           "started_at": {
-            "type": "string",
+            "type": ["string", "null"],
             "format": "date-time"
           },
           "completed_at": {
-            "type": "string",
+            "type": ["string", "null"],
             "format": "date-time"
           },
           "duration": {
-            "type": "integer",
+            "type": ["integer", "null"],
             "description": "Duration in milliseconds"
           },
           "scheduleId": {
-            "type": "string"
+            "type": ["string", "null"]
           },
           "version_label": {
             "type": ["string", "null"],
@@ -19348,7 +19550,7 @@
             "description": "API key ID that triggered the run (null for dashboard/schedule runs)"
           },
           "applicationId": {
-            "type": ["string", "null"],
+            "type": "string",
             "description": "Application ID (app_ prefix) that owns this run"
           },
           "metadata": {
@@ -19511,12 +19713,26 @@
         "required": [
           "id",
           "packageId",
+          "userId",
+          "endUserId",
           "orgId",
           "applicationId",
+          "name",
           "enabled",
           "cron_expression",
+          "timezone",
+          "input",
+          "config_override",
+          "model_id_override",
+          "proxy_id_override",
+          "version_override",
+          "connection_overrides",
+          "last_run_at",
+          "next_run_at",
           "createdAt",
-          "updatedAt"
+          "updatedAt",
+          "actor_name",
+          "actor_type"
         ],
         "properties": {
           "id": {
@@ -19553,10 +19769,12 @@
             "type": ["string", "null"]
           },
           "input": {
-            "type": "object"
+            "type": ["object", "null"],
+            "additionalProperties": true
           },
           "config_override": {
-            "type": ["object", "null"]
+            "type": ["object", "null"],
+            "additionalProperties": true
           },
           "model_id_override": {
             "type": ["string", "null"]
@@ -19602,7 +19820,17 @@
       },
       "ApiKeyInfo": {
         "type": "object",
-        "required": ["id", "name", "keyPrefix", "scopes", "createdAt"],
+        "required": [
+          "id",
+          "name",
+          "keyPrefix",
+          "scopes",
+          "created_by",
+          "expiresAt",
+          "lastUsedAt",
+          "revokedAt",
+          "createdAt"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -19647,7 +19875,19 @@
       },
       "OrgPackageItem": {
         "type": "object",
-        "required": ["id", "source", "createdAt", "updatedAt"],
+        "required": [
+          "id",
+          "source",
+          "createdAt",
+          "updatedAt",
+          "name",
+          "description",
+          "created_by",
+          "used_by_agents",
+          "version",
+          "auto_installed",
+          "forked_from"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -19657,7 +19897,7 @@
             "description": "Owning organization ID (null for system packages)"
           },
           "name": {
-            "type": ["string", "null"]
+            "type": "string"
           },
           "description": {
             "type": ["string", "null"]
@@ -19698,7 +19938,20 @@
       },
       "OrgPackageItemDetail": {
         "type": "object",
-        "required": ["id", "source", "createdAt", "updatedAt"],
+        "required": [
+          "id",
+          "source",
+          "createdAt",
+          "updatedAt",
+          "name",
+          "description",
+          "content",
+          "created_by",
+          "version",
+          "auto_installed",
+          "forked_from",
+          "agents"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -19708,13 +19961,13 @@
             "description": "Owning organization ID (null for system packages)"
           },
           "name": {
-            "type": ["string", "null"]
+            "type": "string"
           },
           "description": {
             "type": ["string", "null"]
           },
           "content": {
-            "type": "string",
+            "type": ["string", "null"],
             "description": "Package item content"
           },
           "source_code": {
@@ -19763,6 +20016,7 @@
             "type": "array",
             "items": {
               "type": "object",
+              "required": ["id", "display_name"],
               "properties": {
                 "id": {
                   "type": "string"
@@ -19792,6 +20046,7 @@
           "baseUrl",
           "source",
           "authMode",
+          "created_by",
           "createdAt",
           "updatedAt"
         ],
@@ -19851,6 +20106,7 @@
           "isDefault",
           "source",
           "credentialId",
+          "created_by",
           "createdAt",
           "updatedAt"
         ],
@@ -20083,6 +20339,7 @@
         "required": [
           "id",
           "label",
+          "urlPrefix",
           "enabled",
           "isDefault",
           "source",
@@ -20133,6 +20390,7 @@
           "name",
           "isDefault",
           "settings",
+          "created_by",
           "createdAt",
           "updatedAt"
         ],
@@ -20186,7 +20444,17 @@
       },
       "EndUserObject": {
         "type": "object",
-        "required": ["id", "object", "applicationId", "createdAt", "updatedAt"],
+        "required": [
+          "id",
+          "object",
+          "applicationId",
+          "name",
+          "email",
+          "externalId",
+          "metadata",
+          "createdAt",
+          "updatedAt"
+        ],
         "properties": {
           "id": {
             "type": "string",
@@ -20216,6 +20484,7 @@
           },
           "metadata": {
             "type": ["object", "null"],
+            "additionalProperties": true,
             "description": "Arbitrary key-value metadata"
           },
           "createdAt": {

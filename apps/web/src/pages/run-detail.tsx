@@ -11,11 +11,11 @@ import { usePackageDetail } from "../hooks/use-packages";
 import { useRun, useRunLogs } from "../hooks/use-runs";
 import { useRunAgent, useCancelRun } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
-import { useRunRealtime, type RunMetricEvent } from "../hooks/use-realtime";
+import { useRunRealtime, type RunMetricEvent, type RunLogEvent } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LogViewer } from "../components/log-viewer";
-import { buildLogEntries, type RawLog } from "../components/log-utils";
+import { buildLogEntries } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
@@ -23,13 +23,18 @@ import { RunInfoTab } from "../components/run-info-tab";
 import { RunRow } from "../components/run-row";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
 import { useMarkRead } from "../hooks/use-notifications";
-import { ACTIVE_RUN_STATUSES, type RunLog, type EnrichedRun } from "@appstrate/shared-types";
+import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
+import type { components } from "../api/client";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
 import { Markdown } from "../components/markdown";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
+import { runKeys } from "../lib/query-keys";
 import { MemoryPanel } from "../components/persistence/memory-panel";
 import { Play } from "lucide-react";
+
+/** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
+type RunLogEntry = components["schemas"]["RunLog"];
 
 export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -61,16 +66,16 @@ export function RunDetailPage() {
   // Auto-mark notification as read when viewing an run
   useEffect(() => {
     if (run && runId && run.notifiedAt && !run.readAt) {
-      markRead.mutate(runId);
+      markRead.mutate({ params: { path: { runId } } });
     }
   }, [run?.notifiedAt, run?.readAt, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const runAgent = useRunAgent(packageId!);
+  const runAgent = useRunAgent(packageId);
   const cancelRun = useCancelRun();
   const [inputOpen, setInputOpen] = useState(false);
   const { historicalLogs, structuredOutput, structuredReport } = useMemo(() => {
     if (!logs) return { historicalLogs: [], structuredOutput: null, structuredReport: null };
-    const { entries, output, report } = buildLogEntries(logs as RawLog[]);
+    const { entries, output, report } = buildLogEntries(logs);
     return { historicalLogs: entries, structuredOutput: output, structuredReport: report };
   }, [logs]);
 
@@ -111,12 +116,21 @@ export function RunDetailPage() {
   // globally via `invalidateRunAndNotificationQueries`.
   useRunRealtime(isRunning ? runId : null, {
     onNewLog: useCallback(
-      (newLog: Record<string, unknown>) => {
-        const log = newLog as unknown as RunLog;
-        qc.setQueryData<RunLog[]>(["run-logs", orgId, applicationId, runId], (prev) => {
-          if (!prev) return [log];
-          if (prev.some((l) => l.id === log.id)) return prev;
-          return [...prev, log];
+      (newLog: RunLogEvent) => {
+        // `newLog` is runtime-validated by `runLogEventSchema`. Type the patch
+        // against the wire `RunLog` (spec) so this writer and `useRunLogs` agree
+        // on the element type of the shared `runKeys.logs` cache. Spread carries
+        // the matching fields (id/createdAt are ISO strings on both); only the
+        // spec's lossy `data` (`object`) needs a localized narrow — the SSE frame
+        // strips `data` server-side (`stripPayload`), so it is null in practice.
+        const entry: RunLogEntry = {
+          ...newLog,
+          data: (newLog.data ?? null) as RunLogEntry["data"],
+        };
+        qc.setQueryData<RunLogEntry[]>(runKeys.logs(orgId, applicationId, runId), (prev) => {
+          if (!prev) return [entry];
+          if (prev.some((l) => l.id === entry.id)) return prev;
+          return [...prev, entry];
         });
       },
       [qc, orgId, applicationId, runId],
@@ -130,13 +144,13 @@ export function RunDetailPage() {
         // `cost_so_far` instead. The next terminal-status invalidation
         // refetches the canonical row so this in-cache shadow is
         // bounded by the run's lifetime.
-        qc.setQueryData<EnrichedRun>(["run", orgId, applicationId, runId], (prev) => {
+        qc.setQueryData<EnrichedRun>(runKeys.detail(orgId, applicationId, runId), (prev) => {
           if (!prev) return prev;
           return {
             ...prev,
-            token_usage: metric.token_usage ?? prev.token_usage,
+            token_usage: metric.tokenUsage ?? prev.token_usage,
             cost: metric.costSoFar,
-          } as EnrichedRun;
+          };
         });
       },
       [qc, orgId, applicationId, runId],
@@ -295,17 +309,17 @@ export function RunDetailPage() {
 
           {resultSubTab === "report" && hasReport && (
             <div className="border-border bg-muted/30 overflow-auto rounded-lg border p-4">
-              <Markdown>{structuredReport!}</Markdown>
+              <Markdown>{structuredReport}</Markdown>
             </div>
           )}
 
-          {resultSubTab === "data" && hasOutput && <JsonView data={finalOutput!} />}
+          {resultSubTab === "data" && hasOutput && <JsonView data={finalOutput} />}
         </div>
       )}
 
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
 
-      {activeTab === "memory" && <MemoryPanel packageId={packageId!} runId={runId!} />}
+      {activeTab === "memory" && <MemoryPanel packageId={packageId} runId={runId} />}
 
       {activeTab === "info" && <RunInfoTab run={enrichedRun} />}
     </div>

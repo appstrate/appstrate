@@ -22,10 +22,10 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
-import { useIntegrations, type IntegrationSummary } from "../hooks/use-integrations";
+import { useIntegrations, type IntegrationSummaryWire } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
 
-function matchesQuery(integration: IntegrationSummary, query: string): boolean {
+function matchesQuery(integration: IntegrationSummaryWire, query: string): boolean {
   if (!query) return true;
   const q = query.toLowerCase();
   const m = integration.manifest;
@@ -75,7 +75,7 @@ function IntegrationIcon({ src }: { src?: string }) {
   );
 }
 
-function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
+function IntegrationCard({ integration }: { integration: IntegrationSummaryWire }) {
   const m = integration.manifest;
   const isActive = Boolean(integration.active);
 

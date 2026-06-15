@@ -113,8 +113,8 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
   const handleSave = () => {
     updateMutation.mutate(
       {
-        id: endUser.id,
-        data: {
+        params: { path: { id: endUser.id } },
+        body: {
           name: editName.trim() || undefined,
           email: editEmail.trim() || undefined,
           externalId: editExternalId.trim() || undefined,
@@ -305,12 +305,15 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
         description={t("applications.deleteEndUserConfirm")}
         isPending={deleteMutation.isPending}
         onConfirm={() => {
-          deleteMutation.mutate(endUser.id, {
-            onSuccess: () => {
-              setConfirmOpen(false);
-              handleClose();
+          deleteMutation.mutate(
+            { params: { path: { id: endUser.id } } },
+            {
+              onSuccess: () => {
+                setConfirmOpen(false);
+                handleClose();
+              },
             },
-          });
+          );
         }}
       />
     </>
