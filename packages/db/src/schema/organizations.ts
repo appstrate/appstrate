@@ -189,13 +189,13 @@ export const modelProviderCredentials = pgTable(
     lastRefreshFailureAt: timestamp("last_refresh_failure_at", { withTimezone: true }),
     /**
      * Model ids empirically verified against this credential — filled by
-     * the model-discovery probe (post-OAuth-import + manual refresh).
-     * NULL = never probed; readers fall back to the provider's static
-     * `featuredModels`. Per-credential because availability depends on
+     * the model-discovery probe (post-OAuth-import + manual refresh). The
+     * server-side authorization record gating model seeding
+     * (`routes/models.ts`). Per-credential because availability depends on
      * the account's plan (e.g. Claude Pro vs Max), not the provider.
+     * NULL = never probed.
      */
     availableModelIds: jsonb("available_model_ids").$type<string[]>(),
-    modelsVerifiedAt: timestamp("models_verified_at", { withTimezone: true }),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

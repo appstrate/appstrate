@@ -636,12 +636,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "models_verified_at": {
-          "name": "models_verified_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_by": {
           "name": "created_by",
           "type": "text",

@@ -1019,12 +1019,7 @@ export const schemas = {
         type: ["array", "null"],
         items: { type: "string" },
         description:
-          "Model ids empirically verified against this credential by the discovery probe (POST /:id/refresh-models, also fired after OAuth import). Null = never probed — clients fall back to the provider's static featured list. Per-credential because availability depends on the account's plan.",
-      },
-      models_verified_at: {
-        type: ["string", "null"],
-        format: "date-time",
-        description: "Timestamp of the last successful discovery probe.",
+          "Model ids empirically verified against this credential by the discovery probe (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. Null = never probed. Per-credential because availability depends on the account's plan.",
       },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },

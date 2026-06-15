@@ -99,18 +99,17 @@ export function useTestModelProviderCredential() {
 
 /**
  * Empirical model discovery — probes which models the credential's
- * account/plan actually serves and persists them server-side.
- * Invalidates both the credentials list (badge + `available_model_ids`)
- * and the registry (widened foreign-catalog model picker).
+ * account/plan actually serves and persists them server-side. The caller
+ * reads the fresh ids straight off the mutation response; this only
+ * invalidates the credentials list so the "{n} verified models" badge
+ * refreshes. The registry is a pure, org-independent catalog (it does not
+ * embed verified ids), so it needs no invalidation.
  */
 export function useRefreshCredentialModels() {
   const qc = useQueryClient();
   return $api.useMutation("post", "/api/model-provider-credentials/{id}/refresh-models", {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] });
-      void qc.invalidateQueries({
-        queryKey: ["get", "/api/model-provider-credentials/registry"],
-      });
     },
   });
 }

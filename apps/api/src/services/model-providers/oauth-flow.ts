@@ -30,7 +30,6 @@ import {
   type CreateOAuthCredentialInput,
 } from "./credentials.ts";
 import { getModelProvider } from "./registry.ts";
-import { discoverAvailableModels } from "./model-discovery.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 
@@ -112,19 +111,11 @@ export async function importOAuthModelProviderConnection(
     ...(email ? { email } : {}),
   });
 
-  // Fire-and-forget empirical discovery — probes which models THIS
-  // account/plan actually serves and persists them on the credential row
-  // (`available_model_ids`). The import response below answers
-  // immediately with the static featured list; the UI picks up the
-  // verified list when the probe lands (seconds later).
-  void discoverAvailableModels(input.orgId, credentialId).catch((err) => {
-    logger.warn("post-import model discovery failed", {
-      credentialId,
-      providerId: input.providerId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  });
-
+  // No discovery probe here on purpose. The served model set is resolved
+  // empirically at config time — the model form (and the manual "Refresh
+  // models" button) probe the live credential and persist
+  // `available_model_ids` then. Probing at import too would double the
+  // quota burst on connect for a list that's re-fetched anyway.
   return {
     credentialId,
     providerId: input.providerId,

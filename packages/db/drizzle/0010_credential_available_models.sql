@@ -1,2 +1,1 @@
-ALTER TABLE "model_provider_credentials" ADD COLUMN "available_model_ids" jsonb;--> statement-breakpoint
-ALTER TABLE "model_provider_credentials" ADD COLUMN "models_verified_at" timestamp with time zone;
+ALTER TABLE "model_provider_credentials" ADD COLUMN "available_model_ids" jsonb;

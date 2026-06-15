@@ -95,40 +95,25 @@ export const testInlineSchema = z.object({
  * pricing catalog is the single source of truth for per-model metadata
  * — provider definitions just point at catalog ids via `featuredModels`.
  *
- *   - **Own catalog, no `catalogProviderId`** (openai/anthropic/mistral/
- *     google-ai/cerebras/groq/xai): expose every catalog entry; ids in
- *     `featuredModels` get `featured: true`.
- *   - **Foreign catalog** (`catalogProviderId` set — codex → openai,
- *     claude-code → anthropic): expose `featuredModels` (all marked
- *     `featured: true`) plus any model the org's discovery probes have
- *     verified against a credential of this provider
- *     (`available_model_ids`, union across the org's credentials). The
- *     underlying catalog has more models than the OAuth product exposes,
- *     so the static list is the floor and the probe widens it. The
- *     per-credential seeding gate (`routes/models.ts`) re-checks against
- *     the exact credential, so the union here can't over-grant.
+ *   - **Has a catalog** (own — openai/anthropic/…; or foreign via
+ *     `catalogProviderId` — codex → openai, claude-code → anthropic):
+ *     expose every catalog entry as metadata; ids in `featuredModels` get
+ *     `featured: true`. For subscription OAuth providers the served set is
+ *     narrower than the catalog, but the empirical probe decides that at
+ *     selection time (the model form filters this list by the credential's
+ *     freshly probed ids) — the registry just supplies the metadata, so it
+ *     carries the full catalog and stays a pure, org-independent function.
  *   - **No catalog** (`featuredModels` empty — openrouter live-search,
  *     openai-compatible Custom): empty list. The picker falls back to
  *     "Custom" or its own live-search UI.
  */
-function serializeProviderModels(
-  p: ModelProviderDefinition,
-  orgVerifiedIds?: ReadonlySet<string>,
-): ProviderRegistryModelEntry[] {
+function serializeProviderModels(p: ModelProviderDefinition): ProviderRegistryModelEntry[] {
   const catalogKey = p.catalogProviderId ?? p.providerId;
   const catalog = listCatalogModels(catalogKey);
   if (catalog.length === 0) return [];
 
   const featuredSet = new Set(p.featuredModels);
-
-  // Foreign-catalog providers expose featuredModels ∪ org-verified ids
-  // (the underlying catalog is wider than the OAuth surface). Own-catalog
-  // providers expose everything.
-  const surfaced = p.catalogProviderId
-    ? catalog.filter((m) => featuredSet.has(m.id) || orgVerifiedIds?.has(m.id))
-    : catalog;
-
-  return surfaced.map((m) => ({ ...m, featured: featuredSet.has(m.id) }));
+  return catalog.map((m) => ({ ...m, featured: featuredSet.has(m.id) }));
 }
 
 export function createModelProviderCredentialsRouter() {
@@ -158,27 +143,12 @@ export function createModelProviderCredentialsRouter() {
     "models",
   ] as const;
 
-  router.get("/registry", requirePermission("model-provider-credentials", "read"), async (c) => {
-    const orgId = c.get("orgId");
+  router.get("/registry", requirePermission("model-provider-credentials", "read"), (c) => {
     const fields = parseFieldSelection(c, REGISTRY_FIELDS);
     const pagination = parseListPagination(c, { defaultLimit: 100 });
     // Only pay the catalog serialization cost when `models` is actually
     // requested (absent `fields` = full shape = include it).
     const includeModels = fields === null || fields.has("models");
-
-    // Discovery-verified ids per provider, unioned across the org's
-    // credentials — widens foreign-catalog (subscription OAuth) model
-    // lists beyond the static featured floor. Only fetched when the
-    // heavy `models` field is being serialized anyway.
-    const verifiedByProvider = new Map<string, Set<string>>();
-    if (includeModels) {
-      for (const cred of await listOrgModelProviderCredentials(orgId)) {
-        if (!cred.providerId || !cred.available_model_ids?.length) continue;
-        const set = verifiedByProvider.get(cred.providerId) ?? new Set<string>();
-        for (const id of cred.available_model_ids) set.add(id);
-        verifiedByProvider.set(cred.providerId, set);
-      }
-    }
 
     const all: ProviderRegistryEntry[] = listModelProviders().map((p) => ({
       providerId: p.providerId,
@@ -191,7 +161,7 @@ export function createModelProviderCredentialsRouter() {
       baseUrlOverridable: p.baseUrlOverridable,
       authMode: p.authMode,
       featured: p.featured ?? false,
-      models: includeModels ? serializeProviderModels(p, verifiedByProvider.get(p.providerId)) : [],
+      models: includeModels ? serializeProviderModels(p) : [],
     }));
 
     const { page, total, hasMore } = paginate(all, pagination);
@@ -332,11 +302,12 @@ export function createModelProviderCredentialsRouter() {
   // model discovery. Probes every discovery candidate against the live
   // credential (1-token requests) and persists the ids that answered as
   // `available_model_ids`. Synchronous — the caller gets the verified
-  // list back. Rate-limited hard: each call burns a handful of requests
-  // on the user's own quota.
+  // list back. Rate-limited (each call burns a handful of requests on the
+  // user's own quota), but loose enough for the model form to revalidate
+  // on every open while configuring several models in a row.
   router.post(
     "/:id/refresh-models",
-    rateLimit(2),
+    rateLimit(6),
     requirePermission("model-provider-credentials", "write"),
     async (c) => {
       const orgId = c.get("orgId");
@@ -354,7 +325,6 @@ export function createModelProviderCredentialsRouter() {
           outcome: result.outcome,
           probed_count: result.probedCount,
           available_model_ids: credential?.available_model_ids ?? null,
-          models_verified_at: credential?.models_verified_at ?? null,
         });
       } catch (err) {
         if (err instanceof ApiError) throw err;

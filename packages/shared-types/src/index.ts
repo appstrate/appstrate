@@ -629,13 +629,11 @@ export interface ModelProviderCredentialInfo {
   needs_reconnection?: boolean;
   /**
    * Model ids empirically verified against this credential by the
-   * discovery probe. NULL/absent = never probed — clients fall back to
-   * the provider's static `featuredModels`. Per-credential because
-   * availability depends on the account's plan.
+   * discovery probe — the server-side authorization record gating model
+   * seeding. Per-credential because availability depends on the account's
+   * plan. NULL/absent = never probed.
    */
   available_model_ids?: string[] | null;
-  /** ISO timestamp of the last successful discovery probe. */
-  models_verified_at?: string | null;
   created_by: string | null;
   createdAt: string;
   updatedAt: string;

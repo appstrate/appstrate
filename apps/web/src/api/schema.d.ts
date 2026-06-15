@@ -1726,7 +1726,7 @@ export interface paths {
         put?: never;
         /**
          * Empirically discover the models this credential serves
-         * @description Probes every discovery-candidate model against the live credential (1-token inference requests on the account's own quota) and persists the ids that answered as `available_model_ids`. Designed for subscription-backed OAuth providers (codex, claude-code) whose served model set depends on the account's plan and has no discovery endpoint. Synchronous; rate limited to 2 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.
+         * @description Probes every discovery-candidate model against the live credential (1-token inference requests on the account's own quota) and persists the ids that answered as `available_model_ids`. Designed for subscription-backed OAuth providers (codex, claude-code) whose served model set depends on the account's plan and has no discovery endpoint. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.
          */
         post: operations["refreshModelProviderCredentialModels"];
         delete?: never;
@@ -4370,13 +4370,8 @@ export interface components {
             providerId?: string | null;
             oauth_email?: string | null;
             needs_reconnection?: boolean;
-            /** @description Model ids empirically verified against this credential by the discovery probe (POST /:id/refresh-models, also fired after OAuth import). Null = never probed — clients fall back to the provider's static featured list. Per-credential because availability depends on the account's plan. */
+            /** @description Model ids empirically verified against this credential by the discovery probe (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. Null = never probed. Per-credential because availability depends on the account's plan. */
             available_model_ids?: string[] | null;
-            /**
-             * Format: date-time
-             * @description Timestamp of the last successful discovery probe.
-             */
-            models_verified_at?: string | null;
             created_by: string | null;
             /** Format: date-time */
             createdAt: string;
@@ -11029,8 +11024,6 @@ export interface operations {
                         outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates";
                         probed_count: number;
                         available_model_ids: string[] | null;
-                        /** Format: date-time */
-                        models_verified_at: string | null;
                     };
                 };
             };

@@ -451,7 +451,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Empirically discover the models this credential serves",
       description:
-        "Probes every discovery-candidate model against the live credential (1-token inference requests on the account's own quota) and persists the ids that answered as `available_model_ids`. Designed for subscription-backed OAuth providers (codex, claude-code) whose served model set depends on the account's plan and has no discovery endpoint. Synchronous; rate limited to 2 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.",
+        "Probes every discovery-candidate model against the live credential (1-token inference requests on the account's own quota) and persists the ids that answered as `available_model_ids`. Designed for subscription-backed OAuth providers (codex, claude-code) whose served model set depends on the account's plan and has no discovery endpoint. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -467,7 +467,7 @@ export const modelProviderCredentialsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["outcome", "probed_count", "available_model_ids", "models_verified_at"],
+                required: ["outcome", "probed_count", "available_model_ids"],
                 properties: {
                   outcome: {
                     type: "string",
@@ -480,7 +480,6 @@ export const modelProviderCredentialsPaths = {
                     type: ["array", "null"],
                     items: { type: "string" },
                   },
-                  models_verified_at: { type: ["string", "null"], format: "date-time" },
                 },
               },
             },

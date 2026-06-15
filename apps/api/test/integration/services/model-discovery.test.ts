@@ -141,7 +141,6 @@ describe("discoverAvailableModels", () => {
     expect(result.verifiedModelIds).toEqual(["m-featured", "m-extra"]);
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
     expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
-    expect(info?.models_verified_at).toBeString();
   });
 
   it("aborts without persisting on AUTH_FAILED (an auth outage must not wipe a good list)", async () => {
