@@ -16,8 +16,8 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemModelProviderKey } from "../services/model-registry.ts";
 import {
   createApiKeyCredential,
+  dedupeCredentialLabel,
   deleteModelProviderCredential,
-  deriveCredentialLabel,
   getOrgModelProviderCredential,
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
@@ -45,8 +45,8 @@ import { recordAuditFromContext } from "../services/audit.ts";
 export const createSchema = z.object({
   /**
    * Optional. When omitted, the server derives the label from the provider's
-   * `displayName` and dedupes against existing org credentials. See
-   * {@link deriveCredentialLabel}.
+   * `displayName`. Either way it is deduped against existing org credentials
+   * (suffixed ` (2)`, ` (3)`, … on collision). See {@link dedupeCredentialLabel}.
    */
   label: z.string().min(1).optional(),
   providerId: z.string().min(1, "providerId is required"),
@@ -196,7 +196,9 @@ export function createModelProviderCredentialsRouter() {
       );
     }
 
-    const label = data.label ?? (await deriveCredentialLabel(orgId, providerId));
+    // Always dedupe — a user-supplied label is suffixed on collision too, so
+    // labels stay unique within the org (same scheme as org models).
+    const label = await dedupeCredentialLabel(orgId, data.label?.trim() || cfg.displayName);
 
     try {
       const id = await createApiKeyCredential({

@@ -25,7 +25,7 @@
 
 import {
   createOAuthCredential,
-  deriveCredentialLabel,
+  dedupeCredentialLabel,
   findMissingIdentityClaims,
   type CreateOAuthCredentialInput,
 } from "./credentials.ts";
@@ -71,9 +71,12 @@ export async function importOAuthModelProviderConnection(
   if (!input.accessToken || !input.refreshToken) {
     throw invalidRequest("`accessToken` and `refreshToken` are required");
   }
-  const label = input.label?.trim()
-    ? input.label.trim()
-    : await deriveCredentialLabel(input.orgId, input.providerId);
+  // Always dedupe, even when the caller (the connect-helper CLI) supplies a
+  // label — its default (`ChatGPT`, `Claude`) is the same on every redeem, so
+  // honouring it verbatim would name every connection identically. The base
+  // is the supplied label, else the provider's displayName.
+  const base = input.label?.trim() || config.displayName || config.providerId;
+  const label = await dedupeCredentialLabel(input.orgId, base);
 
   // Identity extraction is delegated to the provider's module via the
   // `extractTokenIdentity` hook, which maps provider-specific claims into
