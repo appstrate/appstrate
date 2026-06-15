@@ -99,19 +99,14 @@ export function useTestModelProviderCredential() {
 
 /**
  * Empirical model discovery — probes which models the credential's
- * account/plan actually serves and persists them server-side. The caller
- * reads the fresh ids straight off the mutation response; this only
- * invalidates the credentials list so the "{n} verified models" badge
- * refreshes. The registry is a pure, org-independent catalog (it does not
- * embed verified ids), so it needs no invalidation.
+ * account/plan actually serves and persists them server-side (the seed
+ * gate reads the persisted list). The model form reads the fresh ids
+ * straight off the mutation response to populate its dropdown, so nothing
+ * cached needs invalidating: the credentials list surfaces no probe-derived
+ * field and the registry is a pure, org-independent catalog.
  */
 export function useRefreshCredentialModels() {
-  const qc = useQueryClient();
-  return $api.useMutation("post", "/api/model-provider-credentials/{id}/refresh-models", {
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] });
-    },
-  });
+  return $api.useMutation("post", "/api/model-provider-credentials/{id}/refresh-models");
 }
 
 export function deduplicateLabel(label: string, existingKeys: { label: string }[]): string {

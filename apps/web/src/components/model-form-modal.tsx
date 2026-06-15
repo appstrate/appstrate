@@ -350,9 +350,9 @@ function ModelFormBody({
   const probeCredential = (id: string) => {
     if (probeAttempted.current.has(id)) return;
     probeAttempted.current.add(id);
-    // Mutation invalidates the credentials list (refreshes the "{n} verified
-    // models" badge); the dropdown reads the verified ids straight off the
-    // mutation response below, not the registry (which stays a pure catalog).
+    // The probe persists the verified ids server-side (the seed gate reads
+    // that list); the dropdown reads them straight off the mutation response
+    // below — nothing cached needs invalidating.
     refreshModels.mutate(
       { params: { path: { id } } },
       {
