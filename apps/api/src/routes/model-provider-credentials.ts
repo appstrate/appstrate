@@ -24,6 +24,7 @@ import {
   updateModelProviderCredential,
 } from "../services/model-providers/credentials.ts";
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
+import { discoverAvailableModels } from "../services/model-providers/model-discovery.ts";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ProviderRegistryEntry, ProviderRegistryModelEntry } from "@appstrate/shared-types";
@@ -94,13 +95,14 @@ export const testInlineSchema = z.object({
  * pricing catalog is the single source of truth for per-model metadata
  * — provider definitions just point at catalog ids via `featuredModels`.
  *
- *   - **Own catalog, no `catalogProviderId`** (openai/anthropic/mistral/
- *     google-ai/cerebras/groq/xai): expose every catalog entry; ids in
- *     `featuredModels` get `featured: true`.
- *   - **Foreign catalog** (`catalogProviderId` set — codex → openai,
- *     claude-code → anthropic): expose ONLY `featuredModels`, all
- *     marked `featured: true`. The underlying catalog has more models
- *     than the OAuth product exposes.
+ *   - **Has a catalog** (own — openai/anthropic/…; or foreign via
+ *     `catalogProviderId` — codex → openai, claude-code → anthropic):
+ *     expose every catalog entry as metadata; ids in `featuredModels` get
+ *     `featured: true`. For subscription OAuth providers the served set is
+ *     narrower than the catalog, but the empirical probe decides that at
+ *     selection time (the model form filters this list by the credential's
+ *     freshly probed ids) — the registry just supplies the metadata, so it
+ *     carries the full catalog and stays a pure, org-independent function.
  *   - **No catalog** (`featuredModels` empty — openrouter live-search,
  *     openai-compatible Custom): empty list. The picker falls back to
  *     "Custom" or its own live-search UI.
@@ -111,13 +113,7 @@ function serializeProviderModels(p: ModelProviderDefinition): ProviderRegistryMo
   if (catalog.length === 0) return [];
 
   const featuredSet = new Set(p.featuredModels);
-
-  // Foreign-catalog providers expose featuredModels only (the underlying
-  // catalog is wider than the OAuth surface). Own-catalog providers
-  // expose everything.
-  const surfaced = p.catalogProviderId ? catalog.filter((m) => featuredSet.has(m.id)) : catalog;
-
-  return surfaced.map((m) => ({ ...m, featured: featuredSet.has(m.id) }));
+  return catalog.map((m) => ({ ...m, featured: featuredSet.has(m.id) }));
 }
 
 export function createModelProviderCredentialsRouter() {
@@ -297,6 +293,42 @@ export function createModelProviderCredentialsRouter() {
           id,
           error: getErrorMessage(err),
         });
+        throw internalError();
+      }
+    },
+  );
+
+  // POST /api/model-provider-credentials/:id/refresh-models — empirical
+  // model discovery. Probes every discovery candidate against the live
+  // credential (1-token requests) and persists the ids that answered as
+  // `available_model_ids`. Synchronous — the caller gets the verified
+  // list back. Rate-limited (each call burns a handful of requests on the
+  // user's own quota), but loose enough for the model form to revalidate
+  // on every open while configuring several models in a row.
+  router.post(
+    "/:id/refresh-models",
+    rateLimit(6),
+    requirePermission("model-provider-credentials", "write"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const id = c.req.param("id")!;
+      if (isSystemModelProviderKey(id)) {
+        throw systemEntityForbidden("model provider credential", id);
+      }
+      try {
+        const result = await discoverAvailableModels(orgId, id);
+        if (result.outcome === "credential_not_found") {
+          throw notFound("Model provider credential not found");
+        }
+        const credential = await getOrgModelProviderCredential(orgId, id);
+        return c.json({
+          outcome: result.outcome,
+          probed_count: result.probedCount,
+          available_model_ids: credential?.available_model_ids ?? null,
+        });
+      } catch (err) {
+        if (err instanceof ApiError) throw err;
+        logger.error("Model discovery failed", { id, error: getErrorMessage(err) });
         throw internalError();
       }
     },

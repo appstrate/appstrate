@@ -1,0 +1,1 @@
+ALTER TABLE "model_provider_credentials" ADD COLUMN "available_model_ids" jsonb;

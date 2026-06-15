@@ -627,6 +627,13 @@ export interface ModelProviderCredentialInfo {
   oauth_email?: string | null;
   /** True when the worker (or token-resolver) detected an `invalid_grant`. UI surfaces a "Reconnect" badge. */
   needs_reconnection?: boolean;
+  /**
+   * Model ids empirically verified against this credential by the
+   * discovery probe — the server-side authorization record gating model
+   * seeding. Per-credential because availability depends on the account's
+   * plan. NULL/absent = never probed.
+   */
+  available_model_ids?: string[] | null;
   created_by: string | null;
   createdAt: string;
   updatedAt: string;
@@ -701,6 +708,8 @@ export interface TestResult {
   latency: number;
   error?: string;
   message?: string;
+  /** Upstream HTTP status when the provider answered at all — lets callers distinguish 429 (retry later) from 404 (model not served). */
+  status?: number;
 }
 
 // --- API Key Types ---

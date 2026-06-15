@@ -71,6 +71,13 @@
       "when": 1781258681902,
       "tag": "0009_perf_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781276923237,
+      "tag": "0010_credential_available_models",
+      "breakpoints": true
     }
   ]
 }

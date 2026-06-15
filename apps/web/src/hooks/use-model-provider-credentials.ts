@@ -97,6 +97,18 @@ export function useTestModelProviderCredential() {
   return $api.useMutation("post", "/api/model-provider-credentials/{id}/test");
 }
 
+/**
+ * Empirical model discovery — probes which models the credential's
+ * account/plan actually serves and persists them server-side (the seed
+ * gate reads the persisted list). The model form reads the fresh ids
+ * straight off the mutation response to populate its dropdown, so nothing
+ * cached needs invalidating: the credentials list surfaces no probe-derived
+ * field and the registry is a pure, org-independent catalog.
+ */
+export function useRefreshCredentialModels() {
+  return $api.useMutation("post", "/api/model-provider-credentials/{id}/refresh-models");
+}
+
 export function deduplicateLabel(label: string, existingKeys: { label: string }[]): string {
   return dedupeLabel(
     label,

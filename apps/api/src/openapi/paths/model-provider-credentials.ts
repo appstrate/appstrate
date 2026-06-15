@@ -445,4 +445,52 @@ export const modelProviderCredentialsPaths = {
       },
     },
   },
+  "/api/model-provider-credentials/{id}/refresh-models": {
+    post: {
+      operationId: "refreshModelProviderCredentialModels",
+      tags: ["Model Provider Credentials"],
+      summary: "Empirically discover the models this credential serves",
+      description:
+        "Probes every discovery-candidate model against the live credential (1-token inference requests on the account's own quota) and persists the ids that answered as `available_model_ids`. Designed for subscription-backed OAuth providers (codex, claude-code) whose served model set depends on the account's plan and has no discovery endpoint. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Discovery outcome + the credential's current verified list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["outcome", "probed_count", "available_model_ids"],
+                properties: {
+                  outcome: {
+                    type: "string",
+                    enum: ["ok", "auth_failed", "nothing_verified", "no_candidates"],
+                    description:
+                      "`ok` — list persisted. `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — every probe failed (network incident or none served), previous list kept. `no_candidates` — provider declares no discovery candidates.",
+                  },
+                  probed_count: { type: "integer" },
+                  available_model_ids: {
+                    type: ["array", "null"],
+                    items: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "500": { $ref: "#/components/responses/InternalServerError" },
+      },
+    },
+  },
 } as const;

@@ -35,6 +35,7 @@ import { useOpenRouterSearch } from "./model-form/use-open-router-search";
 import {
   useModelProviderCredentials,
   useProvidersRegistry,
+  useRefreshCredentialModels,
 } from "../hooks/use-model-provider-credentials";
 import { OAuthPairingBody } from "./oauth-pairing-body";
 import {
@@ -332,6 +333,35 @@ function ModelFormBody({
   // form without diffing the credential list.
   const [oauthDialogOpen, setOauthDialogOpen] = useState(false);
 
+  // Synchronous model discovery. The model dropdown for OAuth providers is
+  // sourced from THIS credential's verified ids (the account's plan), so the
+  // credential must be probed before the user can pick a model.
+  const refreshModels = useRefreshCredentialModels();
+  // This-session probe result, per credential: the ids the live probe just
+  // verified. It — NOT the persisted `available_model_ids` — drives the
+  // dropdown, so a stale plan is never shown. Null until the call returns
+  // (detector spinner shows); empty array = probed, nothing served.
+  const [probeResult, setProbeResult] = useState<{ id: string; modelIds: string[] } | null>(null);
+  // Credentials already probed THIS form-open (the body remounts per open,
+  // so this resets each time the modal is reopened → a fresh probe every
+  // config session). Prevents re-firing on reselect within one open.
+  const probeAttempted = React.useRef<Set<string>>(new Set());
+
+  const probeCredential = (id: string) => {
+    if (probeAttempted.current.has(id)) return;
+    probeAttempted.current.add(id);
+    // The probe persists the verified ids server-side (the seed gate reads
+    // that list); the dropdown reads them straight off the mutation response
+    // below — nothing cached needs invalidating.
+    refreshModels.mutate(
+      { params: { path: { id } } },
+      {
+        onSuccess: (data) => setProbeResult({ id, modelIds: data.available_model_ids ?? [] }),
+        onError: () => setProbeResult({ id, modelIds: [] }),
+      },
+    );
+  };
+
   const handleOpenOauthDialog = () => {
     setOauthDialogOpen(true);
   };
@@ -340,7 +370,18 @@ function ModelFormBody({
     setValue("credentialId", newId);
     setValue("inlineApiKey", "");
     clearErrors("credentialId");
+    probeCredential(newId);
   };
+
+  // "Select key → fetch the plan's models." Probes on every selection (the
+  // persisted list is intentionally NOT trusted — a subscription's served
+  // models drift over time while the credential doesn't). `probeAttempted`
+  // bounds it to one call per credential per form-open.
+  useEffect(() => {
+    if (!isOauthProvider || !credentialId || !selectedKey) return;
+    probeCredential(credentialId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOauthProvider, credentialId, selectedKey]);
 
   const isOpenRouter = providerId === "openrouter";
   const openRouterSearch = useOpenRouterSearch(isOpenRouter);
@@ -350,6 +391,26 @@ function ModelFormBody({
   const isCustom = isCustomProvider || isCustomModel;
 
   const selectedProvider = isCustomProvider ? undefined : getProviderById(providerId, registry);
+
+  // Models offered in the dropdown. For OAuth (subscription) providers the
+  // list is EXACTLY what the discovery probe verified for the selected
+  // credential's plan — no static "featured" floor. Empty until the probe
+  // returns, which is why the dropdown stays hidden until then. API-key
+  // providers keep the full registry list (static catalog, no discovery).
+  const modelOptions = useMemo(() => {
+    if (!selectedProvider) return [];
+    if (!isOauthProvider) return selectedProvider.models;
+    // Only THIS session's fresh probe (matching the selected credential)
+    // drives the list — the persisted `available_model_ids` is never used
+    // for display, so a drifted plan can't leak stale models. Map each
+    // verified id to its catalog metadata; a verified id absent from the
+    // catalog (modelDiscoveryCandidates may list non-catalog ids) falls back
+    // to an id-only entry so it stays selectable instead of vanishing —
+    // otherwise an all-non-catalog plan would hang the detector spinner.
+    const verifiedIds = probeResult?.id === credentialId ? probeResult.modelIds : [];
+    const byId = new Map(selectedProvider.models.map((m) => [m.id, m]));
+    return verifiedIds.map((id) => byId.get(id) ?? { id, label: id, featured: false });
+  }, [selectedProvider, isOauthProvider, probeResult, credentialId]);
 
   const resetModelFields = () => {
     setValue("label", "");
@@ -488,6 +549,184 @@ function ModelFormBody({
 
   const title = model ? t("models.form.editTitle") : t("models.form.title");
 
+  // Model dropdown. OAuth (subscription) providers show a FLAT list of the
+  // probe-verified models — every entry is equally "available on the plan",
+  // so the Featured/All split (and the Custom escape hatch, which would fail
+  // the server's verified-only seed gate) is meaningless. Catalog-covered
+  // API-key providers keep the split (50-100+ models) + Custom.
+  const modelSelectJsx =
+    selectedProvider && !isOpenRouter && modelOptions.length > 0 ? (
+      <div className="space-y-2">
+        <Label htmlFor="mdl-model">{t("models.form.modelId")}</Label>
+        <Select value={selectedModelId} onValueChange={handleModelChange}>
+          <SelectTrigger id="mdl-model">
+            <SelectValue placeholder={t("models.form.modelPlaceholder")} />
+          </SelectTrigger>
+          <SelectContent>
+            {isOauthProvider ? (
+              modelOptions.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.label ?? m.id}
+                </SelectItem>
+              ))
+            ) : (
+              <>
+                <ProviderPickerGroups
+                  items={modelOptions}
+                  featuredLabel={t("models.form.modelGroupFeatured")}
+                  otherLabel={t("models.form.modelGroupAll")}
+                  renderItem={(m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.label ?? m.id}
+                    </SelectItem>
+                  )}
+                />
+                <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>
+              </>
+            )}
+          </SelectContent>
+        </Select>
+      </div>
+    ) : null;
+
+  // Credential block — placement differs by authMode (see the form body):
+  // OAuth surfaces it BEFORE the model select (connection drives the plan-
+  // scoped model list); API-key surfaces it after a model is chosen.
+  // Two flavors keyed on authMode: OAuth = pick/connect (no inline secret);
+  // API key = type a new key inline OR pick an existing credential.
+  const credentialBlockJsx = (
+    <div className="space-y-2">
+      <Label>
+        {isOauthProvider ? t("models.form.connectionLabel") : t("credentials.form.apiKey")}
+      </Label>
+
+      {selectedKey ? (
+        <div className="flex gap-2">
+          <div className="border-input bg-muted flex h-9 flex-1 items-center gap-2 rounded-md border px-3 text-sm">
+            {isOauthProvider ? (
+              <Plug className="text-muted-foreground size-3.5 shrink-0" />
+            ) : (
+              <KeyRound className="text-muted-foreground size-3.5 shrink-0" />
+            )}
+            <span className="truncate">{selectedKey.label}</span>
+            {isOauthProvider && selectedKey.oauth_email && (
+              <span className="text-muted-foreground truncate text-xs">
+                ({selectedKey.oauth_email})
+              </span>
+            )}
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 shrink-0"
+            onClick={() => {
+              setValue("credentialId", "");
+              setValue("inlineApiKey", "");
+            }}
+          >
+            <X className="size-4" />
+            <span className="sr-only">{t("btn.cancel")}</span>
+          </Button>
+        </div>
+      ) : isOauthProvider ? (
+        // OAuth: existing-connection select stacks ABOVE the connect
+        // button when there's at least one match — single column avoids
+        // the side-by-side overflow when the provider name is long.
+        <div className="flex flex-col gap-2">
+          {availableCredentials.length > 0 && (
+            <Select
+              value=""
+              onValueChange={(id) => {
+                setValue("credentialId", id);
+                setValue("inlineApiKey", "");
+                clearErrors("credentialId");
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder={t("models.form.useExistingConnection")} />
+              </SelectTrigger>
+              <SelectContent>
+                {availableCredentials.map((k) => (
+                  <SelectItem key={k.id} value={k.id}>
+                    <span className="flex items-center gap-2">
+                      <span className="truncate">{k.label}</span>
+                      {k.oauth_email && (
+                        <span className="text-muted-foreground truncate text-xs">
+                          {k.oauth_email}
+                        </span>
+                      )}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            className={cn(
+              "w-full min-w-0 justify-start",
+              showError("credentialId") && "border-destructive",
+            )}
+            onClick={handleOpenOauthDialog}
+          >
+            <Plug className="mr-2 size-4 shrink-0" />
+            <span className="truncate">
+              {availableCredentials.length > 0
+                ? t("models.form.connectAnother", {
+                    provider: registryEntry?.displayName ?? providerId,
+                  })
+                : t("models.form.connectProvider", {
+                    provider: registryEntry?.displayName ?? providerId,
+                  })}
+            </span>
+          </Button>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <Input
+            type="password"
+            {...register("inlineApiKey")}
+            placeholder="sk-..."
+            className={cn("min-w-0 flex-1", showError("credentialId") && "border-destructive")}
+            aria-invalid={showError("credentialId") ? true : undefined}
+          />
+          {availableCredentials.length > 0 && (
+            <Select
+              value=""
+              onValueChange={(id) => {
+                setValue("credentialId", id);
+                setValue("inlineApiKey", "");
+              }}
+            >
+              <SelectTrigger className="w-32 shrink-0">
+                <SelectValue placeholder={t("models.form.useExistingKey")} />
+              </SelectTrigger>
+              <SelectContent>
+                {availableCredentials.map((k) => (
+                  <SelectItem key={k.id} value={k.id}>
+                    {k.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+      )}
+
+      {!selectedKey && !isOauthProvider && inlineApiKey.trim() && (
+        <div className="text-muted-foreground text-sm">{t("models.form.createCredentialHint")}</div>
+      )}
+      {!selectedKey && isOauthProvider && (
+        <div className="text-muted-foreground text-sm">{t("models.form.connectProviderHint")}</div>
+      )}
+      {showError("credentialId") && errors.credentialId?.message && (
+        <div className="text-destructive text-sm">{errors.credentialId.message}</div>
+      )}
+    </div>
+  );
+
   return (
     <Modal
       open
@@ -534,34 +773,43 @@ function ModelFormBody({
           </Select>
         </div>
 
-        {/* Model select (only for known providers, except OpenRouter).
-            Catalog-covered providers expose 50-100+ models — split
-            "Featured" (curated whitelist) from "All models" (the rest of
-            the LiteLLM catalog). Non-catalog providers (codex, openai-
-            compatible) only return their inline list with featured=false,
-            so the All-models group collects everything in that case. */}
-        {selectedProvider && !isOpenRouter && selectedProvider.models.length > 0 && (
-          <div className="space-y-2">
-            <Label htmlFor="mdl-model">{t("models.form.modelId")}</Label>
-            <Select value={selectedModelId} onValueChange={handleModelChange}>
-              <SelectTrigger id="mdl-model">
-                <SelectValue placeholder={t("models.form.modelPlaceholder")} />
-              </SelectTrigger>
-              <SelectContent>
-                <ProviderPickerGroups
-                  items={selectedProvider.models}
-                  featuredLabel={t("models.form.modelGroupFeatured")}
-                  otherLabel={t("models.form.modelGroupAll")}
-                  renderItem={(m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.label ?? m.id}
-                    </SelectItem>
-                  )}
-                />
-                <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+        {/* OAuth (subscription) providers need the connection FIRST: the
+            served model list depends on the account's plan, known only by
+            probing the live credential. So the order flips to connection →
+            probe → model. API-key / OpenRouter providers keep model-first
+            (static catalog, no per-credential discovery). */}
+        {isOauthProvider ? (
+          <>
+            {credentialBlockJsx}
+            {/* Model dropdown is gated on the probe: it appears only once
+                refresh-models has returned the plan's verified ids (metadata
+                comes from the already-loaded registry catalog). A probe that
+                found nothing shows the empty-state instead of an empty
+                dropdown. */}
+            {selectedKey &&
+              (() => {
+                const fresh = probeResult?.id === credentialId ? probeResult : null;
+                // No result yet → call in flight (or, rarely, the registry
+                // catalog is still loading) → detector spinner.
+                if (!fresh || (fresh.modelIds.length > 0 && modelOptions.length === 0)) {
+                  return (
+                    <div className="text-muted-foreground flex items-center gap-2 text-sm">
+                      <Spinner /> {t("models.form.detectingModels")}
+                    </div>
+                  );
+                }
+                if (fresh.modelIds.length === 0) {
+                  return (
+                    <div className="text-muted-foreground text-sm">
+                      {t("models.form.noModelsDetected")}
+                    </div>
+                  );
+                }
+                return modelSelectJsx;
+              })()}
+          </>
+        ) : (
+          modelSelectJsx
         )}
 
         {/* OpenRouter model search (combobox) */}
@@ -624,150 +872,12 @@ function ModelFormBody({
           </div>
         )}
 
-        {/* Credential — visible once a model is chosen.
-            Two flavors keyed on the provider's authMode:
-              - OAuth: select an existing connection OR launch the pairing
-                dialog. No inline secret input.
-              - API key: type a new key inline OR pick an existing credential. */}
-        {(!!selectedModelId || (isOpenRouter && !!modelId)) && (
-          <div className="space-y-2">
-            <Label>
-              {isOauthProvider ? t("models.form.connectionLabel") : t("credentials.form.apiKey")}
-            </Label>
-
-            {selectedKey ? (
-              <div className="flex gap-2">
-                <div className="border-input bg-muted flex h-9 flex-1 items-center gap-2 rounded-md border px-3 text-sm">
-                  {isOauthProvider ? (
-                    <Plug className="text-muted-foreground size-3.5 shrink-0" />
-                  ) : (
-                    <KeyRound className="text-muted-foreground size-3.5 shrink-0" />
-                  )}
-                  <span className="truncate">{selectedKey.label}</span>
-                  {isOauthProvider && selectedKey.oauth_email && (
-                    <span className="text-muted-foreground truncate text-xs">
-                      ({selectedKey.oauth_email})
-                    </span>
-                  )}
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 shrink-0"
-                  onClick={() => {
-                    setValue("credentialId", "");
-                    setValue("inlineApiKey", "");
-                  }}
-                >
-                  <X className="size-4" />
-                  <span className="sr-only">{t("btn.cancel")}</span>
-                </Button>
-              </div>
-            ) : isOauthProvider ? (
-              // OAuth: existing-connection select stacks ABOVE the connect
-              // button when there's at least one match — single column avoids
-              // the side-by-side overflow when the provider name is long.
-              <div className="flex flex-col gap-2">
-                {availableCredentials.length > 0 && (
-                  <Select
-                    value=""
-                    onValueChange={(id) => {
-                      setValue("credentialId", id);
-                      setValue("inlineApiKey", "");
-                      clearErrors("credentialId");
-                    }}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder={t("models.form.useExistingConnection")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableCredentials.map((k) => (
-                        <SelectItem key={k.id} value={k.id}>
-                          <span className="flex items-center gap-2">
-                            <span className="truncate">{k.label}</span>
-                            {k.oauth_email && (
-                              <span className="text-muted-foreground truncate text-xs">
-                                {k.oauth_email}
-                              </span>
-                            )}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  className={cn(
-                    "w-full min-w-0 justify-start",
-                    showError("credentialId") && "border-destructive",
-                  )}
-                  onClick={handleOpenOauthDialog}
-                >
-                  <Plug className="mr-2 size-4 shrink-0" />
-                  <span className="truncate">
-                    {availableCredentials.length > 0
-                      ? t("models.form.connectAnother", {
-                          provider: registryEntry?.displayName ?? providerId,
-                        })
-                      : t("models.form.connectProvider", {
-                          provider: registryEntry?.displayName ?? providerId,
-                        })}
-                  </span>
-                </Button>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <Input
-                  type="password"
-                  {...register("inlineApiKey")}
-                  placeholder="sk-..."
-                  className={cn(
-                    "min-w-0 flex-1",
-                    showError("credentialId") && "border-destructive",
-                  )}
-                  aria-invalid={showError("credentialId") ? true : undefined}
-                />
-                {availableCredentials.length > 0 && (
-                  <Select
-                    value=""
-                    onValueChange={(id) => {
-                      setValue("credentialId", id);
-                      setValue("inlineApiKey", "");
-                    }}
-                  >
-                    <SelectTrigger className="w-32 shrink-0">
-                      <SelectValue placeholder={t("models.form.useExistingKey")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableCredentials.map((k) => (
-                        <SelectItem key={k.id} value={k.id}>
-                          {k.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-            )}
-
-            {!selectedKey && !isOauthProvider && inlineApiKey.trim() && (
-              <div className="text-muted-foreground text-sm">
-                {t("models.form.createCredentialHint")}
-              </div>
-            )}
-            {!selectedKey && isOauthProvider && (
-              <div className="text-muted-foreground text-sm">
-                {t("models.form.connectProviderHint")}
-              </div>
-            )}
-            {showError("credentialId") && errors.credentialId?.message && (
-              <div className="text-destructive text-sm">{errors.credentialId.message}</div>
-            )}
-          </div>
-        )}
+        {/* API-key / OpenRouter credential block — surfaced AFTER a model
+            is chosen. OAuth providers render their connection block above
+            (before the model select), so they're excluded here. */}
+        {!isOauthProvider &&
+          (!!selectedModelId || (isOpenRouter && !!modelId)) &&
+          credentialBlockJsx}
 
         {oauthDialogOpen && (
           <Modal

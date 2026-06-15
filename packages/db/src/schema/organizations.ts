@@ -187,6 +187,15 @@ export const modelProviderCredentials = pgTable(
     // `integration_connections.refresh_failure_count`.
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
     lastRefreshFailureAt: timestamp("last_refresh_failure_at", { withTimezone: true }),
+    /**
+     * Model ids empirically verified against this credential — filled by
+     * the model-discovery probe (post-OAuth-import + manual refresh). The
+     * server-side authorization record gating model seeding
+     * (`routes/models.ts`). Per-credential because availability depends on
+     * the account's plan (e.g. Claude Pro vs Max), not the provider.
+     * NULL = never probed.
+     */
+    availableModelIds: jsonb("available_model_ids").$type<string[]>(),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

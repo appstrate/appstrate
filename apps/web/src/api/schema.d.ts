@@ -1715,6 +1715,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/model-provider-credentials/{id}/refresh-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Empirically discover the models this credential serves
+         * @description Probes every discovery-candidate model against the live credential (1-token inference requests on the account's own quota) and persists the ids that answered as `available_model_ids`. Designed for subscription-backed OAuth providers (codex, claude-code) whose served model set depends on the account's plan and has no discovery endpoint. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.
+         */
+        post: operations["refreshModelProviderCredentialModels"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/model-provider-credentials/{id}/test": {
         parameters: {
             query?: never;
@@ -4350,6 +4370,8 @@ export interface components {
             providerId?: string | null;
             oauth_email?: string | null;
             needs_reconnection?: boolean;
+            /** @description Model ids empirically verified against this credential by the discovery probe (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. Null = never probed. Per-credential because availability depends on the account's plan. */
+            available_model_ids?: string[] | null;
             created_by: string | null;
             /** Format: date-time */
             createdAt: string;
@@ -4845,6 +4867,8 @@ export interface components {
             error?: string;
             /** @description Human-readable error message */
             message?: string;
+            /** @description Upstream HTTP status when the provider answered at all — distinguishes 429 (retry later) from 404 (model not served). */
+            status?: number;
         };
         /** @description UI rendering hints for schema fields, keyed by property name. Lives at the AFPS wrapper level (outside the JSON Schema). */
         UIHintsMap: {
@@ -10968,6 +10992,46 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    refreshModelProviderCredentialModels: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Discovery outcome + the credential's current verified list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * @description `ok` — list persisted. `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — every probe failed (network incident or none served), previous list kept. `no_candidates` — provider declares no discovery candidates.
+                         * @enum {string}
+                         */
+                        outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates";
+                        probed_count: number;
+                        available_model_ids: string[] | null;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     testModelProviderCredential: {

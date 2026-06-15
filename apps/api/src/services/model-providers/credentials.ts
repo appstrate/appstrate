@@ -580,6 +580,7 @@ export async function listOrgModelProviderCredentials(
         providerId: r.providerId,
         oauth_email: isOauth ? (blob.email ?? null) : null,
         needs_reconnection: isOauth ? !!blob.needsReconnection : false,
+        available_model_ids: r.availableModelIds ?? null,
         created_by: r.createdBy,
         createdAt: toISORequired(r.createdAt),
         updatedAt: toISORequired(r.updatedAt),

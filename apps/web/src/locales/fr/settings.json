@@ -565,6 +565,8 @@
   "models.form.connectProvider": "Connecter {{provider}}",
   "models.form.connectAnother": "Connecter un autre compte {{provider}}",
   "models.form.connectProviderHint": "Lance la connexion OAuth via le helper CLI ; une nouvelle connexion sera disponible ici dès qu'elle aboutit.",
+  "models.form.detectingModels": "Détection des modèles disponibles sur cet abonnement…",
+  "models.form.noModelsDetected": "Aucun modèle détecté pour cette connexion. Réessaie, ou vérifie que l'abonnement est actif.",
   "models.form.connectionRequired": "Sélectionne une connexion ou connecte un compte avant d'enregistrer.",
   "models.form.apiKeyRequired": "Saisis une clé API ou sélectionne une clé existante.",
   "models.alert.noModel": "Aucun modèle LLM configuré",

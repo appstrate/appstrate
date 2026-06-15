@@ -711,15 +711,22 @@ export async function testModelConfig(config: {
     });
     const latency = Math.round(performance.now() - start);
 
-    if (res.ok) return { ok: true, latency };
+    if (res.ok) return { ok: true, latency, status: res.status };
     if (res.status === 401 || res.status === 403) {
-      return { ok: false, latency, error: "AUTH_FAILED", message: "Authentication failed" };
+      return {
+        ok: false,
+        latency,
+        error: "AUTH_FAILED",
+        message: "Authentication failed",
+        status: res.status,
+      };
     }
     return {
       ok: false,
       latency,
       error: "PROVIDER_ERROR",
       message: `Provider returned ${res.status}`,
+      status: res.status,
     };
   } catch (err) {
     return mapFetchErrorToTestResult(err, Math.round(performance.now() - start));
@@ -759,13 +766,14 @@ async function runInferenceProbe(req: InferenceProbeRequest): Promise<TestResult
     });
     const latency = Math.round(performance.now() - start);
     void res.body?.cancel().catch(() => {});
-    if (res.ok) return { ok: true, latency };
+    if (res.ok) return { ok: true, latency, status: res.status };
     if (res.status === 401 || res.status === 403) {
       return {
         ok: false,
         latency,
         error: "AUTH_FAILED",
         message: "Provider rejected the token (auth failed or subscription inactive)",
+        status: res.status,
       };
     }
     return {
@@ -773,6 +781,7 @@ async function runInferenceProbe(req: InferenceProbeRequest): Promise<TestResult
       latency,
       error: "PROVIDER_ERROR",
       message: `Provider returned ${res.status}`,
+      status: res.status,
     };
   } catch (err) {
     return mapFetchErrorToTestResult(err, Math.round(performance.now() - start));
