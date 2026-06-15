@@ -13,6 +13,8 @@ import {
   Loader2,
   Users,
   Boxes,
+  Settings,
+  ChevronRight,
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
@@ -20,6 +22,11 @@ import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
 import { useAppConfig } from "../hooks/use-app-config";
 import { SidebarNavLink } from "./sidebar-nav-link";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -48,13 +55,15 @@ export function NavOrg() {
   const hasRunning =
     (agents?.some((f) => f.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0;
   const unread = unreadCount ?? 0;
+  const agentCount = agents?.length ?? 0;
 
-  // Primary workspace items (Runs is rendered separately below — it carries a
-  // running indicator + unread badge — but lives in this same first group).
+  // Primary workspace items (Agents carries a count; Runs is rendered
+  // separately below — it carries a running indicator + unread badge — but
+  // lives in this same first group, ordered Dashboard → Agents → Runs →
+  // Schedules to mirror the target IA).
   const primaryItems = [
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
-    { path: "/agents", label: t("nav.agents"), icon: Layers },
-    { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
+    { path: "/agents", label: t("nav.agents"), icon: Layers, count: agentCount },
   ];
 
   const resourceItems = [
@@ -68,9 +77,10 @@ export function NavOrg() {
       ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]
       : []),
     ...(isAdmin ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }] : []),
+    ...(isAdmin ? [{ path: "/org-settings", label: t("nav.settings"), icon: Settings }] : []),
   ];
 
-  const renderItems = (items: typeof primaryItems) =>
+  const renderItems = (items: { path: string; label: string; icon: typeof Layers }[]) =>
     items.map((item) => (
       <SidebarNavLink
         key={item.path}
@@ -87,7 +97,24 @@ export function NavOrg() {
     <>
       <SidebarGroup>
         <SidebarMenu>
-          {renderItems(primaryItems)}
+          {primaryItems.map((item) => (
+            <SidebarNavLink
+              key={item.path}
+              to={item.path}
+              icon={item.icon}
+              label={item.label}
+              isActive={
+                item.path === "/"
+                  ? location.pathname === "/"
+                  : location.pathname.startsWith(item.path)
+              }
+            >
+              {item.count != null && item.count > 0 && (
+                <SidebarMenuBadge>{item.count}</SidebarMenuBadge>
+              )}
+            </SidebarNavLink>
+          ))}
+
           {/* Runs — with unread badge + running indicator */}
           <SidebarMenuItem className="relative">
             <SidebarMenuButton
@@ -117,13 +144,32 @@ export function NavOrg() {
               </>
             )}
           </SidebarMenuItem>
+
+          <SidebarNavLink
+            to="/schedules"
+            icon={Calendar}
+            label={t("nav.schedules")}
+            isActive={location.pathname.startsWith("/schedules")}
+          />
         </SidebarMenu>
       </SidebarGroup>
 
-      <SidebarGroup>
-        <SidebarGroupLabel>{t("nav.sectionResources")}</SidebarGroupLabel>
-        <SidebarMenu>{renderItems(resourceItems)}</SidebarMenu>
-      </SidebarGroup>
+      <Collapsible defaultOpen className="group/collapsible">
+        <SidebarGroup>
+          <SidebarGroupLabel
+            asChild
+            className="group/label hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          >
+            <CollapsibleTrigger>
+              {t("nav.sectionResources")}
+              <ChevronRight className="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-90" />
+            </CollapsibleTrigger>
+          </SidebarGroupLabel>
+          <CollapsibleContent>
+            <SidebarMenu>{renderItems(resourceItems)}</SidebarMenu>
+          </CollapsibleContent>
+        </SidebarGroup>
+      </Collapsible>
 
       {adminItems.length > 0 && (
         <SidebarGroup>

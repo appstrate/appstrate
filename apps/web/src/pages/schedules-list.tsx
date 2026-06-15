@@ -2,13 +2,13 @@
 
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Calendar } from "lucide-react";
+import { Calendar, Plus } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { Button } from "@/components/ui/button";
 import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
-import { PageHeader } from "../components/page-header";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { LoadingState, ErrorState } from "../components/page-states";
+import { RichEmptyState } from "../components/rich-empty-state";
 import { ScheduleCard } from "../components/schedule-card";
 
 export function SchedulesListPage() {
@@ -18,44 +18,57 @@ export function SchedulesListPage() {
   const { data: schedules, isLoading, error } = useAllSchedules();
   const { data: agents } = useAgents();
 
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
-
   const getAgentName = (packageId: string) =>
     agents?.find((f) => f.id === packageId)?.display_name ?? packageId;
 
   return (
-    <div className="p-6">
-      <PageHeader
-        title={t("schedules.title")}
-        emoji="📅"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("schedules.title") },
-        ]}
-        actions={
-          isMember ? (
-            <Button onClick={() => navigate("/schedules/new")}>{t("schedules.create")}</Button>
-          ) : undefined
-        }
-      />
-
-      {!schedules || schedules.length === 0 ? (
-        <EmptyState message={t("schedules.empty")} hint={t("schedules.emptyHint")} icon={Calendar}>
-          {isMember && (
-            <Button onClick={() => navigate("/schedules/new")}>{t("schedules.create")}</Button>
-          )}
-        </EmptyState>
+    <div className="mx-auto w-full max-w-[1300px] p-8 pb-16">
+      {isLoading ? (
+        <LoadingState />
+      ) : error ? (
+        <ErrorState message={error.message} />
       ) : (
-        <div className="space-y-2">
-          {schedules.map((sched) => (
-            <ScheduleCard
-              key={sched.id}
-              schedule={sched}
-              agentName={getAgentName(sched.packageId)}
+        <>
+          <div className="mb-5 flex flex-wrap items-center gap-4">
+            <div className="flex items-baseline gap-2.5">
+              <h1 className="text-[1.6rem] font-bold tracking-tight">{t("schedules.title")}</h1>
+              <span className="text-muted-foreground text-sm">
+                {schedules?.length ?? 0} {t("schedules.title").toLowerCase()}
+              </span>
+            </div>
+            <span className="flex-1" />
+            {isMember && (
+              <Button onClick={() => navigate("/schedules/new")}>
+                <Plus className="size-4" /> {t("schedules.create")}
+              </Button>
+            )}
+          </div>
+
+          {!schedules || schedules.length === 0 ? (
+            <RichEmptyState
+              icon={Calendar}
+              title={t("schedules.empty")}
+              description={t("schedules.emptyHint")}
+              action={
+                isMember ? (
+                  <Button onClick={() => navigate("/schedules/new")}>
+                    <Plus className="size-4" /> {t("schedules.create")}
+                  </Button>
+                ) : undefined
+              }
             />
-          ))}
-        </div>
+          ) : (
+            <div className="space-y-2">
+              {schedules.map((sched) => (
+                <ScheduleCard
+                  key={sched.id}
+                  schedule={sched}
+                  agentName={getAgentName(sched.packageId)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

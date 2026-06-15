@@ -71,7 +71,7 @@
   "validation.slugFormat": "Lettres minuscules, chiffres et tirets uniquement",
   "validation.emailFormat": "Adresse email invalide",
   "viewManifest": "Voir le manifest",
-  "dashboard.welcome": "Bienvenue, {{name}} \ud83d\udc4b",
+  "dashboard.welcome": "Bienvenue, {{name}} 👋",
   "notifications.ariaLabel": "Notifications",
   "notifications.title": "Notifications",
   "notifications.empty": "Aucune notification",
@@ -103,5 +103,8 @@
   "claim.passwordHelp": "8 caractères minimum.",
   "claim.submit": "Réclamer l'instance",
   "claim.submitting": "Création du compte…",
-  "claim.docs": "Documentation : examples/self-hosting/AUTH_MODES.md"
+  "claim.docs": "Documentation : examples/self-hosting/AUTH_MODES.md",
+  "search.placeholder": "Rechercher…",
+  "search.empty": "Aucun résultat.",
+  "search.navigation": "Navigation"
 }

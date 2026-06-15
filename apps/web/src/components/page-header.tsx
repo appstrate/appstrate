@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { cn } from "@/lib/utils";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -23,11 +24,30 @@ interface PageHeaderProps {
   breadcrumbs?: BreadcrumbEntry[];
   actions?: ReactNode;
   children?: ReactNode;
+  /**
+   * Sticks the header to the top of the scroll area (detail-page chrome).
+   * Full-bleeds out of the page's `p-6` padding so the bottom border spans
+   * the full width, mirroring Apify's pinned entity header.
+   */
+  sticky?: boolean;
 }
 
-export function PageHeader({ title, emoji, breadcrumbs, actions, children }: PageHeaderProps) {
+export function PageHeader({
+  title,
+  emoji,
+  breadcrumbs,
+  actions,
+  children,
+  sticky,
+}: PageHeaderProps) {
   return (
-    <div className="mb-4">
+    <div
+      className={cn(
+        "mb-4",
+        sticky &&
+          "bg-background sticky top-0 z-20 -mx-6 border-b px-6 pt-4 pb-3",
+      )}
+    >
       {breadcrumbs && breadcrumbs.length > 0 && (
         <Breadcrumb className="mb-2">
           <BreadcrumbList>

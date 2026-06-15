@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, lazy, Suspense } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import {
   Routes,
   Route,
@@ -8,7 +8,6 @@ import {
   useLocation,
   useSearchParams,
   Navigate,
-  Link,
 } from "react-router-dom";
 import { PackageList } from "./pages/package-list";
 import { UnifiedPackageDetailPage } from "./pages/unified-package-detail";
@@ -62,8 +61,8 @@ import { ResetPasswordPage } from "./pages/reset-password";
 import { MagicLinkPage } from "./pages/magic-link";
 import { ErrorBoundary } from "./components/error-boundary";
 import { AppSidebar } from "./components/app-sidebar";
-import { NotificationBell } from "./components/notification-bell";
-import { ThemeToggle } from "./components/theme-toggle";
+import { TopNav } from "./components/top-nav";
+import { MobileNav } from "./components/mobile-nav";
 import { LoadingState } from "./components/page-states";
 
 import { useAuth } from "./hooks/use-auth";
@@ -71,11 +70,7 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useApplicationResolver } from "./hooks/use-current-application";
-import { useTheme } from "./stores/theme-store";
-import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
-import { Separator } from "@/components/ui/separator";
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 
 // Module-owned pages live under `apps/web/src/modules/<name>/` and are
@@ -94,37 +89,22 @@ const AuthCallbackPage = lazy(() =>
 );
 
 function MainLayout() {
-  const { resolvedTheme } = useTheme();
-  const { open: sidebarOpen, setOpen: setSidebarOpen } = useSidebarStore();
   useApplicationResolver();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
-    <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
-      <AppSidebar />
-      <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-          <div className="flex items-center gap-2 px-4">
-            <SidebarTrigger className="-ml-1" />
-            <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
-            <Link to="/">
-              <img
-                src={resolvedTheme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
-                alt="Appstrate"
-                className="h-7 w-auto"
-              />
-            </Link>
+    <div className="bg-frame text-foreground flex h-svh w-full flex-col overflow-hidden">
+      <TopNav onMenuClick={() => setMobileNavOpen(true)} />
+      <MobileNav open={mobileNavOpen} onOpenChange={setMobileNavOpen} />
+      <div className="flex min-h-0 min-w-0 flex-1">
+        <AppSidebar />
+        <main className="bg-card border-border flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:mr-3 md:rounded-t-2xl md:border-t md:border-r md:border-l">
+          <div className="flex-1 overflow-y-auto">
+            <Outlet />
           </div>
-          <div className="flex-1" />
-          <div className="flex items-center gap-1 px-4">
-            <ThemeToggle />
-            <NotificationBell />
-          </div>
-        </header>
-        <div className="flex flex-1 flex-col">
-          <Outlet />
-        </div>
-      </SidebarInset>
-    </SidebarProvider>
+        </main>
+      </div>
+    </div>
   );
 }
 

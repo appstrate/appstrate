@@ -45,6 +45,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 COPY --from=deps /app/packages/afps-runtime/node_modules ./packages/afps-runtime/node_modules
+COPY --from=deps /app/packages/afps-shared/node_modules ./packages/afps-shared/node_modules
 COPY --from=deps /app/packages/connect/node_modules ./packages/connect/node_modules
 COPY --from=deps /app/packages/core/node_modules ./packages/core/node_modules
 COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
@@ -71,6 +72,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=deps /app/packages/afps-runtime/node_modules ./packages/afps-runtime/node_modules
+COPY --from=deps /app/packages/afps-shared/node_modules ./packages/afps-shared/node_modules
 COPY --from=deps /app/packages/connect/node_modules ./packages/connect/node_modules
 COPY --from=deps /app/packages/core/node_modules ./packages/core/node_modules
 COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules

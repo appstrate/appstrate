@@ -2,13 +2,30 @@
 
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Shield } from "lucide-react";
+import { Activity } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
 import { cn } from "@/lib/utils";
 import { formatDateField } from "../lib/markdown";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
+
+/** Shared column grid between the data-table header and its rows. */
+export const RUN_GRID =
+  "grid grid-cols-[58px_minmax(0,1fr)_104px_82px] items-center gap-3 sm:grid-cols-[64px_minmax(0,1fr)_112px_124px_84px_96px]";
+
+const TINTS = [
+  "bg-primary-soft text-primary",
+  "bg-spark-soft text-spark",
+  "bg-success-soft text-success",
+  "bg-warning-soft text-warning",
+];
+
+function tintFor(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return TINTS[h % TINTS.length]!;
+}
 
 export function RunRow({
   run,
@@ -26,11 +43,8 @@ export function RunRow({
   const date = run.started_at ? formatDateField(run.started_at) : "";
   const isInline = run.package_ephemeral === true;
   const isRemote = run.runOrigin === "remote";
-  // Source agent deleted (FK SET NULL after migration 0017): the run row
-  // survives but `/agents/:packageId/runs/:id` would 404. Render as a static
-  // row pointing at the global run page instead, and surface a discreet
-  // badge so users understand why "Re-run" / agent-config links are gone.
   const isOrphaned = run.packageId == null && !isInline;
+  const tint = tintFor(run.packageId ?? run.agent_name ?? run.id);
 
   // Live elapsed timer while running
   const [elapsed, setElapsed] = useState(0);
@@ -44,56 +58,70 @@ export function RunRow({
   }, [isRunning, run.started_at]);
 
   const time = isRunning ? elapsed : run.duration;
-  const duration = time ? `${(time / 1000).toFixed(1)}s` : "";
+  const duration = time ? `${(time / 1000).toFixed(1)}s` : "—";
+
+  const flagBadge = (label: string, title?: string) => (
+    <span
+      className="border-border text-muted-foreground hidden shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase sm:inline-block"
+      title={title}
+    >
+      {label}
+    </span>
+  );
 
   const content = (
-    <div className="flex min-w-0 flex-1 items-center gap-2">
-      {run.runNumber != null && (
-        <span className="text-muted-foreground shrink-0 font-mono text-xs">#{run.runNumber}</span>
-      )}
-      {agentName && <span className="truncate font-medium">{agentName}</span>}
-      <Badge status={run.status} compact unread={isUnread} />
-      {isInline && (
-        <span className="border-border text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase">
-          {t("runs.inlineBadge")}
-        </span>
-      )}
-      {isOrphaned && (
+    <>
+      {/* N° */}
+      <div className="flex items-center gap-1.5">
         <span
-          className="border-border text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase italic"
-          title={t("runs.deletedAgentTitle")}
-        >
-          {t("runs.deletedAgentBadge")}
+          className="bg-spark size-1.5 shrink-0 rounded-full"
+          style={{ visibility: isUnread ? "visible" : "hidden" }}
+        />
+        <span className="text-muted-foreground font-mono text-xs tabular-nums">
+          {run.runNumber != null ? `#${run.runNumber}` : "—"}
         </span>
-      )}
-      {isRemote && (
-        <span
-          className="border-border text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
-          title={t("runs.remoteBadgeTitle")}
-        >
-          {t("runs.remoteBadge")}
-        </span>
-      )}
-
-      <RunTrigger run={run} />
-
-      {run.proxy_label && (
-        <Shield size={12} className="text-muted-foreground hidden shrink-0 sm:block" />
-      )}
-      <div className="ml-auto flex shrink-0 items-center gap-2">
-        {duration && (
-          <span className="text-muted-foreground hidden font-mono text-xs sm:inline">
-            {duration}
-          </span>
-        )}
-        <span className="text-muted-foreground text-xs">{date}</span>
       </div>
-    </div>
+
+      {/* Agent */}
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span
+          className={cn(
+            "flex size-7 shrink-0 items-center justify-center rounded-md",
+            tint,
+          )}
+        >
+          <Activity className="size-3.5" />
+        </span>
+        <span className="truncate font-medium">{agentName ?? run.agent_name ?? run.packageId}</span>
+        {isInline && flagBadge(t("runs.inlineBadge"))}
+        {isOrphaned && flagBadge(t("runs.deletedAgentBadge"), t("runs.deletedAgentTitle"))}
+        {isRemote && flagBadge(t("runs.remoteBadge"), t("runs.remoteBadgeTitle"))}
+      </div>
+
+      {/* Statut */}
+      <div className="flex">
+        <Badge status={run.status} compact unread={isUnread} />
+      </div>
+
+      {/* Déclencheur */}
+      <div className="hidden min-w-0 sm:flex">
+        <RunTrigger run={run} />
+      </div>
+
+      {/* Durée */}
+      <div className="text-muted-foreground hidden font-mono text-xs tabular-nums sm:block">
+        {duration}
+      </div>
+
+      {/* Heure */}
+      <div className="text-muted-foreground truncate text-right text-xs sm:text-left">{date}</div>
+    </>
   );
 
   const className = cn(
-    "flex items-center gap-2 px-3 py-3 text-sm transition-colors sm:py-2",
-    !disableLink && "hover:bg-muted/50",
+    RUN_GRID,
+    "border-border/70 min-h-[52px] border-b px-4 py-2 text-sm last:border-b-0",
+    !disableLink && "hover:bg-accent/50 cursor-pointer transition-colors",
   );
 
   if (disableLink || isOrphaned) {

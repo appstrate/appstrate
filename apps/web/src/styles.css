@@ -25,9 +25,18 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
   --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
   --color-info: var(--info);
-  --radius: 0.5rem;
+  --color-spark: var(--spark);
+  --color-spark-foreground: var(--spark-foreground);
+  --color-spark-soft: var(--spark-soft);
+  --color-frame: var(--frame);
+  --color-primary-soft: var(--primary-soft);
+  --radius: 0.5625rem;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -43,36 +52,60 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.623 0.214 259);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.556 0 0);
-  --success: oklch(0.696 0.17 142);
-  --warning: oklch(0.769 0.188 70);
-  --info: oklch(0.623 0.214 259);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.37 0.012 286);
-  --sidebar-primary: oklch(0.21 0.006 286);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.968 0 0);
-  --sidebar-accent-foreground: oklch(0.21 0.006 286);
-  --sidebar-border: oklch(0.928 0.006 265);
-  --sidebar-ring: oklch(0.623 0.188 260);
+  /* Appstrate redesign — palette claire (carte blanche sur frame gris) */
+  --background: #ffffff;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+
+  /* Accent primaire (bleu produit) */
+  --primary: #2f6fed;
+  --primary-foreground: #ffffff;
+  --primary-soft: #eaf1fe;
+
+  /* Neutres / surfaces discrètes */
+  --secondary: #efeff3;
+  --secondary-foreground: #18181b;
+  --muted: #efeff3;
+  --muted-foreground: #6b7280;
+  --accent: #efeff3;
+  --accent-foreground: #18181b;
+
+  /* Spark (corail du logo) — compteurs, notifications, avatar */
+  --spark: #f2683c;
+  --spark-foreground: #ffffff;
+  --spark-soft: #fdede4;
+
+  /* Statuts (tons doux + encre) */
+  --destructive: #c0392b;
+  --destructive-foreground: #ffffff;
+  --success: #157f45;
+  --success-foreground: #ffffff;
+  --success-soft: #e6f6ec;
+  --warning: #9a6b12;
+  --warning-foreground: #ffffff;
+  --warning-soft: #fbf0d9;
+  --info: #2f6fed;
+
+  /* Bordures & focus */
+  --border: #e7e7eb;
+  --input: #e7e7eb;
+  --ring: #2f6fed;
+
+  /* Cadre gris derrière la carte de contenu */
+  --frame: #f7f7f9;
+
+  /* Sidebar (intégrée au frame gris) */
+  --sidebar: #f7f7f9;
+  --sidebar-foreground: #18181b;
+  --sidebar-primary: #2f6fed;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgba(17, 17, 20, 0.06);
+  --sidebar-accent-foreground: #18181b;
+  --sidebar-border: #e7e7eb;
+  --sidebar-ring: #2f6fed;
 }
 
 .dark {

@@ -47,6 +47,7 @@ export function SharedHeader({
   return (
     <>
       <PageHeader
+        sticky
         title={detail.displayName}
         emoji={emojiMap[detail.type]}
         breadcrumbs={[

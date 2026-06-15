@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { useParams, useLocation } from "react-router-dom";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
@@ -17,18 +18,40 @@ import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LogViewer } from "../components/log-viewer";
 import { buildLogEntries, type RawLog } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
-import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
-import { RunRow } from "../components/run-row";
+import { Badge } from "../components/status-badge";
 import { useMarkRead } from "../hooks/use-notifications";
 import { ACTIVE_RUN_STATUSES, type RunLog, type EnrichedRun } from "@appstrate/shared-types";
-import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
 import { Markdown } from "../components/markdown";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { MemoryPanel } from "../components/persistence/memory-panel";
-import { Play } from "lucide-react";
+import { Play, ArrowLeft, Activity } from "lucide-react";
+
+const META_TINTS = [
+  "bg-primary-soft text-primary",
+  "bg-spark-soft text-spark",
+  "bg-success-soft text-success",
+  "bg-warning-soft text-warning",
+];
+
+function tintFor(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return META_TINTS[h % META_TINTS.length]!;
+}
+
+function MetaCell({ k, v, mono }: { k: string; v: React.ReactNode; mono?: boolean }) {
+  return (
+    <div className="border-border/70 border-b border-r p-3 last:border-r-0 sm:border-b-0">
+      <div className="text-muted-foreground text-[0.66rem] font-semibold tracking-wide uppercase">
+        {k}
+      </div>
+      <div className={cn("mt-0.5 text-sm font-semibold", mono && "font-mono font-medium")}>{v}</div>
+    </div>
+  );
+}
 
 export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -38,6 +61,7 @@ export function RunDetailPage() {
   // filtered from catalog endpoints so the query would 404 on every view.
   const isInlinePath = packageId.startsWith("@inline/");
   const location = useLocation();
+  const navigate = useNavigate();
   const stateNumber = (location.state as { runNumber?: number } | null)?.runNumber;
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
@@ -147,38 +171,113 @@ export function RunDetailPage() {
   if (error || !run) return <ErrorState message={error?.message} />;
 
   const enrichedRun = run;
-  const date = run.started_at ? formatDateField(run.started_at) : "";
   const isInline = enrichedRun.package_ephemeral === true;
+  const agentName = isInline
+    ? enrichedRun.agent_name
+      ? `${enrichedRun.agent_name} (${t("runs.inlineBadge").toLowerCase()})`
+      : t("runs.inlineBadge")
+    : agent?.display_name || packageId || "";
 
-  // For inline runs the agent crumb *is* the last crumb (the run itself),
-  // so omit href — PageHeader renders it as the current-page indicator.
-  const agentCrumb = isInline
-    ? {
-        label: enrichedRun.agent_name
-          ? `${enrichedRun.agent_name} (${t("runs.inlineBadge").toLowerCase()})`
-          : t("runs.inlineBadge"),
-      }
-    : { label: agent?.display_name || packageId || "", href: `/agents/${packageId}` };
+  const STATUS_LABEL: Record<string, string> = {
+    success: t("exec.statusSuccess", { defaultValue: "Réussi" }),
+    failed: t("exec.statusFailed", { defaultValue: "Échoué" }),
+    running: t("exec.statusRunning", { defaultValue: "En cours" }),
+    pending: t("exec.statusPending", { defaultValue: "En attente" }),
+    timeout: t("exec.statusTimeout", { defaultValue: "Expiré" }),
+    cancelled: t("exec.statusCancelled", { defaultValue: "Annulé" }),
+  };
+  const statusLabel = STATUS_LABEL[status ?? "pending"] ?? status ?? "";
 
-  const runCrumbLabel = runNumber
-    ? t("exec.breadcrumb", { number: runNumber })
-    : date || runId?.slice(0, 8) || "";
+  const durationText = isRunning
+    ? "—"
+    : run.duration != null
+      ? run.duration >= 60000
+        ? `${Math.floor(run.duration / 60000)}m ${Math.round((run.duration % 60000) / 1000)}s`
+        : `${(run.duration / 1000).toFixed(1)}s`
+      : "—";
 
-  // Inline agents are 1:1 with their single run — the agent crumb already
-  // identifies the run, so a trailing "Run #N" crumb is redundant.
-  const breadcrumbs = [
-    { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-    { label: t("detail.breadcrumb"), href: "/agents" },
-    agentCrumb,
-    ...(isInline ? [] : [{ label: runCrumbLabel }]),
-  ];
+  const triggerLabel = enrichedRun.scheduleId
+    ? t("runs.triggerSchedule", { defaultValue: "Planification" })
+    : enrichedRun.apiKeyId
+      ? t("runs.triggerApi", { defaultValue: "API" })
+      : t("runs.triggerManual", { defaultValue: "Manuel" });
+
+  const tint = tintFor(packageId);
+  const liveUsage = run.token_usage as {
+    input_tokens?: number;
+    output_tokens?: number;
+  } | null;
+  const totalTokens = (liveUsage?.input_tokens ?? 0) + (liveUsage?.output_tokens ?? 0);
 
   return (
-    <div className="p-6">
-      <PageHeader title={runCrumbLabel} emoji="▶️" breadcrumbs={breadcrumbs} />
+    <div className="mx-auto w-full max-w-[1100px] p-8 pb-16">
+      <button
+        type="button"
+        onClick={() => navigate(isInline ? "/runs" : `/agents/${packageId}`)}
+        className="text-muted-foreground hover:text-foreground mb-4 inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
+      >
+        <ArrowLeft className="size-4" /> {t("btn.back", { ns: "common", defaultValue: "Retour" })}
+      </button>
 
-      <div className="border-border mb-4 rounded-md border">
-        <RunRow run={enrichedRun} disableLink />
+      {/* Entity header */}
+      <div className="mb-5 flex flex-wrap items-start gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <span
+            className={cn(
+              "flex size-11 shrink-0 items-center justify-center rounded-[10px]",
+              tint,
+            )}
+          >
+            <Activity className="size-[22px]" />
+          </span>
+          <div className="min-w-0">
+            <h1 className="truncate text-[1.4rem] font-bold tracking-tight">{agentName}</h1>
+            <div className="text-muted-foreground mt-0.5 truncate font-mono text-xs">
+              {runNumber != null ? `run #${runNumber} · ` : ""}
+              {runId}
+            </div>
+          </div>
+          <Badge status={run.status} />
+        </div>
+
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <div className="text-muted-foreground bg-muted/50 flex items-center gap-2 rounded-md px-2.5 py-1 text-xs tabular-nums">
+            {isRunning && (
+              <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
+            )}
+            <span>{totalTokens.toLocaleString()} tokens</span>
+            <span aria-hidden>·</span>
+            <span className="text-foreground font-medium">${(run.cost ?? 0).toFixed(4)}</span>
+          </div>
+          {!isRunning && !isInline && agent && (
+            <Button variant="outline" size="sm" onClick={() => setInputOpen(true)}>
+              <Play className="size-3.5" />
+              {t("exec.rerun")}
+            </Button>
+          )}
+          {isRunning && enrichedRun.runOrigin !== "remote" && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => cancelRun.mutate(runId!)}
+              disabled={cancelRun.isPending}
+            >
+              {cancelRun.isPending && <Spinner />} {t("btn.cancel")}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Meta grid */}
+      <div className="border-border bg-card mb-5 grid grid-cols-2 overflow-hidden rounded-[var(--radius)] border shadow-sm sm:grid-cols-4">
+        <MetaCell k={t("exec.metaStatus", { defaultValue: "Statut" })} v={statusLabel} />
+        <MetaCell k={t("exec.metaDuration", { defaultValue: "Durée" })} v={durationText} mono />
+        <MetaCell k={t("exec.metaTrigger", { defaultValue: "Déclencheur" })} v={triggerLabel} />
+        <MetaCell
+          k={t("exec.metaCost", { defaultValue: "Coût" })}
+          v={`$${(run.cost ?? 0).toFixed(4)}`}
+          mono
+        />
       </div>
 
       {agent && (
@@ -203,7 +302,7 @@ export function RunDetailPage() {
         </div>
       )}
 
-      <div className="mb-4 flex items-center justify-between gap-4">
+      <div className="mb-4">
         <Tabs
           value={activeTab}
           onValueChange={(v) => setActiveTab(v as "logs" | "result" | "memory" | "info")}
@@ -229,50 +328,6 @@ export function RunDetailPage() {
             <TabsTrigger value="info">{t("exec.tabInfo")}</TabsTrigger>
           </TabsList>
         </Tabs>
-        <div className="flex items-center gap-2">
-          {/* Token + cost readout — shown at all times (pending, running,
-              terminal). While the run is active the pulse dot animates and
-              `onMetric` SSE patches `run.token_usage` + `run.cost` in place
-              at the throttled 250 ms cadence; once finalized, the same
-              fields hold the authoritative aggregate written by
-              `finalizeRun`. Defaults to zeros for runs that never produced
-              tokens (the readout is structural, not conditional on data). */}
-          {(() => {
-            const liveUsage = run.token_usage as {
-              input_tokens?: number;
-              output_tokens?: number;
-            } | null;
-            const totalTokens = (liveUsage?.input_tokens ?? 0) + (liveUsage?.output_tokens ?? 0);
-            return (
-              <div className="text-muted-foreground bg-muted/50 flex items-center gap-2 rounded-md px-2.5 py-1 text-xs tabular-nums">
-                {isRunning && (
-                  <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
-                )}
-                <span>{totalTokens.toLocaleString()} tokens</span>
-                <span aria-hidden>·</span>
-                <span className="text-foreground font-medium">${(run.cost ?? 0).toFixed(4)}</span>
-              </div>
-            );
-          })()}
-          {!isRunning && !isInline && agent && (
-            <Button variant="outline" size="sm" onClick={() => setInputOpen(true)}>
-              <Play className="size-3.5" />
-              {t("exec.rerun")}
-            </Button>
-          )}
-          {/* Cancel hidden for remote-origin runs — the process runs on the
-              caller's host and the platform cannot signal it. A soft-cancel
-              (server flag + CLI poll) is tracked as a follow-up. */}
-          {isRunning && enrichedRun.runOrigin !== "remote" && (
-            <Button
-              variant="destructive"
-              onClick={() => cancelRun.mutate(runId!)}
-              disabled={cancelRun.isPending}
-            >
-              {cancelRun.isPending && <Spinner />} {t("btn.cancel")}
-            </Button>
-          )}
-        </div>
       </div>
 
       {activeTab === "result" && hasResult && (

@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PlayCircle } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { usePaginatedRuns, type RunKindFilter } from "../hooks/use-paginated-runs";
 import { useAgents } from "../hooks/use-packages";
-import { RunRow } from "./run-row";
+import { RunRow, RUN_GRID } from "./run-row";
 import { EmptyState } from "./page-states";
 import type { EnrichedRun } from "@appstrate/shared-types";
 
@@ -29,6 +30,8 @@ interface RunListProps {
   user?: "me";
   /** Filter runs by kind -- "all" | "package" | "inline" */
   kind?: RunKindFilter;
+  /** Show the data-table column header (default true) */
+  showHeader?: boolean;
 }
 
 export function RunList({
@@ -42,6 +45,7 @@ export function RunList({
   firstPageBanner,
   user,
   kind,
+  showHeader = true,
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
   const [page, setPage] = useState(0);
@@ -99,8 +103,23 @@ export function RunList({
   };
 
   return (
-    <div className="space-y-2">
-      <div className="border-border rounded-md border">
+    <div className="space-y-3">
+      <div className="border-border bg-card overflow-hidden rounded-[var(--radius)] border shadow-sm">
+        {showHeader && (
+          <div
+            className={cn(
+              RUN_GRID,
+              "border-border text-muted-foreground h-10 border-b px-4 text-[0.72rem] font-semibold tracking-wide uppercase",
+            )}
+          >
+            <div>{t("runs.colNumber", { defaultValue: "N°" })}</div>
+            <div>{t("runs.colAgent", { defaultValue: "Agent" })}</div>
+            <div>{t("runs.colStatus", { defaultValue: "Statut" })}</div>
+            <div className="hidden sm:block">{t("runs.colTrigger", { defaultValue: "Déclencheur" })}</div>
+            <div className="hidden sm:block">{t("runs.colDuration", { defaultValue: "Durée" })}</div>
+            <div>{t("runs.colTime", { defaultValue: "Heure" })}</div>
+          </div>
+        )}
         {page === 0 && firstPageBanner}
         {runs.map((run) => (
           <RunRow key={run.id} run={run} agentName={resolveAgentName(run)} />
