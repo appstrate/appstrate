@@ -251,7 +251,18 @@ export function createS3Storage(config: S3StorageConfig): Storage {
         ...(opts?.mime ? { ContentType: opts.mime } : {}),
         ...(opts?.maxSize && opts.maxSize > 0 ? { ContentLength: opts.maxSize } : {}),
       });
-      const url = await getSignedUrl(presignClient, cmd, { expiresIn });
+      // `@aws-sdk/s3-request-presigner` and `@aws-sdk/client-s3` resolve to
+      // different physical `@smithy/core` copies in the lockfile (transitive
+      // aws-sdk deps pulled by other packages sit on an older smithy generation
+      // than our direct s3 deps), so the shared `Client` base class has two
+      // structurally identical but nominally distinct declarations. `S3Client`
+      // is a valid argument at runtime; the cast bridges that type-identity gap
+      // without widening to `any` (the command + options stay type-checked).
+      const url = await getSignedUrl(
+        presignClient as unknown as Parameters<typeof getSignedUrl>[0],
+        cmd as unknown as Parameters<typeof getSignedUrl>[1],
+        { expiresIn },
+      );
       // Clients must echo the headers bound into the signature. Content-Length
       // is a forbidden header in browsers — fetch()/XHR set it automatically
       // from the body, so echoing the descriptor verbatim stays safe there;
