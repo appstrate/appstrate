@@ -94,6 +94,12 @@ export function createAgentsRouter() {
           mcp_servers: (manifest.dependencies?.mcp_servers ?? {}) as Record<string, string>,
           integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
         },
+        // Built-in runtime tools the agent opted into (`manifest.runtime_tools`):
+        // output/log/note/pin/report. Lets clients tell whether an agent can
+        // narrate (`log`) or report (`report`) before a run produces anything.
+        runtime_tools: Array.isArray(manifest.runtime_tools)
+          ? manifest.runtime_tools.filter((t) => typeof t === "string")
+          : [],
         running_runs: runningCounts[row.id] ?? 0,
         source: row.source ?? "local",
         // Canonical scope format includes the `@` sigil (e.g. "@myorg") so

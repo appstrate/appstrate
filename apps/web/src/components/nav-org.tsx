@@ -13,6 +13,7 @@ import {
   Loader2,
   Users,
   Boxes,
+  MessageSquare,
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
@@ -50,6 +51,8 @@ export function NavOrg() {
 
   const beforeRunsItems = [
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
+    // Module-contributed product surfaces (absent flag = entry hidden)
+    ...(features.chat ? [{ path: "/chat", label: t("nav.chat"), icon: MessageSquare }] : []),
     { path: "/agents", label: t("nav.agents"), icon: Layers },
     { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
   ];

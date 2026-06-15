@@ -11,7 +11,7 @@
  */
 
 import { z } from "zod";
-import type { Hono } from "hono";
+import type { Hono, MiddlewareHandler } from "hono";
 import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
@@ -950,6 +950,19 @@ export interface ModuleInitContext {
 export interface PlatformServices {
   /** Structured JSON logger (pino). */
   logger: Logger;
+  /**
+   * HTTP middleware factories for module routes.
+   *
+   * `rateLimit(maxPerMinute)` returns the platform's authenticated
+   * per-route limiter (keyed on user id / API key + method + path,
+   * Redis-backed under Redis, in-memory otherwise, IETF RateLimit
+   * headers, 429 with Retry-After). Modules capture `services` at init
+   * and wire the factory into their routers — same guard semantics as
+   * every core route, no parallel implementation.
+   */
+  http: {
+    rateLimit(maxPerMinute: number): MiddlewareHandler;
+  };
   /** Run-ledger read surface. */
   runs: {
     /**

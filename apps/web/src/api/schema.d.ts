@@ -4171,6 +4171,8 @@ export interface components {
                     [key: string]: string;
                 };
             };
+            /** @description Built-in runtime tools the agent opted into via `manifest.runtime_tools` (output/log/note/pin/report). */
+            runtime_tools?: string[];
         };
         /** @description AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema. Most extension fields use the x- prefix per AFPS §10, with the exception of the Appstrate-specific top-level `runtime_tools` field documented below. */
         AgentManifest: components["schemas"]["agent.schema"] & {
@@ -4458,6 +4460,8 @@ export interface components {
             id: string;
             label: string;
             apiShape: string;
+            /** @description The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. */
+            providerId: string;
             baseUrl: string;
             modelId: string;
             input?: string[] | null;

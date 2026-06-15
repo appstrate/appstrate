@@ -595,6 +595,13 @@ export interface OrgModelInfo extends ModelMetadata {
   /** Always set — resolvers fall back to catalog label then modelId. */
   label: string;
   apiShape: string;
+  /**
+   * The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`).
+   * Distinguishes subscription providers that share an `apiShape` with an
+   * API-key provider (`claude-code` vs `anthropic`, both `anthropic-messages`)
+   * — clients route them to the right proxy path.
+   */
+  providerId: string;
   baseUrl: string;
   modelId: string;
   enabled: boolean;

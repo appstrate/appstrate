@@ -12,11 +12,13 @@
 import { db } from "@appstrate/db/client";
 import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
+import type { MiddlewareHandler } from "hono";
 import type { ModuleInitContext, PlatformServices } from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
 
 // ---- Platform service imports (for buildPlatformServices) -----------------
 import { logger } from "../logger.ts";
+import { rateLimit } from "../../middleware/rate-limit.ts";
 import { listLlmUsageForRun } from "../../services/state/runs.ts";
 
 // ---------------------------------------------------------------------------
@@ -89,6 +91,11 @@ export function getModuleRegistry(): string[] {
 function buildPlatformServices(): PlatformServices {
   return {
     logger,
+    http: {
+      // Same authenticated limiter every core route uses — modules get
+      // identical guard semantics (keying, headers, 429 shape).
+      rateLimit: (maxPerMinute) => rateLimit(maxPerMinute) as MiddlewareHandler,
+    },
     runs: { listLlmUsage: listLlmUsageForRun },
   };
 }

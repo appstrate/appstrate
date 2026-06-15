@@ -78,6 +78,13 @@
       "when": 1781276923237,
       "tag": "0010_credential_available_models",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781549765807,
+      "tag": "0011_chat_module",
+      "breakpoints": true
     }
   ]
 }

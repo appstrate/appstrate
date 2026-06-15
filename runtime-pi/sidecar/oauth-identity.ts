@@ -27,6 +27,10 @@
  */
 
 import type { OAuthWireFormat, OAuthAdaptiveRetryPolicy } from "@appstrate/core/sidecar-types";
+import {
+  buildIdentityHeaders as coreBuildIdentityHeaders,
+  applyOAuthBodyTransform,
+} from "@appstrate/core/oauth-wire-format";
 import type { CachedToken } from "./oauth-token-cache.ts";
 import { MAX_REQUEST_BODY_SIZE } from "./helpers.ts";
 
@@ -58,12 +62,8 @@ export function buildIdentityHeaders(
   wireFormat: OAuthWireFormat | undefined,
   token: CachedToken,
 ): Record<string, string> {
-  if (!wireFormat) return {};
-  const headers: Record<string, string> = { ...(wireFormat.identityHeaders ?? {}) };
-  if (wireFormat.accountIdHeader && token.accountId) {
-    headers[wireFormat.accountIdHeader] = token.accountId;
-  }
-  return headers;
+  // Single source of truth shared with the first-party LLM proxy.
+  return coreBuildIdentityHeaders(wireFormat, token.accountId);
 }
 
 /**
@@ -86,57 +86,16 @@ export function buildIdentityHeaders(
 export function transformBody(wireFormat: OAuthWireFormat | undefined, bodyText: string): string {
   if (!bodyText) return bodyText;
 
+  // Sidecar-only guard: the buffered LLM body has no MCP-envelope cap, so
+  // bound it here before the parse + restringify round-trip.
   const byteLength = new TextEncoder().encode(bodyText).byteLength;
   if (byteLength > MAX_REQUEST_BODY_SIZE) {
     throw new TransformBodyTooLargeError(byteLength, MAX_REQUEST_BODY_SIZE);
   }
 
-  const wantsBodyTransform =
-    !!wireFormat?.systemPrepend ||
-    wireFormat?.forceStream !== undefined ||
-    wireFormat?.forceStore !== undefined;
-  if (!wantsBodyTransform) return bodyText;
-
-  let json: unknown;
-  try {
-    json = JSON.parse(bodyText);
-  } catch {
-    // Not JSON — pass through (defensive; LLM endpoints always JSON).
-    return bodyText;
-  }
-  if (!isPlainObject(json)) return bodyText;
-
-  if (wireFormat?.systemPrepend) {
-    applySystemPrepend(json, wireFormat.systemPrepend);
-  }
-  if (wireFormat?.forceStream !== undefined) json.stream = wireFormat.forceStream;
-  if (wireFormat?.forceStore !== undefined) json.store = wireFormat.forceStore;
-
-  return JSON.stringify(json);
-}
-
-interface SystemTextBlock {
-  type: "text";
-  text: string;
-}
-
-function applySystemPrepend(
-  json: Record<string, unknown>,
-  prepend: { type: "text"; text: string },
-): void {
-  const identityBlock: SystemTextBlock = { type: "text", text: prepend.text };
-
-  const system = json.system;
-  if (Array.isArray(system)) {
-    const first = system[0] as SystemTextBlock | undefined;
-    const alreadyPrepended = first?.type === "text" && first.text === prepend.text;
-    json.system = alreadyPrepended ? system : [identityBlock, ...system];
-  } else if (typeof system === "string") {
-    json.system =
-      system === prepend.text ? [identityBlock] : [identityBlock, { type: "text", text: system }];
-  } else {
-    json.system = [identityBlock];
-  }
+  // The transform itself is the single source of truth shared with the
+  // first-party LLM proxy (`@appstrate/core/oauth-wire-format`).
+  return applyOAuthBodyTransform(wireFormat, bodyText);
 }
 
 /**
@@ -194,8 +153,4 @@ export function adaptHeaderForRetry(
     next[originalKey] = filtered.join(", ");
   }
   return { headers: next };
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

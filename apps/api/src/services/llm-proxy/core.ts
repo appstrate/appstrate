@@ -29,6 +29,8 @@ import { parseProxyRequest } from "./helpers.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal, UpstreamUsage } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ModelCost } from "@appstrate/core/module";
+import { getModelProvider } from "../model-providers/registry.ts";
+import { buildIdentityHeaders, applyOAuthBodyTransform } from "@appstrate/core/oauth-wire-format";
 
 /** Maximum request body the proxy will accept before refusing up-front. */
 const DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
@@ -83,7 +85,19 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     inputs.adapter.apiShape,
   );
 
-  const rewrittenBody = request.rewriteModel(resolved.modelId);
+  let rewrittenBody = request.rewriteModel(resolved.modelId);
+
+  // Subscription providers (codex, claude-code) declare an `oauthWireFormat`
+  // on their module. Apply the SAME body transform the in-container sidecar
+  // applies (system prelude + stream/store coercion) so the first-party
+  // proxy path is byte-identical to the run path — both read the module as
+  // the single source of truth (`@appstrate/core/oauth-wire-format`).
+  const wireFormat = getModelProvider(resolved.providerId)?.oauthWireFormat;
+  if (wireFormat) {
+    rewrittenBody = new TextEncoder().encode(
+      applyOAuthBodyTransform(wireFormat, new TextDecoder().decode(rewrittenBody)),
+    );
+  }
 
   // Response-cache lookup. The cache is keyed on `(orgId, presetId,
   // apiShape, modelId, requestBody)` so cross-org / cross-preset
@@ -116,7 +130,13 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   const upstreamHeaders = inputs.adapter.buildUpstreamHeaders(
     inputs.incomingHeaders,
     resolved.apiKey,
+    resolved.accountId,
   );
+  // Module-declared identity headers (+ accountId echo) win over whatever
+  // the adapter set — same precedence as the sidecar.
+  if (wireFormat) {
+    Object.assign(upstreamHeaders, buildIdentityHeaders(wireFormat, resolved.accountId));
+  }
 
   const started = Date.now();
   let upstream: Response;

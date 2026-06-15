@@ -278,6 +278,12 @@ export const schemas = {
           integrations: { type: "object", additionalProperties: { type: "string" } },
         },
       },
+      runtime_tools: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Built-in runtime tools the agent opted into via `manifest.runtime_tools` (output/log/note/pin/report).",
+      },
     },
   },
   AgentDetail: {
@@ -1032,6 +1038,7 @@ export const schemas = {
       "id",
       "label",
       "apiShape",
+      "providerId",
       "baseUrl",
       "modelId",
       "enabled",
@@ -1046,6 +1053,11 @@ export const schemas = {
       id: { type: "string" },
       label: { type: "string" },
       apiShape: { type: "string" },
+      providerId: {
+        type: "string",
+        description:
+          "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path.",
+      },
       baseUrl: { type: "string" },
       modelId: { type: "string" },
       input: { type: ["array", "null"], items: { type: "string" } },

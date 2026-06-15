@@ -74,6 +74,7 @@
     "./platform-types": "./src/platform-types.ts",
     "./token-usage": "./src/token-usage.ts",
     "./sidecar-types": "./src/sidecar-types.ts",
+    "./oauth-wire-format": "./src/oauth-wire-format.ts",
     "./pairing-token": "./src/pairing-token.ts",
     "./jwt": "./src/jwt.ts",
     "./credential-template": "./src/credential-template.ts",

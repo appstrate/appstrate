@@ -18,17 +18,20 @@
  * spec explicitly resists premature abstraction so each route keeps its
  * own adapter binding instead of sharing a single dispatch table.
  *
- * Run-only shapes (no proxy route, by design):
- *   - `openai-codex-responses` (the `codex` OAuth subscription provider) and
- *     the `claude-code` subscription provider are **run-only**. Their
- *     credentials are short-lived OAuth subscription tokens the sidecar
- *     injects per-request inside the run sandbox; there is deliberately no
- *     `/api/llm-proxy/...` route that would hand a third-party caller a path
- *     to spend a user's personal subscription. A remote/CLI runner using one
- *     of these providers calls the upstream itself with its own token — it
- *     does not route through this proxy. (Note `claude-code` rides the
- *     `anthropic-messages` shape, which DOES have a route for API-key
- *     Anthropic; the subscription provider still never proxies.)
+ * Subscription shapes (FIRST-PARTY-ONLY proxy routes):
+ *   - `openai-codex-responses` (the `codex` ChatGPT subscription) and
+ *     `claude-code` (the Claude Pro/Max/Team subscription, on a dedicated
+ *     `/claude-code-messages/*` path so its OAuth wire format never reaches
+ *     the API-key Anthropic route) each have a proxy route restricted to
+ *     first-party interactive callers (`assertFirstPartyOnly`: dashboard
+ *     OIDC JWT or the chat module's in-process loopback). The invariant is
+ *     unchanged — an API key or external token can NEVER spend a personal
+ *     subscription; the org's own members through the org's own surfaces
+ *     can, the same trust boundary as the in-container sidecar already
+ *     serving these credentials to runs. Both apply their module's
+ *     declarative `oauthWireFormat` (identity headers + system prelude)
+ *     from the registry via `@appstrate/core/oauth-wire-format` — the same
+ *     single source of truth the sidecar reads.
  *
  * Security:
  *   - Bearer auth only — API keys with `llm-proxy:call` (headless) OR
@@ -53,7 +56,7 @@ import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest } from "../lib/errors.ts";
-import { assertBearerOnly } from "../lib/bearer-only.ts";
+import { assertBearerOnly, assertFirstPartyOnly } from "../lib/bearer-only.ts";
 import { recordLlmLatency } from "../observability/index.ts";
 import {
   proxyLlmCall,
@@ -63,6 +66,8 @@ import {
 import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
+import { codexResponsesAdapter } from "../services/llm-proxy/codex.ts";
+import { claudeCodeMessagesAdapter } from "../services/llm-proxy/claude-code.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -77,6 +82,8 @@ export function createLlmProxyRouter() {
     urlPath: string;
     upstreamPath: string;
     adapter: LlmProxyAdapter;
+    /** Restrict to first-party interactive callers (subscription routes). */
+    firstPartyOnly?: boolean;
   }> = [
     // `upstreamPath` mirrors each SDK's own path convention so a stored
     // `baseUrl` produces the same final URL whether pi-ai calls the
@@ -103,6 +110,30 @@ export function createLlmProxyRouter() {
       upstreamPath: "/v1/chat/completions",
       adapter: mistralConversationsAdapter,
     },
+    // Codex (ChatGPT subscription) — FIRST-PARTY ONLY. The blanket
+    // "subscriptions never proxy" rule protects against third parties
+    // (API keys, external tokens) spending a personal subscription; the
+    // org's own interactive surfaces (dashboard JWT, in-process chat
+    // loopback) are the same trust boundary as the in-container sidecar
+    // that already serves these credentials to runs. The OpenAI Responses
+    // provider appends `/responses` → urlPath ends at `/codex`.
+    {
+      urlPath: "/openai-codex-responses/codex/responses",
+      upstreamPath: "/codex/responses",
+      adapter: codexResponsesAdapter,
+      firstPartyOnly: true,
+    },
+    // Claude Code (Claude Pro/Max/Team subscription) — FIRST-PARTY ONLY,
+    // same boundary as codex. Shares the `anthropic-messages` apiShape with
+    // the API-key Anthropic route, but on a distinct path so the OAuth
+    // subscription wire format (Bearer + oauth beta + CLI fingerprint +
+    // system prelude) never reaches a third-party API-key caller.
+    {
+      urlPath: "/claude-code-messages/v1/messages",
+      upstreamPath: "/v1/messages",
+      adapter: claudeCodeMessagesAdapter,
+      firstPartyOnly: true,
+    },
   ];
 
   for (const entry of routes) {
@@ -110,7 +141,11 @@ export function createLlmProxyRouter() {
       entry.urlPath,
       rateLimit(limits.rate_per_min),
       requirePermission("llm-proxy", "call"),
-      async (c) => handleProxy(c, entry.adapter, entry.upstreamPath, limits),
+      async (c) => {
+        if (entry.firstPartyOnly)
+          assertFirstPartyOnly(c.get("authMethod"), "Subscription LLM proxy");
+        return handleProxy(c, entry.adapter, entry.upstreamPath, limits);
+      },
     );
   }
 
