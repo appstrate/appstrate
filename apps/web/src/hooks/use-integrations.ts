@@ -16,19 +16,44 @@ import { useTranslation } from "react-i18next";
 import type {
   ConsumingAgentSummary,
   IntegrationConnection,
-  IntegrationDetail,
+  IntegrationManifestView,
   IntegrationOAuthClient,
   IntegrationOrgDefault,
   IntegrationPin,
-  IntegrationSummary,
 } from "@appstrate/shared-types";
-import { $api, client, ApiError } from "../api/client";
+import { $api, client, ApiError, type paths } from "../api/client";
+
+// Spec-pinned narrowings for the two integration read endpoints. They take the
+// generated OpenAPI response shape verbatim (so a rename/removal of any
+// non-`manifest` field breaks compilation) and narrow only the freeform AFPS
+// `manifest` JSON to IntegrationManifestView — the single trust boundary the
+// legacy `api<IntegrationSummary>()` cast drew. This replaces a blind
+// `as IntegrationSummary[]` that erased the spec type and could hide drift on
+// every non-manifest field.
+type RawIntegrationSummary = NonNullable<
+  paths["/api/integrations"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
+>[number];
+export type IntegrationSummaryWire = Omit<RawIntegrationSummary, "manifest"> &
+  // `/api/integrations` supports `?fields=` projection, so the spec marks these
+  // optional; this hook never projects, so re-require what consumers read.
+  Required<Pick<RawIntegrationSummary, "id" | "orgId" | "source">> & {
+    manifest: IntegrationManifestView;
+  };
+type RawIntegrationDetail =
+  paths["/api/integrations/{packageId}"]["get"]["responses"]["200"]["content"]["application/json"];
+export type IntegrationDetailWire = Omit<RawIntegrationDetail, "manifest"> & {
+  manifest: IntegrationManifestView;
+};
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { useOrgScope } from "./use-org-scope";
 
 // Re-export wire types for component consumers — canonical definitions
 // live in `@appstrate/shared-types/integrations.ts`.
+// NB: the integration list/detail READ shapes are NOT re-exported from
+// shared-types — consumers must use the spec-derived IntegrationSummaryWire /
+// IntegrationDetailWire (above), the exact shape the hooks return, so a spec
+// rename/removal of any non-`manifest` field breaks compilation.
 export type {
   AgentIntegrationEntry,
   IntegrationAgentResolution,
@@ -36,10 +61,8 @@ export type {
   IntegrationAuthType,
   IntegrationCandidate,
   IntegrationConnection,
-  IntegrationDetail,
   IntegrationManifestAuth,
   IntegrationManifestView,
-  IntegrationSummary,
 } from "@appstrate/shared-types";
 
 // ─────────────────────────────────────────────
@@ -75,10 +98,8 @@ export function useIntegrations() {
     { params: { header: scope.header } },
     {
       enabled: scope.enabled,
-      // The spec types `manifest` as an open JSON object (AFPS manifests are
-      // dynamic); the shared wire types narrow it to IntegrationManifestView.
-      // Same trust boundary the legacy `api<IntegrationSummary>` cast drew.
-      select: (envelope) => envelope.data as IntegrationSummary[],
+      // Spec-pinned (see IntegrationSummaryWire): only `manifest` is narrowed.
+      select: (envelope) => envelope.data as IntegrationSummaryWire[],
     },
   );
 }
@@ -93,8 +114,8 @@ export function useIntegrationDetail(packageId: string | undefined) {
     },
     {
       enabled: scope.enabled && !!packageId,
-      // Spec `manifest` is an open JSON object — see useIntegrations.
-      select: (data) => data as IntegrationDetail,
+      // Spec-pinned (see IntegrationDetailWire): only `manifest` is narrowed.
+      select: (data) => data as IntegrationDetailWire,
     },
   );
 }

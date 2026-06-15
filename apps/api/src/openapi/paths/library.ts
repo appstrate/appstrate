@@ -80,7 +80,7 @@ export const libraryPaths = {
                     {
                       id: "pkg_inbox_triage",
                       type: "agent",
-                      source: "org",
+                      source: "local",
                       name: "Inbox Triage",
                       description: "Sorts incoming Gmail threads into priority buckets.",
                       installed_in: ["app_default"],

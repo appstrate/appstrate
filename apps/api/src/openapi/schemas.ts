@@ -80,6 +80,13 @@ export const schemas = {
   },
   User: {
     type: "object",
+    // Better-Auth-owned shape: the platform documents the three fields it
+    // relies on, but Better Auth also emits emailVerified/image/createdAt/
+    // updatedAt (+ the platform `realm` column). The SPA reads the user via the
+    // Better Auth client, not the generated OpenAPI type, so the full set is
+    // framework-owned — declare the response open rather than mirror an
+    // upstream shape that changes on Better Auth upgrades.
+    additionalProperties: true,
     required: ["id", "name", "email"],
     properties: {
       id: { type: "string" },

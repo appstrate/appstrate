@@ -4857,6 +4857,8 @@ export interface components {
             id: string;
             name: string;
             email: string;
+        } & {
+            [key: string]: unknown;
         };
         /** @description The dashboard user's profile — single serializer shared by GET and PATCH /api/profile. */
         UserProfile: {
@@ -10035,7 +10037,7 @@ export interface operations {
                      *           {
                      *             "id": "pkg_inbox_triage",
                      *             "type": "agent",
-                     *             "source": "org",
+                     *             "source": "local",
                      *             "name": "Inbox Triage",
                      *             "description": "Sorts incoming Gmail threads into priority buckets.",
                      *             "installed_in": [

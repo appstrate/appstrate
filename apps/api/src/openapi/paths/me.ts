@@ -218,6 +218,9 @@ export const mePaths = {
                   object: { type: "string", enum: ["list"] },
                   data: {
                     type: "array",
+                    // `listMemberPinsForAgent` projects to exactly these two
+                    // fields (NOT the 6-field IntegrationPin the PUT route's
+                    // `toPinSummary` emits) — keep the list item minimal.
                     items: {
                       type: "object",
                       required: ["integration_package_id", "connection_id"],

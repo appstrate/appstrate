@@ -1304,8 +1304,9 @@ const CODE_TO_SPEC_ALLOWLIST = new Set<string>([
   "POST /api/oauth/magic-link",
   "GET /api/oauth/magic-link/confirm",
   "POST /api/oauth/magic-link/confirm",
-  "GET /api/oauth/logout",
-  "POST /api/oauth/logout",
+  // NB: /api/oauth/logout is intentionally absent — it is a GET-only redirect
+  // documented in the spec (oidc/openapi/paths.ts), so it is not an orphan, and
+  // there is no POST route. An allowlist entry for either verb would be dead.
   "GET /api/oauth/assets/social-sign-in.js",
   // OIDC device-flow activation pages — server-rendered HTML.
   "GET /activate",
@@ -1390,6 +1391,8 @@ const RESPONSE_SCHEMA_ALLOWLIST = new Set<string>([
   "GET /api/auth/oauth2/authorize 200",
   "GET /api/auth/oauth2/userinfo 200",
   "POST /api/auth/oauth2/revoke 200",
+  // Redirect endpoint — the 200 is a degenerate no-body fallback (the real path
+  // is a 302); logout always redirects, so there is no body to declare.
   "GET /api/oauth/logout 200",
   // Server-rendered HTML pages (device-flow activation, OAuth callback).
   "GET /activate 200",

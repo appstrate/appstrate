@@ -59,7 +59,7 @@ const STATUS_HAS_NO_BODY = new Set(["204", "304"]);
  * SPA never consumes it (runner-facing). Validating it against the platform
  * spec would false-positive on every provider-specific field.
  */
-const PASSTHROUGH_PREFIXES = ["/api/llm-proxy"];
+const PASSTHROUGH_PREFIXES = ["/api/llm-proxy", "/api/credential-proxy"];
 
 /** Outcome of resolving a (path, method, status) to a response schema. */
 type Resolved =
@@ -154,15 +154,29 @@ export function createResponseValidationMiddleware(spec: unknown): MiddlewareHan
 
     const status = String(res.status);
 
+    const resolved = resolve(specPath, method, status);
+    if (resolved.kind === "skip") return;
+
     let body: unknown;
+    let parsed = true;
     try {
       body = await res.clone().json();
     } catch {
-      return; // not actually JSON despite the header
+      parsed = false;
+    }
+    if (!parsed) {
+      // A response that advertises application/json but emits a body that does
+      // not parse is a contract breach when the spec expects a JSON schema for
+      // this status. (Undeclared status is reported below regardless.)
+      if (resolved.kind === "validate") {
+        throw new Error(
+          `[response-contract] ${method.toUpperCase()} ${specPath} -> ${status} ` +
+            `declares an application/json body but emitted unparseable JSON.`,
+        );
+      }
+      return;
     }
 
-    const resolved = resolve(specPath, method, status);
-    if (resolved.kind === "skip") return;
     if (resolved.kind === "undeclared") {
       // A JSON body on a status the spec does not declare for this operation
       // is itself a contract breach.
