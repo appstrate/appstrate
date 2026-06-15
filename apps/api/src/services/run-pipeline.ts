@@ -11,6 +11,7 @@ import {
   ModelNotConfiguredError,
   ModelCredentialMissingError,
 } from "./run-context-builder.ts";
+import { BundleError } from "@appstrate/afps-runtime/bundle";
 import { createRun } from "./state/runs.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
@@ -76,6 +77,12 @@ export interface RunPipelineParams {
   modelId?: string | null;
   proxyId?: string | null;
   overrideVersionLabel?: string;
+  /**
+   * Per-run dependency version overrides (#666). Threaded into
+   * `buildRunContext` → `buildAgentPackage` and persisted verbatim on
+   * `runs.dependency_overrides`. Null when the run resolved manifest pins.
+   */
+  dependencyOverrides?: Record<string, string> | null;
   /** Schedule ID — set only for scheduled runs. */
   scheduleId?: string;
   /** Application ID — required for all runs. */
@@ -304,6 +311,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       modelId,
       proxyId,
       overrideVersionLabel,
+      dependencyOverrides: params.dependencyOverrides ?? null,
       traceparent: params.traceparent,
       resolvedConnections,
       manifestCache,
@@ -323,6 +331,25 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         code: "model_credential_missing",
         title: "Bad Request",
         detail: err.message,
+      });
+    }
+    // A dependency pin that resolves to nothing — an unsatisfiable range or a
+    // never-published skill — surfaces here as a DEPENDENCY_UNRESOLVED bundle
+    // error from the closure walk. Fail loud BEFORE the container starts with
+    // a structured 422, never a silent draft fallback (#666). The detail names
+    // the unresolved deps + the fix (publish or pass dependency_overrides).
+    if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") {
+      const missing = (err.details as { missing?: Array<{ name: string; versionSpec: string }> })
+        ?.missing;
+      const list =
+        missing && missing.length > 0
+          ? missing.map((m) => `'${m.name}@${m.versionSpec}'`).join(", ")
+          : "a declared dependency";
+      throw new ApiError({
+        status: 422,
+        code: "dependency_unresolved",
+        title: "Dependency Unresolved",
+        detail: `Could not resolve ${list} against published versions — publish the dependency, fix the pin, or pass \`dependency_overrides\` to run a working copy.`,
       });
     }
     throw err;
@@ -367,6 +394,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       agentName: agentDenorm.name,
       config,
       configOverride: params.configOverride ?? null,
+      dependencyOverrides: params.dependencyOverrides ?? null,
       runOrigin: "platform",
       sinkSecretEncrypted: encrypt(sinkCredentials.secret),
       sinkExpiresAt: new Date(sinkCredentials.expiresAt),

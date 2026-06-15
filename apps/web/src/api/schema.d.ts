@@ -4769,6 +4769,10 @@ export interface components {
             connection_overrides: {
                 [key: string]: string;
             } | null;
+            /** @description Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. A `"draft"` value means the run consumed a dependency's mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions. */
+            dependency_overrides: {
+                [key: string]: string;
+            } | null;
             /** @description Connections resolved for this run, projected from the internal snapshot for display. Null when the agent declares no integrations. */
             connections_used: {
                 integration_id: string;
@@ -4818,6 +4822,10 @@ export interface components {
             version_override: string | null;
             /** @description Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Flat map: `{ "@scope/integration": "<connection_id>" }`. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4). */
             connection_overrides: {
+                [key: string]: string;
+            } | null;
+            /** @description Per-schedule dependency version overrides (#666), frozen on the schedule row. Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. Propagated to `runs.dependency_overrides` on every fire. */
+            dependency_overrides: {
                 [key: string]: string;
             } | null;
             /** Format: date-time */
@@ -6071,6 +6079,9 @@ export interface operations {
                  *       },
                  *       "config": {
                  *         "dryRun": true
+                 *       },
+                 *       "dependency_overrides": {
+                 *         "@test/test-skill": "draft"
                  *       }
                  *     }
                  */
@@ -6087,6 +6098,10 @@ export interface operations {
                     config?: Record<string, never>;
                     /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
                     connection_overrides?: {
+                        [key: string]: string;
+                    };
+                    /** @description Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. By default every skill in the agent's closure resolves against PUBLISHED versions honoring its manifest pin; an entry here overrides that for a single run — `"draft"` pulls the dependency's mutable working copy (the skill edit loop: edit → run → observe, no republish), any other value replaces the pin with that spec. Run-scoped only (never stored in the manifest) and recorded on the run object so a run that consumed draft bytes is never mistaken for a reproducible one. An unsatisfiable pin (including a never-published dependency) returns 422 `dependency_unresolved` before the run starts — pass an override or publish the dependency to fix it. */
+                    dependency_overrides?: {
                         [key: string]: string;
                     };
                 };
@@ -6150,6 +6165,7 @@ export interface operations {
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": "mpc_8h2k4m6n",
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "user_name": null,
                      *       "end_user_name": null,
                      *       "api_key_name": null,
@@ -6389,6 +6405,10 @@ export interface operations {
                     connection_overrides?: {
                         [key: string]: string;
                     };
+                    /** @description Per-schedule dependency version overrides (#666), frozen on the schedule row. Shape: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. Propagated to `runs.dependency_overrides` on every fire. Each value must be `draft` or a valid version spec (semver range or dist-tag). */
+                    dependency_overrides?: {
+                        [key: string]: string;
+                    };
                 };
             };
         };
@@ -6422,6 +6442,7 @@ export interface operations {
                      *       "proxy_id_override": null,
                      *       "version_override": null,
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "last_run_at": null,
                      *       "next_run_at": "2026-01-16T09:00:00Z",
                      *       "createdAt": "2026-01-15T10:30:00Z",
@@ -15974,6 +15995,7 @@ export interface operations {
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": "mpc_8h2k4m6n",
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "user_name": null,
                      *       "end_user_name": null,
                      *       "api_key_name": null,
@@ -16300,6 +16322,7 @@ export interface operations {
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": null,
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "user_name": "Pierre",
                      *       "end_user_name": null,
                      *       "api_key_name": null,
@@ -16401,6 +16424,7 @@ export interface operations {
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": null,
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "user_name": "Pierre",
                      *       "end_user_name": null,
                      *       "api_key_name": null,
@@ -16959,6 +16983,7 @@ export interface operations {
                      *       "proxy_id_override": null,
                      *       "version_override": "1.2.0",
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "last_run_at": "2026-01-15T09:00:00Z",
                      *       "next_run_at": "2026-01-16T09:00:00Z",
                      *       "createdAt": "2026-01-14T14:00:00Z",
@@ -17004,6 +17029,10 @@ export interface operations {
                     version_override?: string | null;
                     /** @description Per-integration connection picks frozen on the schedule. Pass `null` to clear. */
                     connection_overrides?: {
+                        [key: string]: string;
+                    } | null;
+                    /** @description Per-schedule dependency version overrides (#666). Shape: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. Pass `null` to clear. */
+                    dependency_overrides?: {
                         [key: string]: string;
                     } | null;
                 };

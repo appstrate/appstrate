@@ -13,7 +13,7 @@ import {
   type BundlePackage,
 } from "@appstrate/afps-runtime/bundle";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { DraftPackageCatalog } from "./run-launcher/draft-package-catalog.ts";
+import { RunPackageCatalog } from "./run-launcher/run-package-catalog.ts";
 import { loadAndVerifyBundle } from "./run-launcher/bundle-signature-policy.ts";
 
 const BUCKET = "agent-packages";
@@ -122,13 +122,23 @@ interface AgentPackageResult {
  * including each dependency's doc companion (`SKILL.md` for skills,
  * `INTEGRATION.md` for integrations, `README.md` for mcp-servers).
  *
- * Dependency resolution uses {@link DraftPackageCatalog}, which reads
- * draft manifests + the `package-items` storage bucket — NOT published
- * versions — so edits to a dependency are picked up on the next run.
+ * Dependency resolution uses {@link RunPackageCatalog}, which resolves
+ * `dependencies.skills` against PUBLISHED versions honoring each pin
+ * (exact → dist-tag → semver range) — the reproducibility fix for #666.
+ * A dependency's mutable draft never leaks into a consumer's run unless
+ * the caller explicitly opts that dependency in via `dependencyOverrides`
+ * (the skill-development edit loop). An unsatisfiable pin (including a
+ * never-published dependency) throws `DEPENDENCY_UNRESOLVED` rather than
+ * silently falling back to the draft.
  */
 export async function buildAgentPackage(
   agent: LoadedPackage,
   orgId: string,
+  /**
+   * Per-run dependency overrides (`{ "@scope/name": "draft" | <spec> }`).
+   * Run-scoped only — never read from the manifest. See {@link RunPackageCatalog}.
+   */
+  dependencyOverrides?: Record<string, string> | null,
 ): Promise<AgentPackageResult> {
   const manifest = agent.manifest as Record<string, unknown>;
   const name = typeof manifest.name === "string" ? manifest.name : null;
@@ -151,11 +161,11 @@ export async function buildAgentPackage(
   };
 
   // Timing instrumentation: skill dependencies are fetched here one storage
-  // round-trip at a time (DraftPackageCatalog → downloadPackageFiles per
-  // skill). For an inline run this is the per-run critical-path cost a
-  // persisted agent avoids (it pulls one pre-built versioned ZIP), and the
-  // prime suspect for the inline-vs-persisted latency gap. Logging the
-  // duration + skill count makes that measurable in prod instead of guessed.
+  // round-trip at a time (RunPackageCatalog → downloadVersionZip per skill).
+  // For an inline run this is the per-run critical-path cost a persisted
+  // agent avoids (it pulls one pre-built versioned ZIP), and the prime
+  // suspect for the inline-vs-persisted latency gap. Logging the duration +
+  // skill count makes that measurable in prod instead of guessed.
   const depsRecord =
     manifest.dependencies && typeof manifest.dependencies === "object"
       ? (manifest.dependencies as { skills?: unknown }).skills
@@ -164,14 +174,18 @@ export async function buildAgentPackage(
     depsRecord && typeof depsRecord === "object" ? Object.keys(depsRecord).length : 0;
 
   const buildStart = performance.now();
-  const bundle = await buildBundleFromCatalog(root, new DraftPackageCatalog({ orgId }), {
-    // Run bundle = agent + skills. Integrations/mcp-servers are spawned and
-    // fetched separately by the sidecar, not bundled into the agent.
-    depTypes: ["skills"],
-    onWarn: (message) => {
-      logger.warn("buildAgentPackage: bundle builder warning", { agentId: agent.id, message });
+  const bundle = await buildBundleFromCatalog(
+    root,
+    new RunPackageCatalog({ orgId, dependencyOverrides }),
+    {
+      // Run bundle = agent + skills. Integrations/mcp-servers are spawned and
+      // fetched separately by the sidecar, not bundled into the agent.
+      depTypes: ["skills"],
+      onWarn: (message) => {
+        logger.warn("buildAgentPackage: bundle builder warning", { agentId: agent.id, message });
+      },
     },
-  });
+  );
   logger.info("buildAgentPackage: bundle assembled", {
     agentId: agent.id,
     skillCount,

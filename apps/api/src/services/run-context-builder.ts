@@ -78,6 +78,13 @@ export async function buildRunContext(params: {
   proxyId?: string | null;
   overrideVersionLabel?: string;
   /**
+   * Per-run dependency version overrides (#666) — `{ "@scope/name": "draft"
+   * | "<spec>" }`. Forwarded into `buildAgentPackage` so a single run can opt
+   * a skill out of the published-only resolution (the skill edit loop). Null /
+   * omitted resolves the manifest pins verbatim against published versions.
+   */
+  dependencyOverrides?: Record<string, string> | null;
+  /**
    * W3C `traceparent` of the spawning request — forwarded into the
    * runtime so its outbound HTTP traffic becomes child spans of the
    * platform's trace. Optional: callers from background workers
@@ -119,7 +126,7 @@ export async function buildRunContext(params: {
     await Promise.all([
       skipConfigFetch ? null : getPackageConfig(applicationId, agent.id),
       getCheckpoint(agent.id, applicationId, persistenceScope),
-      buildAgentPackage(agent, orgId),
+      buildAgentPackage(agent, orgId, params.dependencyOverrides ?? null),
       params.overrideVersionLabel
         ? null
         : agent.source !== "system"

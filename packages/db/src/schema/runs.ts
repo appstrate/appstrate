@@ -137,6 +137,14 @@ export const runs = pgTable(
     // can replay the exact same delta. Null when the run used persisted
     // defaults verbatim.
     configOverride: jsonb("config_override").$type<Record<string, unknown>>(),
+    // Per-run dependency version overrides (#666). Shape:
+    // { "@scope/skill": "draft" | "<semver|dist-tag>" }. Run-scoped escape
+    // hatch out of the published-only resolution: `"draft"` pulls that
+    // dependency's mutable working copy (skill edit loop), any other value
+    // replaces the manifest pin for that dependency. Persisted as the audit
+    // trail so a run that consumed draft bytes is never mistaken for a
+    // reproducible one. Null when the run resolved the manifest pins verbatim.
+    dependencyOverrides: jsonb("dependency_overrides").$type<Record<string, string>>(),
     // Snapshot of the agent's @scope/name at run creation time. Survives
     // package rename, delete, or inline-run compaction (where manifest is
     // NULLed). Read by global /api/runs view and UI to display agent name
@@ -581,6 +589,10 @@ export const schedules = pgTable(
     // creation/edit (mirrors `configOverride`). Same shape as
     // `runs.connectionOverrides`. Loses to admin pin at fire time.
     connectionOverrides: jsonb("connection_overrides").$type<Record<string, string>>(),
+    // Per-schedule dependency version overrides (#666) — frozen at schedule
+    // creation/edit, propagated to `runs.dependency_overrides` at fire time.
+    // Same shape + semantics as `runs.dependencyOverrides`.
+    dependencyOverrides: jsonb("dependency_overrides").$type<Record<string, string>>(),
     lastRunAt: timestamp("last_run_at", { withTimezone: true }),
     nextRunAt: timestamp("next_run_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

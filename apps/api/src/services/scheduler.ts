@@ -58,6 +58,12 @@ interface ScheduleJobData {
    * with the scheduler's intent. Loses to admin pins.
    */
   connectionOverrides?: Record<string, string>;
+  /**
+   * Frozen per-dependency version overrides (#666). Loaded from
+   * `package_schedules.dependency_overrides`, propagated into
+   * `runs.dependency_overrides` at fire time and applied to the closure walk.
+   */
+  dependencyOverrides?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +93,7 @@ function toSchedule(row: typeof schedules.$inferSelect): ScheduleWireDto {
     proxy_id_override: row.proxyIdOverride,
     version_override: row.versionOverride,
     connection_overrides: (row.connectionOverrides as Record<string, string> | null) ?? null,
+    dependency_overrides: (row.dependencyOverrides as Record<string, string> | null) ?? null,
     last_run_at: row.lastRunAt ? row.lastRunAt.toISOString() : null,
     next_run_at: row.nextRunAt ? row.nextRunAt.toISOString() : null,
     createdAt: row.createdAt!.toISOString(),
@@ -124,6 +131,7 @@ async function upsertScheduleJob(schedule: ScheduleWireDto, orgId: string): Prom
     proxyIdOverride: schedule.proxy_id_override ?? undefined,
     versionOverride: schedule.version_override ?? undefined,
     connectionOverrides: schedule.connection_overrides ?? undefined,
+    dependencyOverrides: schedule.dependency_overrides ?? undefined,
   };
 
   await (
@@ -155,6 +163,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     proxyIdOverride,
     versionOverride,
     connectionOverrides,
+    dependencyOverrides,
   } = job.data;
 
   await triggerScheduledRun(
@@ -164,7 +173,14 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     orgId,
     applicationId,
     input,
-    { configOverride, modelIdOverride, proxyIdOverride, versionOverride, connectionOverrides },
+    {
+      configOverride,
+      modelIdOverride,
+      proxyIdOverride,
+      versionOverride,
+      connectionOverrides,
+      dependencyOverrides,
+    },
   );
 
   // Update schedule timestamps
@@ -254,6 +270,7 @@ async function triggerScheduledRun(
     proxyIdOverride?: string;
     versionOverride?: string;
     connectionOverrides?: Record<string, string>;
+    dependencyOverrides?: Record<string, string>;
   } = {},
 ) {
   // Populated once the agent loads so every failSchedule() call can
@@ -421,6 +438,7 @@ async function triggerScheduledRun(
         modelId: finalModelId,
         proxyId: finalProxyId,
         overrideVersionLabel,
+        dependencyOverrides: overrides.dependencyOverrides ?? null,
         scheduleId,
         applicationId,
         scheduleConnectionOverrides: overrides.connectionOverrides ?? null,
@@ -561,6 +579,7 @@ export async function createSchedule(
     proxyIdOverride?: string | null;
     versionOverride?: string | null;
     connectionOverrides?: Record<string, string> | null;
+    dependencyOverrides?: Record<string, string> | null;
   },
 ): Promise<EnrichedSchedule> {
   const id = `sched_${crypto.randomUUID()}`;
@@ -588,6 +607,7 @@ export async function createSchedule(
       proxyIdOverride: data.proxyIdOverride ?? null,
       versionOverride: data.versionOverride ?? null,
       connectionOverrides: data.connectionOverrides ?? null,
+      dependencyOverrides: data.dependencyOverrides ?? null,
       nextRunAt: nextRun ?? null,
     })
     .returning();
@@ -619,6 +639,7 @@ export async function updateSchedule(
     proxyIdOverride?: string | null;
     versionOverride?: string | null;
     connectionOverrides?: Record<string, string> | null;
+    dependencyOverrides?: Record<string, string> | null;
   },
 ): Promise<EnrichedSchedule | null> {
   const existing = await getSchedule(id, scope);
@@ -647,6 +668,8 @@ export async function updateSchedule(
   if (data.versionOverride !== undefined) payload.versionOverride = data.versionOverride;
   if (data.connectionOverrides !== undefined)
     payload.connectionOverrides = data.connectionOverrides;
+  if (data.dependencyOverrides !== undefined)
+    payload.dependencyOverrides = data.dependencyOverrides;
 
   const [row] = await db
     .update(schedules)

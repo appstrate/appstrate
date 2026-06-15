@@ -108,6 +108,7 @@ export function createRunsRouter() {
           proxyIdOverride,
           configOverride,
           connectionOverrides,
+          dependencyOverrides,
         } = inputResult;
 
         // An explicit per-run `modelId` override must reference a real model
@@ -163,6 +164,7 @@ export function createRunsRouter() {
           modelId: modelIdOverride ?? preflightModelId,
           proxyId: proxyIdOverride ?? preflightProxyId,
           overrideVersionLabel,
+          dependencyOverrides: dependencyOverrides ?? null,
           applicationId: c.get("applicationId"),
           apiKeyId: c.get("apiKeyId") ?? undefined,
           connectionOverrides: connectionOverrides ?? null,

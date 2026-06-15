@@ -50,6 +50,9 @@ import {
   type UploadMeta,
 } from "./uploads.ts";
 import { getRun } from "./state/runs.ts";
+import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
+import { isValidRange } from "@appstrate/core/semver";
+import { isValidDistTag } from "@appstrate/core/dist-tags";
 import { sanitizeStorageKey } from "./file-storage.ts";
 import {
   streamRunDocument,
@@ -87,6 +90,15 @@ export interface ParsedInput {
    * per integration; the chosen connection carries its own authKey.
    */
   connectionOverrides?: Record<string, string>;
+  /**
+   * Per-run dependency version overrides (#666). Wire field
+   * `dependency_overrides`; flows into `buildAgentPackage` and is persisted
+   * on `runs.dependency_overrides`. Flat shape:
+   * `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. `"draft"` opts that
+   * dependency out of the published-only resolution (the skill edit loop);
+   * any other value replaces the manifest pin for that dependency.
+   */
+  dependencyOverrides?: Record<string, string>;
 }
 
 interface RunRequestBody {
@@ -104,6 +116,20 @@ interface RunRequestBody {
   proxyId?: string;
   config?: Record<string, unknown>;
   connection_overrides?: Record<string, string>;
+  dependency_overrides?: Record<string, string>;
+}
+
+/**
+ * A run-scoped dependency override value is valid when it is the literal
+ * `draft` selector OR a resolvable version spec (semver range / exact version
+ * via `isValidRange`, or a dist-tag name). Reserved selectors other than
+ * `draft` (e.g. `published`) carry no per-dependency meaning and are rejected.
+ * Deep "does this version exist" checks happen at resolution time (422
+ * `dependency_unresolved`); this is the cheap syntactic gate.
+ */
+function isValidDependencyOverride(value: string): boolean {
+  if (value === VERSION_SELECTOR_DRAFT) return true;
+  return isValidRange(value) || isValidDistTag(value);
 }
 
 /** Validate `input` against the manifest schema, throwing `validationFailed` (422). */
@@ -719,6 +745,28 @@ export async function parseRequestInput(
     }
   }
 
+  // `dependency_overrides` shape + value guard (#666). Flat map:
+  // packageId → "draft" | "<semver|dist-tag>". Each value must be a valid
+  // run-scoped override so a typo'd pin 400s here instead of silently doing
+  // nothing — the per-dependency analogue of the `connection_overrides` gate.
+  if (body.dependency_overrides !== undefined) {
+    if (
+      body.dependency_overrides === null ||
+      typeof body.dependency_overrides !== "object" ||
+      Array.isArray(body.dependency_overrides)
+    ) {
+      throw invalidRequest("`dependency_overrides` must be a JSON object", "dependency_overrides");
+    }
+    for (const [depId, spec] of Object.entries(body.dependency_overrides)) {
+      if (typeof spec !== "string" || !isValidDependencyOverride(spec)) {
+        throw invalidRequest(
+          `\`dependency_overrides["${depId}"]\` must be "draft" or a valid version spec (semver range or dist-tag)`,
+          `dependency_overrides.${depId}`,
+        );
+      }
+    }
+  }
+
   return {
     input,
     uploadedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
@@ -726,5 +774,6 @@ export async function parseRequestInput(
     proxyIdOverride: body.proxyId,
     configOverride: body.config,
     connectionOverrides: body.connection_overrides,
+    dependencyOverrides: body.dependency_overrides,
   };
 }

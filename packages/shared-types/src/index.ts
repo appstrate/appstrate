@@ -103,6 +103,13 @@ export interface RunWireDto {
   contextSnapshot: unknown;
   modelCredentialId: string | null;
   connection_overrides: unknown;
+  /**
+   * Per-run dependency version overrides (#666) — `{ "@scope/name": "draft" |
+   * "<spec>" }`. Present when the caller opted a dependency out of the
+   * published-only resolution; a non-null map (esp. with a `"draft"` value)
+   * means the run is NOT reproducible from its `version_ref` alone.
+   */
+  dependency_overrides: unknown;
 }
 
 /**
@@ -263,6 +270,12 @@ export interface ScheduleWireDto {
   proxy_id_override: string | null;
   version_override: string | null;
   connection_overrides: Record<string, string> | null;
+  /**
+   * Per-schedule dependency version overrides (#666) — `{ "@scope/name":
+   * "draft" | "<spec>" }`, frozen at schedule create/update and propagated to
+   * `runs.dependency_overrides` at each fire.
+   */
+  dependency_overrides: Record<string, string> | null;
   last_run_at: string | null;
   next_run_at: string | null;
   createdAt: string;

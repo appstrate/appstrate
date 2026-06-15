@@ -26,11 +26,24 @@ import { recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { runConfigOverrideSchema, scheduleInputSchema } from "../lib/jsonb-schemas.ts";
+import { isValidRange } from "@appstrate/core/semver";
+import { isValidDistTag } from "@appstrate/core/dist-tags";
+import { VERSION_SELECTOR_DRAFT } from "../services/agent-version-resolver.ts";
 
 // Per-integration connection picks frozen on the schedule row (cascade
 // mechanism #3). Same wire shape as the run-route's connection_overrides;
 // loses to admin pins at fire time. Shape: { "@scope/integration": "<connection_id>" }.
 const connectionOverridesSchema = z.record(z.string(), z.string());
+
+// Per-dependency version overrides frozen on the schedule row (#666). Same
+// wire shape + validation as the run-route's dependency_overrides: each value
+// is "draft" or a resolvable version spec (semver range / dist-tag).
+const dependencyOverridesSchema = z.record(
+  z.string(),
+  z.string().refine((v) => v === VERSION_SELECTOR_DRAFT || isValidRange(v) || isValidDistTag(v), {
+    message: 'must be "draft" or a valid version spec (semver range or dist-tag)',
+  }),
+);
 
 export const createScheduleSchema = z.object({
   name: z.string().optional(),
@@ -46,6 +59,7 @@ export const createScheduleSchema = z.object({
   proxy_id_override: z.string().optional(),
   version_override: z.string().optional(),
   connection_overrides: connectionOverridesSchema.optional(),
+  dependency_overrides: dependencyOverridesSchema.optional(),
 });
 
 export const updateScheduleSchema = z.object({
@@ -60,6 +74,7 @@ export const updateScheduleSchema = z.object({
   proxy_id_override: z.string().nullable().optional(),
   version_override: z.string().nullable().optional(),
   connection_overrides: connectionOverridesSchema.nullable().optional(),
+  dependency_overrides: dependencyOverridesSchema.nullable().optional(),
 });
 
 export function createSchedulesRouter() {
@@ -135,6 +150,7 @@ export function createSchedulesRouter() {
         proxyIdOverride: data.proxy_id_override ?? null,
         versionOverride: data.version_override ?? null,
         connectionOverrides: data.connection_overrides ?? null,
+        dependencyOverrides: data.dependency_overrides ?? null,
       });
       await recordAuditFromContext(c, {
         action: "schedule.created",
@@ -193,6 +209,7 @@ export function createSchedulesRouter() {
       proxyIdOverride: data.proxy_id_override,
       versionOverride: data.version_override,
       connectionOverrides: data.connection_overrides,
+      dependencyOverrides: data.dependency_overrides,
     });
     // Mirror schedule.created: explicit camelCase keys (dominant audit
     // convention — see api-keys.ts, modules/webhooks/routes.ts). Only

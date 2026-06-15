@@ -78,6 +78,13 @@
       "when": 1781276923237,
       "tag": "0010_credential_available_models",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781553138308,
+      "tag": "0011_bright_skin",
+      "breakpoints": true
     }
   ]
 }
