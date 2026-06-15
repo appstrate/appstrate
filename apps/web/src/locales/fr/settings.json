@@ -545,7 +545,6 @@
   "credentials.oauth.callbackSuccess": "Provider OAuth connecté avec succès",
   "credentials.oauth.cliStageTitle": "Connecter via la CLI",
   "credentials.oauth.cliInstructions": "Exécutez cette commande dans votre terminal pour terminer la connexion :",
-  "credentials.oauth.cliHint": "Si vous n'avez pas encore Bun, l'installer via : curl -fsSL https://bun.sh/install | bash",
   "credentials.oauth.cliWaiting": "En attente de la connexion…",
   "credentials.oauth.dismissConfirmTitle": "Fermer la fenêtre de connexion ?",
   "credentials.oauth.dismissConfirmDescription": "La commande affichée disparaîtra. Une connexion en cours se terminera quand même en arrière-plan.",

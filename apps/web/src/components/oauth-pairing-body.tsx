@@ -191,7 +191,6 @@ export function OAuthPairingBody({ providerId, onConnected, onBusyChange }: OAut
               </span>
             </Button>
           </div>
-          <p className="text-muted-foreground text-xs">{t("credentials.oauth.cliHint")}</p>
           <div className="text-muted-foreground flex items-center gap-2 text-xs">
             <Spinner />
             <span>{t("credentials.oauth.cliWaiting")}</span>
