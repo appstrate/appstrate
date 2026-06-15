@@ -334,18 +334,14 @@ export async function updateModelProviderCredential(
 // ─── Label derivation ──────────────────────────────────────────────────────
 
 /**
- * Derive a credential label when the caller doesn't supply one. Picks the
- * provider's `displayName` (registry) and dedupes against existing labels
- * in the same org by appending ` (2)`, ` (3)`, … on collision, resolved
- * server-side so automation (CLI, connect-helper, OAuth import) doesn't have
- * to invent a name.
- *
- * Unknown providerIds fall back to the literal id — defensive only;
- * upstream callers reject unknown ids before we get here.
+ * Make `base` unique within an org's credential labels by appending ` (2)`,
+ * ` (3)`, … on collision (same suffix scheme as org models). Always run a
+ * label through this before persisting — including caller-supplied ones —
+ * so two connections to the same provider never share a name. The
+ * `connect-helper` CLI sends a default label (`ChatGPT`, `Claude`) on every
+ * redeem, so deriving only when the label is absent would never dedupe.
  */
-export async function deriveCredentialLabel(orgId: string, providerId: string): Promise<string> {
-  const provider = getModelProvider(providerId);
-  const base = provider?.displayName ?? providerId;
+export async function dedupeCredentialLabel(orgId: string, base: string): Promise<string> {
   const rows = await db
     .select({ label: modelProviderCredentials.label })
     .from(modelProviderCredentials)
@@ -354,6 +350,20 @@ export async function deriveCredentialLabel(orgId: string, providerId: string): 
     base,
     rows.map((r) => r.label),
   );
+}
+
+/**
+ * Derive a credential label when the caller doesn't supply one. Picks the
+ * provider's `displayName` (registry) and dedupes against existing labels in
+ * the same org, resolved server-side so automation doesn't have to invent a
+ * name.
+ *
+ * Unknown providerIds fall back to the literal id — defensive only;
+ * upstream callers reject unknown ids before we get here.
+ */
+export async function deriveCredentialLabel(orgId: string, providerId: string): Promise<string> {
+  const provider = getModelProvider(providerId);
+  return dedupeCredentialLabel(orgId, provider?.displayName ?? providerId);
 }
 
 /**

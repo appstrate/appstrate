@@ -5,15 +5,19 @@
  * providers cleanup (follow-up to #437). Both `POST /api/models` and
  * `POST /api/model-provider-credentials` accept an optional `label` field
  * and fall back to these helpers when omitted; the connect-helper /
- * `pair/redeem` route relies on `deriveCredentialLabel` for the same
- * reason. The matrix below pins:
+ * `pair/redeem` route runs every label (including the CLI-supplied default)
+ * through `dedupeCredentialLabel`. The matrix below pins:
  *   1. `displayName` / catalog-label is the base.
  *   2. Subsequent rows get ` (2)`, ` (3)`, … on collision.
- *   3. Unknown providers / models fall back to the literal id.
+ *   3. A caller-supplied label is deduped too (not honoured verbatim).
+ *   4. Unknown providers / models fall back to the literal id.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { deriveCredentialLabel } from "../../../src/services/model-providers/credentials.ts";
+import {
+  deriveCredentialLabel,
+  dedupeCredentialLabel,
+} from "../../../src/services/model-providers/credentials.ts";
 import { deriveModelLabel } from "../../../src/services/org-models.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -54,6 +58,40 @@ describe("deriveCredentialLabel", () => {
       apiKey: "sk-test-2",
     });
     expect(await deriveCredentialLabel(ctx.orgId, "openai")).toBe("OpenAI (3)");
+  });
+});
+
+describe("dedupeCredentialLabel", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "labelorg" });
+  });
+
+  it("returns the base verbatim when free", async () => {
+    expect(await dedupeCredentialLabel(ctx.orgId, "ChatGPT")).toBe("ChatGPT");
+  });
+
+  it("suffixes a caller-supplied label on collision (CLI default-label case)", async () => {
+    // The connect-helper sends the same default label ("ChatGPT") on every
+    // redeem; without deduping the supplied label every connection collides.
+    await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      label: "ChatGPT",
+      apiShape: "openai-completions",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-test-1",
+    });
+    expect(await dedupeCredentialLabel(ctx.orgId, "ChatGPT")).toBe("ChatGPT (2)");
+    await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      label: "ChatGPT (2)",
+      apiShape: "openai-completions",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-test-2",
+    });
+    expect(await dedupeCredentialLabel(ctx.orgId, "ChatGPT")).toBe("ChatGPT (3)");
   });
 });
 
