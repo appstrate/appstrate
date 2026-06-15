@@ -87,9 +87,8 @@ export function OnboardingCreateStep() {
 
   const createMutation = $api.useMutation("post", "/api/orgs", {
     onSuccess: async (data) => {
-      // use-org.ts still reads the legacy ["orgs"] key; invalidate both stacks.
+      // The org list is served solely by the legacy ["orgs"] key (use-org.ts).
       await queryClient.invalidateQueries({ queryKey: orgKeys.all });
-      await queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs"] });
       if (data.id) switchOrg(data.id);
       if (nextRoute) navigate(nextRoute);
     },

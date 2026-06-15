@@ -4,13 +4,10 @@ import { useCallback } from "react";
 import { useStore } from "zustand";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { client } from "../api/client";
-import { orgStore, getCurrentOrgId } from "../stores/org-store";
+import { orgStore } from "../stores/org-store";
 import { appStore } from "../stores/app-store";
 import { useAutoSelect } from "./use-auto-select";
 import { orgKeys } from "../lib/query-keys";
-
-// Re-export non-hook accessor so existing imports keep working (e.g. api.ts)
-export { getCurrentOrgId };
 
 // Reactive hook for query key usage — re-renders when org changes
 export function useCurrentOrgId(): string | null {

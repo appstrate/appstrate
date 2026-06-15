@@ -23,7 +23,8 @@ import { RunInfoTab } from "../components/run-info-tab";
 import { RunRow } from "../components/run-row";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
 import { useMarkRead } from "../hooks/use-notifications";
-import { ACTIVE_RUN_STATUSES, type RunLog, type EnrichedRun } from "@appstrate/shared-types";
+import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
+import type { components } from "../api/client";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
 import { Markdown } from "../components/markdown";
@@ -31,6 +32,9 @@ import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys } from "../lib/query-keys";
 import { MemoryPanel } from "../components/persistence/memory-panel";
 import { Play } from "lucide-react";
+
+/** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
+type RunLogEntry = components["schemas"]["RunLog"];
 
 export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -113,15 +117,20 @@ export function RunDetailPage() {
   useRunRealtime(isRunning ? runId : null, {
     onNewLog: useCallback(
       (newLog: RunLogEvent) => {
-        // `newLog` is runtime-validated by `runLogEventSchema`. The cast bridges
-        // it to Drizzle `RunLog`, which types `createdAt` as `Date` even though
-        // both the GET endpoint and this SSE frame deliver an ISO string — a
-        // pre-existing frontend Drizzle-`Date` leak, out of scope here.
-        const log = newLog as unknown as RunLog;
-        qc.setQueryData<RunLog[]>(runKeys.logs(orgId, applicationId, runId), (prev) => {
-          if (!prev) return [log];
-          if (prev.some((l) => l.id === log.id)) return prev;
-          return [...prev, log];
+        // `newLog` is runtime-validated by `runLogEventSchema`. Type the patch
+        // against the wire `RunLog` (spec) so this writer and `useRunLogs` agree
+        // on the element type of the shared `runKeys.logs` cache. Spread carries
+        // the matching fields (id/createdAt are ISO strings on both); only the
+        // spec's lossy `data` (`object`) needs a localized narrow — the SSE frame
+        // strips `data` server-side (`stripPayload`), so it is null in practice.
+        const entry: RunLogEntry = {
+          ...newLog,
+          data: (newLog.data ?? null) as RunLogEntry["data"],
+        };
+        qc.setQueryData<RunLogEntry[]>(runKeys.logs(orgId, applicationId, runId), (prev) => {
+          if (!prev) return [entry];
+          if (prev.some((l) => l.id === entry.id)) return prev;
+          return [...prev, entry];
         });
       },
       [qc, orgId, applicationId, runId],

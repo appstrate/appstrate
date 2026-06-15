@@ -23,7 +23,7 @@ export const uploadClient: UploadFn = async (file, signal) => {
 
   const putRes = await fetch(desc.url, {
     method: desc.method,
-    headers: desc.headers as Record<string, string>,
+    headers: desc.headers,
     body: file,
     signal,
   });

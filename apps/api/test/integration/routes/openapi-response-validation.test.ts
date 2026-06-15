@@ -148,6 +148,45 @@ describe("OpenAPI response validation", () => {
     });
   });
 
+  // ── Installed packages list (auth + app-scoped) ────────────
+  // Regression guard: this envelope goes through `listResponse()`, which always
+  // emits `hasMore`. The spec previously omitted it (the same drift fixed for
+  // GET /api/applications), so `extraFields` would flag the undocumented field.
+
+  describe("GET /api/applications/{applicationId}/packages -> 200", () => {
+    it("response body conforms to OpenAPI schema (incl. hasMore envelope field)", async () => {
+      const pkg = await seedAgent({
+        id: "@openapi-test/installed-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, pkg.id);
+
+      const schema = getResponseSchema("/api/applications/{applicationId}/packages", "GET", "200");
+      expect(schema).not.toBeNull();
+
+      const res = await app.request(`/api/applications/${ctx.defaultAppId}/packages`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+
+      const body = await res.json();
+      const result = validateResponse(body, schema);
+
+      if (!result.valid) {
+        console.error("GET installed packages validation errors:", result.errors);
+      }
+      if (result.extraFields.length > 0) {
+        console.warn("GET installed packages extra fields not in spec:", result.extraFields);
+      }
+
+      expect(result.valid).toBe(true);
+      expect(result.extraFields).toEqual([]);
+      expect(body).toHaveProperty("hasMore");
+      expect((body as any).hasMore).toBeBoolean();
+    });
+  });
+
   // ── Agent detail (auth + app-scoped) ───────────────────────
   // Detail endpoints carry richer projections than the list envelopes — cover
   // one here so the AgentDetail schema is exercised against a real response,

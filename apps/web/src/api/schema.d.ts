@@ -6828,6 +6828,8 @@ export interface operations {
                         /** @enum {string} */
                         object: "list";
                         data: components["schemas"]["ApplicationPackage"][];
+                        /** @description Whether more results exist beyond this page */
+                        hasMore: boolean;
                     };
                 };
             };

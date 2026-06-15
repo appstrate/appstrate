@@ -9,7 +9,7 @@ import {
   type RunLogEvent,
   type RunMetricEvent,
 } from "@appstrate/shared-types";
-import { getCurrentOrgId } from "./use-org";
+import { getCurrentOrgId } from "../stores/org-store";
 import { getCurrentApplicationId } from "./use-current-application";
 
 // Re-export so existing consumers (run-detail.tsx) keep importing the metric

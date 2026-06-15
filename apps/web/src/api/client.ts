@@ -98,6 +98,11 @@ const problemDetailErrors: Middleware = {
         body.code,
         body.detail || `API Error: ${response.status}`,
         response.status,
+        // `ApiError.details` is intentionally an open record: the spec models
+        // `errors` as a typed array, but runtime problem bodies are polymorphic
+        // by `code` (validation → array of field errors; conflict codes →
+        // code-specific object), so consumers narrow per `code`. The cast
+        // bridges the spec's array type to that open shape.
         body.errors as unknown as Record<string, unknown> | undefined,
         body.requestId,
       );

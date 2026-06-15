@@ -276,12 +276,16 @@ export const applicationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["object", "data"],
+                required: ["object", "data", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/ApplicationPackage" },
+                  },
+                  hasMore: {
+                    type: "boolean",
+                    description: "Whether more results exist beyond this page",
                   },
                 },
               },
