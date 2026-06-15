@@ -26,6 +26,7 @@ import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
 import { OAuthPairingBody } from "./oauth-pairing-body";
+import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 import { PROVIDER_ICONS } from "./icons";
 import {
   useModelProviderCredentials,
@@ -45,6 +46,7 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [working, setWorking] = useState(false);
+  const oauthDismiss = usePairingDismissConfirm(() => setDialogOpen(false));
 
   // Inline lookup to satisfy `react-hooks/static-components` — the rule
   // flags PascalCase consts assigned from helper calls. Equivalent to
@@ -123,10 +125,10 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
       {dialogOpen && (
         <Modal
           open
-          onClose={() => setDialogOpen(false)}
+          onClose={oauthDismiss.requestClose}
           title={t("credentials.oauth.cliStageTitle")}
           actions={
-            <Button variant="ghost" onClick={() => setDialogOpen(false)}>
+            <Button variant="ghost" onClick={oauthDismiss.requestClose}>
               {t("credentials.oauth.close")}
             </Button>
           }
@@ -137,9 +139,11 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
               setDialogOpen(false);
               void handleConnected(newId);
             }}
+            onBusyChange={oauthDismiss.onBusyChange}
           />
         </Modal>
       )}
+      {oauthDismiss.confirmDialog}
     </>
   );
 }

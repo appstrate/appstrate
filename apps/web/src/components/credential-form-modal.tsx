@@ -49,6 +49,7 @@ import { getProviderById, resolveProviderId } from "@/lib/provider-registry-help
 import { PROVIDER_ICONS } from "./icons";
 import { ProviderPickerGroups } from "./provider-picker-groups";
 import { OAuthPairingBody } from "./oauth-pairing-body";
+import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 
 /**
  * Canonical payload shape submitted to `POST /api/model-provider-credentials`.
@@ -228,50 +229,56 @@ function CredentialFormBody({
     });
   });
 
+  const oauthDismiss = usePairingDismissConfirm(onClose);
+
   const title = credential ? t("credentials.form.editTitle") : t("credentials.form.title");
 
   // OAuth-selected: the pairing body owns submission (helper POSTs creds
   // back). Hide the form-side Test/Save buttons; only Close stays.
   if (isOAuthSelected && selectedOption?.providerId) {
     return (
-      <Modal
-        open
-        onClose={onClose}
-        title={title}
-        actions={
-          <Button type="button" variant="outline" onClick={onClose}>
-            {t("credentials.oauth.close")}
-          </Button>
-        }
-      >
-        <div className="space-y-4">
-          {!isEditing && (
-            <div className="space-y-2">
-              <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
-              <Select value={selectedId} onValueChange={handleProviderChange}>
-                <SelectTrigger id="pk-provider">
-                  <SelectValue placeholder={t("models.form.providerPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <ProviderPickerGroups
-                    items={options}
-                    featuredLabel={t("models.form.providerGroupFeatured")}
-                    otherLabel={t("models.form.providerGroupOther")}
-                    renderItem={(option) => (
-                      <PickerOptionItem key={option.id} option={option} t={t} />
-                    )}
-                  />
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          <OAuthPairingBody
-            key={selectedOption.providerId}
-            providerId={selectedOption.providerId}
-            onConnected={() => onClose()}
-          />
-        </div>
-      </Modal>
+      <>
+        <Modal
+          open
+          onClose={oauthDismiss.requestClose}
+          title={title}
+          actions={
+            <Button type="button" variant="outline" onClick={oauthDismiss.requestClose}>
+              {t("credentials.oauth.close")}
+            </Button>
+          }
+        >
+          <div className="space-y-4">
+            {!isEditing && (
+              <div className="space-y-2">
+                <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
+                <Select value={selectedId} onValueChange={handleProviderChange}>
+                  <SelectTrigger id="pk-provider">
+                    <SelectValue placeholder={t("models.form.providerPlaceholder")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <ProviderPickerGroups
+                      items={options}
+                      featuredLabel={t("models.form.providerGroupFeatured")}
+                      otherLabel={t("models.form.providerGroupOther")}
+                      renderItem={(option) => (
+                        <PickerOptionItem key={option.id} option={option} t={t} />
+                      )}
+                    />
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <OAuthPairingBody
+              key={selectedOption.providerId}
+              providerId={selectedOption.providerId}
+              onConnected={() => onClose()}
+              onBusyChange={oauthDismiss.onBusyChange}
+            />
+          </div>
+        </Modal>
+        {oauthDismiss.confirmDialog}
+      </>
     );
   }
 
