@@ -237,46 +237,48 @@ function CredentialFormBody({
   // back). Hide the form-side Test/Save buttons; only Close stays.
   if (isOAuthSelected && selectedOption?.providerId) {
     return (
-      <Modal
-        open
-        onClose={oauthDismiss.requestClose}
-        title={title}
-        actions={
-          <Button type="button" variant="outline" onClick={oauthDismiss.requestClose}>
-            {t("credentials.oauth.close")}
-          </Button>
-        }
-      >
-        <div className="space-y-4">
-          {!isEditing && (
-            <div className="space-y-2">
-              <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
-              <Select value={selectedId} onValueChange={handleProviderChange}>
-                <SelectTrigger id="pk-provider">
-                  <SelectValue placeholder={t("models.form.providerPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <ProviderPickerGroups
-                    items={options}
-                    featuredLabel={t("models.form.providerGroupFeatured")}
-                    otherLabel={t("models.form.providerGroupOther")}
-                    renderItem={(option) => (
-                      <PickerOptionItem key={option.id} option={option} t={t} />
-                    )}
-                  />
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          <OAuthPairingBody
-            key={selectedOption.providerId}
-            providerId={selectedOption.providerId}
-            onConnected={() => onClose()}
-            onBusyChange={oauthDismiss.onBusyChange}
-          />
-        </div>
+      <>
+        <Modal
+          open
+          onClose={oauthDismiss.requestClose}
+          title={title}
+          actions={
+            <Button type="button" variant="outline" onClick={oauthDismiss.requestClose}>
+              {t("credentials.oauth.close")}
+            </Button>
+          }
+        >
+          <div className="space-y-4">
+            {!isEditing && (
+              <div className="space-y-2">
+                <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
+                <Select value={selectedId} onValueChange={handleProviderChange}>
+                  <SelectTrigger id="pk-provider">
+                    <SelectValue placeholder={t("models.form.providerPlaceholder")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <ProviderPickerGroups
+                      items={options}
+                      featuredLabel={t("models.form.providerGroupFeatured")}
+                      otherLabel={t("models.form.providerGroupOther")}
+                      renderItem={(option) => (
+                        <PickerOptionItem key={option.id} option={option} t={t} />
+                      )}
+                    />
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <OAuthPairingBody
+              key={selectedOption.providerId}
+              providerId={selectedOption.providerId}
+              onConnected={() => onClose()}
+              onBusyChange={oauthDismiss.onBusyChange}
+            />
+          </div>
+        </Modal>
         {oauthDismiss.confirmDialog}
-      </Modal>
+      </>
     );
   }
 

@@ -12,13 +12,15 @@
  * complete the redeem.
  *
  * `<PendingPairingsWatcher>` reads this store to poll each pairing to
- * completion regardless of which modal (if any) is currently open.
+ * completion regardless of which modal (if any) is currently open. The
+ * store is also synced across tabs via the `storage` event so a pairing
+ * minted (or completed) in one tab is reflected in the others.
  */
 
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 
-const STORAGE_KEY = "appstrate_pending_pairings";
+export const STORAGE_KEY = "appstrate_pending_pairings";
 
 export interface PendingPairing {
   /** Pairing row id (`pair_...`) — NOT the secret token. */
@@ -36,6 +38,8 @@ interface PairingState {
   remove: (id: string) => void;
   /** Drop pairings whose TTL has elapsed (keeps the poller list bounded). */
   prune: () => void;
+  /** Re-read the persisted list (used by the cross-tab `storage` sync). */
+  hydrate: () => void;
 }
 
 function isPendingPairing(p: unknown): p is PendingPairing {
@@ -49,10 +53,27 @@ function isPendingPairing(p: unknown): p is PendingPairing {
   );
 }
 
-function load(): PendingPairing[] {
-  if (typeof window === "undefined") return [];
+/**
+ * Lazily resolve the Web Storage backend. Feature-detected (not gated on
+ * `window`) so it works in any host that exposes `localStorage`, and
+ * returns `null` — never throws — when storage is absent or access is
+ * denied (SSR, private-mode quota errors, tests without a DOM). Reading it
+ * lazily also lets tests inject a fake `globalThis.localStorage`.
+ */
+function getStorage(): Storage | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read + validate + TTL-filter the persisted list. Exported for tests. */
+export function readPersistedPairings(): PendingPairing[] {
+  const storage = getStorage();
+  if (!storage) return [];
+  try {
+    const raw = storage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -66,13 +87,19 @@ function load(): PendingPairing[] {
 }
 
 function persist(pairings: PendingPairing[]): void {
-  if (typeof window === "undefined") return;
-  if (pairings.length === 0) localStorage.removeItem(STORAGE_KEY);
-  else localStorage.setItem(STORAGE_KEY, JSON.stringify(pairings));
+  const storage = getStorage();
+  if (!storage) return;
+  try {
+    if (pairings.length === 0) storage.removeItem(STORAGE_KEY);
+    else storage.setItem(STORAGE_KEY, JSON.stringify(pairings));
+  } catch {
+    // Best-effort — a write failure (quota, private mode) just means the
+    // pairing won't survive a reload; the in-memory poll still completes it.
+  }
 }
 
 export const pairingStore = createStore<PairingState>()((set) => ({
-  pairings: load(),
+  pairings: readPersistedPairings(),
   add: (p) =>
     set((s) => {
       const next = [...s.pairings.filter((x) => x.id !== p.id), p];
@@ -94,7 +121,17 @@ export const pairingStore = createStore<PairingState>()((set) => ({
       persist(next);
       return { pairings: next };
     }),
+  hydrate: () => set({ pairings: readPersistedPairings() }),
 }));
+
+// Cross-tab sync: when another tab mutates the persisted list, mirror it
+// here so this tab's watcher picks up newly-minted pairings and drops ones
+// another tab already completed (reducing duplicate success toasts).
+if (typeof globalThis.addEventListener === "function") {
+  globalThis.addEventListener("storage", (e: StorageEvent) => {
+    if (e.key === STORAGE_KEY) pairingStore.getState().hydrate();
+  });
+}
 
 /** Reactive list for React components. */
 export function usePendingPairings(): PendingPairing[] {

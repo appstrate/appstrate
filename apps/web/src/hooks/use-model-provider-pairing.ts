@@ -8,8 +8,10 @@
  * `consumed` (= the helper completed the OAuth dance and POSTed the
  * credentials back).
  *
- * Cancellation on modal close is best-effort — the token TTL (5 min) is
- * the safety net if the DELETE never lands.
+ * The dashboard no longer cancels a pairing when its modal closes (that
+ * dropped in-flight connections); abandoned tokens are reaped by their TTL
+ * (5 min). `useCancelModelProviderPairing` remains as the binding for the
+ * DELETE endpoint but is not used by the modal-close path.
  */
 
 import { $api, type paths } from "../api/client";
@@ -32,7 +34,10 @@ export function useCreateModelProviderPairing() {
  * surrounding component re-renders deterministically.
  *
  * `refetchInterval` is set to 2.5s when polling; we stop polling as soon
- * as the status transitions to a terminal state (consumed / expired).
+ * as the status transitions to a terminal state (consumed / expired), or
+ * the row is gone (404/410 once the TTL reaps it server-side) — otherwise
+ * an expired pairing would spin the poll until the client-side prune drops
+ * it from the store.
  */
 export function useModelProviderPairingStatus(id: string | null, options: { enabled: boolean }) {
   return $api.useQuery(
@@ -42,6 +47,9 @@ export function useModelProviderPairingStatus(id: string | null, options: { enab
     {
       enabled: options.enabled && !!id,
       refetchInterval: (q) => {
+        // Row reaped server-side after its TTL — stop, don't spin on 404/410.
+        const errStatus = (q.state.error as { status?: number } | null)?.status;
+        if (errStatus === 404 || errStatus === 410) return false;
         const data = q.state.data;
         if (!data) return 2500;
         if (data.status === "pending") return 2500;
