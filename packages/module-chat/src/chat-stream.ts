@@ -35,6 +35,12 @@ When a tool call fails with a recoverable error (e.g. a validation error naming 
 
 When the best answer is a self-contained visual — a chart, a diagram, a mockup, a small interactive demo — call \`render_html\` with one complete HTML document (inline CSS/JS only; no external network). It renders sandboxed in the user's browser as a live artifact. Use it for things worth *seeing*, not for prose or code the user just wants to read.`;
 
+// Fallback when the platform MCP module isn't reachable (e.g. `mcp` absent
+// from MODULES). The chat keeps working for plain conversation — it just has
+// no instance tools — so the prompt drops the tool-grounding instructions and
+// tells the model to be upfront about the limitation.
+const NO_TOOLS_SYSTEM_PROMPT = `You are Appstrate's assistant. Right now your instance tools are unavailable because the platform MCP module is not active, so you cannot search operations, run agents, inspect runs, or schedule. Answer the user's questions directly and conversationally. If the user asks for an action that needs those tools, say plainly that tools are disabled until the \`mcp\` module is enabled, rather than pretending to act.`;
+
 /**
  * Client-rendered artifact tool. The `execute` is a no-op ack so the model
  * keeps streaming after the call; the HTML lives in the call args and the
@@ -125,7 +131,16 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   // org's default app unless the caller already pinned one.
   const applicationId =
     c.req.header("x-application-id") ?? (await resolveDefaultApplicationId(origin, headers, orgId));
-  const mcp = await openPlatformMcp({ origin, headers, orgId, applicationId });
+  // Graceful degradation: the chat's tools come from the platform MCP module
+  // (`/api/mcp/o/:org`). If it's unreachable (e.g. `mcp` not in MODULES), keep
+  // the turn usable for plain conversation instead of 500-ing. The UI surfaces
+  // a "no tools" banner via the `mcp` app-config feature flag.
+  let mcp: Awaited<ReturnType<typeof openPlatformMcp>> | null = null;
+  try {
+    mcp = await openPlatformMcp({ origin, headers, orgId, applicationId });
+  } catch (err) {
+    logger.warn("platform MCP unavailable — chat degrades to no-tools", { err: String(err) });
+  }
 
   // Per-turn observability: structured per-step logs to stdout. Full payloads
   // only under CHAT_DEBUG — they may carry PII/customer content.
@@ -134,7 +149,11 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   let step = 0;
   let stepStart = turnStart;
 
-  let system = mcp.instructions ? `${SYSTEM_PROMPT}\n\n${mcp.instructions}` : SYSTEM_PROMPT;
+  let system = !mcp
+    ? NO_TOOLS_SYSTEM_PROMPT
+    : mcp.instructions
+      ? `${SYSTEM_PROMPT}\n\n${mcp.instructions}`
+      : SYSTEM_PROMPT;
   if (body.context) {
     system += `\n\nThe user is currently looking at: ${body.context.type} "${body.context.label ?? body.context.id}" (id: ${body.context.id}). Prefer this context when the question is ambiguous.`;
   }
@@ -144,11 +163,13 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
       model,
       system,
       messages: await convertToModelMessages(messages),
-      tools: {
-        ...mcp.tools,
-        wait_for_run: createWaitForRunTool(mcp.tools),
-        render_html: renderHtmlTool,
-      },
+      tools: mcp
+        ? {
+            ...mcp.tools,
+            wait_for_run: createWaitForRunTool(mcp.tools),
+            render_html: renderHtmlTool,
+          }
+        : { render_html: renderHtmlTool },
       stopWhen: stepCountIs(MAX_STEPS),
       abortSignal: c.req.raw.signal,
       // Codex (ChatGPT) backend quirks, ignored by non-OpenAI providers:
@@ -184,17 +205,17 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
           usage: totalUsage as unknown as Record<string, unknown>,
           finishReason,
         });
-        void mcp.close();
+        void mcp?.close();
       },
     });
 
     // Close the MCP session if the client disconnects mid-stream.
-    c.req.raw.signal.addEventListener("abort", () => void mcp.close(), { once: true });
+    c.req.raw.signal.addEventListener("abort", () => void mcp?.close(), { once: true });
 
     // Surface the real failure to the client (AI SDK masks errors otherwise).
     return result.toUIMessageStreamResponse({ onError: clientErrorMessage });
   } catch (err) {
-    await mcp.close();
+    await mcp?.close();
     throw err;
   }
 }

@@ -18,7 +18,6 @@ import {
   ErrorPrimitive,
   AuiIf,
   useMessage,
-  useAuiState,
   groupPartByType,
 } from "@assistant-ui/react";
 import {
@@ -234,17 +233,6 @@ function ThinkingIndicator() {
   );
 }
 
-/**
- * The GroupedParts `indicator` ("no-text") only fires once the message has
- * parts; this covers the gap before the first token arrives.
- */
-function EmptyIndicator() {
-  const show = useAuiState(
-    (s) => s.message.parts.length === 0 && s.message.status?.type === "running",
-  );
-  return show ? <ThinkingIndicator /> : null;
-}
-
 /** Collapsible card wrapping a run of consecutive tool calls. */
 function ToolGroup({
   count,
@@ -292,7 +280,6 @@ function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
       <div className="text-foreground text-sm leading-relaxed">
-        <EmptyIndicator />
         <MessagePrimitive.GroupedParts groupBy={groupToolCalls}>
           {({ part, children }) => {
             switch (part.type) {

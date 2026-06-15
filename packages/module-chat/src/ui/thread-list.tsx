@@ -9,6 +9,7 @@ import {
   ThreadListItemMorePrimitive,
   ThreadListItemRuntimeProvider,
   useAssistantRuntime,
+  useThreadList,
   useThreadListItem,
   useThreadListItemRuntime,
 } from "@assistant-ui/react";
@@ -80,8 +81,25 @@ export function ThreadList() {
       </div>
       <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2">
         <ThreadListPrimitive.Items components={{ ThreadListItem }} />
+        <EmptyConversations />
       </div>
     </div>
+  );
+}
+
+/**
+ * Empty-state for the conversation list. assistant-ui exposes no native
+ * `ThreadListPrimitive.Empty`, so we read the runtime state (`useThreadList`)
+ * and render our own copy — only once loading settled and no saved
+ * conversation exists, so it never flashes during the initial load.
+ */
+function EmptyConversations() {
+  const showEmpty = useThreadList((s) => s.threadIds.length === 0 && !s.isLoading);
+  if (!showEmpty) return null;
+  return (
+    <p className="text-muted-foreground px-2 py-6 text-center text-xs">
+      Envoie un message ! Ton historique de conversations apparaîtra ici.
+    </p>
   );
 }
 
