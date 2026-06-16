@@ -36,10 +36,13 @@
  * `version_label` with `version_dirty: false`, and the run serializer derives
  * `version_ref` from that pair (see `deriveVersionRef` in state/runs.ts).
  *
- * Known scope limit (refs #588): substituting the published manifest + prompt
- * pins the agent definition itself, but skill dependencies still resolve
- * through `DraftPackageCatalog` on the run hot path — the org working-copy
- * model. Pinning the full transitive closure is the #588 follow-up.
+ * Scope: this resolver pins the agent's OWN definition (manifest + prompt) to
+ * the selected version. The transitive skill closure is pinned separately, on
+ * the run hot path, by `RunPackageCatalog` (#666) — it resolves each
+ * `dependencies.skills` entry against PUBLISHED versions honoring the manifest
+ * pin, so a dependency's mutable draft never leaks into a run. Integration /
+ * mcp-server spawns are resolved by the sidecar and remain the open follow-up
+ * (#686).
  */
 
 import { ApiError, notFound } from "../lib/errors.ts";

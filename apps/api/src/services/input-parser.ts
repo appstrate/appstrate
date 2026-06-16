@@ -771,6 +771,15 @@ export async function parseRequestInput(
     }
   }
 
+  // An empty `{}` carries no override — collapse it to `undefined` so it
+  // persists as NULL on `runs.dependency_overrides`. A non-null map on the run
+  // object signals "consumed an override (maybe draft) → not reproducible from
+  // version_ref alone"; an empty object would muddy that signal for free.
+  const dependencyOverrides =
+    body.dependency_overrides && Object.keys(body.dependency_overrides).length > 0
+      ? body.dependency_overrides
+      : undefined;
+
   return {
     input,
     uploadedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
@@ -778,6 +787,6 @@ export async function parseRequestInput(
     proxyIdOverride: body.proxyId,
     configOverride: body.config,
     connectionOverrides: body.connection_overrides,
-    dependencyOverrides: body.dependency_overrides,
+    dependencyOverrides,
   };
 }
