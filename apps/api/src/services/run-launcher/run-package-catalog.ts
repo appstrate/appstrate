@@ -57,23 +57,36 @@ export interface RunPackageCatalogOptions {
    * replaces the manifest pin with that spec against published versions.
    */
   dependencyOverrides?: Record<string, string> | null;
+  /**
+   * Injection seam for tests (the repo's no-`mock.module` DI policy). Supply
+   * stand-in catalogs to exercise the routing logic without DB/storage. The
+   * draft factory is lazy so production runs that declare no `draft` override
+   * never construct a `DraftPackageCatalog`. Production defaults wrap the real
+   * {@link DbPackageCatalog} / {@link DraftPackageCatalog}.
+   */
+  deps?: {
+    db?: PackageCatalog;
+    makeDraft?: () => PackageCatalog;
+  };
 }
 
 export class RunPackageCatalog implements PackageCatalog {
-  private readonly db: DbPackageCatalog;
+  private readonly db: PackageCatalog;
+  private readonly makeDraft: () => PackageCatalog;
   /** Created lazily — most runs declare no `draft` override at all. */
-  private draftCatalog: DraftPackageCatalog | null = null;
+  private draftCatalog: PackageCatalog | null = null;
   private readonly overrides: Map<string, string>;
   /** identity → the backing catalog that resolved it (routes `fetch`). */
   private readonly owners = new Map<PackageIdentity, PackageCatalog>();
 
-  constructor(private readonly opts: RunPackageCatalogOptions) {
-    this.db = new DbPackageCatalog({ orgId: opts.orgId });
+  constructor(opts: RunPackageCatalogOptions) {
+    this.db = opts.deps?.db ?? new DbPackageCatalog({ orgId: opts.orgId });
+    this.makeDraft = opts.deps?.makeDraft ?? (() => new DraftPackageCatalog({ orgId: opts.orgId }));
     this.overrides = new Map(Object.entries(opts.dependencyOverrides ?? {}));
   }
 
-  private draft(): DraftPackageCatalog {
-    return (this.draftCatalog ??= new DraftPackageCatalog({ orgId: this.opts.orgId }));
+  private draft(): PackageCatalog {
+    return (this.draftCatalog ??= this.makeDraft());
   }
 
   async resolve(name: string, versionSpec: string): Promise<ResolvedPackage | null> {
