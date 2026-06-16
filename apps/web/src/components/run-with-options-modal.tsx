@@ -11,28 +11,35 @@ import type { SchemaWrapper, JSONSchemaObject } from "@appstrate/core/form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { uploadClient } from "../api/uploads";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
-import { AgentVersionField } from "./agent-version-field";
+import { AgentVersionField } from "./package-version-select";
 import { DependencyOverridesSection } from "./dependency-overrides-section";
 import { useScheduleFormDeps } from "../hooks/use-schedules";
 import type { AgentDetail } from "@appstrate/shared-types";
 
 /**
  * Everything the modal collects, mapped 1:1 onto the run API body by the
- * caller: `version` rides the `?version=` query (defaults to `draft`, the same
- * version the plain "Lancer" button runs); `overrides` carries the
+ * caller: `version` rides the `?version=` query (`undefined` = omit it, so the
+ * server applies the exact same default as the plain "Lancer" button — latest
+ * published when one exists, draft otherwise, #636); `overrides` carries the
  * schedule-shaped delta for model / proxy / config / connections (reused from
  * `RunOverridesPanel`); `dependencyOverrides` the per-skill
  * `dependency_overrides` map. Defaults across the board mirror plain "Lancer".
  */
 export interface RunWithOptionsSubmit {
   input: Record<string, unknown>;
-  version: string;
+  version: string | undefined;
   overrides: RunOverridesValue;
   dependencyOverrides: Record<string, string>;
 }
 
-/** Default version selector — matches the plain "Lancer" button (#636). */
-const DEFAULT_VERSION = "draft";
+/**
+ * Sentinel for the default version choice. Selecting it sends NO `?version=`,
+ * so the run inherits the server-side default — identical to the plain
+ * "Lancer" button (#636), which also omits the query. Hardcoding `draft` here
+ * would diverge for any agent that has a published version (plain "Lancer"
+ * runs the latest published, not the working copy).
+ */
+const VERSION_DEFAULT = "__default__";
 
 interface RunWithOptionsModalProps {
   open: boolean;
@@ -97,7 +104,7 @@ function RunWithOptionsForm({
   const deps = useScheduleFormDeps(agent.id);
   const labels = useSchemaFormLabels();
   const [inputData, setInputData] = useState<Record<string, unknown>>({});
-  const [version, setVersion] = useState<string>(DEFAULT_VERSION);
+  const [version, setVersion] = useState<string>(VERSION_DEFAULT);
   const [overrides, setOverrides] = useState<RunOverridesValue>({});
   const [dependencyOverrides, setDependencyOverrides] = useState<Record<string, string>>({});
   const inputFormRef = useRef<RjsfForm>(null);
@@ -108,7 +115,14 @@ function RunWithOptionsForm({
   const skills = agent.dependencies?.skills ?? [];
 
   const fire = (input: Record<string, unknown>) =>
-    onSubmit({ input, version, overrides, dependencyOverrides });
+    onSubmit({
+      input,
+      // Default sentinel → omit version (server applies the plain-"Lancer"
+      // default); any explicit pick (draft or a published version) is sent.
+      version: version === VERSION_DEFAULT ? undefined : version,
+      overrides,
+      dependencyOverrides,
+    });
 
   const handleSubmit = () => {
     // Route through rjsf validation first when the agent declares input —
@@ -136,16 +150,21 @@ function RunWithOptionsForm({
         </div>
       )}
 
-      {/* Run version — semantics: default `draft` (= plain "Lancer"), every
-          pick applied verbatim. The only leading option is `draft`; there is
-          no schedule-style "inherit" because a run has no fire-time
-          resolution to defer to. */}
+      {/* Run version — semantics: the leading "Default" option (selected by
+          default) omits `?version=`, so the server applies the same default as
+          plain "Lancer" (latest published, or draft when none). `draft` and any
+          published version are explicit picks, applied verbatim. This is the
+          run-time analogue of the schedule's "inherit", resolved now (server
+          default at submit) rather than per-fire. */}
       <AgentVersionField
         packageId={agent.id}
         label={t("run.overrides.versionLabel")}
         value={version}
         onChange={setVersion}
-        leadingOptions={[{ value: DEFAULT_VERSION, label: t("run.overrides.versionDraft") }]}
+        leadingOptions={[
+          { value: VERSION_DEFAULT, label: t("run.overrides.versionDefault") },
+          { value: "draft", label: t("run.overrides.versionDraft") },
+        ]}
       />
 
       {deps && (

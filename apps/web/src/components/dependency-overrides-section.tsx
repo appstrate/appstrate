@@ -2,14 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { usePackageVersions } from "../hooks/use-packages";
+import { PackageVersionSelect } from "./package-version-select";
 
 const INHERIT = "__inherit__";
 const DRAFT = "draft";
@@ -80,34 +73,28 @@ function DependencyOverrideRow({
   onChange: (next: string) => void;
 }) {
   const { t } = useTranslation(["agents"]);
-  const { data: versions } = usePackageVersions("skill", skill.id);
   const label = skill.name ?? skill.id;
   return (
     <div className="space-y-1.5" data-testid={`dep-override-row-${skill.id}`}>
       <div className="text-xs font-medium">{label}</div>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={INHERIT}>
-            {skill.version
+      <PackageVersionSelect
+        type="skill"
+        packageId={skill.id}
+        value={value}
+        onChange={onChange}
+        leadingOptions={[
+          {
+            value: INHERIT,
+            label: skill.version
               ? t("run.overrides.dependencyInheritPinned", { version: skill.version })
-              : t("run.overrides.dependencyInherit")}
-          </SelectItem>
-          {/* "draft" runs the dependency's mutable working copy — the skill
-              edit loop. Persisted on the run row so a drafted run is never
-              mistaken for a reproducible one. */}
-          <SelectItem value={DRAFT}>{t("run.overrides.dependencyDraft")}</SelectItem>
-          {versions
-            ?.filter((v) => !v.yanked)
-            .map((v) => (
-              <SelectItem key={v.version} value={v.version}>
-                v{v.version}
-              </SelectItem>
-            ))}
-        </SelectContent>
-      </Select>
+              : t("run.overrides.dependencyInherit"),
+          },
+          // "draft" runs the dependency's mutable working copy — the skill
+          // edit loop. Persisted on the run row so a drafted run is never
+          // mistaken for a reproducible one.
+          { value: DRAFT, label: t("run.overrides.dependencyDraft") },
+        ]}
+      />
     </div>
   );
 }

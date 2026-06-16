@@ -108,7 +108,7 @@ export function useRunAgent(packageId: string) {
             : {}),
           ...(modelId !== undefined ? { modelId } : {}),
           ...(proxyId !== undefined ? { proxyId } : {}),
-          ...(config !== undefined ? { config: config as Record<string, never> } : {}),
+          ...(config !== undefined ? { config } : {}),
           ...(dependencyOverrides !== undefined
             ? { dependency_overrides: dependencyOverrides }
             : {}),

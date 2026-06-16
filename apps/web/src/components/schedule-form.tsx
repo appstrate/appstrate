@@ -23,7 +23,7 @@ import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { uploadClient } from "../api/uploads";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
-import { AgentVersionField } from "./agent-version-field";
+import { AgentVersionField } from "./package-version-select";
 
 // Sentinel for the schedule's "inherit" version choice — no pin stored; the
 // agent's version resolution applies at fire time.
