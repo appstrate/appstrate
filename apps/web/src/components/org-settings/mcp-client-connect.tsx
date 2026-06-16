@@ -2,8 +2,8 @@
 
 import { useTranslation } from "react-i18next";
 import { Check, Copy, ExternalLink } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@appstrate/ui/components/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
 import { buildMcpClientConfig } from "../../lib/mcp-client-config";
 

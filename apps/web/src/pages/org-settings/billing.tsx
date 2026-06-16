@@ -3,7 +3,7 @@
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { CreditCard } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useBilling, useCheckout, usePortal, getUsageBarColor } from "../../hooks/use-billing";
 import { PlanGrid } from "../../components/plan-card";

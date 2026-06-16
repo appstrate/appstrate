@@ -5,8 +5,8 @@ import { useTranslation } from "react-i18next";
 import { KeyRound } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { ConfirmModal } from "../components/confirm-modal";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@appstrate/ui/components/button";
+import { Badge } from "@appstrate/ui/components/badge";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import {
   useApiKeys,

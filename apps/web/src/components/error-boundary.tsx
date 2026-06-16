@@ -2,7 +2,7 @@
 
 import { Component, type ReactNode, type ErrorInfo } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 import { isChunkLoadError, reloadOnceForChunkError } from "@/lib/chunk-reload";
 
 interface Props {

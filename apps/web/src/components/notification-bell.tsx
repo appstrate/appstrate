@@ -6,10 +6,10 @@ import { useTranslation } from "react-i18next";
 import { Bell, CheckCheck, Circle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "./status-badge";
-import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { Separator } from "@/components/ui/separator";
+import { Button } from "@appstrate/ui/components/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
+import { Sheet, SheetContent, SheetTrigger } from "@appstrate/ui/components/sheet";
+import { Separator } from "@appstrate/ui/components/separator";
 import {
   useUnreadCount,
   useMarkRead,

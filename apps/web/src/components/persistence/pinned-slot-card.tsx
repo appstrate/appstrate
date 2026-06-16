@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Pin, Trash2, Copy, Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 import type { PersistenceActorType } from "@appstrate/shared-types";
 import { formatDateField } from "../../lib/markdown";
 import { ActorBadge } from "./actor-badge";

@@ -35,7 +35,7 @@ import { useApplicationResolver } from "./hooks/use-current-application";
 import { useTheme } from "./stores/theme-store";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
-import { Separator } from "@/components/ui/separator";
+import { Separator } from "@appstrate/ui/components/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 

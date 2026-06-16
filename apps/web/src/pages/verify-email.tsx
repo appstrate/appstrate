@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation, Trans } from "react-i18next";
 import { Mail, AlertCircle, LogOut } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 import { AuthLayout } from "../components/auth-layout";
 import { useAuth } from "../hooks/use-auth";
 

@@ -13,7 +13,7 @@ import {
   AlertTriangle,
   XCircle,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@/lib/utils";
 import { formatTimestamp, typeColors, levelColors, type LogEntry } from "./log-utils";
 

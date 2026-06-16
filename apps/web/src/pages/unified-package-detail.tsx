@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
   usePackageDetail,
@@ -30,7 +30,7 @@ import { ConfirmModal } from "../components/confirm-modal";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { VersionBanners } from "../components/version-banners";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { VersionHistory } from "../components/version-history";
 import { DiffTab } from "../components/diff-tab";
 import { CreateVersionModal } from "../components/create-version-modal";

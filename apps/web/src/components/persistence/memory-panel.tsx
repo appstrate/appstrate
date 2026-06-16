@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BrainCircuit, ChevronDown, Pin, Library } from "lucide-react";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
 import { EmptyState } from "../page-states";
 import { ScopeFilter, type PersistenceScopeFilter } from "./scope-filter";
 import { MemoryRow } from "./memory-row";

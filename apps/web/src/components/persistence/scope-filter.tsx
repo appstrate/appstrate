@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@appstrate/ui/components/select";
 
 /** UI-level scope filter shared by the agent-level Memories + Checkpoints tabs. */
 export type PersistenceScopeFilter = "all" | "shared" | "mine";

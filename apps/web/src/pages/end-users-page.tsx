@@ -5,10 +5,15 @@ import { useTranslation } from "react-i18next";
 import { Search, Users } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Button } from "@appstrate/ui/components/button";
+import { Input } from "@appstrate/ui/components/input";
+import { Badge } from "@appstrate/ui/components/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@appstrate/ui/components/tooltip";
 import { useEndUsers, type EndUserInfo } from "../hooks/use-end-users";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { PageHeader } from "../components/page-header";

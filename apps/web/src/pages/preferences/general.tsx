@@ -3,9 +3,9 @@
 import { useState } from "react";
 import { useTranslation, Trans } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Button } from "@appstrate/ui/components/button";
+import { Input } from "@appstrate/ui/components/input";
+import { Label } from "@appstrate/ui/components/label";
 import { useUpdateDisplayName } from "../../hooks/use-profile";
 import { useAuth, refreshAuth, EmailChangeError } from "../../hooks/use-auth";
 import { useAppConfig } from "../../hooks/use-app-config";

@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@appstrate/ui/components/button";
+import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { useUnreadCount, useMarkAllRead } from "../hooks/use-notifications";
 import { PageHeader } from "../components/page-header";
 import { RunList } from "../components/run-list";
