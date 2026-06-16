@@ -11,11 +11,13 @@ import {
   useDeleteAgent,
   useDeleteAgentRuns,
   useDeleteAllMemories,
+  useRunAgent,
 } from "../../hooks/use-mutations";
 import { usePackageInstallState, useTogglePackageInstall } from "../../hooks/use-library";
 import { useCurrentApplicationId } from "../../hooks/use-current-application";
 import { PackageActionsDropdown } from "./package-actions-dropdown";
 import { ConfirmModal } from "../confirm-modal";
+import { RunWithOptionsModal } from "../run-with-options-modal";
 
 export function AgentActions({
   packageId,
@@ -50,6 +52,7 @@ export function AgentActions({
   const deleteRuns = useDeleteAgentRuns(packageId);
   const deleteAllMemories = useDeleteAllMemories(packageId);
   const uninstallMutation = useTogglePackageInstall();
+  const runAgent = useRunAgent(packageId);
   const currentAppId = useCurrentApplicationId();
   const { installedAppNames, isInstalledInCurrentApp } = usePackageInstallState(packageId);
 
@@ -57,6 +60,7 @@ export function AgentActions({
     type: "deleteAgent" | "clearRuns" | "clearMemories" | "uninstallAgent";
     label: string;
   } | null>(null);
+  const [runOptionsOpen, setRunOptionsOpen] = useState(false);
 
   if (!detail) return null;
 
@@ -140,6 +144,33 @@ export function AgentActions({
             label: t("detail.clearMemoriesConfirm"),
           })
         }
+        onRunWithOptions={() => setRunOptionsOpen(true)}
+      />
+      <RunWithOptionsModal
+        open={runOptionsOpen}
+        onClose={() => setRunOptionsOpen(false)}
+        agent={detail}
+        isPending={runAgent.isPending}
+        onSubmit={({ input, overrides, dependencyOverrides }) => {
+          // Map the schedule-shaped override delta onto the run API body.
+          // `version_override` rides the `?version=` query; the proxy "none"
+          // sentinel (`__none__`) becomes the server's `"none"` (no proxy).
+          const proxy = overrides.proxy_id_override;
+          runAgent.mutate(
+            {
+              ...(Object.keys(input).length > 0 ? { input } : {}),
+              ...(overrides.version_override ? { version: overrides.version_override } : {}),
+              ...(overrides.model_id_override ? { modelId: overrides.model_id_override } : {}),
+              ...(proxy ? { proxyId: proxy === "__none__" ? "none" : proxy } : {}),
+              ...(overrides.config_override ? { config: overrides.config_override } : {}),
+              ...(overrides.connection_overrides
+                ? { connectionOverrides: overrides.connection_overrides }
+                : {}),
+              ...(Object.keys(dependencyOverrides).length > 0 ? { dependencyOverrides } : {}),
+            },
+            { onSuccess: () => setRunOptionsOpen(false) },
+          );
+        }}
       />
       <ConfirmModal
         open={confirmState !== null}
