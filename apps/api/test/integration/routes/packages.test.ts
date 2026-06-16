@@ -1062,6 +1062,65 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
+  // POST /api/packages/agents/:scope/:name/versions — publish (re-validation gate)
+  // ═══════════════════════════════════════════════
+
+  describe("POST /api/packages/agents/:scope/:name/versions", () => {
+    it("rejects publishing a draft with an orphan integrations_configuration entry", async () => {
+      // integrations_configuration key with NO matching dependencies.integrations
+      // entry — must be refused at the publish gate (AFPS §4.4 orphan-key rule).
+      await seedPackage({
+        id: "@pkgorg/orphan-config",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@pkgorg/orphan-config",
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          display_name: "Orphan Config",
+          description: "Agent with orphan integration config",
+          integrations_configuration: { "@acme/fathom": { tools: ["api_call"] } },
+        },
+        draftContent: "Prompt.",
+      });
+
+      const res = await app.request("/api/packages/agents/@pkgorg/orphan-config/versions", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("publishes a valid draft", async () => {
+      await seedPackage({
+        id: "@pkgorg/valid-draft",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@pkgorg/valid-draft",
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          display_name: "Valid Draft",
+          description: "Valid agent",
+        },
+        draftContent: "Prompt.",
+      });
+
+      const res = await app.request("/api/packages/agents/@pkgorg/valid-draft/versions", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      expect(res.status).toBeLessThan(300);
+    });
+  });
+
+  // ═══════════════════════════════════════════════
   // GET /api/packages/skills/:scope/:name/versions — list skill versions
   // ═══════════════════════════════════════════════
 

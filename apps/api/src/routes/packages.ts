@@ -1071,6 +1071,16 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       throw notFound(`${label} '${itemId}' not found`);
     }
 
+    // Re-validate the draft manifest at the publish gate (defense in depth).
+    // Save/import already validate, but cutting a version must not trust a
+    // draft that became invalid by any path — this rejects e.g. an
+    // `integrations_configuration` entry without a matching declared
+    // dependency before it is frozen into an immutable version.
+    const manifestResult = validateManifest(item.manifest);
+    if (!manifestResult.valid) {
+      throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
+    }
+
     // Parse optional version override from request body
     let versionOverride: string | undefined;
     try {
