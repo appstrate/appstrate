@@ -14,6 +14,13 @@
  * the published manifest keeps the data — it feeds the PUBLISHED version's
  * manifest through the exact resolver the run pipeline uses and asserts the
  * integration is spawned with its declared tool in the allowlist.
+ *
+ * Both tool delivery paths are covered, because the original report
+ * (`@tractr/fathom-*`) used `api_call`, which resolves through a different
+ * branch (`getApiCallConfigs` / `_meta["dev.appstrate/api"]`) than an MCP-server
+ * tool:
+ *   - a `source.kind: "local"` integration exposing an MCP tool, and
+ *   - a `source.kind: "none"` (serverless) integration exposing `api_call`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -28,25 +35,82 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedInstalledPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
+  apiIntegrationManifest,
   mcpServerManifest,
 } from "../../helpers/integration-manifests.ts";
 
-const INTEG = "@e2eorg/fathom";
-const SERVER = "@e2eorg/fathom-server";
-const AGENT = "@e2eorg/prompt-only";
+const API_KEY_AUTH = {
+  primary: {
+    type: "api_key" as const,
+    authorizedUris: ["https://api.fathom.test/**"],
+    credentialFields: ["api_key"],
+    delivery: { env: { API_KEY: { value: "{$credential.api_key}", sensitive: true } } },
+  },
+};
 
-/** Prompt-only agent (no skills) declaring the integration + one of its tools. */
-function agentDraftManifest(): Record<string, unknown> {
-  return {
-    schema_version: "0.2",
+async function seedConnection(ctx: TestContext, integrationId: string) {
+  await db.insert(integrationConnections).values({
+    integrationId,
+    authKey: "primary",
+    accountId: "default",
+    applicationId: ctx.defaultAppId,
+    userId: ctx.user.id,
+    endUserId: null,
+    credentialsEncrypted: encryptCredentials({ api_key: "secret" }),
+    identityClaims: {},
+    scopesGranted: [],
+    needsReconnection: false,
+    expiresAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+}
+
+/** Seed a prompt-only agent (no skills) declaring `integrationId` with `tool`,
+ *  publish it from draft, and return the resolver result against the PUBLISHED
+ *  (immutable) version manifest — the exact path the run pipeline uses. */
+async function publishAndResolve(
+  ctx: TestContext,
+  agentId: string,
+  integrationId: string,
+  tool: string,
+) {
+  const agent = await seedPackage({
+    id: agentId,
+    orgId: ctx.orgId,
     type: "agent",
-    name: AGENT,
-    version: "1.0.0",
-    display_name: "Prompt Only",
-    description: "Prompt-only agent with one integration, zero skills",
-    dependencies: { integrations: { [INTEG]: "^1.0.0" } },
-    integrations_configuration: { [INTEG]: { tools: ["search"], auth_key: "primary" } },
-  };
+    source: "local",
+    draftManifest: {
+      schema_version: "0.2",
+      type: "agent",
+      name: agentId,
+      version: "1.0.0",
+      display_name: "Prompt Only",
+      description: "Prompt-only agent with one integration, zero skills",
+      dependencies: { integrations: { [integrationId]: "^1.0.0" } },
+      integrations_configuration: { [integrationId]: { tools: [tool], auth_key: "primary" } },
+    },
+    draftContent: "Do the sync.",
+  });
+
+  const result = await createVersionFromDraft({
+    packageId: agent.id,
+    orgId: ctx.orgId,
+    userId: ctx.user.id,
+  });
+  expect("error" in result).toBe(false);
+
+  const [stored] = await db
+    .select({ manifest: packageVersions.manifest })
+    .from(packageVersions)
+    .where(and(eq(packageVersions.packageId, agentId), eq(packageVersions.version, "1.0.0")))
+    .limit(1);
+
+  return resolveIntegrationSpawns({
+    applicationId: ctx.defaultAppId,
+    actor: { type: "user", id: ctx.user.id },
+    agentManifest: stored!.manifest as Record<string, unknown>,
+  });
 }
 
 describe("publish → resolveIntegrationSpawns (prompt-only agent, e2e)", () => {
@@ -57,8 +121,9 @@ describe("publish → resolveIntegrationSpawns (prompt-only agent, e2e)", () => 
     ctx = await createTestContext({ orgSlug: "e2eorg" });
   });
 
-  it("a published prompt-only agent resolves its integration tool from the stored version manifest", async () => {
-    // ── integration + its mcp-server, installed + connected ──
+  it("resolves an MCP-tool integration from the published version manifest", async () => {
+    const INTEG = "@e2eorg/mcp-integ";
+    const SERVER = "@e2eorg/mcp-integ-server";
     await seedPackage({
       id: INTEG,
       orgId: ctx.orgId,
@@ -68,14 +133,7 @@ describe("publish → resolveIntegrationSpawns (prompt-only agent, e2e)", () => 
         name: INTEG,
         version: "1.0.0",
         serverName: SERVER,
-        auths: {
-          primary: {
-            type: "api_key",
-            authorizedUris: ["https://api.fathom.test/**"],
-            credentialFields: ["api_key"],
-            delivery: { env: { API_KEY: { value: "{$credential.api_key}", sensitive: true } } },
-          },
-        },
+        auths: API_KEY_AUTH,
         tools_policy: { search: {} },
       }),
     });
@@ -97,57 +155,38 @@ describe("publish → resolveIntegrationSpawns (prompt-only agent, e2e)", () => 
         entryPoint: "./server.js",
       }),
     });
-    await db.insert(integrationConnections).values({
-      integrationId: INTEG,
-      authKey: "primary",
-      accountId: "default",
-      applicationId: ctx.defaultAppId,
-      userId: ctx.user.id,
-      endUserId: null,
-      credentialsEncrypted: encryptCredentials({ api_key: "secret" }),
-      identityClaims: {},
-      scopesGranted: [],
-      needsReconnection: false,
-      expiresAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    await seedConnection(ctx, INTEG);
 
-    // ── the prompt-only agent: draft → published version ──
-    const agent = await seedPackage({
-      id: AGENT,
-      orgId: ctx.orgId,
-      type: "agent",
-      source: "local",
-      draftManifest: agentDraftManifest(),
-      draftContent: "Do the sync.",
-    });
+    const specs = await publishAndResolve(ctx, "@e2eorg/agent-mcp", INTEG, "search");
 
-    const result = await createVersionFromDraft({
-      packageId: agent.id,
-      orgId: ctx.orgId,
-      userId: ctx.user.id,
-    });
-    expect("error" in result).toBe(false);
-
-    // Read back the PUBLISHED, immutable manifest (not the draft).
-    const [stored] = await db
-      .select({ manifest: packageVersions.manifest })
-      .from(packageVersions)
-      .where(and(eq(packageVersions.packageId, AGENT), eq(packageVersions.version, "1.0.0")))
-      .limit(1);
-    const publishedManifest = stored!.manifest as Record<string, unknown>;
-
-    // ── run-pipeline resolution against the published manifest ──
-    const specs = await resolveIntegrationSpawns({
-      applicationId: ctx.defaultAppId,
-      actor: { type: "user", id: ctx.user.id },
-      agentManifest: publishedManifest,
-    });
-
-    // The bug produced []; the integration's declared tool must now resolve.
     expect(specs.length).toBe(1);
     expect(specs[0]!.integrationId).toBe(INTEG);
+    expect(specs[0]!.sourceKind).toBe("local");
     expect(specs[0]!.toolAllowlist).toEqual(["search"]);
+  });
+
+  it("resolves an api_call (serverless) integration — the original Fathom shape", async () => {
+    const INTEG = "@e2eorg/fathom";
+    await seedPackage({
+      id: INTEG,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: apiIntegrationManifest({
+        name: INTEG,
+        version: "1.0.0",
+        apiCall: { authKey: "primary" },
+        auths: API_KEY_AUTH,
+      }),
+    });
+    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedConnection(ctx, INTEG);
+
+    const specs = await publishAndResolve(ctx, "@e2eorg/agent-api", INTEG, "api_call");
+
+    expect(specs.length).toBe(1);
+    expect(specs[0]!.integrationId).toBe(INTEG);
+    expect(specs[0]!.sourceKind).toBe("none");
+    expect(specs[0]!.toolAllowlist).toEqual(["api_call"]);
   });
 });

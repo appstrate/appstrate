@@ -628,11 +628,12 @@ export async function createVersionFromDraft(params: {
 
 /**
  * Resolver for {@link detectCycle}: returns the direct dependencies of the
- * latest published version of `@scope/name` by reading the flattened
- * `package_version_dependencies` rows. Used at publish time to walk the
- * transitive dep graph and reject cycles before persistence. The graph is a
- * conservative snapshot — yanked versions are excluded by
- * {@link getLatestVersionId}'s preference for "latest" dist-tag.
+ * latest published version of `@scope/name` from its `package_version_dependencies`
+ * rows (the derived index — a per-version projection of `manifest.dependencies`,
+ * direct deps only; {@link detectCycle} walks the graph transitively by calling
+ * this resolver per node). Used at publish time to reject cycles before
+ * persistence. The graph is a conservative snapshot — yanked versions are
+ * excluded by {@link getLatestVersionId}'s preference for "latest" dist-tag.
  */
 async function resolvePublishedDeps(scope: string, name: string): Promise<DepEntry[]> {
   const packageId = `${scope}/${name}`;
@@ -757,6 +758,17 @@ export async function createVersionAndUpload(params: {
       createdBy,
       deps,
     });
+
+    // `null` = no row created (invalid semver / forward-only rejection — NOT
+    // the "exists" case, which returns the existing row). The ZIP was already
+    // uploaded above, so clean it up rather than leave it orphaned in storage.
+    if (!result) {
+      try {
+        await deleteVersionZip(packageId, version);
+      } catch {
+        logger.warn("Failed to clean up ZIP after no-op version create", { packageId, version });
+      }
+    }
 
     return result;
   } catch (err) {
