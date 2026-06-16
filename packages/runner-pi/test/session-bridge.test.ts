@@ -81,6 +81,40 @@ describe("installSessionBridge — message_end", () => {
     expect((errorEvent as unknown as { message: string }).message).toBe("LLM timeout");
   });
 
+  it("emits appstrate.error when stopReason is aborted (mirrors getTerminalError)", () => {
+    // A provider-side abort is a terminal failure `getTerminalError()`
+    // stamps as failed — the live trail must log it too so the failure is
+    // not visible only on `runs.error`.
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    session.pushMessage({
+      role: "assistant",
+      stopReason: "aborted",
+      errorMessage: "Request was aborted",
+      content: [],
+    });
+    session.emit({ type: "message_end" });
+
+    const errorEvent = sink.events.find((e) => e.type === "appstrate.error");
+    expect(errorEvent).toBeDefined();
+    expect((errorEvent as unknown as { message: string }).message).toBe("Request was aborted");
+  });
+
+  it("emits appstrate.error with a fallback message when an error turn has no errorMessage", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    session.pushMessage({ role: "assistant", stopReason: "error", content: [] });
+    session.emit({ type: "message_end" });
+
+    const errorEvent = sink.events.find((e) => e.type === "appstrate.error");
+    expect(errorEvent).toBeDefined();
+    expect((errorEvent as unknown as { message: string }).message).toMatch(/ended in an error/);
+  });
+
   it("ignores message_end when no assistant message was pushed", () => {
     const sink = createInternalCapture();
     const session = createFakeSession();

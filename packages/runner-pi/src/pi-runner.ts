@@ -674,6 +674,31 @@ function truncateString(s: string, limitBytes: number): string {
   return `${head}…(truncated, ${byteLength} bytes)`;
 }
 
+/**
+ * True when a settled assistant turn's `stopReason` represents a terminal
+ * failure — `"error"` (provider/stream failure, incl. overflow, which the
+ * SDK surfaces as a stopReason="error" turn) or `"aborted"` (a provider-side
+ * abort that did not propagate as a thrown cancellation; a user cancel
+ * travels the abort-signal throw path in `run()` instead, so it never
+ * reaches here). Shared by the live `appstrate.error` emit and
+ * `getTerminalError()` so the `run_logs` visibility row always matches the
+ * stamped terminal verdict.
+ */
+function isTerminalErrorStop(stopReason: string | undefined): boolean {
+  return stopReason === "error" || stopReason === "aborted";
+}
+
+/**
+ * Human-facing message for a terminal-error turn: the SDK's `errorMessage`
+ * when present, else a generic fallback. Both stop reasons carry an
+ * `errorMessage` by SDK contract; the fallback guards the rare empty case.
+ */
+function terminalErrorMessage(errorMessage: string | undefined): string {
+  return typeof errorMessage === "string" && errorMessage.length > 0
+    ? errorMessage
+    : "The agent's final model turn ended in an error";
+}
+
 export function installSessionBridge(
   session: BridgeableSession,
   sink: InternalSink,
@@ -769,13 +794,19 @@ export function installSessionBridge(
           }
         }
 
-        // SDK error (e.g. LLM API unreachable, auth failures)
-        if (last.stopReason === "error" && last.errorMessage) {
+        // SDK error (e.g. LLM API unreachable, auth failures) or a
+        // provider-side abort. Mirror `getTerminalError()`'s verdict so a
+        // terminal `aborted` turn — or an `error` turn the SDK left without
+        // an `errorMessage` — still lands a `run_logs` row, not just a
+        // bare `runs.error`. A transient error turn the agent later
+        // recovers from also logs here (harmless — the trail no longer
+        // drives status).
+        if (isTerminalErrorStop(last.stopReason)) {
           fire({
             type: "appstrate.error",
             timestamp: Date.now(),
             runId,
-            message: String(last.errorMessage),
+            message: terminalErrorMessage(last.errorMessage),
           });
         }
 
@@ -871,20 +902,14 @@ export function installSessionBridge(
       return totalCost;
     },
     getTerminalError(): RunError | undefined {
-      // `"error"` covers provider/stream failures (incl. overflow, which
-      // the SDK surfaces as a stopReason="error" turn); `"aborted"` covers
-      // a provider-side abort that did not propagate as a thrown
-      // cancellation (a user cancel travels the abort-signal throw path in
-      // `run()` instead, so it never reaches here). Both carry an
-      // errorMessage by SDK contract; fall back to a generic line if absent.
-      if (lastAssistantStopReason !== "error" && lastAssistantStopReason !== "aborted") {
+      // Verdict on the LAST assistant turn. `isTerminalErrorStop` /
+      // `terminalErrorMessage` are shared with the live `appstrate.error`
+      // emit above, so the stamped status and the `run_logs` trail can
+      // never disagree on what counts as a terminal failure.
+      if (!isTerminalErrorStop(lastAssistantStopReason)) {
         return undefined;
       }
-      const message =
-        typeof lastAssistantErrorMessage === "string" && lastAssistantErrorMessage.length > 0
-          ? lastAssistantErrorMessage
-          : "The agent's final model turn ended in an error";
-      return { code: "adapter_error", message };
+      return { code: "adapter_error", message: terminalErrorMessage(lastAssistantErrorMessage) };
     },
     async drainPending(): Promise<void> {
       // Snapshot the current pending set: events fired AFTER drainPending
