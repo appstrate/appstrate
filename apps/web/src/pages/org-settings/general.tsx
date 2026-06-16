@@ -12,11 +12,11 @@ import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
-import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Spinner } from "../../components/spinner";
 import { EmptyState } from "../../components/page-states";
+import { McpClientConnect } from "../../components/org-settings/mcp-client-connect";
 import { orgKeys } from "../../lib/query-keys";
 import { toast } from "sonner";
 
@@ -30,8 +30,6 @@ export function OrgSettingsGeneralPage() {
   const updateSettingsMutation = useUpdateOrgSettings();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
-
-  const { copied: mcpCopied, copy: copyMcp } = useCopyToClipboard();
 
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
@@ -69,8 +67,6 @@ export function OrgSettingsGeneralPage() {
     if (!trimmed || !orgId) return;
     updateNameMutation.mutate({ params: { path: { orgId } }, body: { name: trimmed } });
   };
-
-  const mcpCommand = `claude mcp add --transport http appstrate-${currentOrg.slug} ${window.location.origin}/api/mcp/o/${currentOrg.id}`;
 
   return (
     <>
@@ -172,21 +168,11 @@ export function OrgSettingsGeneralPage() {
       </div>
       <div className="border-border bg-card mb-4 rounded-lg border p-5">
         <h3 className="text-sm font-semibold">{t("orgSettings.mcpTitle")}</h3>
-        <p className="text-muted-foreground mt-1 text-sm">{t("orgSettings.mcpDesc")}</p>
-        <div className="border-border bg-muted/50 mt-3 flex items-center gap-2 rounded-md border px-3 py-2">
-          <code className="text-foreground flex-1 font-mono text-xs break-all select-all">
-            {mcpCommand}
-          </code>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-primary shrink-0 text-xs hover:underline"
-            aria-label={t("btn.copy", { ns: "common" })}
-            onClick={() => copyMcp(mcpCommand)}
-          >
-            {mcpCopied ? t("btn.copied", { ns: "common" }) : t("btn.copy", { ns: "common" })}
-          </Button>
-        </div>
+        <p className="text-muted-foreground mt-1 mb-3 text-sm">{t("orgSettings.mcpDesc")}</p>
+        <McpClientConnect
+          serverName={`appstrate-${currentOrg.slug}`}
+          url={`${window.location.origin}/api/mcp/o/${currentOrg.id}`}
+        />
       </div>
 
       {isOwner && (
