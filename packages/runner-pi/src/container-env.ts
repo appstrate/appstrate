@@ -59,7 +59,7 @@ export interface RuntimePiEnvOptions {
   forwardProxyUrl?: string;
   /**
    * Disable Pi SDK's internal retry loop. Defaults to undefined (SDK
-   * retry stays on with `maxRetries: 2`). Opt-in escape hatch for
+   * retry stays on with `maxRetries: 4`). Opt-in escape hatch for
    * deployments wiring an external retry layer that would otherwise
    * stack with the SDK retry and cause amplification on 429.
    */

@@ -22,14 +22,9 @@
  * design.
  */
 
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  runs,
-  runLogs,
-  TERMINAL_RUN_EVENT_TYPES,
-  type RunResultPayload,
-} from "@appstrate/db/schema";
+import { runs, TERMINAL_RUN_EVENT_TYPES, type RunResultPayload } from "@appstrate/db/schema";
 import { type CloudEventEnvelope } from "@appstrate/afps-runtime/events";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
@@ -319,22 +314,19 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     }
   }
 
-  // Adapter-error backstop. The Pi SDK keeps the agent loop alive after
-  // an `appstrate.error` (e.g. OpenAI 429 TPM rate-limit exhausting the
-  // SDK's internal retries) so `runner.run()` resolves without throwing.
-  // The result then lacks an explicit `status` / `error`, defaults to
-  // `success`, and `output` is null because the LLM never produced one.
-  // The `runHadZeroTokens` heuristic below does NOT trigger when partial
-  // tokens were produced before the fatal adapter error. Without this
-  // check, a run that hit an unrecoverable upstream error is reported as
-  // `success` with `result: null`.
-  if (status === "success" && (result.output === null || result.output === undefined)) {
-    const lastAdapterError = await findLastAdapterError(run.id);
-    if (lastAdapterError !== null) {
-      status = "failed";
-      errorMessage = lastAdapterError;
-    }
-  }
+  // NOTE: terminal success/failure is the RUNNER's call, not the
+  // platform's. `PiRunner.run()` inspects the settled session and stamps
+  // `status: "failed"` + `error` when the agent loop ended on an errored
+  // final turn (see the bridge's `getTerminalError()` in runner-pi); a
+  // transient mid-loop error the
+  // agent recovered from leaves `status: "success"`. `mapTerminalStatus`
+  // honours that authoritative status above. The platform deliberately
+  // does NOT second-guess it by scanning the `run_logs` adapter-error
+  // trail — that post-hoc archaeology produced false positives, failing
+  // runs whose agent recovered and delivered via `report`/`log` (which
+  // legitimately leave `output === null`). The `runHadZeroTokens` guard
+  // below remains as a distinct backstop for the "LLM never reachable,
+  // zero tokens, no terminal error surfaced" shape.
 
   // Zod boundary on the runner-supplied terminal usage (tolerant: known
   // numeric fields kept, unknown keys stripped, an invalid shape is treated
@@ -774,29 +766,12 @@ function validateFinalizeUsage(usage: unknown, runId: string): TokenUsage | null
 }
 
 /**
- * Last `adapter_error` row written by the {@link PersistingEventSink} for
- * this run, or `null` when none was recorded. `appstrate.error` events
- * fired by the Pi SDK on fatal upstream failures (rate-limit exhaustion,
- * auth failures, malformed responses) land in `run_logs` as
- * `type='system', event='adapter_error'`. When the runner then resolves
- * without throwing — which is the SDK's current behaviour for
- * `stopReason=error` — finalize is the last chance to translate that
- * trail into a `failed` status. Indexed via `idx_run_logs_lookup`
- * (run_id, id).
+ * Operator-facing message for the "LLM never reachable" failure shape —
+ * a run that produced zero tokens (see {@link runHadZeroTokens}). Distinct
+ * from a terminal model error the runner already stamped: that verdict is
+ * the runner's authoritative call (runner-pi's `getTerminalError()`), and
+ * finalize no longer scans the `run_logs` adapter-error trail at all.
  */
-async function findLastAdapterError(runId: string): Promise<string | null> {
-  const [row] = await db
-    .select({ message: runLogs.message })
-    .from(runLogs)
-    .where(
-      and(eq(runLogs.runId, runId), eq(runLogs.type, "system"), eq(runLogs.event, "adapter_error")),
-    )
-    .orderBy(desc(runLogs.id))
-    .limit(1);
-  if (!row) return null;
-  return typeof row.message === "string" && row.message.length > 0 ? row.message : null;
-}
-
 function llmUnreachableMessage(run: RunSinkContext): string {
   // Runs that carry a `proxyLabel` resolved a proxy at preflight — when they
   // subsequently fail to reach the LLM, the proxy is the first suspect. Keep

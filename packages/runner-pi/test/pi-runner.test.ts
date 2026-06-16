@@ -104,6 +104,52 @@ describe("PiRunner.run — event forwarding", () => {
   });
 });
 
+describe("PiRunner.run — terminal verdict (bridge-captured)", () => {
+  it("stamps status=failed + error when the final assistant turn errored", async () => {
+    const sink = createCaptureSink();
+    const runner = new ScriptedPiRunner(async (session) => {
+      session.pushMessage({
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "Codex error: server_error",
+        content: [],
+      });
+      session.emit({ type: "message_end" });
+    });
+
+    await runner.run({ bundle: STUB_BUNDLE, context: makeContext(), eventSink: sink });
+
+    expect(sink.finalized?.status).toBe("failed");
+    expect(sink.finalized?.error?.message).toBe("Codex error: server_error");
+  });
+
+  it("leaves status unset (success) when a transient error was recovered", async () => {
+    const sink = createCaptureSink();
+    const runner = new ScriptedPiRunner(async (session) => {
+      // Transient error turn…
+      session.pushMessage({
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "transient 5xx",
+        content: [],
+      });
+      session.emit({ type: "message_end" });
+      // …then a clean final turn.
+      session.pushMessage({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "recovered and finished" }],
+      });
+      session.emit({ type: "message_end" });
+    });
+
+    await runner.run({ bundle: STUB_BUNDLE, context: makeContext(), eventSink: sink });
+
+    expect(sink.finalized?.status).toBeUndefined();
+    expect(sink.finalized?.error).toBeUndefined();
+  });
+});
+
 describe("PiRunner.run — usage in RunResult", () => {
   // Authoritative usage rides on the finalize POST so the platform's
   // zero-tokens heuristic does not race with the (fire-and-forget)
