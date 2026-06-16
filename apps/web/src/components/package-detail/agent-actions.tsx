@@ -151,15 +151,16 @@ export function AgentActions({
         onClose={() => setRunOptionsOpen(false)}
         agent={detail}
         isPending={runAgent.isPending}
-        onSubmit={({ input, overrides, dependencyOverrides }) => {
-          // Map the schedule-shaped override delta onto the run API body.
-          // `version_override` rides the `?version=` query; the proxy "none"
-          // sentinel (`__none__`) becomes the server's `"none"` (no proxy).
+        onSubmit={({ input, version, overrides, dependencyOverrides }) => {
+          // Map the modal payload onto the run API body. `version` rides the
+          // `?version=` query (always sent — defaults to `draft`, like plain
+          // "Lancer"); the proxy "none" sentinel (`__none__`) becomes the
+          // server's `"none"` (no proxy).
           const proxy = overrides.proxy_id_override;
           runAgent.mutate(
             {
               ...(Object.keys(input).length > 0 ? { input } : {}),
-              ...(overrides.version_override ? { version: overrides.version_override } : {}),
+              version,
               ...(overrides.model_id_override ? { modelId: overrides.model_id_override } : {}),
               ...(proxy ? { proxyId: proxy === "__none__" ? "none" : proxy } : {}),
               ...(overrides.config_override ? { config: overrides.config_override } : {}),

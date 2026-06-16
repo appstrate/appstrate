@@ -11,21 +11,28 @@ import type { SchemaWrapper, JSONSchemaObject } from "@appstrate/core/form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { uploadClient } from "../api/uploads";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
+import { AgentVersionField } from "./agent-version-field";
 import { DependencyOverridesSection } from "./dependency-overrides-section";
 import { useScheduleFormDeps } from "../hooks/use-schedules";
 import type { AgentDetail } from "@appstrate/shared-types";
 
 /**
  * Everything the modal collects, mapped 1:1 onto the run API body by the
- * caller: `overrides` carries the schedule-shaped override delta (version,
- * model, proxy, config, connections — reused from `RunOverridesPanel`),
- * `dependencyOverrides` the per-skill `dependency_overrides` map.
+ * caller: `version` rides the `?version=` query (defaults to `draft`, the same
+ * version the plain "Lancer" button runs); `overrides` carries the
+ * schedule-shaped delta for model / proxy / config / connections (reused from
+ * `RunOverridesPanel`); `dependencyOverrides` the per-skill
+ * `dependency_overrides` map. Defaults across the board mirror plain "Lancer".
  */
 export interface RunWithOptionsSubmit {
   input: Record<string, unknown>;
+  version: string;
   overrides: RunOverridesValue;
   dependencyOverrides: Record<string, string>;
 }
+
+/** Default version selector — matches the plain "Lancer" button (#636). */
+const DEFAULT_VERSION = "draft";
 
 interface RunWithOptionsModalProps {
   open: boolean;
@@ -90,6 +97,7 @@ function RunWithOptionsForm({
   const deps = useScheduleFormDeps(agent.id);
   const labels = useSchemaFormLabels();
   const [inputData, setInputData] = useState<Record<string, unknown>>({});
+  const [version, setVersion] = useState<string>(DEFAULT_VERSION);
   const [overrides, setOverrides] = useState<RunOverridesValue>({});
   const [dependencyOverrides, setDependencyOverrides] = useState<Record<string, string>>({});
   const inputFormRef = useRef<RjsfForm>(null);
@@ -100,7 +108,7 @@ function RunWithOptionsForm({
   const skills = agent.dependencies?.skills ?? [];
 
   const fire = (input: Record<string, unknown>) =>
-    onSubmit({ input, overrides, dependencyOverrides });
+    onSubmit({ input, version, overrides, dependencyOverrides });
 
   const handleSubmit = () => {
     // Route through rjsf validation first when the agent declares input —
@@ -128,6 +136,18 @@ function RunWithOptionsForm({
         </div>
       )}
 
+      {/* Run version — semantics: default `draft` (= plain "Lancer"), every
+          pick applied verbatim. The only leading option is `draft`; there is
+          no schedule-style "inherit" because a run has no fire-time
+          resolution to defer to. */}
+      <AgentVersionField
+        packageId={agent.id}
+        label={t("run.overrides.versionLabel")}
+        value={version}
+        onChange={setVersion}
+        leadingOptions={[{ value: DEFAULT_VERSION, label: t("run.overrides.versionDraft") }]}
+      />
+
       {deps && (
         <RunOverridesPanel
           packageId={agent.id}
@@ -135,7 +155,6 @@ function RunWithOptionsForm({
           persistedConfig={deps.persistedConfig}
           persistedModelId={deps.persistedModelId}
           persistedProxyId={deps.persistedProxyId}
-          persistedVersion={deps.persistedVersion}
           agentIntegrations={deps.agentIntegrations}
           value={overrides}
           onChange={setOverrides}
