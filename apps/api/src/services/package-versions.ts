@@ -24,7 +24,6 @@ import {
 } from "@appstrate/core/semver";
 import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/version-policy";
 
-import { buildDependencies } from "./package-items/dependencies.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
@@ -42,6 +41,13 @@ interface CreateVersionParams {
   artifactSize: number;
   manifest: Record<string, unknown>;
   createdBy: string | null;
+  /**
+   * Derived dependency index rows (from `extractDependencies`). Inserted in
+   * the SAME transaction as the version row so the row and its index commit
+   * (or roll back) atomically — never a committed version with a missing or
+   * partial index.
+   */
+  deps?: DepEntry[];
 }
 
 /**
@@ -59,7 +65,7 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
   id: number;
   version: string;
 } | null> {
-  const { packageId, version, integrity, artifactSize, manifest, createdBy } = params;
+  const { packageId, version, integrity, artifactSize, manifest, createdBy, deps } = params;
 
   if (!isValidVersion(version)) {
     logger.error("Invalid semver version", { packageId, version });
@@ -111,6 +117,12 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
       .insert(packageVersions)
       .values({ packageId, version, integrity, artifactSize, manifest, createdBy })
       .returning({ id: packageVersions.id, version: packageVersions.version });
+
+    // Derived dependency index — same transaction as the row, so a version is
+    // never committed with a missing/partial index.
+    if (deps && deps.length > 0) {
+      await storeVersionDependencies(row!.id, deps, tx);
+    }
 
     // Auto-manage "latest" dist-tag
     if (outcome.shouldUpdateLatest) {
@@ -548,21 +560,17 @@ export async function createVersionFromDraft(params: {
 
   const manifest = { ...baseManifest, version };
 
-  // Enrich manifest with dependencies so the version ZIP
-  // matches what would be published to the registry (same integrity).
-  const deps = await buildDependencies(packageId);
+  // The draft manifest is the single source of truth for dependencies
+  // (skills / integrations / mcp_servers) — the editor maintains them
+  // directly. Publish preserves the `dependencies` block verbatim, exactly
+  // like every other version-creation path (import, fork, system sync). The
+  // transitive skill closure and version resolution happen at bundle time
+  // (`buildBundleFromCatalog`), and the derived per-version dependency index
+  // is rebuilt downstream from this manifest via `extractDependencies`.
   const parsed = typeof baseManifest.name === "string" ? parseScopedName(baseManifest.name) : null;
-  let finalManifest: Record<string, unknown>;
-  if (parsed) {
-    finalManifest = { ...manifest, name: `@${parsed.scope}/${parsed.name}`, version };
-    if (deps) {
-      finalManifest.dependencies = deps;
-    } else {
-      delete finalManifest.dependencies;
-    }
-  } else {
-    finalManifest = manifest;
-  }
+  const finalManifest: Record<string, unknown> = parsed
+    ? { ...manifest, name: `@${parsed.scope}/${parsed.name}`, version }
+    : manifest;
 
   // Build ZIP depending on package type
   let zipBuffer: Buffer;
@@ -683,22 +691,28 @@ export async function replaceVersionContent(params: {
   // Upload ZIP first to avoid integrity mismatch if upload fails after DB update
   await uploadPackageZip(packageId, version, zipBuffer);
 
-  const [row] = await db
-    .update(packageVersions)
-    .set({ integrity, artifactSize, manifest })
-    .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
-    .returning({ id: packageVersions.id });
+  // Row update + dependency-index rewrite in one transaction, so the manifest
+  // snapshot and its derived index can never diverge on a partial failure.
+  // Invalid ranges are rejected upstream by `extractDependencies`.
+  const found = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(packageVersions)
+      .set({ integrity, artifactSize, manifest })
+      .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
+      .returning({ id: packageVersions.id });
 
-  if (!row) {
+    if (!row) return false;
+
+    await clearVersionDependencies(row.id, tx);
+    if (deps.length > 0) {
+      await storeVersionDependencies(row.id, deps, tx);
+    }
+    return true;
+  });
+
+  if (!found) {
     logger.warn("replaceVersionContent: version row not found", { packageId, version });
     return;
-  }
-
-  // Clear old deps and re-store from new manifest. Invalid ranges are
-  // rejected upstream by `extractDependencies`.
-  await clearVersionDependencies(row.id);
-  if (deps.length > 0) {
-    await storeVersionDependencies(row.id, deps);
   }
 
   logger.info("Replaced version content", { packageId, version, integrity });
@@ -732,6 +746,8 @@ export async function createVersionAndUpload(params: {
   await uploadPackageZip(packageId, version, zipBuffer);
 
   try {
+    // The version row + its derived dependency index commit atomically inside
+    // createPackageVersion's transaction (deps passed through here).
     const result = await createPackageVersion({
       packageId,
       version,
@@ -739,13 +755,8 @@ export async function createVersionAndUpload(params: {
       artifactSize,
       manifest,
       createdBy,
+      deps,
     });
-
-    if (result) {
-      if (deps.length > 0) {
-        await storeVersionDependencies(result.id, deps);
-      }
-    }
 
     return result;
   } catch (err) {
