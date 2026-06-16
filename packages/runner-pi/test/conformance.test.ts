@@ -28,6 +28,7 @@ import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import { PiRunner } from "../src/pi-runner.ts";
 import type { InternalSink } from "../src/pi-runner.ts";
+import type { RunError } from "@appstrate/afps-runtime/runner";
 import { createCaptureSink, makeBundlePackage, makeTestBundle } from "./helpers.ts";
 
 /**
@@ -59,13 +60,14 @@ class ScriptedEventRunner extends PiRunner {
     _context: ExecutionContext,
     internalSink: InternalSink,
     _signal: AbortSignal | undefined,
-  ): Promise<void> {
+  ): Promise<RunError | undefined> {
     for (const event of this.scripted) {
       await internalSink.emit(event);
     }
     // Conformance runner emits raw scripted events — no Pi SDK session,
     // no bridge to install, so no usage accumulator and no onBridgeReady
-    // callback to fire.
+    // callback to fire. No terminal-error read (no session state).
+    return undefined;
   }
 }
 

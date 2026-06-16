@@ -43,6 +43,7 @@ import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   emptyRunResult,
   reduceEvents,
+  type RunError,
   type RunOptions,
   type Runner,
   type RunResult,
@@ -240,8 +241,18 @@ export class PiRunner implements Runner {
       }
     };
 
+    // Authoritative terminal verdict from the session itself. When the
+    // agent loop ends on an errored final turn (the last model call
+    // failed and the SDK's retries were exhausted with nothing recovering
+    // after), `executeSession` returns that error so `run()` can stamp a
+    // `failed` status on the result. A *transient* error mid-loop that
+    // the agent recovered from leaves a clean final message → `undefined`
+    // → success. This makes the runner the single source of truth for the
+    // run's outcome instead of having the platform reconstruct it from the
+    // `run_logs` adapter-error trail post-hoc (issue: run_fd977eb6).
+    let terminalError: RunError | undefined;
     try {
-      await this.executeSession(context, internalSink, signal, captureBridge);
+      terminalError = await this.executeSession(context, internalSink, signal, captureBridge);
     } catch (err) {
       if (signal?.aborted) {
         // Cancellation: propagate without finalizing — the caller's
@@ -267,6 +278,10 @@ export class PiRunner implements Runner {
     }
 
     const result: RunResult = events.length === 0 ? emptyRunResult() : reduceEvents(events);
+    if (terminalError) {
+      result.status = "failed";
+      result.error = terminalError;
+    }
     attachAccumulators(result);
     // Drain pending bridge fires BEFORE finalize. Finalize closes the
     // server-side sink via CAS — any POST in flight after that lands
@@ -277,12 +292,20 @@ export class PiRunner implements Runner {
     await eventSink.finalize(result);
   }
 
+  /**
+   * Drive one Pi SDK session to completion. Returns a {@link RunError}
+   * when the agent loop ended on an errored final turn (terminal run
+   * failure), or `undefined` when it finished cleanly — including when a
+   * transient error earlier in the loop was recovered from. The return
+   * value, not the presence of any `appstrate.error` event, is the
+   * authoritative success/failure signal.
+   */
   protected async executeSession(
     context: ExecutionContext,
     internalSink: InternalSink,
     signal: AbortSignal | undefined,
     onBridgeReady?: (handle: SessionBridgeHandle) => void,
-  ): Promise<void> {
+  ): Promise<RunError | undefined> {
     const { model, apiKey, systemPrompt, startMessage } = this.opts;
     const cwd = this.opts.cwd ?? process.cwd();
     const agentDir = this.opts.agentDir ?? "/tmp/pi-agent";
@@ -336,14 +359,18 @@ export class PiRunner implements Runner {
       sessionManager: SessionManager.inMemory(),
       settingsManager: SettingsManager.inMemory({
         compaction: derivePiCompactionSettings(model, process.env),
-        // Pi SDK's built-in retry (Retry-After honoring + jitter, max 2
-        // attempts) covers transient 429/5xx upstream. Operators can
-        // opt out by setting `MODEL_RETRY_ENABLED=false` on the runtime
-        // env when stacking external retry middleware.
+        // Pi SDK's built-in retry (Retry-After honoring + jitter) covers
+        // transient 429/5xx upstream — including OpenAI's mid-stream 5xx
+        // `server_error`, which the Codex/Responses adapter surfaces as a
+        // failed turn. 4 attempts (was 2) rides out the short upstream
+        // blips that 2 retries occasionally exhausted, before the agent
+        // loop has to self-recover. Operators can opt out by setting
+        // `MODEL_RETRY_ENABLED=false` on the runtime env when stacking
+        // external retry middleware.
         retry:
           process.env.MODEL_RETRY_ENABLED === "false"
             ? { enabled: false }
-            : { enabled: true, maxRetries: 2 },
+            : { enabled: true, maxRetries: 4 },
       }),
     });
 
@@ -377,7 +404,41 @@ export class PiRunner implements Runner {
     // turn re-encounters the same prompt-too-long 400. Polling
     // `isCompacting` here lets that recovery actually drain.
     await waitForCompactionToSettle(session as unknown as { isCompacting?: boolean }, signal);
+
+    // Authoritative outcome read: inspect the FINAL message after the
+    // loop has fully settled. If the agent recovered from an earlier
+    // transient error, the last message is a clean assistant/tool turn
+    // and this returns undefined → success.
+    return readTerminalError(session as unknown as BridgeableSession);
   }
+}
+
+/**
+ * Read the run's terminal error from a settled Pi SDK session. Returns a
+ * {@link RunError} only when the LAST message is an assistant turn whose
+ * `stopReason` is `"error"` — i.e. the agent loop genuinely ended on a
+ * failed model call (final-call error, retries exhausted, nothing after).
+ * Any other final state (a normal assistant stop, a tool message, an
+ * empty session) is treated as a non-terminal-error outcome and returns
+ * `undefined`, so a transient error the agent recovered from does not
+ * poison the run's status.
+ *
+ * Mirrors the per-turn error read in {@link installSessionBridge} but
+ * applied once, at run granularity, to the final message only. Exported
+ * for unit testing.
+ *
+ * @internal
+ */
+export function readTerminalError(session: BridgeableSession): RunError | undefined {
+  const messages = session.state.messages;
+  if (!messages.length) return undefined;
+  const last = messages[messages.length - 1] as PiAssistantMessage | undefined;
+  if (last?.role !== "assistant" || last.stopReason !== "error") return undefined;
+  const message =
+    typeof last.errorMessage === "string" && last.errorMessage.length > 0
+      ? last.errorMessage
+      : "The agent's final model turn ended in an error";
+  return { code: "adapter_error", message };
 }
 
 /**

@@ -10,7 +10,7 @@ import type { BridgeableSession, InternalSink } from "../src/pi-runner.ts";
 import { PiRunner } from "../src/pi-runner.ts";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
-import type { RunResult } from "@appstrate/afps-runtime/runner";
+import type { RunError, RunResult } from "@appstrate/afps-runtime/runner";
 import {
   BUNDLE_FORMAT_VERSION,
   bundleIntegrity,
@@ -190,10 +190,11 @@ export class ScriptedPiRunner extends PiRunner {
     internalSink: InternalSink,
     signal: AbortSignal | undefined,
     onBridgeReady?: (handle: import("../src/pi-runner.ts").SessionBridgeHandle) => void,
-  ): Promise<void> {
+  ): Promise<RunError | undefined> {
     const session = createFakeSession();
     const { installSessionBridge } = await import("../src/pi-runner.ts");
     onBridgeReady?.(installSessionBridge(session, internalSink, context.runId));
     await this.script(session, context, signal);
+    return undefined;
   }
 }
