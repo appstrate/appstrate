@@ -10,7 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@appstrate/ui/components/dropdown-menu";
 
 export function AppSettingsSwitcher() {
   const { t } = useTranslation();

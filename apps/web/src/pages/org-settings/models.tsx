@@ -4,8 +4,8 @@ import { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { BrainCircuit, KeyRound, Pencil, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@appstrate/ui/components/button";
+import { Badge } from "@appstrate/ui/components/badge";
 import {
   Table,
   TableHeader,
@@ -13,8 +13,8 @@ import {
   TableRow,
   TableHead,
   TableCell,
-} from "@/components/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+} from "@appstrate/ui/components/table";
+import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
   useModels,

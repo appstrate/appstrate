@@ -4,7 +4,7 @@ import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 import { useOrg } from "../hooks/use-org";
 import { useTheme } from "../stores/theme-store";
 import { useAppConfig } from "../hooks/use-app-config";

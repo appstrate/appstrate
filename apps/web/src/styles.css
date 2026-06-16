@@ -2,9 +2,11 @@
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 
-/* Module UI packages are symlinked under node_modules, which Tailwind's
-   auto-detection skips — declare their sources explicitly so their classes
-   are generated. One line per UI-contributing module. */
+/* UI packages live outside apps/web/src (symlinked under node_modules), which
+   Tailwind's auto-detection skips — declare their sources explicitly so the
+   classes used ONLY there are scanned and emitted, not silently dropped. One
+   line per UI-contributing package. */
+@source "../../../packages/ui/src";
 @source "../../../packages/module-chat/src";
 
 @custom-variant dark (&:is(.dark *));

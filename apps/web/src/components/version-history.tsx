@@ -7,8 +7,8 @@ import { usePackageVersions, useRestoreVersion, useDeleteVersion } from "../hook
 import { formatDateField } from "../lib/markdown";
 import { Spinner } from "./spinner";
 import { ConfirmModal } from "./confirm-modal";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@appstrate/ui/components/badge";
+import { Button } from "@appstrate/ui/components/button";
 import { Trash2 } from "lucide-react";
 
 interface VersionHistoryProps {

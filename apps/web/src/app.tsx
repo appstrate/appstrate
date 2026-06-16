@@ -36,7 +36,7 @@ import { useTheme } from "./stores/theme-store";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
-import { Separator } from "@/components/ui/separator";
+import { Separator } from "@appstrate/ui/components/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 

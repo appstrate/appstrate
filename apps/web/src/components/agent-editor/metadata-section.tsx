@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@appstrate/ui/components/button";
+import { Input } from "@appstrate/ui/components/input";
+import { Label } from "@appstrate/ui/components/label";
+import { Textarea } from "@appstrate/ui/components/textarea";
 import { FormField } from "../form-field";
 import { SectionCard } from "../section-card";
 import { toSlug, toLiveSlug } from "../../lib/strings";

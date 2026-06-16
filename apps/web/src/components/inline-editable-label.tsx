@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Input } from "@/components/ui/input";
+import { Input } from "@appstrate/ui/components/input";
 import { cn } from "@/lib/utils";
 
 /**

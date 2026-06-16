@@ -6,7 +6,7 @@ import { ShieldCheck } from "lucide-react";
 import { Badge } from "./status-badge";
 import { RunAgentButton } from "./run-agent-button";
 import { packageDetailPath } from "../lib/package-paths";
-import { ScrollArea, ScrollBar } from "./ui/scroll-area";
+import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
 import type { CardItem } from "../pages/package-list";
 
 export function PackageCard({

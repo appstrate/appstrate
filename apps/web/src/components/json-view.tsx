@@ -4,7 +4,7 @@ import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { JsonView as JsonViewLite, allExpanded, defaultStyles } from "react-json-view-lite";
 import "react-json-view-lite/dist/index.css";
 import { Copy, Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@/lib/utils";
 
 interface JsonViewProps {

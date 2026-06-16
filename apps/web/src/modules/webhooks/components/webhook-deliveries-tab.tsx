@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Send } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@appstrate/ui/components/badge";
 import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
 import { useWebhookDeliveries } from "../hooks/use-webhooks";
 import type { WebhookDelivery } from "../hooks/use-webhooks";

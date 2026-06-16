@@ -7,9 +7,9 @@ import { AppWindow, Plus, X } from "lucide-react";
 import { useAppForm } from "../../../hooks/use-app-form";
 import { usePermissions } from "../../../hooks/use-permissions";
 import { ConfirmModal } from "../../../components/confirm-modal";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Button } from "@appstrate/ui/components/button";
+import { Input } from "@appstrate/ui/components/input";
+import { Label } from "@appstrate/ui/components/label";
 import {
   useApplication,
   useUpdateApplication,

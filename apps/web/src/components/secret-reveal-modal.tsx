@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { RevealedSecret } from "./revealed-secret";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 
 interface Props {
   open: boolean;

@@ -2,13 +2,13 @@
 
 import { useTranslation } from "react-i18next";
 import { Sun, Moon } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@appstrate/ui/components/dropdown-menu";
 import { useTheme } from "../stores/theme-store";
 import { themeOptions } from "../lib/theme";
 
