@@ -381,7 +381,6 @@
   "run.overrides.proxyInheritWithDefault": "Hériter ({{name}})",
   "run.overrides.proxyNone": "Aucun proxy",
   "run.overrides.versionLabel": "Version",
-  "run.overrides.versionDefault": "Défaut (comme « Lancer »)",
   "run.overrides.versionInheritLatest": "Dernière version",
   "run.overrides.versionInheritPinned": "Épinglée (v{{version}})",
   "run.overrides.versionDraft": "Brouillon (copie de travail)",

@@ -381,7 +381,6 @@
   "run.overrides.proxyInheritWithDefault": "Inherit ({{name}})",
   "run.overrides.proxyNone": "No proxy",
   "run.overrides.versionLabel": "Version",
-  "run.overrides.versionDefault": "Default (same as Run)",
   "run.overrides.versionInheritLatest": "Latest",
   "run.overrides.versionInheritPinned": "Pinned (v{{version}})",
   "run.overrides.versionDraft": "Draft (working copy)",
