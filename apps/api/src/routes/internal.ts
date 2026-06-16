@@ -454,7 +454,11 @@ export function createInternalRouter() {
         .where(
           and(eq(packageVersions.packageId, mcpServerId), sql`${packageVersions.yanked} = false`),
         )
-        .orderBy(sql`${packageVersions.createdAt} DESC`)
+        // Tiebreak by the serial `id` (insertion order) so two versions
+        // published in the same `createdAt` tick still resolve "latest"
+        // deterministically — without it the ORDER BY is non-deterministic on
+        // a tie and the most-recently-inserted version is not guaranteed.
+        .orderBy(sql`${packageVersions.createdAt} DESC, ${packageVersions.id} DESC`)
         .limit(1);
       if (!resolved) throw notFound(`No published version for '${mcpServerId}'`);
     }
