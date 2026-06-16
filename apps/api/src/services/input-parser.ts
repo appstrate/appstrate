@@ -127,7 +127,7 @@ interface RunRequestBody {
  * Deep "does this version exist" checks happen at resolution time (422
  * `dependency_unresolved`); this is the cheap syntactic gate.
  */
-function isValidDependencyOverride(value: string): boolean {
+export function isValidDependencyOverride(value: string): boolean {
   if (value === VERSION_SELECTOR_DRAFT) return true;
   return isValidRange(value) || isValidDistTag(value);
 }
