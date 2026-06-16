@@ -119,6 +119,17 @@ describe("RunPackageCatalog — routing", () => {
     expect(db.fetchCalls).toEqual(["@s/never-resolved@9.9.9"]);
   });
 
+  it("fetch THROWS on an owner-miss for a draft-overridden dep (never silently serves published)", async () => {
+    // Builder fetches an identity it never resolved through us (owner miss) for
+    // a dep the caller pinned to `draft`. A DB fallback would serve PUBLISHED
+    // bytes — refuse loudly instead so a draft override can't silently degrade.
+    const { catalog, db } = make({ "@s/drafted": "draft" });
+    await expect(catalog.fetch("@s/drafted@1.0.0" as PackageIdentity)).rejects.toThrow(
+      /draft-overridden/,
+    );
+    expect(db.fetchCalls).toEqual([]);
+  });
+
   it("returns null (propagating an unresolved dep) when the DB catalog can't resolve", async () => {
     const db = new FakeCatalog("db");
     db.resolve = async () => null;

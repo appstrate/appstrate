@@ -35,7 +35,10 @@
  *
  * `fetch` is routed to whichever backing catalog produced the identity
  * during `resolve` (the bundle builder always resolves before fetching).
- * A fetch for an un-resolved identity falls back to the DB catalog.
+ * A fetch for an un-resolved identity falls back to the DB catalog — EXCEPT
+ * for a dependency the caller pinned to `draft`: serving published bytes for
+ * a draft override would silently break the override (the #666 leak, in
+ * reverse), so an owner-miss on a draft-overridden dep throws loud instead.
  */
 
 import {
@@ -108,7 +111,21 @@ export class RunPackageCatalog implements PackageCatalog {
   }
 
   async fetch(identity: PackageIdentity): Promise<BundlePackage> {
-    const owner = this.owners.get(identity) ?? this.db;
-    return owner.fetch(identity);
+    const owner = this.owners.get(identity);
+    if (owner) return owner.fetch(identity);
+
+    // Owner miss — the builder fetched an identity it never resolved through
+    // us (defensive; resolve-before-fetch normally populates `owners`). DB
+    // fallback is safe for a published dep, but for one the caller pinned to
+    // `draft` it would silently serve PUBLISHED bytes. Keep "draft must be
+    // draft" loud rather than quietly swapping bytes. Identity shape is
+    // `@scope/name@version`, so the name is everything before the last `@`.
+    const name = identity.slice(0, identity.lastIndexOf("@"));
+    if (this.overrides.get(name) === VERSION_SELECTOR_DRAFT) {
+      throw new Error(
+        `RunPackageCatalog: draft-overridden dependency '${name}' fetched without a recorded resolver — refusing to serve published bytes for a draft override`,
+      );
+    }
+    return this.db.fetch(identity);
   }
 }
