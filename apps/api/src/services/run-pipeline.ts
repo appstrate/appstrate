@@ -11,6 +11,7 @@ import {
   ModelNotConfiguredError,
   ModelCredentialMissingError,
 } from "./run-context-builder.ts";
+import { BundleError } from "@appstrate/afps-runtime/bundle";
 import { createRun } from "./state/runs.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
@@ -19,6 +20,7 @@ import { resolveRunConnectionsOrError } from "./integration-connection-resolver.
 import type { IntegrationManifestCache } from "./integration-service.ts";
 import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
 import { parseScopedName } from "@appstrate/core/naming";
+import { extractSkillIdsFromManifest } from "../lib/manifest-utils.ts";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
@@ -76,6 +78,12 @@ export interface RunPipelineParams {
   modelId?: string | null;
   proxyId?: string | null;
   overrideVersionLabel?: string;
+  /**
+   * Per-run dependency version overrides (#666). Threaded into
+   * `buildRunContext` → `buildAgentPackage` and persisted verbatim on
+   * `runs.dependency_overrides`. Null when the run resolved manifest pins.
+   */
+  dependencyOverrides?: Record<string, string> | null;
   /** Schedule ID — set only for scheduled runs. */
   scheduleId?: string;
   /** Application ID — required for all runs. */
@@ -236,6 +244,29 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   }
   const { agent } = gates;
 
+  // Reject `dependency_overrides` keys that name a package the agent does not
+  // declare as a skill dependency (#666). The run-route value gate only checks
+  // each override VALUE; an override KEY that isn't in `dependencies.skills` is
+  // never consulted by the closure walk and would silently do nothing — the
+  // exact "fails silently" trap the value gate exists to avoid, on the key
+  // axis. The manifest isn't in scope at parse time, so the key check lives
+  // here (the first point with both the parsed overrides and the agent). Skills
+  // are the only bundled dependency type, matching `buildAgentPackage`.
+  if (params.dependencyOverrides) {
+    const declaredSkills = new Set(extractSkillIdsFromManifest(agent.manifest));
+    const unknownKey = Object.keys(params.dependencyOverrides).find(
+      (key) => !declaredSkills.has(key),
+    );
+    if (unknownKey) {
+      throw new ApiError({
+        status: 400,
+        code: "invalid_request",
+        title: "Bad Request",
+        detail: `\`dependency_overrides["${unknownKey}"]\` is not a declared skill dependency of this agent`,
+      });
+    }
+  }
+
   // --- Step 2: Connection resolution snapshot (#199) ---
   //
   // Apply the 4-mechanism cascade once at kickoff so:
@@ -304,6 +335,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       modelId,
       proxyId,
       overrideVersionLabel,
+      dependencyOverrides: params.dependencyOverrides ?? null,
       traceparent: params.traceparent,
       resolvedConnections,
       manifestCache,
@@ -323,6 +355,25 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         code: "model_credential_missing",
         title: "Bad Request",
         detail: err.message,
+      });
+    }
+    // A dependency pin that resolves to nothing — an unsatisfiable range or a
+    // never-published skill — surfaces here as a DEPENDENCY_UNRESOLVED bundle
+    // error from the closure walk. Fail loud BEFORE the container starts with
+    // a structured 422, never a silent draft fallback (#666). The detail names
+    // the unresolved deps + the fix (publish or pass dependency_overrides).
+    if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") {
+      const missing = (err.details as { missing?: Array<{ name: string; versionSpec: string }> })
+        ?.missing;
+      const list =
+        missing && missing.length > 0
+          ? missing.map((m) => `'${m.name}@${m.versionSpec}'`).join(", ")
+          : "a declared dependency";
+      throw new ApiError({
+        status: 422,
+        code: "dependency_unresolved",
+        title: "Dependency Unresolved",
+        detail: `Could not resolve ${list} against published versions — publish the dependency, fix the pin, or pass \`dependency_overrides\` to run a working copy.`,
       });
     }
     throw err;
@@ -367,6 +418,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       agentName: agentDenorm.name,
       config,
       configOverride: params.configOverride ?? null,
+      dependencyOverrides: params.dependencyOverrides ?? null,
       runOrigin: "platform",
       sinkSecretEncrypted: encrypt(sinkCredentials.secret),
       sinkExpiresAt: new Date(sinkCredentials.expiresAt),

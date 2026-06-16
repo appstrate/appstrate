@@ -241,7 +241,18 @@ export async function shutdownScheduleWorker(): Promise<void> {
 // Run trigger
 // ---------------------------------------------------------------------------
 
-async function triggerScheduledRun(
+/**
+ * Fire one scheduled run. Loads the agent, resolves the version selector
+ * (`versionOverride` | inherit → `published`, #636), runs the readiness +
+ * preflight gates, then executes. Any `ApiError` along the way is converted
+ * into a visible failed-run record via `failSchedule()` (never a silent skip).
+ *
+ * Exported for the fire-path integration test: the unified-version breaking
+ * change (omit ≡ published) means an inheriting schedule on a never-published
+ * agent must surface a `no_published_version` failed run here — the riskiest
+ * surface of #636 because it runs in the background worker, not a request.
+ */
+export async function triggerScheduledRun(
   scheduleId: string,
   packageId: string,
   actor: Actor | null,
@@ -301,10 +312,14 @@ async function triggerScheduledRun(
 
     // Resolve which definition this scheduled run executes (#636). The
     // schedule's `version_override` is a selector (`draft` | `published` |
-    // spec); when absent, scheduled runs default to the latest published
-    // version when one exists (draft otherwise) — same default as the API
-    // run route. Pre-fix, `version_override` only relabeled the run while
-    // the draft executed regardless; resolving here makes the pin real.
+    // spec); when absent it defaults to `published` — same unified default as
+    // the API run route, the working copy is never an implicit default. A
+    // schedule inheriting on a never-published agent therefore resolves to
+    // 404 `no_published_version`, caught just below: no run executes, a warning
+    // is logged AND a visible failed run is recorded via failSchedule() (never
+    // a silent skip — pin `version_override = draft` to schedule the working
+    // copy). Pre-fix, `version_override` only relabeled the run while the
+    // draft executed regardless; resolving here makes the pin real.
     let agent: LoadedPackage;
     let overrideVersionLabel: string | undefined;
     try {

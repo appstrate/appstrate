@@ -137,6 +137,14 @@ export const runs = pgTable(
     // can replay the exact same delta. Null when the run used persisted
     // defaults verbatim.
     configOverride: jsonb("config_override").$type<Record<string, unknown>>(),
+    // Per-run dependency version overrides (#666). Shape:
+    // { "@scope/skill": "draft" | "<semver|dist-tag>" }. Run-scoped escape
+    // hatch out of the published-only resolution: `"draft"` pulls that
+    // dependency's mutable working copy (skill edit loop), any other value
+    // replaces the manifest pin for that dependency. Persisted as the audit
+    // trail so a run that consumed draft bytes is never mistaken for a
+    // reproducible one. Null when the run resolved the manifest pins verbatim.
+    dependencyOverrides: jsonb("dependency_overrides").$type<Record<string, string>>(),
     // Snapshot of the agent's @scope/name at run creation time. Survives
     // package rename, delete, or inline-run compaction (where manifest is
     // NULLed). Read by global /api/runs view and UI to display agent name

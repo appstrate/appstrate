@@ -78,6 +78,13 @@
       "when": 1781276923237,
       "tag": "0010_credential_available_models",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781594303211,
+      "tag": "0011_aromatic_korvac",
+      "breakpoints": true
     }
   ]
 }

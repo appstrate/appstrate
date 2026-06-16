@@ -69,6 +69,18 @@ export interface RunAgentParams {
    * modal picker.
    */
   connectionOverrides?: Record<string, string>;
+  /** Per-run model id override (wire `modelId`). From the run-with-options modal. */
+  modelId?: string;
+  /** Per-run proxy id override (wire `proxyId`). From the run-with-options modal. */
+  proxyId?: string;
+  /** Per-run config delta, deep-merged with the persisted config (wire `config`). */
+  config?: Record<string, unknown>;
+  /**
+   * Per-run dependency version overrides (#666) — `{ "@scope/skill": "draft"
+   * | "<semver|dist-tag>" }`. From the run-with-options modal. "draft" runs a
+   * dependency's working copy; any other value replaces the manifest pin.
+   */
+  dependencyOverrides?: Record<string, string>;
 }
 
 export function useRunAgent(packageId: string) {
@@ -76,14 +88,17 @@ export function useRunAgent(packageId: string) {
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async (params?: RunAgentParams) => {
-      const { input, version, connectionOverrides } = params ?? {};
+      const { input, version, connectionOverrides, modelId, proxyId, config, dependencyOverrides } =
+        params ?? {};
       const { data } = await client.POST("/api/agents/{scope}/{name}/run", {
         params: {
           path: splitPackageRef(packageId),
-          // Editor default: run the draft the user is editing. Explicit so
-          // the server-side published-by-default (#636) never changes UI
-          // behavior.
-          query: { version: version ?? "draft" },
+          // Pure pass-through — NO default here. Omitting `version` means the
+          // server's unified default (`published`, #636), exactly as for any
+          // API caller. The editor's "run the working copy" intent is encoded
+          // explicitly at the call site (`version: "draft"`), never inferred
+          // by this transport hook — so API and front agree on every selector.
+          query: { version },
         },
         body: {
           // The spec types the free-form input object as `Record<string,
@@ -92,6 +107,12 @@ export function useRunAgent(packageId: string) {
           ...(input !== undefined ? { input: input as Record<string, never> } : {}),
           ...(connectionOverrides !== undefined
             ? { connection_overrides: connectionOverrides }
+            : {}),
+          ...(modelId !== undefined ? { modelId } : {}),
+          ...(proxyId !== undefined ? { proxyId } : {}),
+          ...(config !== undefined ? { config } : {}),
+          ...(dependencyOverrides !== undefined
+            ? { dependency_overrides: dependencyOverrides }
             : {}),
         },
       });

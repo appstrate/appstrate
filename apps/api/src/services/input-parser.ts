@@ -50,6 +50,9 @@ import {
   type UploadMeta,
 } from "./uploads.ts";
 import { getRun } from "./state/runs.ts";
+import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
+import { isValidRange } from "@appstrate/core/semver";
+import { isValidDistTag, isProtectedTag } from "@appstrate/core/dist-tags";
 import { sanitizeStorageKey } from "./file-storage.ts";
 import {
   streamRunDocument,
@@ -87,6 +90,15 @@ export interface ParsedInput {
    * per integration; the chosen connection carries its own authKey.
    */
   connectionOverrides?: Record<string, string>;
+  /**
+   * Per-run dependency version overrides (#666). Wire field
+   * `dependency_overrides`; flows into `buildAgentPackage` and is persisted
+   * on `runs.dependency_overrides`. Flat shape:
+   * `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. `"draft"` opts that
+   * dependency out of the published-only resolution (the skill edit loop);
+   * any other value replaces the manifest pin for that dependency.
+   */
+  dependencyOverrides?: Record<string, string>;
 }
 
 interface RunRequestBody {
@@ -104,6 +116,24 @@ interface RunRequestBody {
   proxyId?: string;
   config?: Record<string, unknown>;
   connection_overrides?: Record<string, string>;
+  dependency_overrides?: Record<string, string>;
+}
+
+/**
+ * A run-scoped dependency override value is valid when it is the literal
+ * `draft` selector OR a resolvable version spec (semver range / exact version
+ * via `isValidRange`, or a dist-tag name). The other protected tag names
+ * (`published`, `latest`) carry no per-dependency override meaning — they can
+ * never be created as real dist-tags (`isProtectedTag`), so accepting them here
+ * would let a value 400 should reject sail through the gate and die later as a
+ * confusing 422. Reject them syntactically so the caller gets a clean 400.
+ * Deep "does this version exist" checks happen at resolution time (422
+ * `dependency_unresolved`); this is the cheap syntactic gate.
+ */
+export function isValidDependencyOverride(value: string): boolean {
+  if (value === VERSION_SELECTOR_DRAFT) return true;
+  if (isProtectedTag(value)) return false;
+  return isValidRange(value) || isValidDistTag(value);
 }
 
 /** Validate `input` against the manifest schema, throwing `validationFailed` (422). */
@@ -719,6 +749,37 @@ export async function parseRequestInput(
     }
   }
 
+  // `dependency_overrides` shape + value guard (#666). Flat map:
+  // packageId → "draft" | "<semver|dist-tag>". Each value must be a valid
+  // run-scoped override so a typo'd pin 400s here instead of silently doing
+  // nothing — the per-dependency analogue of the `connection_overrides` gate.
+  if (body.dependency_overrides !== undefined) {
+    if (
+      body.dependency_overrides === null ||
+      typeof body.dependency_overrides !== "object" ||
+      Array.isArray(body.dependency_overrides)
+    ) {
+      throw invalidRequest("`dependency_overrides` must be a JSON object", "dependency_overrides");
+    }
+    for (const [depId, spec] of Object.entries(body.dependency_overrides)) {
+      if (typeof spec !== "string" || !isValidDependencyOverride(spec)) {
+        throw invalidRequest(
+          `\`dependency_overrides["${depId}"]\` must be "draft" or a valid version spec (semver range or dist-tag)`,
+          `dependency_overrides.${depId}`,
+        );
+      }
+    }
+  }
+
+  // An empty `{}` carries no override — collapse it to `undefined` so it
+  // persists as NULL on `runs.dependency_overrides`. A non-null map on the run
+  // object signals "consumed an override (maybe draft) → not reproducible from
+  // version_ref alone"; an empty object would muddy that signal for free.
+  const dependencyOverrides =
+    body.dependency_overrides && Object.keys(body.dependency_overrides).length > 0
+      ? body.dependency_overrides
+      : undefined;
+
   return {
     input,
     uploadedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
@@ -726,5 +787,6 @@ export async function parseRequestInput(
     proxyIdOverride: body.proxyId,
     configOverride: body.config,
     connectionOverrides: body.connection_overrides,
+    dependencyOverrides,
   };
 }

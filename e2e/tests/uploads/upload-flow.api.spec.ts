@@ -76,7 +76,7 @@ test.describe("upload:// protocol", () => {
     expect(putRes.ok()).toBe(true);
 
     // 3. Trigger a run referencing the upload URI.
-    const runRes = await apiClient.post(`/agents/${scope}/${agentName}/run`, {
+    const runRes = await apiClient.post(`/agents/${scope}/${agentName}/run?version=draft`, {
       input: { doc: descriptor.uri },
     });
     expect(runRes.status()).toBe(201);
@@ -109,7 +109,7 @@ test.describe("upload:// protocol", () => {
     });
     expect(putRes.ok()).toBe(true);
 
-    const runRes = await apiClient.post(`/agents/${scope}/${agentName}/run`, {
+    const runRes = await apiClient.post(`/agents/${scope}/${agentName}/run?version=draft`, {
       input: { doc: descriptor.uri },
     });
     expect(runRes.status()).toBe(400);
@@ -141,13 +141,13 @@ test.describe("upload:// protocol", () => {
       data: Buffer.from(PDF_MAGIC),
     });
 
-    const first = await apiClient.post(`/agents/${scope}/${agentName}/run`, {
+    const first = await apiClient.post(`/agents/${scope}/${agentName}/run?version=draft`, {
       input: { doc: descriptor.uri },
     });
     expect(first.status()).toBe(201);
     const firstRun = await first.json();
 
-    const second = await apiClient.post(`/agents/${scope}/${agentName}/run`, {
+    const second = await apiClient.post(`/agents/${scope}/${agentName}/run?version=draft`, {
       input: { doc: descriptor.uri },
     });
     expect(second.status()).toBe(201);

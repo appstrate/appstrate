@@ -103,6 +103,13 @@ export interface RunWireDto {
   contextSnapshot: unknown;
   modelCredentialId: string | null;
   connection_overrides: unknown;
+  /**
+   * Per-run dependency version overrides (#666) — `{ "@scope/name": "draft" |
+   * "<spec>" }`. Present when the caller opted a dependency out of the
+   * published-only resolution; a non-null map (esp. with a `"draft"` value)
+   * means the run is NOT reproducible from its `version_ref` alone.
+   */
+  dependency_overrides: unknown;
 }
 
 /**

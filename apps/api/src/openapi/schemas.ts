@@ -539,6 +539,7 @@ export const schemas = {
       "contextSnapshot",
       "modelCredentialId",
       "connection_overrides",
+      "dependency_overrides",
       "user_name",
       "end_user_name",
       "api_key_name",
@@ -746,6 +747,12 @@ export const schemas = {
         type: ["object", "null"],
         description:
           'Per-integration connection picks for this run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (#1).',
+        additionalProperties: { type: "string" },
+      },
+      dependency_overrides: {
+        type: ["object", "null"],
+        description:
+          'Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. A `"draft"` value means the run consumed a dependency\'s mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions.',
         additionalProperties: { type: "string" },
       },
       connections_used: {

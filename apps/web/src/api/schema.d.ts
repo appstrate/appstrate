@@ -4769,6 +4769,10 @@ export interface components {
             connection_overrides: {
                 [key: string]: string;
             } | null;
+            /** @description Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. A `"draft"` value means the run consumed a dependency's mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions. */
+            dependency_overrides: {
+                [key: string]: string;
+            } | null;
             /** @description Connections resolved for this run, projected from the internal snapshot for display. Null when the agent declares no integrations. */
             connections_used: {
                 integration_id: string;
@@ -6039,7 +6043,7 @@ export interface operations {
     runAgent: {
         parameters: {
             query?: {
-                /** @description Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version — 404 `no_published_version` if nothing is published), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Default when omitted: the latest published version when one exists, the draft otherwise** — programmatic callers (API, MCP, CLI, CI) run what was published unless they explicitly ask for the draft. The editor UI passes `version=draft` for test-runs. The run object's `version_ref` states which definition executed. Ignored for system agents. */
+                /** @description Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Omitting the parameter is strictly identical to `published`** — the latest published version, or `404 no_published_version` when nothing is published. The working copy is NEVER an implicit default: run it by passing `version=draft` explicitly (the editor UI does this for test-runs). This unified default keeps every caller — API, MCP, CLI, CI, schedules and the dashboard — coherent on every selector. The run object's `version_ref` states which definition executed. Ignored for system agents. */
                 version?: string;
             };
             header?: {
@@ -6071,6 +6075,9 @@ export interface operations {
                  *       },
                  *       "config": {
                  *         "dryRun": true
+                 *       },
+                 *       "dependency_overrides": {
+                 *         "@test/test-skill": "draft"
                  *       }
                  *     }
                  */
@@ -6084,9 +6091,15 @@ export interface operations {
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
                     proxyId?: string;
                     /** @description Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair. */
-                    config?: Record<string, never>;
+                    config?: {
+                        [key: string]: unknown;
+                    };
                     /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
                     connection_overrides?: {
+                        [key: string]: string;
+                    };
+                    /** @description Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. By default every skill in the agent's closure resolves against PUBLISHED versions honoring its manifest pin; an entry here overrides that for a single run — `"draft"` pulls the dependency's mutable working copy (the skill edit loop: edit → run → observe, no republish), any other value replaces the pin with that spec. Run-scoped only (never stored in the manifest) and recorded on the run object so a run that consumed draft bytes is never mistaken for a reproducible one. An unsatisfiable pin (including a never-published dependency) returns 422 `dependency_unresolved` before the run starts — pass an override or publish the dependency to fix it. */
+                    dependency_overrides?: {
                         [key: string]: string;
                     };
                 };
@@ -6150,6 +6163,7 @@ export interface operations {
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": "mpc_8h2k4m6n",
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "user_name": null,
                      *       "end_user_name": null,
                      *       "api_key_name": null,
@@ -6383,7 +6397,7 @@ export interface operations {
                     model_id_override?: string;
                     /** @description Override the persisted proxy on every run triggered by this schedule. */
                     proxy_id_override?: string;
-                    /** @description Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Default when omitted: the latest published version when one exists, the draft otherwise. The pinned definition (manifest + prompt) is resolved at each fire. */
+                    /** @description Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitting it is identical to `published` (latest published version; the working copy is opt-in via `draft` only). The pinned definition (manifest + prompt) is resolved at each fire — a schedule inheriting (`published`) on a never-published agent skips the fire and logs a warning until a version is published or `draft` is pinned. */
                     version_override?: string;
                     /** @description Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ "@scope/integration": "<connection_id>" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire. */
                     connection_overrides?: {
@@ -15974,6 +15988,7 @@ export interface operations {
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": "mpc_8h2k4m6n",
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "user_name": null,
                      *       "end_user_name": null,
                      *       "api_key_name": null,
@@ -16300,6 +16315,7 @@ export interface operations {
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": null,
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "user_name": "Pierre",
                      *       "end_user_name": null,
                      *       "api_key_name": null,
@@ -16401,6 +16417,7 @@ export interface operations {
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": null,
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "user_name": "Pierre",
                      *       "end_user_name": null,
                      *       "api_key_name": null,
@@ -17000,7 +17017,7 @@ export interface operations {
                     config_override?: Record<string, never> | null;
                     model_id_override?: string | null;
                     proxy_id_override?: string | null;
-                    /** @description Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default: latest published version when one exists, draft otherwise). */
+                    /** @description Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default `published` — latest published version; the working copy is opt-in via `draft` only). */
                     version_override?: string | null;
                     /** @description Per-integration connection picks frozen on the schedule. Pass `null` to clear. */
                     connection_overrides?: {

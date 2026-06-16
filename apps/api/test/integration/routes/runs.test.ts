@@ -76,7 +76,7 @@ describe("Runs API", () => {
     it("returns 400 when required input field is missing", async () => {
       await seedAgentWithInput();
 
-      const res = await app.request("/api/agents/@runorg/input-agent/run", {
+      const res = await app.request("/api/agents/@runorg/input-agent/run?version=draft", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ input: { count: 5 } }),
@@ -90,7 +90,7 @@ describe("Runs API", () => {
     it("returns 400 when input is omitted entirely and schema has required fields", async () => {
       await seedAgentWithInput();
 
-      const res = await app.request("/api/agents/@runorg/input-agent/run", {
+      const res = await app.request("/api/agents/@runorg/input-agent/run?version=draft", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({}),
@@ -102,7 +102,7 @@ describe("Runs API", () => {
     it("returns 400 when required field is empty string", async () => {
       await seedAgentWithInput();
 
-      const res = await app.request("/api/agents/@runorg/input-agent/run", {
+      const res = await app.request("/api/agents/@runorg/input-agent/run?version=draft", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ input: { email: "" } }),
@@ -114,7 +114,7 @@ describe("Runs API", () => {
     it("returns 400 when required field is null", async () => {
       await seedAgentWithInput();
 
-      const res = await app.request("/api/agents/@runorg/input-agent/run", {
+      const res = await app.request("/api/agents/@runorg/input-agent/run?version=draft", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ input: { email: null } }),
@@ -132,7 +132,7 @@ describe("Runs API", () => {
       // omitted, never any other shape".
       await seedAgentWithInput();
 
-      const res = await app.request("/api/agents/@runorg/input-agent/run", {
+      const res = await app.request("/api/agents/@runorg/input-agent/run?version=draft", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ input: { email: "a@b.c" }, config: ["not", "an", "object"] }),
@@ -151,7 +151,7 @@ describe("Runs API", () => {
       // empty override.
       await seedAgentWithInput();
 
-      const res = await app.request("/api/agents/@runorg/input-agent/run", {
+      const res = await app.request("/api/agents/@runorg/input-agent/run?version=draft", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ input: { email: "a@b.c" }, config: null }),
@@ -195,7 +195,7 @@ describe("Runs API", () => {
         { contact: "ops@example.com", notify: true },
       );
 
-      const res = await app.request("/api/agents/@runorg/cfg-agent/run", {
+      const res = await app.request("/api/agents/@runorg/cfg-agent/run?version=draft", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ config: { contact: "not-an-email" } }),
@@ -238,7 +238,7 @@ describe("Runs API", () => {
     it("returns 404 (not 500) for a non-UUID modelId", async () => {
       await seedNoInputAgent();
 
-      const res = await app.request("/api/agents/@runorg/model-agent/run", {
+      const res = await app.request("/api/agents/@runorg/model-agent/run?version=draft", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ input: {}, modelId: "gpt-5.5" }),
@@ -252,7 +252,7 @@ describe("Runs API", () => {
     it("returns 404 for a well-formed but unknown modelId UUID", async () => {
       await seedNoInputAgent();
 
-      const res = await app.request("/api/agents/@runorg/model-agent/run", {
+      const res = await app.request("/api/agents/@runorg/model-agent/run?version=draft", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -313,7 +313,7 @@ describe("Runs API", () => {
       // robust to that behavior changing.
       await setDefaultModel(ctx.orgId, modelDbId);
 
-      const res = await app.request("/api/agents/@runorg/nokey-agent/run", {
+      const res = await app.request("/api/agents/@runorg/nokey-agent/run?version=draft", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ input: {} }),
@@ -443,7 +443,7 @@ describe("Runs API", () => {
       const modelDbId = await seedOrgModel("Echo Default GPT");
       await setDefaultModel(ctx.orgId, modelDbId);
 
-      const res = await app.request("/api/agents/@runorg/echo-agent/run", {
+      const res = await app.request("/api/agents/@runorg/echo-agent/run?version=draft", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ input: {} }),
@@ -496,7 +496,7 @@ describe("Runs API", () => {
       await setDefaultModel(ctx.orgId, defaultId);
       const pinnedId = await seedOrgModel("Echo Pinned GPT");
 
-      const res = await app.request("/api/agents/@runorg/echo-agent/run", {
+      const res = await app.request("/api/agents/@runorg/echo-agent/run?version=draft", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ input: {}, modelId: pinnedId }),

@@ -226,6 +226,7 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     contextSnapshot: row.contextSnapshot,
     modelCredentialId: row.modelCredentialId,
     connection_overrides: row.connectionOverrides,
+    dependency_overrides: row.dependencyOverrides,
   };
 }
 
@@ -304,6 +305,14 @@ interface CreateRunParams {
    */
   configOverride?: Record<string, unknown> | null;
   /**
+   * Per-run dependency version overrides (#666) — the `{ "@scope/name":
+   * "draft" | "<spec>" }` map the caller passed on the run trigger (or a
+   * schedule froze). Persisted verbatim on `runs.dependency_overrides` as the
+   * audit trail so a run that consumed draft bytes is never mistaken for a
+   * reproducible one. Null when the run resolved the manifest pins verbatim.
+   */
+  dependencyOverrides?: Record<string, string> | null;
+  /**
    * Which runner drives this run. Platform-origin runs execute in a
    * server-managed Docker container; remote-origin runs execute on the
    * caller's host. Both speak the same HMAC-signed event protocol.
@@ -380,6 +389,9 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     agentName: params.agentName ?? null,
     config: parseRunConfig(params.config),
     configOverride: parseRunConfigOverride(params.configOverride),
+    ...(params.dependencyOverrides !== undefined
+      ? { dependencyOverrides: params.dependencyOverrides }
+      : {}),
     runOrigin: params.runOrigin ?? "platform",
     ...(params.sinkSecretEncrypted !== undefined
       ? { sinkSecretEncrypted: params.sinkSecretEncrypted }
