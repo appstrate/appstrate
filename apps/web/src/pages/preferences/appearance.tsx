@@ -7,7 +7,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@appstrate/ui/components/select";
 import { useTheme } from "../../stores/theme-store";
 import { useUpdateLanguage } from "../../hooks/use-profile";
 

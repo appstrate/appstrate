@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle, XCircle, Puzzle, Check, Loader2 } from "lucide-react";
 import type { AgentIntegrationEntry } from "@appstrate/shared-types";
 import { Modal } from "./modal";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { resolutionBlocksRun } from "./integration-connect/integration-run-readiness";

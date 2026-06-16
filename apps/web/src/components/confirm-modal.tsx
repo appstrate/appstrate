@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 
 interface ConfirmModalProps {

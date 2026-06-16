@@ -18,7 +18,7 @@
 import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import { RUNTIME_TOOL_CATALOG } from "@appstrate/core/runtime-tools-catalog";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
 
 interface RuntimeToolsGroupProps {
   /** Currently selected runtime tool ids (manifest.runtime_tools). */

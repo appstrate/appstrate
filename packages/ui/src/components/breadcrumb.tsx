@@ -5,7 +5,7 @@ import { Slot } from "@radix-ui/react-slot";
 import * as ScrollAreaPrimitive from "@radix-ui/react-scroll-area";
 import { ChevronRight, MoreHorizontal } from "lucide-react";
 
-import { cn } from "@/lib/utils";
+import { cn } from "./lib/utils.ts";
 
 const Breadcrumb = React.forwardRef<
   HTMLElement,

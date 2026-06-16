@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Fragment, type ReactNode } from "react";
-import { SelectGroup, SelectLabel } from "@/components/ui/select";
+import { SelectGroup, SelectLabel } from "@appstrate/ui/components/select";
 
 /**
  * Render the shared "Featured / Other" split used by the credential and

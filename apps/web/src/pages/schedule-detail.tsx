@@ -5,16 +5,16 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePermissions } from "../hooks/use-permissions";
 import { ConfirmModal } from "../components/confirm-modal";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge as UIBadge } from "@/components/ui/badge";
+import { Button } from "@appstrate/ui/components/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import { Badge as UIBadge } from "@appstrate/ui/components/badge";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
+} from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { JsonView } from "../components/json-view";

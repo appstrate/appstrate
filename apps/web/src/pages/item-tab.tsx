@@ -4,7 +4,7 @@ import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Wrench, Plug } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 import { ImportModal } from "../components/import-modal";
 import { usePackageList, type PackageType } from "../hooks/use-packages";
 import { type CardItem, PackageTab } from "./package-list";

@@ -3,13 +3,13 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Plug, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@appstrate/ui/components/dropdown-menu";
 import { FieldsConnectModal } from "./fields-connect-modal";
 import { useIntegrationOAuthPopup } from "./use-integration-oauth-popup";
 import { useIntegrationDetail } from "../../hooks/use-integrations";

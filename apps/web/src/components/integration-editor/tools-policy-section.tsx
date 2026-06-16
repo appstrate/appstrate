@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Trash2, Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Button } from "@appstrate/ui/components/button";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Input } from "@appstrate/ui/components/input";
+import { Label } from "@appstrate/ui/components/label";
 import { SectionCard } from "../section-card";
 import { StringListInput } from "./string-list-input";
 import {

@@ -7,7 +7,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@appstrate/ui/components/select";
 import {
   DndContext,
   closestCenter,
@@ -29,10 +29,10 @@ import { toSlug, toLiveSlug, toCredentialKey, toLiveCredentialKey } from "../../
  *  substitution contract (lowercase letters, digits and underscores;
  *  must start with a letter). */
 const CREDENTIAL_KEY_RE = /^[a-z][a-z0-9_]*$/;
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
+import { Button } from "@appstrate/ui/components/button";
+import { Input } from "@appstrate/ui/components/input";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Label } from "@appstrate/ui/components/label";
 import { SectionCard } from "../section-card";
 
 export interface SchemaField {

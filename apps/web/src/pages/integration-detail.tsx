@@ -35,12 +35,12 @@ import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Trash2, ShieldCheck, Plus, Pencil, Check, X, ChevronRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Button } from "@appstrate/ui/components/button";
+import { Badge } from "@appstrate/ui/components/badge";
+import { Input } from "@appstrate/ui/components/input";
+import { Label } from "@appstrate/ui/components/label";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import {
   Table,
   TableHeader,
@@ -48,8 +48,8 @@ import {
   TableRow,
   TableHead,
   TableCell,
-} from "@/components/ui/table";
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+} from "@appstrate/ui/components/table";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@appstrate/ui/components/collapsible";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";

@@ -3,9 +3,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@appstrate/ui/components/button";
+import { Label } from "@appstrate/ui/components/label";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Modal } from "@/components/modal";
 import { Spinner } from "@/components/spinner";
 import { WebhookFormFields } from "./webhook-form-fields";

@@ -7,7 +7,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@appstrate/ui/components/dialog";
 
 interface ModalProps {
   open: boolean;

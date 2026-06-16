@@ -6,7 +6,7 @@
 // screen instead of a broken /onboarding/create flow.
 
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 import { useAuth } from "../../hooks/use-auth";
 import { Mail } from "lucide-react";
 

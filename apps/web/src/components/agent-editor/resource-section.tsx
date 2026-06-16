@@ -18,8 +18,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
+} from "@appstrate/ui/components/select";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { ShieldCheck, AlertTriangle } from "lucide-react";
 import { Spinner } from "../spinner";
 import type { ResourceEntry } from "./types";

@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 
 interface Props {
   /** The secret value to reveal and copy. */

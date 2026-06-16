@@ -3,8 +3,8 @@
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, XCircle, Clock, Ban } from "lucide-react";
 import { Spinner } from "./spinner";
-import { Badge as UIBadge } from "@/components/ui/badge";
-import type { BadgeProps } from "@/components/ui/badge";
+import { Badge as UIBadge } from "@appstrate/ui/components/badge";
+import type { BadgeProps } from "@appstrate/ui/components/badge";
 
 const statusVariantMap: Record<string, BadgeProps["variant"]> = {
   success: "success",

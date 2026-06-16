@@ -3,9 +3,9 @@
 import { useTranslation } from "react-i18next";
 import { useForm } from "react-hook-form";
 import { Modal } from "./modal";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Button } from "@appstrate/ui/components/button";
+import { Input } from "@appstrate/ui/components/input";
+import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "./spinner";
 import { useCreateEndUser } from "../hooks/use-end-users";
 import { getErrorMessage } from "@appstrate/core/errors";

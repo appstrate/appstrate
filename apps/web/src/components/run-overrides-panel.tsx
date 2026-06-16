@@ -2,14 +2,14 @@
 
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Label } from "@/components/ui/label";
+import { Label } from "@appstrate/ui/components/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@appstrate/ui/components/select";
 import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { uploadClient } from "../api/uploads";
