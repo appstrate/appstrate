@@ -241,7 +241,18 @@ export async function shutdownScheduleWorker(): Promise<void> {
 // Run trigger
 // ---------------------------------------------------------------------------
 
-async function triggerScheduledRun(
+/**
+ * Fire one scheduled run. Loads the agent, resolves the version selector
+ * (`versionOverride` | inherit → `published`, #636), runs the readiness +
+ * preflight gates, then executes. Any `ApiError` along the way is converted
+ * into a visible failed-run record via `failSchedule()` (never a silent skip).
+ *
+ * Exported for the fire-path integration test: the unified-version breaking
+ * change (omit ≡ published) means an inheriting schedule on a never-published
+ * agent must surface a `no_published_version` failed run here — the riskiest
+ * surface of #636 because it runs in the background worker, not a request.
+ */
+export async function triggerScheduledRun(
   scheduleId: string,
   packageId: string,
   actor: Actor | null,
