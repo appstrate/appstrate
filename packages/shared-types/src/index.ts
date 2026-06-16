@@ -270,12 +270,6 @@ export interface ScheduleWireDto {
   proxy_id_override: string | null;
   version_override: string | null;
   connection_overrides: Record<string, string> | null;
-  /**
-   * Per-schedule dependency version overrides (#666) — `{ "@scope/name":
-   * "draft" | "<spec>" }`, frozen at schedule create/update and propagated to
-   * `runs.dependency_overrides` at each fire.
-   */
-  dependency_overrides: Record<string, string> | null;
   last_run_at: string | null;
   next_run_at: string | null;
   createdAt: string;

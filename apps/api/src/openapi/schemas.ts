@@ -818,7 +818,6 @@ export const schemas = {
       "proxy_id_override",
       "version_override",
       "connection_overrides",
-      "dependency_overrides",
       "last_run_at",
       "next_run_at",
       "createdAt",
@@ -849,12 +848,6 @@ export const schemas = {
         type: ["object", "null"],
         description:
           'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Flat map: `{ "@scope/integration": "<connection_id>" }`. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4).',
-        additionalProperties: { type: "string" },
-      },
-      dependency_overrides: {
-        type: ["object", "null"],
-        description:
-          'Per-schedule dependency version overrides (#666), frozen on the schedule row. Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. Propagated to `runs.dependency_overrides` on every fire.',
         additionalProperties: { type: "string" },
       },
       last_run_at: { type: ["string", "null"], format: "date-time" },

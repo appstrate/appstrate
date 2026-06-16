@@ -4824,10 +4824,6 @@ export interface components {
             connection_overrides: {
                 [key: string]: string;
             } | null;
-            /** @description Per-schedule dependency version overrides (#666), frozen on the schedule row. Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. Propagated to `runs.dependency_overrides` on every fire. */
-            dependency_overrides: {
-                [key: string]: string;
-            } | null;
             /** Format: date-time */
             last_run_at: string | null;
             /** Format: date-time */
@@ -6405,10 +6401,6 @@ export interface operations {
                     connection_overrides?: {
                         [key: string]: string;
                     };
-                    /** @description Per-schedule dependency version overrides (#666), frozen on the schedule row. Shape: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. Propagated to `runs.dependency_overrides` on every fire. Each value must be `draft` or a valid version spec (semver range or dist-tag). */
-                    dependency_overrides?: {
-                        [key: string]: string;
-                    };
                 };
             };
         };
@@ -6442,7 +6434,6 @@ export interface operations {
                      *       "proxy_id_override": null,
                      *       "version_override": null,
                      *       "connection_overrides": null,
-                     *       "dependency_overrides": null,
                      *       "last_run_at": null,
                      *       "next_run_at": "2026-01-16T09:00:00Z",
                      *       "createdAt": "2026-01-15T10:30:00Z",
@@ -16983,7 +16974,6 @@ export interface operations {
                      *       "proxy_id_override": null,
                      *       "version_override": "1.2.0",
                      *       "connection_overrides": null,
-                     *       "dependency_overrides": null,
                      *       "last_run_at": "2026-01-15T09:00:00Z",
                      *       "next_run_at": "2026-01-16T09:00:00Z",
                      *       "createdAt": "2026-01-14T14:00:00Z",
@@ -17029,10 +17019,6 @@ export interface operations {
                     version_override?: string | null;
                     /** @description Per-integration connection picks frozen on the schedule. Pass `null` to clear. */
                     connection_overrides?: {
-                        [key: string]: string;
-                    } | null;
-                    /** @description Per-schedule dependency version overrides (#666). Shape: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. Pass `null` to clear. */
-                    dependency_overrides?: {
                         [key: string]: string;
                     } | null;
                 };

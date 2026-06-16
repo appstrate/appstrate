@@ -20,6 +20,7 @@ import { resolveRunConnectionsOrError } from "./integration-connection-resolver.
 import type { IntegrationManifestCache } from "./integration-service.ts";
 import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
 import { parseScopedName } from "@appstrate/core/naming";
+import { extractSkillIdsFromManifest } from "../lib/manifest-utils.ts";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
@@ -242,6 +243,29 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     });
   }
   const { agent } = gates;
+
+  // Reject `dependency_overrides` keys that name a package the agent does not
+  // declare as a skill dependency (#666). The run-route value gate only checks
+  // each override VALUE; an override KEY that isn't in `dependencies.skills` is
+  // never consulted by the closure walk and would silently do nothing — the
+  // exact "fails silently" trap the value gate exists to avoid, on the key
+  // axis. The manifest isn't in scope at parse time, so the key check lives
+  // here (the first point with both the parsed overrides and the agent). Skills
+  // are the only bundled dependency type, matching `buildAgentPackage`.
+  if (params.dependencyOverrides) {
+    const declaredSkills = new Set(extractSkillIdsFromManifest(agent.manifest));
+    const unknownKey = Object.keys(params.dependencyOverrides).find(
+      (key) => !declaredSkills.has(key),
+    );
+    if (unknownKey) {
+      throw new ApiError({
+        status: 400,
+        code: "invalid_request",
+        title: "Bad Request",
+        detail: `\`dependency_overrides["${unknownKey}"]\` is not a declared skill dependency of this agent`,
+      });
+    }
+  }
 
   // --- Step 2: Connection resolution snapshot (#199) ---
   //

@@ -21,10 +21,20 @@ describe("isValidDependencyOverride", () => {
     }
   });
 
-  it("accepts dist-tag names", () => {
-    for (const v of ["latest", "next", "beta", "canary-1"]) {
+  it("accepts non-protected dist-tag names", () => {
+    for (const v of ["next", "beta", "canary-1"]) {
       expect(isValidDependencyOverride(v)).toBe(true);
     }
+  });
+
+  it("rejects the protected tag names that carry no per-dependency meaning", () => {
+    // `latest` / `published` can never be created as real dist-tags
+    // (isProtectedTag), so accepting them here would only defer the failure to
+    // a confusing 422 at resolution. `draft` is the one protected name with a
+    // dedicated meaning (the working-copy selector) and stays valid.
+    expect(isValidDependencyOverride("latest")).toBe(false);
+    expect(isValidDependencyOverride("published")).toBe(false);
+    expect(isValidDependencyOverride("draft")).toBe(true);
   });
 
   it("rejects clearly malformed values", () => {

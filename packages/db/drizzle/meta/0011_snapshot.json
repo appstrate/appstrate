@@ -1,5 +1,5 @@
 {
-  "id": "8877476c-8c6a-4406-b5c6-351e9c033967",
+  "id": "932ea6cb-110e-4b41-8ff4-de6baeca3589",
   "prevId": "e791931f-56a3-4e41-bdf1-b3226260ae93",
   "version": "7",
   "dialect": "postgresql",
@@ -4179,12 +4179,6 @@
         },
         "connection_overrides": {
           "name": "connection_overrides",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "dependency_overrides": {
-          "name": "dependency_overrides",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false

@@ -589,10 +589,6 @@ export const schedules = pgTable(
     // creation/edit (mirrors `configOverride`). Same shape as
     // `runs.connectionOverrides`. Loses to admin pin at fire time.
     connectionOverrides: jsonb("connection_overrides").$type<Record<string, string>>(),
-    // Per-schedule dependency version overrides (#666) — frozen at schedule
-    // creation/edit, propagated to `runs.dependency_overrides` at fire time.
-    // Same shape + semantics as `runs.dependencyOverrides`.
-    dependencyOverrides: jsonb("dependency_overrides").$type<Record<string, string>>(),
     lastRunAt: timestamp("last_run_at", { withTimezone: true }),
     nextRunAt: timestamp("next_run_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

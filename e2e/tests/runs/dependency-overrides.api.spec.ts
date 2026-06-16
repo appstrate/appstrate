@@ -95,26 +95,24 @@ test.describe("Run dependency resolution (#666)", () => {
     expect(dump).toContain("@x/y");
   });
 
-  test("does not reject a well-formed dependency_overrides value at the value gate", async ({
+  test("rejects an override key that is not a declared dependency with 400", async ({
     apiClient,
     orgContext,
   }) => {
-    // A syntactically valid override must pass the value gate. The run proceeds
-    // past parsing and fails later for an unrelated reason (no model / no real
-    // dep to resolve) — so the ONLY thing asserted is the negative: a 400, if
-    // any, must NOT be the dependency_overrides value rejection. Robust across
-    // envs (model configured → 202; not → 400 model_not_configured).
+    // A syntactically valid VALUE on a key the agent does not declare as a skill
+    // dependency must 400 — the override would otherwise be silently ignored by
+    // the closure walk (it is only consulted for declared deps). The value gate
+    // passes; the key gate (run-pipeline, where the manifest is in scope) trips.
     const scope = `@${orgContext.org.orgSlug}`;
-    const name = `dep-ov-ok-${Date.now()}`;
+    const name = `dep-ov-unknown-${Date.now()}`;
     await createAgent(apiClient, scope, name);
 
     const res = await apiClient.post(`/agents/${scope}/${name}/run`, {
       dependency_overrides: { "@x/y": "^1.2.3" },
     });
 
-    if (res.status() === 400) {
-      expect(JSON.stringify(await res.json())).not.toContain("dependency_overrides");
-    }
+    expect(res.status()).toBe(400);
+    expect(JSON.stringify(await res.json()).toLowerCase()).toContain("declared skill dependency");
   });
 
   test("fails loud with 422 for an unsatisfiable manifest pin", async ({

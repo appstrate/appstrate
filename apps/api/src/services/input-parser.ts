@@ -52,7 +52,7 @@ import {
 import { getRun } from "./state/runs.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { isValidRange } from "@appstrate/core/semver";
-import { isValidDistTag } from "@appstrate/core/dist-tags";
+import { isValidDistTag, isProtectedTag } from "@appstrate/core/dist-tags";
 import { sanitizeStorageKey } from "./file-storage.ts";
 import {
   streamRunDocument,
@@ -122,13 +122,17 @@ interface RunRequestBody {
 /**
  * A run-scoped dependency override value is valid when it is the literal
  * `draft` selector OR a resolvable version spec (semver range / exact version
- * via `isValidRange`, or a dist-tag name). Reserved selectors other than
- * `draft` (e.g. `published`) carry no per-dependency meaning and are rejected.
+ * via `isValidRange`, or a dist-tag name). The other protected tag names
+ * (`published`, `latest`) carry no per-dependency override meaning — they can
+ * never be created as real dist-tags (`isProtectedTag`), so accepting them here
+ * would let a value 400 should reject sail through the gate and die later as a
+ * confusing 422. Reject them syntactically so the caller gets a clean 400.
  * Deep "does this version exist" checks happen at resolution time (422
  * `dependency_unresolved`); this is the cheap syntactic gate.
  */
 export function isValidDependencyOverride(value: string): boolean {
   if (value === VERSION_SELECTOR_DRAFT) return true;
+  if (isProtectedTag(value)) return false;
   return isValidRange(value) || isValidDistTag(value);
 }
 
