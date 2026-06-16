@@ -241,18 +241,8 @@ export class PiRunner implements Runner {
       }
     };
 
-    // Authoritative terminal verdict from the session itself. When the
-    // agent loop ends on an errored final turn (the last model call
-    // failed and the SDK's retries were exhausted with nothing recovering
-    // after), `executeSession` returns that error so `run()` can stamp a
-    // `failed` status on the result. A *transient* error mid-loop that
-    // the agent recovered from leaves a clean final message → `undefined`
-    // → success. This makes the runner the single source of truth for the
-    // run's outcome instead of having the platform reconstruct it from the
-    // `run_logs` adapter-error trail post-hoc (issue: run_fd977eb6).
-    let terminalError: RunError | undefined;
     try {
-      terminalError = await this.executeSession(context, internalSink, signal, captureBridge);
+      await this.executeSession(context, internalSink, signal, captureBridge);
     } catch (err) {
       if (signal?.aborted) {
         // Cancellation: propagate without finalizing — the caller's
@@ -277,7 +267,19 @@ export class PiRunner implements Runner {
       return;
     }
 
+    // Authoritative terminal verdict, captured by the bridge while it
+    // streamed `message_end` events. When the agent loop ended on an
+    // errored/aborted FINAL assistant turn, this is the RunError to stamp;
+    // a transient error mid-loop that the agent recovered from leaves a
+    // clean final assistant turn → undefined → success. Read from the
+    // bridge (not `session.state.messages`) so trailing non-assistant
+    // entries — toolResults, compaction summaries appended after an
+    // overflow error (#464) — cannot mask the real terminal turn. This
+    // makes the runner the single source of truth for the run's outcome
+    // instead of having the platform reconstruct it from the `run_logs`
+    // adapter-error trail post-hoc (issue: run_fd977eb6).
     const result: RunResult = events.length === 0 ? emptyRunResult() : reduceEvents(events);
+    const terminalError = bridgeRef.current?.getTerminalError();
     if (terminalError) {
       result.status = "failed";
       result.error = terminalError;
@@ -293,19 +295,18 @@ export class PiRunner implements Runner {
   }
 
   /**
-   * Drive one Pi SDK session to completion. Returns a {@link RunError}
-   * when the agent loop ended on an errored final turn (terminal run
-   * failure), or `undefined` when it finished cleanly — including when a
-   * transient error earlier in the loop was recovered from. The return
-   * value, not the presence of any `appstrate.error` event, is the
-   * authoritative success/failure signal.
+   * Drive one Pi SDK session to completion. The terminal success/failure
+   * verdict is NOT returned here — it is captured by the bridge as it
+   * streams (`SessionBridgeHandle.getTerminalError`) and read by `run()`
+   * after this resolves, so trailing non-assistant messages cannot mask
+   * the final assistant turn's outcome.
    */
   protected async executeSession(
     context: ExecutionContext,
     internalSink: InternalSink,
     signal: AbortSignal | undefined,
     onBridgeReady?: (handle: SessionBridgeHandle) => void,
-  ): Promise<RunError | undefined> {
+  ): Promise<void> {
     const { model, apiKey, systemPrompt, startMessage } = this.opts;
     const cwd = this.opts.cwd ?? process.cwd();
     const agentDir = this.opts.agentDir ?? "/tmp/pi-agent";
@@ -404,41 +405,7 @@ export class PiRunner implements Runner {
     // turn re-encounters the same prompt-too-long 400. Polling
     // `isCompacting` here lets that recovery actually drain.
     await waitForCompactionToSettle(session as unknown as { isCompacting?: boolean }, signal);
-
-    // Authoritative outcome read: inspect the FINAL message after the
-    // loop has fully settled. If the agent recovered from an earlier
-    // transient error, the last message is a clean assistant/tool turn
-    // and this returns undefined → success.
-    return readTerminalError(session as unknown as BridgeableSession);
   }
-}
-
-/**
- * Read the run's terminal error from a settled Pi SDK session. Returns a
- * {@link RunError} only when the LAST message is an assistant turn whose
- * `stopReason` is `"error"` — i.e. the agent loop genuinely ended on a
- * failed model call (final-call error, retries exhausted, nothing after).
- * Any other final state (a normal assistant stop, a tool message, an
- * empty session) is treated as a non-terminal-error outcome and returns
- * `undefined`, so a transient error the agent recovered from does not
- * poison the run's status.
- *
- * Mirrors the per-turn error read in {@link installSessionBridge} but
- * applied once, at run granularity, to the final message only. Exported
- * for unit testing.
- *
- * @internal
- */
-export function readTerminalError(session: BridgeableSession): RunError | undefined {
-  const messages = session.state.messages;
-  if (!messages.length) return undefined;
-  const last = messages[messages.length - 1] as PiAssistantMessage | undefined;
-  if (last?.role !== "assistant" || last.stopReason !== "error") return undefined;
-  const message =
-    typeof last.errorMessage === "string" && last.errorMessage.length > 0
-      ? last.errorMessage
-      : "The agent's final model turn ended in an error";
-  return { code: "adapter_error", message };
 }
 
 /**
@@ -528,6 +495,18 @@ export interface SessionBridgeHandle {
    * and is silently dropped by the bridge's catch handler.
    */
   drainPending(): Promise<void>;
+  /**
+   * Terminal run verdict, derived from the LAST assistant turn the bridge
+   * observed. Returns a {@link RunError} when that turn ended with
+   * `stopReason` `"error"` or `"aborted"`; `undefined` otherwise (clean
+   * stop, or a transient error the agent recovered from before a later
+   * clean turn). Tracked from the `message_end` event stream — NOT read
+   * from `session.state.messages` — so trailing non-assistant entries
+   * (toolResults, compaction summaries appended after an overflow error,
+   * #464) cannot mask the real terminal turn. `run()` reads this to stamp
+   * `RunResult.status`.
+   */
+  getTerminalError(): RunError | undefined;
 }
 
 /**
@@ -710,6 +689,14 @@ export function installSessionBridge(
   };
   let totalCost = 0;
 
+  // Terminal verdict tracking. Updated on every assistant `message_end`,
+  // so after the loop settles these hold the LAST assistant turn's outcome
+  // — robust against trailing non-assistant messages (toolResults,
+  // compaction summaries) that `session.state.messages.at(-1)` would
+  // surface instead. Read via `getTerminalError()`.
+  let lastAssistantStopReason: string | undefined;
+  let lastAssistantErrorMessage: string | undefined;
+
   // Pending fire-and-forget emits. `fire()` dispatches each sink.emit
   // call without awaiting (the Pi SDK callback is synchronous), and
   // pushes the resulting promise here so `drainPending()` can await
@@ -739,6 +726,12 @@ export function installSessionBridge(
         if (!entries.length) break;
         const last = entries[entries.length - 1] as PiAssistantMessage | undefined;
         if (last?.role !== "assistant") break;
+
+        // Record this assistant turn's terminal outcome. Overwritten each
+        // turn → ends as the FINAL assistant turn's stopReason once the
+        // loop settles (mirrors the SDK's own `_lastAssistantMessage`).
+        lastAssistantStopReason = last.stopReason;
+        lastAssistantErrorMessage = last.errorMessage;
 
         // Accumulate token usage. Pi SDK exposes the legacy
         // `{ input, output, cacheRead, cacheWrite }` shape on
@@ -876,6 +869,22 @@ export function installSessionBridge(
     },
     getCost(): number {
       return totalCost;
+    },
+    getTerminalError(): RunError | undefined {
+      // `"error"` covers provider/stream failures (incl. overflow, which
+      // the SDK surfaces as a stopReason="error" turn); `"aborted"` covers
+      // a provider-side abort that did not propagate as a thrown
+      // cancellation (a user cancel travels the abort-signal throw path in
+      // `run()` instead, so it never reaches here). Both carry an
+      // errorMessage by SDK contract; fall back to a generic line if absent.
+      if (lastAssistantStopReason !== "error" && lastAssistantStopReason !== "aborted") {
+        return undefined;
+      }
+      const message =
+        typeof lastAssistantErrorMessage === "string" && lastAssistantErrorMessage.length > 0
+          ? lastAssistantErrorMessage
+          : "The agent's final model turn ended in an error";
+      return { code: "adapter_error", message };
     },
     async drainPending(): Promise<void> {
       // Snapshot the current pending set: events fired AFTER drainPending
