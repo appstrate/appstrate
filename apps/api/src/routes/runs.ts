@@ -73,9 +73,10 @@ export function createRunsRouter() {
       const orgId = c.get("orgId");
       const actor = getActor(c);
       // Version selector from query param: `draft`, `published`, or a
-      // version spec (exact / dist-tag / semver range). Default for API and
-      // MCP callers: published when at least one version exists, draft
-      // otherwise (#636). The editor UI passes `version=draft` explicitly.
+      // version spec (exact / dist-tag / semver range). Omitted ≡ `published`
+      // for EVERY caller (latest published; 404 when none, #636) — the working
+      // copy is opt-in via `version=draft` only, never an implicit default.
+      // The editor UI passes `version=draft` explicitly.
       const versionOverride = c.req.query("version");
       const { agent: effectiveAgent, overrideVersionLabel } = await resolveAgentRunVersion(
         agent,

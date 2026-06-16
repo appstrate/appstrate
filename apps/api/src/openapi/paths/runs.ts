@@ -38,7 +38,7 @@ export const runsPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version — 404 `no_published_version` if nothing is published), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Default when omitted: the latest published version when one exists, the draft otherwise** — programmatic callers (API, MCP, CLI, CI) run what was published unless they explicitly ask for the draft. The editor UI passes `version=draft` for test-runs. The run object's `version_ref` states which definition executed. Ignored for system agents.",
+            "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Omitting the parameter is strictly identical to `published`** — the latest published version, or `404 no_published_version` when nothing is published. The working copy is NEVER an implicit default: run it by passing `version=draft` explicitly (the editor UI does this for test-runs). This unified default keeps every caller — API, MCP, CLI, CI, schedules and the dashboard — coherent on every selector. The run object's `version_ref` states which definition executed. Ignored for system agents.",
         },
       ],
       requestBody: {
@@ -71,6 +71,7 @@ export const runsPaths = {
                 },
                 config: {
                   type: "object",
+                  additionalProperties: true,
                   description:
                     "Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair.",
                 },

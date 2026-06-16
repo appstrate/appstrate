@@ -9,8 +9,10 @@
  * 200 here would fire `executeAgentInBackground()` whose async tail races
  * the next test's `truncateAll()` (same flakiness rationale as the inline
  * run tests). The route-level contract pinned here is everything that fails
- * BEFORE the pipeline: explicit selectors that cannot be satisfied must 404
- * rather than silently falling back to the draft.
+ * BEFORE the pipeline: selectors that cannot be satisfied must 404 rather than
+ * silently falling back to the draft — INCLUDING an omitted selector, which is
+ * strictly identical to `published` (the unified default; the working copy is
+ * opt-in via `version=draft` only).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -45,6 +47,24 @@ describe("POST /api/agents/:scope/:name/run — version selector", () => {
 
   it("returns 404 no_published_version for ?version=published on a never-published agent", async () => {
     const res = await run("published");
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe("no_published_version");
+  });
+
+  // CRITICAL: omitting the selector is the unified default `published`, NOT a
+  // silent draft fallback. A never-published agent run with no `?version=`
+  // must 404 (fails before the pipeline) instead of executing the working copy.
+  it("returns 404 no_published_version when ?version is OMITTED on a never-published agent", async () => {
+    const res = await run();
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe("no_published_version");
+  });
+
+  // Empty-string query (e.g. `?version=`) is normalised to omitted → same 404.
+  it("returns 404 no_published_version for an empty ?version= on a never-published agent", async () => {
+    const res = await run("");
     expect(res.status).toBe(404);
     const body = (await res.json()) as { code?: string };
     expect(body.code).toBe("no_published_version");

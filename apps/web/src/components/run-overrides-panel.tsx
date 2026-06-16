@@ -16,7 +16,6 @@ import { uploadClient } from "../api/uploads";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { useModels } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
-import { usePackageVersions } from "../hooks/use-packages";
 import { useProvidersRegistry } from "../hooks/use-model-provider-credentials";
 import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpers";
 import { getProviderIcon } from "./icons";
@@ -34,8 +33,6 @@ export interface RunOverridesValue {
   model_id_override?: string;
   /** Per-run proxy id override. */
   proxy_id_override?: string;
-  /** Per-run version label or dist-tag override. */
-  version_override?: string;
   /**
    * Per-integration connection picks — frozen at schedule create/edit so
    * every fire uses the same row. Loses to admin pins; beats
@@ -63,8 +60,6 @@ export interface RunOverridesPanelProps {
   persistedModelId: string | null;
   /** Persisted proxy id (or null = inherit org default). */
   persistedProxyId: string | null;
-  /** Persisted version pin (or null = follow latest dist-tag). */
-  persistedVersion: string | null;
   /**
    * Agent's declared integration dependencies — drives the
    * connectionOverrides picker. Pass an empty array to hide the section
@@ -78,10 +73,16 @@ export interface RunOverridesPanelProps {
 }
 
 /**
- * Per-run override editor — rendered inside the Schedule form. Emits a
- * delta payload (`onChange`): each field is present only when it differs
- * from the persisted default, so the caller never has to re-implement
- * diff detection.
+ * Override editor for the agent's resolution defaults — model, proxy, config,
+ * and integration connections. Shared by the schedule editor and the run
+ * launcher, where these four carry identical semantics ("inherit" = the agent
+ * default). Emits a delta payload (`onChange`): each field is present only when
+ * it differs from the persisted default, so the caller never re-implements diff
+ * detection.
+ *
+ * Version is deliberately NOT here — its semantics are context-specific (a
+ * schedule inherits/pins; a run defaults to `draft` and applies every pick), so
+ * each caller composes {@link AgentVersionField} itself.
  *
  * Source of truth for the merge semantics:
  * `@appstrate/core/schema-validation` (`deepMergeConfig`), shared with
@@ -93,7 +94,6 @@ export function RunOverridesPanel({
   persistedConfig,
   persistedModelId,
   persistedProxyId,
-  persistedVersion,
   agentIntegrations,
   value,
   onChange,
@@ -102,7 +102,6 @@ export function RunOverridesPanel({
   const { data: orgModels } = useModels();
   const { data: orgProxies } = useProxies();
   const { data: registry } = useProvidersRegistry();
-  const { data: versions } = usePackageVersions("agent", packageId);
   const labels = useSchemaFormLabels();
 
   // Local form state for the SchemaForm. Initialised with the resolved
@@ -141,16 +140,6 @@ export function RunOverridesPanel({
     }
   };
 
-  const setVersion = (next: string) => {
-    if (next === INHERIT || next === (persistedVersion ?? "latest")) {
-      const { version_override: _omit, ...rest } = value;
-      void _omit;
-      onChange(rest);
-    } else {
-      onChange({ ...value, version_override: next });
-    }
-  };
-
   const setConfigForm = (formData: Record<string, unknown>) => {
     setConfigValues(formData);
     const delta = computeConfigDelta(persistedConfig, formData);
@@ -168,7 +157,6 @@ export function RunOverridesPanel({
 
   const modelSelectValue = value.model_id_override ?? persistedModelId ?? INHERIT;
   const proxySelectValue = value.proxy_id_override ?? persistedProxyId ?? INHERIT;
-  const versionSelectValue = value.version_override ?? persistedVersion ?? INHERIT;
 
   return (
     <div className="space-y-4">
@@ -227,39 +215,6 @@ export function RunOverridesPanel({
                   {p.label}
                 </SelectItem>
               ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      {versions && versions.length > 0 && (
-        <div className="space-y-2">
-          <Label>{t("run.overrides.versionLabel", { ns: "agents" })}</Label>
-          <Select value={versionSelectValue} onValueChange={setVersion}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={INHERIT}>
-                {persistedVersion
-                  ? t("run.overrides.versionInheritPinned", {
-                      ns: "agents",
-                      version: persistedVersion,
-                    })
-                  : t("run.overrides.versionInheritLatest", { ns: "agents" })}
-              </SelectItem>
-              {/* Explicit draft pin (#636): without it, runs default to the
-                  latest published version once one exists. */}
-              <SelectItem value="draft">
-                {t("run.overrides.versionDraft", { ns: "agents" })}
-              </SelectItem>
-              {versions
-                .filter((v) => !v.yanked)
-                .map((v) => (
-                  <SelectItem key={v.version} value={v.version}>
-                    v{v.version}
-                  </SelectItem>
-                ))}
             </SelectContent>
           </Select>
         </div>

@@ -12,6 +12,9 @@ import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 // Catch stale fire-and-forget rejections from previous test cycles
 // (e.g., ensureDefaultProfile racing with truncateAll)
 process.on("unhandledRejection", () => {});
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { runs } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
@@ -25,6 +28,7 @@ import {
   getSchedule,
   updateSchedule,
   deleteSchedule,
+  triggerScheduledRun,
 } from "../../../src/services/scheduler.ts";
 
 // Real BullMQ repeatable-job semantics — skipped in tier0 (in-memory queue).
@@ -562,6 +566,44 @@ describeRequiresRedis("scheduler service", () => {
       expect(remaining).toHaveLength(1);
       expect(remaining[0]!.id).toBe(schedule1.id);
       expect(remaining[0]!.name).toBe("Keep This");
+    });
+  });
+
+  // ── triggerScheduledRun — version resolution (#636 breaking surface) ──
+  //
+  // The unified model (omit ≡ `published`) means an INHERITING schedule on a
+  // never-published agent no longer silently runs the draft — it 404s. This is
+  // the riskiest surface of the breaking change because it fires in the BullMQ
+  // worker, not in a request: the resolver + run-route tests prove the 404, but
+  // only this asserts the worker turns it into a VISIBLE failed run instead of
+  // a silent skip. (The seeded agent is a never-published draft.)
+
+  describe("triggerScheduledRun version resolution", () => {
+    it("surfaces a failed run when an inheriting schedule fires on a never-published agent", async () => {
+      const schedule = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        actor,
+        { cronExpression: "0 * * * *" }, // no versionOverride → inherit
+      );
+
+      // Inherit (no versionOverride) → resolves to `published` → 404
+      // no_published_version → caught → failSchedule(). Stops before preflight,
+      // so nothing executes.
+      await triggerScheduledRun(
+        schedule.id,
+        packageId,
+        actor,
+        orgId,
+        defaultAppId,
+        undefined, // input
+        {}, // overrides — versionOverride absent → inherit
+      );
+
+      const failed = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+      expect(failed).toHaveLength(1);
+      expect(failed[0]!.status).toBe("failed");
+      expect((failed[0]!.error ?? "").toLowerCase()).toContain("no published version");
     });
   });
 });

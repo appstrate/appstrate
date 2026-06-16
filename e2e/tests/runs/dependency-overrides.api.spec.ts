@@ -84,7 +84,7 @@ test.describe("Run dependency resolution (#666)", () => {
     // `@x/y` is a syntactically valid package id; the SPEC value is garbage, so
     // the per-dependency value guard in parseRunInput must 400 (RFC 9457) and
     // name the offending field — before readiness or resolution ever run.
-    const res = await apiClient.post(`/agents/${scope}/${name}/run`, {
+    const res = await apiClient.post(`/agents/${scope}/${name}/run?version=draft`, {
       dependency_overrides: { "@x/y": "not a valid version!!" },
     });
 
@@ -107,7 +107,7 @@ test.describe("Run dependency resolution (#666)", () => {
     const name = `dep-ov-unknown-${Date.now()}`;
     await createAgent(apiClient, scope, name);
 
-    const res = await apiClient.post(`/agents/${scope}/${name}/run`, {
+    const res = await apiClient.post(`/agents/${scope}/${name}/run?version=draft`, {
       dependency_overrides: { "@x/y": "^1.2.3" },
     });
 
@@ -132,7 +132,7 @@ test.describe("Run dependency resolution (#666)", () => {
       dependencies: { skills: { [skillId]: "^9.0.0" } },
     });
 
-    const res = await apiClient.post(`/agents/${scope}/${agentName}/run`, {});
+    const res = await apiClient.post(`/agents/${scope}/${agentName}/run?version=draft`, {});
 
     expect(res.status()).toBe(422);
     const body = (await res.json()) as { code?: string };
@@ -155,7 +155,7 @@ test.describe("Run dependency resolution (#666)", () => {
       dependencies: { skills: { [skillId]: "^1.0.0" } },
     });
 
-    const res = await apiClient.post(`/agents/${scope}/${agentName}/run`, {
+    const res = await apiClient.post(`/agents/${scope}/${agentName}/run?version=draft`, {
       dependency_overrides: { [skillId]: "^9.0.0" },
     });
 

@@ -35,7 +35,11 @@ describe("POST /api/agents/:scope/:name/run — dependency_overrides validation"
   });
 
   async function run(body: Record<string, unknown>) {
-    return app.request(`/api/agents/${AGENT}/run`, {
+    // `?version=draft` — the seeded agent is never published; the dependency
+    // gates under test fire only once version resolution passes (omit ≡
+    // `published` → 404 on a never-published agent). Draft is the explicit
+    // opt-in that reaches those gates.
+    return app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify(body),
