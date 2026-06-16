@@ -76,6 +76,7 @@ import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
 import { connectionDisplayLabel } from "../components/integration-connect/connection-label";
+import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
 
 // ─────────────────────────────────────────────
 // OAuth client (admin) form
@@ -923,7 +924,9 @@ function ConnectionRow({
               )}
               {connection.needs_reconnection && (
                 <>
-                  <Badge variant="destructive">{t("integration.auth.needsReconnection")}</Badge>
+                  <ConnectionStatusBadge tone="needsReconnection">
+                    {t("integration.auth.needsReconnection")}
+                  </ConnectionStatusBadge>
                   {canRenew && authType === "oauth2" && (
                     <InlineConnectButton
                       packageId={packageId}
