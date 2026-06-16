@@ -93,10 +93,12 @@ export function useRunAgent(packageId: string) {
       const { data } = await client.POST("/api/agents/{scope}/{name}/run", {
         params: {
           path: splitPackageRef(packageId),
-          // Editor default: run the draft the user is editing. Explicit so
-          // the server-side published-by-default (#636) never changes UI
-          // behavior.
-          query: { version: version ?? "draft" },
+          // Pure pass-through — NO default here. Omitting `version` means the
+          // server's unified default (`published`, #636), exactly as for any
+          // API caller. The editor's "run the working copy" intent is encoded
+          // explicitly at the call site (`version: "draft"`), never inferred
+          // by this transport hook — so API and front agree on every selector.
+          query: { version },
         },
         body: {
           // The spec types the free-form input object as `Record<string,

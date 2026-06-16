@@ -158,7 +158,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     await seedIntegration(INTEGRATION);
     // Deliberately NO connection seeded for the actor.
 
-    const res = await app.request(`/api/agents/${AGENT}/run`, {
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -197,7 +197,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     await seedIntegration(SECOND_INTEGRATION);
     // Both integrations declared + installed, no connections.
 
-    const res = await app.request(`/api/agents/${AGENT}/run`, {
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -237,7 +237,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     const conn1 = await seedConnection(INTEGRATION, ctx.user.id);
     const conn2 = await seedConnection(INTEGRATION, ctx.user.id);
 
-    const res = await app.request(`/api/agents/${AGENT}/run`, {
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -277,7 +277,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     await seedConnection(INTEGRATION, ctx.user.id);
 
     // Sanity: same setup as the must_choose test fires 412.
-    const first = await app.request(`/api/agents/${AGENT}/run`, {
+    const first = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -285,7 +285,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(first.status).toBe(412);
 
     // Retry with the picked override (flat wire format).
-    const retry = await app.request(`/api/agents/${AGENT}/run`, {
+    const retry = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ connection_overrides: { [INTEGRATION]: conn1 } }),
@@ -328,7 +328,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       .returning({ id: integrationConnections.id });
     const deadConnectionId = row!.id;
 
-    const res = await app.request(`/api/agents/${AGENT}/run`, {
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -373,7 +373,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         ),
       );
 
-    const res = await app.request(`/api/agents/${AGENT}/run`, {
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -404,7 +404,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       draftManifest: buildIntegrationManifest(INTEGRATION),
     });
 
-    const res = await app.request(`/api/agents/${AGENT}/run`, {
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -432,7 +432,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     await seedIntegration(INTEGRATION);
     await seedConnection(INTEGRATION, ctx.user.id);
 
-    const res = await app.request(`/api/agents/${AGENT}/run`, {
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),

@@ -301,10 +301,13 @@ async function triggerScheduledRun(
 
     // Resolve which definition this scheduled run executes (#636). The
     // schedule's `version_override` is a selector (`draft` | `published` |
-    // spec); when absent, scheduled runs default to the latest published
-    // version when one exists (draft otherwise) — same default as the API
-    // run route. Pre-fix, `version_override` only relabeled the run while
-    // the draft executed regardless; resolving here makes the pin real.
+    // spec); when absent it defaults to `published` — same unified default as
+    // the API run route, the working copy is never an implicit default. A
+    // schedule inheriting on a never-published agent therefore resolves to
+    // 404 `no_published_version`, caught just below: the fire is skipped + a
+    // warning logged (pin `version_override = draft` to schedule the working
+    // copy). Pre-fix, `version_override` only relabeled the run while the
+    // draft executed regardless; resolving here makes the pin real.
     let agent: LoadedPackage;
     let overrideVersionLabel: string | undefined;
     try {
