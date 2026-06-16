@@ -887,8 +887,8 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   // ---------------------------------------------------------------------
   // Authoritative runner status (issue: run_fd977eb6). Terminal
   // success/failure is the RUNNER's call — `PiRunner.run()` inspects the
-  // settled session and stamps `status`/`error` (see runner-pi's
-  // `readTerminalError`). The platform TRUSTS that status and must NOT
+  // settled session and stamps `status`/`error` (see runner-pi's bridge
+  // `getTerminalError()`). The platform TRUSTS that status and must NOT
   // re-derive it from the `run_logs` adapter-error trail. The old
   // server-side "adapter-error backstop" (#427) did that archaeology and
   // produced false positives: it failed runs whose agent recovered from a

@@ -317,7 +317,8 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // NOTE: terminal success/failure is the RUNNER's call, not the
   // platform's. `PiRunner.run()` inspects the settled session and stamps
   // `status: "failed"` + `error` when the agent loop ended on an errored
-  // final turn (see `readTerminalError`); a transient mid-loop error the
+  // final turn (see the bridge's `getTerminalError()` in runner-pi); a
+  // transient mid-loop error the
   // agent recovered from leaves `status: "success"`. `mapTerminalStatus`
   // honours that authoritative status above. The platform deliberately
   // does NOT second-guess it by scanning the `run_logs` adapter-error
@@ -765,15 +766,11 @@ function validateFinalizeUsage(usage: unknown, runId: string): TokenUsage | null
 }
 
 /**
- * Last `adapter_error` row written by the {@link PersistingEventSink} for
- * this run, or `null` when none was recorded. `appstrate.error` events
- * fired by the Pi SDK on fatal upstream failures (rate-limit exhaustion,
- * auth failures, malformed responses) land in `run_logs` as
- * `type='system', event='adapter_error'`. When the runner then resolves
- * without throwing — which is the SDK's current behaviour for
- * `stopReason=error` — finalize is the last chance to translate that
- * trail into a `failed` status. Indexed via `idx_run_logs_lookup`
- * (run_id, id).
+ * Operator-facing message for the "LLM never reachable" failure shape —
+ * a run that produced zero tokens (see {@link runHadZeroTokens}). Distinct
+ * from a terminal model error the runner already stamped: that verdict is
+ * the runner's authoritative call (runner-pi's `getTerminalError()`), and
+ * finalize no longer scans the `run_logs` adapter-error trail at all.
  */
 function llmUnreachableMessage(run: RunSinkContext): string {
   // Runs that carry a `proxyLabel` resolved a proxy at preflight — when they
