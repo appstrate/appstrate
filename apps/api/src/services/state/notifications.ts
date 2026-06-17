@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, eq, or, inArray, isNull, count, desc, sql, type SQL } from "drizzle-orm";
+import { and, eq, or, inArray, isNull, isNotNull, count, desc, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, notifications, organizationMembers } from "@appstrate/db/schema";
 import { scopedWhere } from "../../lib/db-helpers.ts";
@@ -109,9 +109,43 @@ export async function createRunNotifications(scope: AppScope, runId: string): Pr
 }
 
 /**
+ * Transition dual-write (#667): the run-list and schedule-card surfaces still
+ * derive their "unread" badge from the legacy global `runs.readAt` flag.
+ * Mirror the per-recipient mark onto it so those surfaces clear until they are
+ * migrated onto the notifications table (removed in the follow-up that drops
+ * `runs.notifiedAt` / `runs.readAt`). Scoped to runs the actor can see, only
+ * those already notified and still unread — a verbatim port of the pre-#667
+ * mark queries. Best-effort relative to the authoritative notifications write.
+ */
+async function legacyMarkRunsRead(scope: AppScope, actorId: string, runId?: string): Promise<void> {
+  await db
+    .update(runs)
+    .set({ readAt: new Date() })
+    .where(
+      scopedWhere(runs, {
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
+        extra: [
+          ...(runId ? [eq(runs.id, runId)] : []),
+          actorOrOrgFilter(actorId),
+          isNotNull(runs.notifiedAt),
+          isNull(runs.readAt),
+        ],
+      }),
+    );
+}
+
+/**
  * Mark a single notification read. Idempotent for the recipient (already-read
  * → still `true`); returns `false` only when the notification does not exist
  * or does not belong to the caller, which the route maps to `404`.
+ *
+ * Single atomic UPDATE … RETURNING: `COALESCE(read_at, now())` preserves the
+ * original read timestamp on a re-ack and makes an already-read row still
+ * match (so it returns → `true`), while the recipient filter excludes a
+ * non-caller's / missing row (zero rows → `false` → 404). This avoids the
+ * former UPDATE-then-SELECT, whose two non-atomic statements could return a
+ * spurious 404 if a concurrent run-delete cascaded the row away between them.
  */
 export async function markNotificationRead(
   scope: AppScope,
@@ -122,23 +156,18 @@ export async function markNotificationRead(
     orgId: scope.orgId,
     applicationId: scope.applicationId,
     extra: [eq(notifications.id, notificationId), recipientFilter(actorId)],
-  });
+  })!;
 
   const updated = await db
     .update(notifications)
-    .set({ readAt: new Date() })
-    .where(and(where!, isNull(notifications.readAt)))
-    .returning({ id: notifications.id });
-  if (updated.length > 0) return true;
+    .set({ readAt: sql`COALESCE(${notifications.readAt}, now())` })
+    .where(where)
+    .returning({ id: notifications.id, runId: notifications.runId });
+  if (updated.length === 0) return false;
 
-  // No row updated — either already read (still a valid ack) or not the
-  // caller's notification (404). Disambiguate with an existence check.
-  const [exists] = await db
-    .select({ id: notifications.id })
-    .from(notifications)
-    .where(where!)
-    .limit(1);
-  return exists !== undefined;
+  const runId = updated[0]!.runId;
+  if (runId) await legacyMarkRunsRead(scope, actorId, runId);
+  return true;
 }
 
 /**
@@ -167,6 +196,7 @@ export async function markNotificationReadByRun(
         ],
       }),
     );
+  await legacyMarkRunsRead(scope, actorId, runId);
 }
 
 export async function markAllNotificationsRead(scope: AppScope, actorId: string): Promise<number> {
@@ -181,6 +211,7 @@ export async function markAllNotificationsRead(scope: AppScope, actorId: string)
       }),
     )
     .returning({ id: notifications.id });
+  await legacyMarkRunsRead(scope, actorId);
   return updated.length;
 }
 

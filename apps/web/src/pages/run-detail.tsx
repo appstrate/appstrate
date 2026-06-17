@@ -63,14 +63,19 @@ export function RunDetailPage() {
 
   const markRead = useMarkReadByRun();
 
-  // Auto-mark notification as read when viewing a run. `run.notifiedAt` still
-  // flags that a notification was created (dual-write during the #667
-  // transition); the mark is idempotent so re-firing on view is harmless.
+  // Auto-mark notification as read when viewing a terminal run. Keyed on
+  // `status` (not `notifiedAt`): the SSE run patch carries `status` but not
+  // `notifiedAt` (see `runUpdateToRunPatch`), so a run that finalizes while
+  // the page is open marks read the moment status flips terminal — `notifiedAt`
+  // would stay null in the cache until a full refetch. Idempotent server-side
+  // (no-op for a non-recipient / already-read), and `status` is stable once
+  // terminal so the effect does not re-fire on subsequent renders.
   useEffect(() => {
-    if (run && runId && run.notifiedAt) {
+    const terminal = !!status && !(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
+    if (run && runId && terminal) {
       markRead.mutate({ params: { path: { runId } } });
     }
-  }, [run?.notifiedAt, runId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [status, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runAgent = useRunAgent(packageId);
   const cancelRun = useCancelRun();

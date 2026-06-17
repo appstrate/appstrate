@@ -177,7 +177,7 @@ export const notificationsPaths = {
   },
   "/api/notifications/{id}/read": {
     put: {
-      operationId: "markNotificationRead",
+      operationId: "markNotificationReadById",
       tags: ["Notifications"],
       summary: "Mark a notification as read",
       description:
@@ -210,7 +210,11 @@ export const notificationsPaths = {
   },
   "/api/notifications/read/{runId}": {
     put: {
-      operationId: "markNotificationReadByRun",
+      // Keeps the operationId the by-run endpoint shipped with (baseline.json)
+      // so operationId-keyed SDK consumers don't silently retarget when the
+      // new by-id endpoint was added — see PR review. The by-id path took a
+      // fresh `markNotificationReadById` instead.
+      operationId: "markNotificationRead",
       tags: ["Notifications"],
       summary: "Mark a run's notification as read",
       description:

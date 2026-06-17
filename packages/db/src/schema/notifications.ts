@@ -62,11 +62,18 @@ export const notifications = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // Unread-badge / list query: recipient + scope, unread only. Partial
-    // index mirrors the old `idx_runs_unread` predicate so the badge count
-    // never scans read rows.
-    index("idx_notifications_unread")
-      .on(table.applicationId, table.userId, table.endUserId)
+    // Unread-badge / list query: `org_id = ? AND application_id = ? AND
+    // (user_id = ? OR end_user_id = ?) AND read_at IS NULL`. The recipient is
+    // an OR across two columns, which a single composite btree cannot serve as
+    // a range — so split into one partial index per recipient column. Postgres
+    // bitmap-ORs the two for the OR predicate, and each is a tight
+    // (org, app, recipient) seek restricted to unread rows by the partial
+    // WHERE. `org_id` leads because every query filters it first (scopedWhere).
+    index("idx_notifications_unread_user")
+      .on(table.orgId, table.applicationId, table.userId)
+      .where(sql`${table.readAt} IS NULL`),
+    index("idx_notifications_unread_end_user")
+      .on(table.orgId, table.applicationId, table.endUserId)
       .where(sql`${table.readAt} IS NULL`),
     index("idx_notifications_run").on(table.runId),
     // Defense-in-depth against a double fan-out: at most one notification of

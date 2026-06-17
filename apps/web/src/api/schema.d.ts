@@ -2059,7 +2059,7 @@ export interface paths {
          * Mark a run's notification as read
          * @description Mark the caller's notification for a run read, keyed by run id — complements `PUT /api/notifications/{id}/read` for callers that hold a run id but not the notification id. Idempotent: a missing run or non-recipient is a no-op, always 204.
          */
-        put: operations["markNotificationReadByRun"];
+        put: operations["markNotificationRead"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2119,7 +2119,7 @@ export interface paths {
          * Mark a notification as read
          * @description Marks a single notification read for the current recipient. Idempotent (204 even if already read); returns 404 when the notification does not belong to the caller.
          */
-        put: operations["markNotificationRead"];
+        put: operations["markNotificationReadById"];
         post?: never;
         delete?: never;
         options?: never;
@@ -11948,7 +11948,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    markNotificationReadByRun: {
+    markNotificationRead: {
         parameters: {
             query?: never;
             header?: {
@@ -12062,7 +12062,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    markNotificationRead: {
+    markNotificationReadById: {
         parameters: {
             query?: never;
             header?: {

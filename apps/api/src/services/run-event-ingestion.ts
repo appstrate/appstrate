@@ -640,18 +640,21 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
 
   // Fan out in-app notifications — one row per recipient (issue #667).
   // Only the CAS winner reaches here, so this runs exactly once per run.
-  // Post-CAS best-effort: the run is already terminal, so a transient
-  // INSERT failure must not 500 the runner finalize nor strand the
-  // broadcast below. The legacy `runs.notifiedAt` flag is still written by
-  // the CAS update above for one release (dual-write soft transition).
-  try {
-    await createRunNotifications(scope, run.id);
-  } catch (err) {
+  // Fire-and-forget, off the critical path (same rationale as the workspace
+  // delete above): a multi-row INSERT (+ an `org_members` SELECT for the
+  // actor-less fan-out) must NOT sit between the CAS close and the terminal
+  // status broadcast below — the broadcast is what updates the UI and fires
+  // webhooks. Best-effort by contract: the run is already terminal, so a
+  // transient INSERT failure is logged and swallowed, never failing the
+  // runner finalize. The legacy `runs.notifiedAt` flag is still written
+  // atomically in the CAS update above for one release (dual-write soft
+  // transition), so the run-list badge survives a dropped fan-out.
+  void createRunNotifications(scope, run.id).catch((err) => {
     logger.error("finalize: notification fan-out failed (run already terminal)", {
       runId: run.id,
       err: getErrorMessage(err),
     });
-  }
+  });
 
   // 8. Status-change broadcast with the enriched params (including
   //    validation-failure errors and any afterRun metadata).

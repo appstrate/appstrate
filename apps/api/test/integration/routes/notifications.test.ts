@@ -10,8 +10,11 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedEndUser } from "../../helpers/seed.ts";
+import { seedAgent, seedRun, seedEndUser, seedApplication } from "../../helpers/seed.ts";
 import { createRunNotifications } from "../../../src/services/state/notifications.ts";
+import { db } from "@appstrate/db/client";
+import { notifications, runs } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 
 const app = getTestApp();
 
@@ -323,6 +326,232 @@ describe("Notifications API (per-recipient, issue #667)", () => {
 
       const otherCtx = await createTestContext({ orgSlug: "othernotiforg" });
       expect(await unreadCount(authHeaders(otherCtx))).toBe(0);
+    });
+  });
+
+  // ─── createRunNotifications edge cases ──────────────────────
+
+  describe("createRunNotifications edge cases", () => {
+    it("returns 0 for an unknown run id and never throws (best-effort contract)", async () => {
+      const n = await createRunNotifications(scope(), "exec_does_not_exist");
+      expect(n).toBe(0);
+    });
+
+    it("positively creates exactly one row for the end-user recipient", async () => {
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        name: "EU positive",
+      });
+      const run = await seedNotifiedRun({ agentName: "eu-pos", actor: { endUserId: eu.id } });
+
+      const rows = await db
+        .select({ endUserId: notifications.endUserId, userId: notifications.userId })
+        .from(notifications)
+        .where(eq(notifications.runId, run.id));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.endUserId).toBe(eu.id);
+      expect(rows[0]!.userId).toBeNull();
+    });
+  });
+
+  // ─── notifications_one_recipient CHECK ──────────────────────
+
+  describe("notifications_one_recipient CHECK", () => {
+    it("rejects a row with both a user and an end-user recipient", async () => {
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        name: "Both",
+      });
+      await expect(
+        db
+          .insert(notifications)
+          .values({
+            orgId: ctx.orgId,
+            applicationId: ctx.defaultAppId,
+            userId: ctx.user.id,
+            endUserId: eu.id,
+            type: "run_completed",
+          })
+          .execute(),
+      ).rejects.toThrow();
+    });
+
+    it("rejects a row with neither recipient", async () => {
+      await expect(
+        db
+          .insert(notifications)
+          .values({
+            orgId: ctx.orgId,
+            applicationId: ctx.defaultAppId,
+            type: "run_completed",
+          })
+          .execute(),
+      ).rejects.toThrow();
+    });
+  });
+
+  // ─── unread-counts-by-agent: null agent_id ──────────────────
+
+  describe("GET /api/notifications/unread-counts-by-agent (null agent_id)", () => {
+    it("skips notifications whose payload carries no agent_id", async () => {
+      await seedNotifiedRun({ agentName: "has-agent", actor: { userId: ctx.user.id } });
+      // Hand-insert a notification with a payload that lacks agent_id.
+      await db.insert(notifications).values({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        type: "run_completed",
+        payload: { status: "success" },
+      });
+
+      const res = await app.request("/api/notifications/unread-counts-by-agent", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const counts = ((await res.json()) as { counts: Record<string, number> }).counts;
+      expect(counts["@notiforg/has-agent"]).toBe(1);
+      // The null-agent_id row is surfaced under no key at all.
+      expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(1);
+    });
+  });
+
+  // ─── GET /api/notifications pagination + ordering ───────────
+
+  describe("GET /api/notifications pagination + ordering", () => {
+    it("orders newest-first, paginates with total, and sets a next Link", async () => {
+      await seedNotifiedRun({ agentName: "p1", actor: { userId: ctx.user.id } });
+      await seedNotifiedRun({ agentName: "p2", actor: { userId: ctx.user.id } });
+      await seedNotifiedRun({ agentName: "p3", actor: { userId: ctx.user.id } });
+
+      const res = await app.request("/api/notifications?limit=2&offset=0", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: NotificationDto[]; total: number };
+      expect(body.total).toBe(3);
+      expect(body.data).toHaveLength(2);
+      // created_at descending (newest first).
+      expect(new Date(body.data[0]!.created_at).getTime()).toBeGreaterThanOrEqual(
+        new Date(body.data[1]!.created_at).getTime(),
+      );
+      // A further page exists → RFC 5988 next link.
+      expect(res.headers.get("Link") ?? "").toContain('rel="next"');
+    });
+  });
+
+  // ─── mark isolation: cross-org + by-run non-recipient ───────
+
+  describe("mark isolation", () => {
+    it("returns 404 marking a notification that belongs to another org", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
+
+      const otherCtx = await createTestContext({ orgSlug: "wrongorg" });
+      const res = await app.request(`/api/notifications/${id}/read`, {
+        method: "PUT",
+        headers: authHeaders(otherCtx),
+      });
+      expect(res.status).toBe(404);
+      // Untouched for the real recipient.
+      expect(await unreadCount(authHeaders(ctx))).toBe(1);
+    });
+
+    it("PUT read/{runId} is a no-op for a non-recipient (204, owner stays unread)", async () => {
+      const userB = await createTestUser();
+      await addOrgMember(ctx.orgId, userB.id, "member");
+      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+
+      const res = await app.request(`/api/notifications/read/${run.id}`, {
+        method: "PUT",
+        headers: headersFor(userB),
+      });
+      expect(res.status).toBe(204);
+      expect(await unreadCount(authHeaders(ctx))).toBe(1);
+    });
+
+    it("PUT read/{runId} is idempotent on a second ack", async () => {
+      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const h = authHeaders(ctx);
+      const first = await app.request(`/api/notifications/read/${run.id}`, {
+        method: "PUT",
+        headers: h,
+      });
+      expect(first.status).toBe(204);
+      const second = await app.request(`/api/notifications/read/${run.id}`, {
+        method: "PUT",
+        headers: h,
+      });
+      expect(second.status).toBe(204);
+      expect(await unreadCount(h)).toBe(0);
+    });
+  });
+
+  // ─── read-all counts only the unread subset ─────────────────
+
+  describe("PUT /api/notifications/read-all (mixed read/unread)", () => {
+    it("counts only the still-unread notifications", async () => {
+      await seedNotifiedRun({ agentName: "mix1", actor: { userId: ctx.user.id } });
+      await seedNotifiedRun({ agentName: "mix2", actor: { userId: ctx.user.id } });
+      // Mark one of the two read up front.
+      const firstId = (await listNotifications(authHeaders(ctx)))[0]!.id;
+      await app.request(`/api/notifications/${firstId}/read`, {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
+
+      const res = await app.request("/api/notifications/read-all", {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      // Only the remaining unread one is flipped.
+      expect(((await res.json()) as { updated_count: number }).updated_count).toBe(1);
+      expect(await unreadCount(authHeaders(ctx))).toBe(0);
+    });
+  });
+
+  // ─── Cross-application isolation (same org, different app) ───
+
+  describe("cross-application isolation", () => {
+    it("a notification in app A is invisible from app B in the same org", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } }); // app = ctx.defaultAppId
+      const appB = await seedApplication({ orgId: ctx.orgId, name: "App B" });
+      const headersB = {
+        Cookie: ctx.cookie,
+        "X-Org-Id": ctx.orgId,
+        "X-Application-Id": appB.id,
+      };
+
+      expect(await unreadCount(headersB)).toBe(0);
+      // …still visible in app A.
+      expect(await unreadCount(authHeaders(ctx))).toBe(1);
+    });
+  });
+
+  // ─── Legacy runs.readAt dual-write (#667 transition) ────────
+
+  describe("legacy runs.readAt dual-write", () => {
+    it("mark-by-id also clears the run's legacy readAt flag", async () => {
+      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
+      await app.request(`/api/notifications/${id}/read`, {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
+      const [row] = await db.select({ readAt: runs.readAt }).from(runs).where(eq(runs.id, run.id));
+      expect(row!.readAt).not.toBeNull();
+    });
+
+    it("mark-by-run also clears the run's legacy readAt flag", async () => {
+      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      await app.request(`/api/notifications/read/${run.id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
+      const [row] = await db.select({ readAt: runs.readAt }).from(runs).where(eq(runs.id, run.id));
+      expect(row!.readAt).not.toBeNull();
     });
   });
 
