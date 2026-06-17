@@ -31,7 +31,7 @@
 // curl-installed standalone binary crashes at startup with ENOENT.
 import "./lib/pi-binary-shim.ts";
 import { Command, InvalidArgumentError } from "commander";
-import { installCommand } from "./commands/install.ts";
+import { composeUpgradeCommand, installCommand } from "./commands/install.ts";
 import { loginCommand } from "./commands/login.ts";
 import { logoutCommand } from "./commands/logout.ts";
 import { whoamiCommand } from "./commands/whoami.ts";
@@ -200,7 +200,19 @@ program
     "-y, --yes",
     "Skip all prompts and accept smart defaults (Docker-aware tier from #180, default directory, auto-start dev server). Required for curl|bash, CI, Dockerfile RUN, cloud-init. Equivalent to APPSTRATE_YES=1. Per-field flags (--tier, --dir, --port) still override the defaults.",
   )
+  .option(
+    "--upgrade-compose",
+    "Maintenance only: strip stale duplicated env defaults from an existing install's docker-compose.yml (issue #515). Backs up the file, preserves your edits, does not touch .env or run Docker. Use --dir to point at a non-default install. Skips the normal install flow.",
+  )
   .action(async (opts) => {
+    // --upgrade-compose is a standalone maintenance op — short-circuit
+    // before the tier/dir/port resolution of the normal install flow.
+    if (opts.upgradeCompose === true) {
+      await composeUpgradeCommand({
+        dir: typeof opts.dir === "string" ? opts.dir : undefined,
+      });
+      return;
+    }
     // Env var fallback mirrors Homebrew's NONINTERACTIVE=1 / rustup-init's
     // RUSTUP_INIT_SKIP_PATH_CHECK pattern — useful for Dockerfile `ENV` and
     // cloud-init `environment:` blocks where appending argv is awkward.

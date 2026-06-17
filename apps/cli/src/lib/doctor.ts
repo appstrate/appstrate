@@ -13,6 +13,8 @@
  * `probeBinary` to assert the rendered output without spawning anything.
  */
 
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { runCommand } from "./install/os.ts";
 import {
   defaultPathScanFs,
@@ -22,6 +24,7 @@ import {
 } from "./path-scan.ts";
 import { upgradeHint, type InstallSource } from "./install-source.ts";
 import { defaultInstallDir, readProjectFile } from "./install/project.ts";
+import { analyzeComposeDefaults, type ComposeFinding } from "./compose-defaults.ts";
 
 export interface InstallationInfo {
   /** PATH directory containing the binary. */
@@ -61,6 +64,18 @@ export interface DoctorReport {
    * the user doesn't have to memorize the derived project hash.
    */
   localInstall?: LocalInstallInfo;
+  /**
+   * Drift findings against the on-disk `<dir>/docker-compose.yml` of a
+   * detected local install (issue #515). Only populated when a local
+   * install is present AND its compose file carries stale duplicated
+   * env defaults (or an intentional override that no longer matches).
+   * Absent/empty for a healthy or freshly-installed compose file.
+   *
+   * Each finding masks the Zod schema's single source of truth the same
+   * way the #513 `MODULES` drift did — `appstrate install
+   * --upgrade-compose` strips the safe-to-remove duplicates.
+   */
+  composeDrift?: ComposeFinding[];
 }
 
 export interface ProbeBinary {
@@ -121,6 +136,13 @@ export interface RunDoctorOptions {
   probeLocalInstall?: (dir: string) => Promise<LocalInstallInfo | null>;
   /** Override the install dir probed (defaults to `~/appstrate`). */
   installDir?: string;
+  /**
+   * Read `<dir>/docker-compose.yml` for the compose-drift check (#515).
+   * Returns the file content, or `null` when there is no compose file.
+   * Defaults to a real `readFile`. Injected by tests to assert drift
+   * formatting without touching disk.
+   */
+  readComposeFile?: (dir: string) => Promise<string | null>;
 }
 
 /**
@@ -197,13 +219,50 @@ export async function runDoctor(opts: RunDoctorOptions = {}): Promise<DoctorRepo
     // intentional swallow — sidecar absence is not a doctor finding.
   }
 
+  // Compose-drift check (#515) — only meaningful for a detected local
+  // install: the on-disk compose file is what an operator's stack
+  // actually boots from, so stale duplicated defaults there silently
+  // mask the schema's source of truth. Soft-fails on any read error
+  // (unreadable / absent file) so it never perturbs the rest of the
+  // report — a missing compose file is the normal state for the common
+  // "no local install" case, already gated by `localInstall`.
+  let composeDrift: ComposeFinding[] | undefined;
+  if (localInstall) {
+    const readCompose = opts.readComposeFile ?? defaultReadComposeFile;
+    try {
+      const content = await readCompose(localInstall.dir);
+      if (content !== null) {
+        const findings = analyzeComposeDefaults(content);
+        if (findings.length > 0) composeDrift = findings;
+      }
+    } catch {
+      // intentional swallow — drift detection is best-effort.
+    }
+  }
+
   return {
     installations,
     runningIndex,
     dualInstall: installations.length > 1,
     multiSource: sources.size > 1,
     ...(localInstall ? { localInstall } : {}),
+    ...(composeDrift ? { composeDrift } : {}),
   };
+}
+
+/**
+ * Default compose reader — reads `<dir>/docker-compose.yml`. Returns
+ * `null` (not a throw) when the file is missing so `runDoctor` can
+ * skip the drift section cleanly; other I/O errors propagate to the
+ * caller's soft-fail catch.
+ */
+async function defaultReadComposeFile(dir: string): Promise<string | null> {
+  try {
+    return await readFile(join(dir, "docker-compose.yml"), "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+    throw err;
+  }
 }
 
 /**
@@ -273,6 +332,10 @@ export function formatDoctorReport(report: DoctorReport, runningExecPath: string
     lines.push(`  • appstrate uninstall --purge   (down -v + rm <dir>, destructive)`);
   }
 
+  if (report.composeDrift && report.composeDrift.length > 0) {
+    lines.push(...formatComposeDrift(report.composeDrift));
+  }
+
   if (report.dualInstall) {
     lines.push(``);
     lines.push(`Multiple installations detected.`);
@@ -296,6 +359,51 @@ export function formatDoctorReport(report: DoctorReport, runningExecPath: string
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Render the compose-drift section (#515). Splits the findings into the
+ * two classes so the operator sees which lines are safe to auto-strip
+ * (`appstrate install --upgrade-compose`) versus which need a human eye
+ * (an intentional override whose recorded default drifted).
+ */
+function formatComposeDrift(findings: ComposeFinding[]): string[] {
+  const lines: string[] = [];
+  const duplicates = findings.filter((f) => f.kind === "duplicate");
+  const drifts = findings.filter((f) => f.kind === "allowlist-drift");
+
+  lines.push(``);
+  lines.push(
+    `Compose drift: ${findings.length} env default(s) in your on-disk docker-compose.yml ` +
+      `mirror or diverge from the platform schema.`,
+  );
+
+  if (duplicates.length > 0) {
+    lines.push(``);
+    lines.push(
+      `  Stale duplicated defaults (safe to remove — they mask schema updates, the #513 class):`,
+    );
+    for (const f of duplicates) {
+      lines.push(`    • line ${f.line}: ${f.varName}=${JSON.stringify(f.yamlDefault)}`);
+    }
+    lines.push(``);
+    lines.push(`  Fix automatically (backs up the file first, preserves your edits):`);
+    lines.push(`    • appstrate install --upgrade-compose`);
+  }
+
+  if (drifts.length > 0) {
+    lines.push(``);
+    lines.push(`  Intentional overrides whose value diverged from the shipped template:`);
+    for (const f of drifts) {
+      lines.push(
+        `    • line ${f.line}: ${f.varName}=${JSON.stringify(f.yamlDefault)} ` +
+          `(template default ${JSON.stringify(f.expectedYamlDefault)})`,
+      );
+    }
+    lines.push(`  Left untouched by --upgrade-compose — review by hand if unexpected.`);
+  }
+
+  return lines;
 }
 
 function upgradeHintRemoval(source: InstallSource): string {

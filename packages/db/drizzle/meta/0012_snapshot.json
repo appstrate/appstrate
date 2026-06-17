@@ -1,5 +1,5 @@
 {
-  "id": "2d87e76d-ddbf-4ca7-a910-3e9cfe08c44b",
+  "id": "695ee164-9a0b-4405-9fe6-508d69c1f8e3",
   "prevId": "932ea6cb-110e-4b41-8ff4-de6baeca3589",
   "version": "7",
   "dialect": "postgresql",
@@ -3583,6 +3583,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "resolved_integration_versions": {
+          "name": "resolved_integration_versions",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "api_key_id": {
           "name": "api_key_id",
           "type": "text",
@@ -4183,6 +4189,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "dependency_overrides": {
+          "name": "dependency_overrides",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "last_run_at": {
           "name": "last_run_at",
           "type": "timestamp with time zone",
@@ -4341,260 +4353,6 @@
         "package_schedules_at_most_one_actor": {
           "name": "package_schedules_at_most_one_actor",
           "value": "NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.notifications": {
-      "name": "notifications",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "org_id": {
-          "name": "org_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "application_id": {
-          "name": "application_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "end_user_id": {
-          "name": "end_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "type": {
-          "name": "type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "run_id": {
-          "name": "run_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "payload": {
-          "name": "payload",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "read_at": {
-          "name": "read_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_notifications_unread_user": {
-          "name": "idx_notifications_unread_user",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "application_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"notifications\".\"read_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_notifications_unread_end_user": {
-          "name": "idx_notifications_unread_end_user",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "application_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "end_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"notifications\".\"read_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_notifications_run": {
-          "name": "idx_notifications_run",
-          "columns": [
-            {
-              "expression": "run_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "uq_notifications_run_user_type": {
-          "name": "uq_notifications_run_user_type",
-          "columns": [
-            {
-              "expression": "run_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"notifications\".\"user_id\" IS NOT NULL AND \"notifications\".\"run_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "uq_notifications_run_end_user_type": {
-          "name": "uq_notifications_run_end_user_type",
-          "columns": [
-            {
-              "expression": "run_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "end_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"notifications\".\"end_user_id\" IS NOT NULL AND \"notifications\".\"run_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "notifications_org_id_organizations_id_fk": {
-          "name": "notifications_org_id_organizations_id_fk",
-          "tableFrom": "notifications",
-          "tableTo": "organizations",
-          "columnsFrom": ["org_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "notifications_application_id_applications_id_fk": {
-          "name": "notifications_application_id_applications_id_fk",
-          "tableFrom": "notifications",
-          "tableTo": "applications",
-          "columnsFrom": ["application_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "notifications_user_id_user_id_fk": {
-          "name": "notifications_user_id_user_id_fk",
-          "tableFrom": "notifications",
-          "tableTo": "user",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "notifications_end_user_id_end_users_id_fk": {
-          "name": "notifications_end_user_id_end_users_id_fk",
-          "tableFrom": "notifications",
-          "tableTo": "end_users",
-          "columnsFrom": ["end_user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "notifications_run_id_runs_id_fk": {
-          "name": "notifications_run_id_runs_id_fk",
-          "tableFrom": "notifications",
-          "tableTo": "runs",
-          "columnsFrom": ["run_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "notifications_one_recipient": {
-          "name": "notifications_one_recipient",
-          "value": "(\"notifications\".\"user_id\" IS NULL) <> (\"notifications\".\"end_user_id\" IS NULL)"
         }
       },
       "isRLSEnabled": false

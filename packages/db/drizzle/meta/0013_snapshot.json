@@ -1,6 +1,6 @@
 {
-  "id": "1894128e-3b35-4bd6-a188-70862136bf71",
-  "prevId": "2d87e76d-ddbf-4ca7-a910-3e9cfe08c44b",
+  "id": "1d4e8e7a-d611-4dcd-bed7-cb4b8eb537cb",
+  "prevId": "695ee164-9a0b-4405-9fe6-508d69c1f8e3",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3571,6 +3571,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "resolved_integration_versions": {
+          "name": "resolved_integration_versions",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "api_key_id": {
           "name": "api_key_id",
           "type": "text",
@@ -4112,6 +4118,12 @@
         },
         "connection_overrides": {
           "name": "connection_overrides",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dependency_overrides": {
+          "name": "dependency_overrides",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false

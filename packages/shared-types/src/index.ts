@@ -275,6 +275,7 @@ export interface ScheduleWireDto {
   proxy_id_override: string | null;
   version_override: string | null;
   connection_overrides: Record<string, string> | null;
+  dependency_overrides: Record<string, string> | null;
   last_run_at: string | null;
   next_run_at: string | null;
   createdAt: string;

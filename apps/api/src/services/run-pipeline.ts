@@ -17,10 +17,14 @@ import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
 import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
-import type { IntegrationManifestCache } from "./integration-service.ts";
+import {
+  resolveRunIntegrationVersions,
+  type IntegrationManifestCache,
+  type ResolvedIntegrationVersionMap,
+} from "./integration-service.ts";
+import { collectOverridableDependencyIds } from "@appstrate/core/dependencies";
 import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
 import { parseScopedName } from "@appstrate/core/naming";
-import { extractSkillIdsFromManifest } from "../lib/manifest-utils.ts";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
@@ -196,6 +200,70 @@ export async function resolveRunPreflight(params: {
 }
 
 // ---------------------------------------------------------------------------
+// Spawn-dependency freeze (#686) — shared across origins
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate `dependency_overrides` keys and freeze every declared integration's
+ * manifest version against PUBLISHED versions honoring its pin (+ overrides).
+ *
+ * The single point the integration pin is enforced for a run, shared by EVERY
+ * origin — platform (`prepareAndExecuteRun`), scheduled (same), and remote
+ * (`run-creation.createRun`). Extracting it is what closes the remote-origin
+ * gap: before, only the platform path froze versions, so a remote run silently
+ * served the mutable draft on the credential path (the exact #686 bug class on
+ * a different origin).
+ *
+ *   - Rejects an override KEY that names no declared skill/integration with a
+ *     400 (the "fails silently on the key axis" trap the value gate can't see).
+ *   - Seeds the shared `manifestCache` (when given) so every kickoff reader
+ *     threading it honors the pin with no per-caller change.
+ *   - Throws a structured `dependency_unresolved` (422) on an unsatisfiable /
+ *     never-published pin — never a silent draft fallback.
+ *
+ * Returns the frozen `{ version, source }` map to persist on
+ * `runs.resolved_integration_versions`.
+ */
+export async function freezeRunSpawnDependencies(params: {
+  agent: LoadedPackage;
+  dependencyOverrides?: Record<string, string> | null;
+  manifestCache?: IntegrationManifestCache;
+}): Promise<ResolvedIntegrationVersionMap> {
+  if (params.dependencyOverrides) {
+    const declaredDeps = collectOverridableDependencyIds(
+      params.agent.manifest as Record<string, unknown>,
+    );
+    const unknownKey = Object.keys(params.dependencyOverrides).find(
+      (key) => !declaredDeps.has(key),
+    );
+    if (unknownKey) {
+      throw new ApiError({
+        status: 400,
+        code: "invalid_request",
+        title: "Bad Request",
+        detail: `\`dependency_overrides["${unknownKey}"]\` is not a declared skill or integration dependency of this agent`,
+      });
+    }
+  }
+
+  const resolved = await resolveRunIntegrationVersions({
+    agentManifest: params.agent.manifest as Record<string, unknown>,
+    dependencyOverrides: params.dependencyOverrides ?? null,
+    manifestCache: params.manifestCache,
+  });
+  if (!resolved.ok) {
+    const list = resolved.unresolved.map((m) => `'${m.name}@${m.versionSpec}'`).join(", ");
+    throw new ApiError({
+      status: 422,
+      code: "dependency_unresolved",
+      title: "Dependency Unresolved",
+      detail: `Could not resolve ${list} against published versions — publish the integration, fix the pin, or pass \`dependency_overrides\` to run a working copy.`,
+    });
+  }
+  return resolved.versions;
+}
+
+// ---------------------------------------------------------------------------
 // Pipeline
 // ---------------------------------------------------------------------------
 
@@ -244,30 +312,24 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   }
   const { agent } = gates;
 
-  // Reject `dependency_overrides` keys that name a package the agent does not
-  // declare as a skill dependency (#666). The run-route value gate only checks
-  // each override VALUE; an override KEY that isn't in `dependencies.skills` is
-  // never consulted by the closure walk and would silently do nothing — the
-  // exact "fails silently" trap the value gate exists to avoid, on the key
-  // axis. The manifest isn't in scope at parse time, so the key check lives
-  // here (the first point with both the parsed overrides and the agent). Skills
-  // are the only bundled dependency type, matching `buildAgentPackage`.
-  if (params.dependencyOverrides) {
-    const declaredSkills = new Set(extractSkillIdsFromManifest(agent.manifest));
-    const unknownKey = Object.keys(params.dependencyOverrides).find(
-      (key) => !declaredSkills.has(key),
-    );
-    if (unknownKey) {
-      throw new ApiError({
-        status: 400,
-        code: "invalid_request",
-        title: "Bad Request",
-        detail: `\`dependency_overrides["${unknownKey}"]\` is not a declared skill dependency of this agent`,
-      });
-    }
-  }
+  // --- Step 2a: Integration manifest version snapshot (#686) ---
+  //
+  // Validate `dependency_overrides` keys and freeze every declared
+  // integration's manifest version against PUBLISHED versions honoring its
+  // `dependencies.integrations.<id>` pin (+ any `dependency_overrides`), BEFORE
+  // the connection cascade and the spawn resolver run. Seeding the shared
+  // `manifestCache` makes both honor the pin transparently; the frozen map is
+  // persisted so the runtime credential path resolves the SAME version. An
+  // unsatisfiable pin fails loud (422), never a silent draft spawn. Shared with
+  // the remote origin (`run-creation.ts`) via `freezeRunSpawnDependencies`.
+  const resolvedIntegrationVersions: ResolvedIntegrationVersionMap =
+    await freezeRunSpawnDependencies({
+      agent,
+      dependencyOverrides: params.dependencyOverrides ?? null,
+      manifestCache,
+    });
 
-  // --- Step 2: Connection resolution snapshot (#199) ---
+  // --- Step 2b: Connection resolution snapshot (#199) ---
   //
   // Apply the 4-mechanism cascade once at kickoff so:
   //  - the spawn loader (run-context-builder) pins the same row admin/run intended,
@@ -280,7 +342,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // state — any error here is hard 412: either the override points at an
   // invalid id (caller's mistake), or a race after readiness mutated DB
   // state (connection deleted / pin shifted). Either way the caller
-  // needs structured feedback, not a silent fallback.
+  // needs structured feedback, not a silent fallback. The cascade reads the
+  // pinned manifests seeded by Step 2a (auth keys / scopes match the spawn).
   let resolvedConnections: ResolvedConnectionMap | null = null;
   if (actor) {
     const outcome = await resolveRunConnectionsOrError({
@@ -424,6 +487,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       sinkExpiresAt: new Date(sinkCredentials.expiresAt),
       connectionOverrides: params.connectionOverrides ?? null,
       resolvedConnections,
+      resolvedIntegrationVersions,
       runnerName: params.runnerName ?? null,
       runnerKind: params.runnerKind ?? null,
       modelCredentialId: plan.llmConfig.credentialId ?? null,

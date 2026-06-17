@@ -46,7 +46,10 @@ import {
   markIntegrationConnectionNeedsReconnection,
 } from "./integration-connections.ts";
 import { computeRequiredScopes } from "./integration-scope-resolver.ts";
-import { fetchIntegrationManifest } from "./integration-service.ts";
+import {
+  readIntegrationManifestForRun,
+  type ResolvedIntegrationVersion,
+} from "./integration-service.ts";
 
 /** Mutable builder for the wire payload (returned widened to the readonly wire type). */
 interface MutableCredentialsWire {
@@ -90,6 +93,13 @@ export async function resolveLiveIntegrationCredentials(
      * declaration is materialised.
      */
     resolvedConnections?: Record<string, { connectionId: string; source: string }> | null;
+    /**
+     * Snapshot from `runs.resolved_integration_versions` (#686). When present,
+     * `[integrationId]` pins the manifest VERSION this resolver reads — so the
+     * delivery/auth plan a mid-run MITM refresh injects matches the version the
+     * spawn resolver used at kickoff. Absent (legacy / soft-resolved) → draft.
+     */
+    resolvedIntegrationVersions?: Record<string, ResolvedIntegrationVersion> | null;
   },
   options: ResolveLiveCredentialsOptions = {},
 ): Promise<IntegrationCredentialsWire> {
@@ -99,7 +109,10 @@ export async function resolveLiveIntegrationCredentials(
     throw notFound(`Integration '${integrationId}' has no actor-scoped connection for this run`);
   }
 
-  const manifest = await loadIntegrationManifest(integrationId);
+  const manifest = await loadIntegrationManifest(
+    integrationId,
+    context.resolvedIntegrationVersions?.[integrationId] ?? null,
+  );
   await assertIntegrationActive(integrationId, context.applicationId);
 
   const auths = (manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
@@ -346,8 +359,13 @@ export async function resolveLiveIntegrationCredentials(
 // Helpers
 // ─────────────────────────────────────────────
 
-async function loadIntegrationManifest(integrationId: string): Promise<IntegrationManifest> {
-  const res = await fetchIntegrationManifest(integrationId);
+async function loadIntegrationManifest(
+  integrationId: string,
+  frozenVersion: ResolvedIntegrationVersion | null,
+): Promise<IntegrationManifest> {
+  // Read AT the version frozen for this run (#686) so the delivery/auth plan
+  // matches the spawn. No frozen entry → draft (legacy / soft-resolved).
+  const res = await readIntegrationManifestForRun(integrationId, frozenVersion);
   if (res.ok) return res.manifest;
   switch (res.failure.kind) {
     case "not_found":

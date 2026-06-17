@@ -994,6 +994,12 @@ export const runsPaths = {
                 },
                 applicationId: { type: "string", minLength: 1 },
                 input: { type: "object" },
+                dependency_overrides: {
+                  type: "object",
+                  description:
+                    'Per-run dependency version overrides (#666/#686). Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. `"draft"` opts that dependency into its working copy; any other value replaces the manifest pin. An unsatisfiable pin aborts the run with `dependency_unresolved` (422).',
+                  additionalProperties: { type: "string" },
+                },
                 contextSnapshot: {
                   type: "object",
                   description:

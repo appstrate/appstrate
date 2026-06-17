@@ -4,6 +4,7 @@ import { describe, it, expect } from "bun:test";
 import { formatDoctorReport, runDoctor, type ProbeBinary } from "../src/lib/doctor.ts";
 import { type PathScanFs } from "../src/lib/path-scan.ts";
 import { buildInternalInfoPayload, type InternalInfoPayload } from "../src/commands/internal.ts";
+import { CODE_DEFAULTS } from "../src/lib/compose-defaults.ts";
 
 /**
  * Phase 3 — `appstrate doctor` (issue #249).
@@ -335,6 +336,173 @@ describe("local Docker-tier install probe (#343)", () => {
     );
     expect(text).not.toContain("Local Docker-tier install detected");
     expect(text).not.toContain("appstrate logs -f");
+  });
+});
+
+describe("compose-drift check (#515)", () => {
+  const onPath = {
+    pathEnv: "/usr/local/bin",
+    pathScanFs: fs({ "/usr/local/bin/appstrate": { exec: true } }),
+    probeBinary: probe({
+      "/usr/local/bin/appstrate": { version: "1.2.3", source: "curl" as const },
+    }),
+    execPath: "/usr/local/bin/appstrate",
+  };
+  const localInstall = async (dir: string) => ({ dir, projectName: "appstrate-prod-cafebabe" });
+  const MODULES_DEFAULT = CODE_DEFAULTS.MODULES!;
+  const STALE_COMPOSE = [
+    "    environment:",
+    `      - MODULES=\${MODULES:-${MODULES_DEFAULT}}`,
+  ].join("\n");
+
+  it("attaches composeDrift when a local install's compose has a stale default", async () => {
+    const report = await runDoctor({
+      ...onPath,
+      probeLocalInstall: localInstall,
+      installDir: "/srv/appstrate",
+      readComposeFile: async () => STALE_COMPOSE,
+    });
+    expect(report.composeDrift).toBeDefined();
+    expect(report.composeDrift).toHaveLength(1);
+    expect(report.composeDrift![0]).toMatchObject({ kind: "duplicate", varName: "MODULES" });
+  });
+
+  it("omits composeDrift when the compose file is clean", async () => {
+    const report = await runDoctor({
+      ...onPath,
+      probeLocalInstall: localInstall,
+      installDir: "/srv/appstrate",
+      readComposeFile: async () => "    environment:\n      - MODULES",
+    });
+    expect(report.composeDrift).toBeUndefined();
+  });
+
+  it("does NOT read the compose file when there is no local install", async () => {
+    let read = false;
+    const report = await runDoctor({
+      ...onPath,
+      probeLocalInstall: async () => null,
+      readComposeFile: async () => {
+        read = true;
+        return STALE_COMPOSE;
+      },
+    });
+    expect(read).toBe(false);
+    expect(report.composeDrift).toBeUndefined();
+  });
+
+  it("omits composeDrift when the compose file is absent (reader returns null)", async () => {
+    const report = await runDoctor({
+      ...onPath,
+      probeLocalInstall: localInstall,
+      installDir: "/srv/appstrate",
+      readComposeFile: async () => null,
+    });
+    expect(report.composeDrift).toBeUndefined();
+  });
+
+  it("fails soft (no composeDrift) when the reader throws", async () => {
+    const report = await runDoctor({
+      ...onPath,
+      probeLocalInstall: localInstall,
+      installDir: "/srv/appstrate",
+      readComposeFile: async () => {
+        throw new Error("permission denied");
+      },
+    });
+    // The local install is still reported — only the drift section is skipped.
+    expect(report.localInstall).toBeDefined();
+    expect(report.composeDrift).toBeUndefined();
+  });
+
+  it("renders the drift section with the --upgrade-compose hint", () => {
+    const text = formatDoctorReport(
+      {
+        installations: [
+          {
+            pathEntry: "/usr/local/bin",
+            binary: "/usr/local/bin/appstrate",
+            realPath: "/usr/local/bin/appstrate",
+            version: "1.2.3",
+            source: "curl",
+          },
+        ],
+        runningIndex: 0,
+        dualInstall: false,
+        multiSource: false,
+        localInstall: { dir: "/srv/appstrate", projectName: "appstrate-prod-cafebabe" },
+        composeDrift: [
+          {
+            kind: "duplicate",
+            line: 2,
+            varName: "MODULES",
+            yamlDefault: "a,b",
+            codeDefault: "a,b",
+            raw: "      - MODULES=${MODULES:-a,b}",
+          },
+        ],
+      },
+      "/usr/local/bin/appstrate",
+    );
+    expect(text).toContain("Compose drift");
+    expect(text).toContain("MODULES");
+    expect(text).toContain("appstrate install --upgrade-compose");
+  });
+
+  it("renders allowlist-drift findings as manual-review, not auto-fixable", () => {
+    const text = formatDoctorReport(
+      {
+        installations: [
+          {
+            pathEntry: "/usr/local/bin",
+            binary: "/usr/local/bin/appstrate",
+            realPath: "/usr/local/bin/appstrate",
+            version: "1.2.3",
+            source: "curl",
+          },
+        ],
+        runningIndex: 0,
+        dualInstall: false,
+        multiSource: false,
+        localInstall: { dir: "/srv/appstrate", projectName: "appstrate-prod-cafebabe" },
+        composeDrift: [
+          {
+            kind: "allowlist-drift",
+            line: 9,
+            varName: "RUN_ADAPTER",
+            yamlDefault: "process",
+            expectedYamlDefault: "docker",
+            raw: "      - RUN_ADAPTER=${RUN_ADAPTER:-process}",
+          },
+        ],
+      },
+      "/usr/local/bin/appstrate",
+    );
+    expect(text).toContain("Intentional overrides");
+    expect(text).toContain("RUN_ADAPTER");
+    expect(text).toContain("review by hand");
+  });
+
+  it("does NOT render a drift section when composeDrift is absent", () => {
+    const text = formatDoctorReport(
+      {
+        installations: [
+          {
+            pathEntry: "/usr/local/bin",
+            binary: "/usr/local/bin/appstrate",
+            realPath: "/usr/local/bin/appstrate",
+            version: "1.2.3",
+            source: "curl",
+          },
+        ],
+        runningIndex: 0,
+        dualInstall: false,
+        multiSource: false,
+        localInstall: { dir: "/srv/appstrate", projectName: "appstrate-prod-cafebabe" },
+      },
+      "/usr/local/bin/appstrate",
+    );
+    expect(text).not.toContain("Compose drift");
   });
 });
 

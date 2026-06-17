@@ -19,8 +19,10 @@
  *   - pin honored: a `^1.0.0` pin resolves to the highest matching version and
  *     EXCLUDES a newer out-of-range version (2.0.0), even though it is latest.
  *   - manifest follows the resolved version, NOT the draft (distinct entry_point).
- *   - unsatisfiable pin → integration skipped (loud), not silently run on stale bytes.
- *   - no published version → integration skipped (unrunnable; byte route 404s).
+ *   - unsatisfiable pin → run fails loud (`DEPENDENCY_UNRESOLVED`), never a
+ *     silent degrade (#686 tightened this from the old warn-and-skip).
+ *   - no published version → same loud failure (unrunnable byte route would
+ *     otherwise 404 mid-run).
  *   - incident regression: publishing a new in-range version makes the run pick
  *     it up WITHOUT overwriting the draft.
  */
@@ -160,8 +162,10 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
     expect(server.entry_point).toBe("./v1_5.js");
   });
 
-  it("skips the integration when the pin cannot be satisfied (no silent stale bytes)", async () => {
-    // Integration pins `^3.0.0`; only 1.0.0 is published → unsatisfiable.
+  it("fails loud when the server pin cannot be satisfied (no silent degrade, #686)", async () => {
+    // Integration pins `^3.0.0`; only 1.0.0 is published → unsatisfiable. The
+    // run must abort with DEPENDENCY_UNRESOLVED, never spawn without the
+    // integration's tools.
     await seedPackage({
       id: INTEG,
       orgId: ctx.orgId,
@@ -180,11 +184,10 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
     await seedServerVersion("1.0.0", "./v1.js");
     await seedConnection(ctx);
 
-    const specs = await resolve(ctx);
-    expect(specs.length).toBe(0);
+    expect(resolve(ctx)).rejects.toMatchObject({ code: "DEPENDENCY_UNRESOLVED" });
   });
 
-  it("skips the integration when the mcp-server has no published version", async () => {
+  it("fails loud when the mcp-server has no published version (#686)", async () => {
     await seedPackage({
       id: INTEG,
       orgId: ctx.orgId,
@@ -203,8 +206,7 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
     // No seedPackageVersion → draft-only, unrunnable.
     await seedConnection(ctx);
 
-    const specs = await resolve(ctx);
-    expect(specs.length).toBe(0);
+    expect(resolve(ctx)).rejects.toMatchObject({ code: "DEPENDENCY_UNRESOLVED" });
   });
 
   it("regression: publishing a new in-range version is picked up WITHOUT overwriting the draft", async () => {
