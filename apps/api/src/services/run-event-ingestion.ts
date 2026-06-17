@@ -637,32 +637,35 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     });
   }
 
-  // Fan out in-app notifications — one row per recipient (issue #667).
-  // Only the CAS winner reaches here, so this runs exactly once per run.
-  // Fire-and-forget, off the critical path (same rationale as the workspace
-  // delete above): a multi-row INSERT (+ an `org_members` SELECT for the
-  // actor-less fan-out) must NOT sit between the CAS close and the terminal
-  // status broadcast below — the broadcast is what updates the UI and fires
-  // webhooks. Best-effort by contract: the run is already terminal, so a
-  // transient INSERT failure is logged and swallowed, never failing the
-  // runner finalize. The `notifications` table is the sole source of
-  // notification read-state; a dropped fan-out means a missing bell entry, not
-  // a stuck run-list badge (the badge derives from the same table).
-  void createRunNotifications(scope, run.id).catch((err) => {
-    logger.error("finalize: notification fan-out failed (run already terminal)", {
-      runId: run.id,
-      err: getErrorMessage(err),
-    });
-  });
-
   // 8. Status-change broadcast with the enriched params (including
-  //    validation-failure errors and any afterRun metadata).
+  //    validation-failure errors and any afterRun metadata). Fired BEFORE the
+  //    notification fan-out so the multi-row INSERT can never sit between the
+  //    CAS close and the broadcast — the broadcast is what updates the UI and
+  //    fires webhooks, so it must not wait on bell bookkeeping.
   const broadcastParams: RunStatusChangeParams = {
     ...hookParams,
     ...(errorMessage ? { extra: { error: errorMessage } } : {}),
     ...(resultToPersist && status === "success" ? { extra: { result: resultToPersist } } : {}),
   };
   void emitEvent("onRunStatusChange", broadcastParams);
+
+  // Fan out in-app notifications — one row per recipient (issue #667). Only
+  // the CAS winner reaches here, so this runs exactly once per run. Awaited
+  // (after the broadcast) rather than detached: the run is already terminal
+  // and the broadcast has already fired, so the small INSERT adds negligible
+  // latency, and awaiting it keeps the write from outliving the request — a
+  // detached promise would otherwise race a concurrent run-delete / test
+  // teardown. Best-effort by contract: a transient INSERT failure is logged
+  // and swallowed, never failing the runner finalize. The `notifications`
+  // table is the sole source of notification read-state; a dropped fan-out
+  // means a missing bell entry, not a stuck run-list badge (the badge derives
+  // from the same table).
+  await createRunNotifications(scope, run.id).catch((err) => {
+    logger.error("finalize: notification fan-out failed (run already terminal)", {
+      runId: run.id,
+      err: getErrorMessage(err),
+    });
+  });
 }
 
 /**
