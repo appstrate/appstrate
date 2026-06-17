@@ -18,6 +18,7 @@ import { getEnv } from "@appstrate/env";
 // ---- Platform service imports (for buildPlatformServices) -----------------
 import { logger } from "../logger.ts";
 import { listLlmUsageForRun } from "../../services/state/runs.ts";
+import { proxyCall } from "../../services/credential-proxy/core.ts";
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
@@ -90,6 +91,12 @@ function buildPlatformServices(): PlatformServices {
   return {
     logger,
     runs: { listLlmUsage: listLlmUsageForRun },
+    // Reuse the platform's existing credential-proxy (the same one the agent
+    // runtime uses) so a module can call a third-party API with the caller's
+    // own integration connection — no module-side OAuth. Consumer: storage.
+    credentialProxy: {
+      call: proxyCall,
+    },
   };
 }
 
