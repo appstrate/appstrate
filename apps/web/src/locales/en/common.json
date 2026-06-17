@@ -13,6 +13,7 @@
   "nav.ariaLabel": "Navigation",
   "nav.orgSection": "Organization",
   "nav.dashboard": "Dashboard",
+  "nav.storage": "Storage",
   "nav.agents": "Agents",
   "nav.runs": "Runs",
   "nav.schedules": "Schedules",

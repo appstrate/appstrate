@@ -2,10 +2,12 @@
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 
-/* The shared UI components live outside apps/web/src — point Tailwind at
-   @appstrate/ui so classes used ONLY there (e.g. the select's trigger-width
-   var) are scanned and emitted, not silently dropped. */
+/* Shared UI + module UIs live outside apps/web/src — point Tailwind at their
+   sources so classes used ONLY there (the select's trigger-width var, the
+   shared Dropzone, module pages) are scanned and emitted, not silently
+   dropped. */
 @source "../../../packages/ui/src";
+@source "../../../packages/module-storage/src";
 
 @custom-variant dark (&:is(.dark *));
 

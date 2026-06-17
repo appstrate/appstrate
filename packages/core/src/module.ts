@@ -16,6 +16,7 @@ import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
 import type { ModelApiShape, OAuthWireFormat } from "./sidecar-types.ts";
+import type { CredentialProxyCallInput, CredentialProxyCallResult } from "./platform-types.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -965,5 +966,16 @@ export interface PlatformServices {
       orgId: string;
       sources: readonly string[];
     }): Promise<Array<{ id: number; costUsd: number; source: string }>>;
+  };
+  /**
+   * Credential proxy — make an authenticated outbound call to a third-party
+   * API using one of the caller's EXISTING integration connections. The
+   * platform substitutes the credential server-side (the same credential-proxy
+   * the agent runtime uses); the module never sees the raw provider token and
+   * never rolls its own OAuth. Consumer: `module-storage` cloud disks reuse a
+   * user's connection (e.g. Google Drive) to browse/read files.
+   */
+  credentialProxy: {
+    call(input: CredentialProxyCallInput): Promise<CredentialProxyCallResult>;
   };
 }
