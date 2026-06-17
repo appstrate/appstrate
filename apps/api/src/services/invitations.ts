@@ -8,6 +8,9 @@ import { getAppConfig } from "../lib/app-config.ts";
 import { sendEmail } from "./email.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 
+/** Accepts either the base client or an open transaction handle. */
+type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /** Roles assignable via invitation (excludes owner — transferred, not invited). */
 export const ASSIGNABLE_ROLES = ["viewer", "member", "admin"] as const;
 export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
@@ -31,13 +34,11 @@ export async function createInvitation({
   orgId,
   role,
   invitedBy,
-  skipEmail,
 }: {
   email: string;
   orgId: string;
   role: AssignableRole;
   invitedBy: string;
-  skipEmail?: boolean;
 }) {
   const normalizedEmail = email.toLowerCase().trim();
 
@@ -69,7 +70,7 @@ export async function createInvitation({
 
   if (!invitation) throw new Error("Failed to create invitation");
 
-  if (!skipEmail && getAppConfig().features.smtp) {
+  if (getAppConfig().features.smtp) {
     const [orgName, inviterName] = await Promise.all([
       getOrgName(orgId),
       getInviterName(invitedBy),
@@ -107,11 +108,24 @@ export async function getOrgInvitations(orgId: string) {
     .orderBy(desc(orgInvitations.createdAt));
 }
 
-export async function markInvitationAccepted(invitationId: string, userId: string) {
-  await db
+/**
+ * Atomically claim a single-use invitation: flips `pending → accepted` only if
+ * it is still pending, in one conditional UPDATE. Returns `true` if THIS call
+ * won the claim, `false` if the row was already consumed (lost a concurrent
+ * race). The `WHERE status = 'pending'` guard is what makes two simultaneous
+ * accepts safe — the row lock lets exactly one UPDATE match.
+ */
+export async function markInvitationAccepted(
+  invitationId: string,
+  userId: string,
+  tx: DbOrTx = db,
+): Promise<boolean> {
+  const claimed = await tx
     .update(orgInvitations)
     .set({ status: "accepted", acceptedBy: userId, acceptedAt: new Date() })
-    .where(eq(orgInvitations.id, invitationId));
+    .where(and(eq(orgInvitations.id, invitationId), eq(orgInvitations.status, "pending")))
+    .returning({ id: orgInvitations.id });
+  return claimed.length > 0;
 }
 
 export async function cancelInvitation(invitationId: string, orgId: string) {

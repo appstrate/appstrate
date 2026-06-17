@@ -24,6 +24,20 @@ function hasOidc(): boolean {
   return !!(window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
 }
 
+/** Map an invitation ApiError code to a translation key, falling back to `fallback`. */
+function inviteErrorKey(code: string | null, fallback: string): string {
+  switch (code) {
+    case "invitation_expired":
+      return "invite.expired";
+    case "invitation_accepted":
+      return "invite.alreadyAccepted";
+    case "invitation_cancelled":
+      return "invite.cancelled";
+    default:
+      return fallback;
+  }
+}
+
 /**
  * Invitation acceptance — a single route (`/invite/:token`) that is, in
  * order: a loader, then an authentication delegator, then an explicit accept.
@@ -66,16 +80,8 @@ export function InviteAcceptPage() {
         setLoading(false);
       })
       .catch((err: unknown) => {
-        const code = err instanceof ApiError ? err.code : "invitation_not_found";
-        if (code === "invitation_expired") {
-          setServerError(t("invite.expired"));
-        } else if (code === "invitation_accepted") {
-          setServerError(t("invite.alreadyAccepted"));
-        } else if (code === "invitation_cancelled") {
-          setServerError(t("invite.cancelled"));
-        } else {
-          setServerError(t("invite.invalid"));
-        }
+        const code = err instanceof ApiError ? err.code : null;
+        setServerError(t(inviteErrorKey(code, "invite.invalid")));
         setLoading(false);
       });
   }, [token, t]);
@@ -88,14 +94,16 @@ export function InviteAcceptPage() {
   useEffect(() => {
     if (!info || user || !oidc || !token) return;
     const redirectTo = `/invite/${token}`;
-    void import("../modules/oidc/lib/oidc").then(({ startOidcLogin, startOidcSignup }) => {
-      if (info.is_new_user) {
-        void startOidcSignup(redirectTo, info.email);
-      } else {
-        void startOidcLogin(redirectTo, info.email);
-      }
-    });
-  }, [info, user, oidc, token]);
+    void import("../modules/oidc/lib/oidc")
+      .then(({ startOidcLogin, startOidcSignup }) =>
+        info.is_new_user
+          ? startOidcSignup(redirectTo, info.email)
+          : startOidcLogin(redirectTo, info.email),
+      )
+      // If the dynamic import or the redirect fails, surface an error instead
+      // of leaving the OIDC branch stuck on an indefinite spinner.
+      .catch(() => setServerError(t("invite.error")));
+  }, [info, user, oidc, token, t]);
 
   /** POST accept (session-bound, no body) + handle success. */
   const postAccept = useCallback(async () => {
@@ -195,7 +203,8 @@ export function InviteAcceptPage() {
       try {
         await postAccept();
       } catch (err) {
-        setServerError(err instanceof Error ? err.message : t("invite.error"));
+        const code = err instanceof ApiError ? err.code : null;
+        setServerError(t(inviteErrorKey(code, "invite.error")));
         setAccepting(false);
       }
     };
@@ -214,8 +223,22 @@ export function InviteAcceptPage() {
   }
 
   // Unauthenticated + OIDC: the delegation effect above is redirecting away.
-  // Render a spinner for that brief window.
+  // Render a spinner for that brief window — unless the redirect failed, in
+  // which case show the error instead of spinning forever.
   if (oidc) {
+    if (serverError) {
+      return (
+        <AuthLayout>
+          <div className="flex flex-col gap-6">
+            {inviteBanner}
+            <p className="text-destructive text-center text-sm">{serverError}</p>
+            <Button className="w-full" onClick={() => navigate("/")}>
+              {t("invite.goHome")}
+            </Button>
+          </div>
+        </AuthLayout>
+      );
+    }
     return (
       <AuthLayout>
         <div className="flex items-center justify-center py-8">

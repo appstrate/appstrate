@@ -755,14 +755,15 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
             // both gates (Infisical-style breakage avoidance), matching
             // the non-bypass evaluator's logic.
             const bootstrapTokenBypass = isBootstrapTokenRedemptionActive();
-            // A pending invitation for this exact email proves the recipient
-            // owns the inbox the inviter sent the token to. It serves two
-            // purposes below: it overrides the signup gate, AND it auto-verifies
-            // the email so an invited user never hits the verification screen —
-            // regardless of signup method (email/password, OIDC, social,
-            // magic-link). One generic rule, no per-flow special-casing. The
-            // lookup is index-covered (`idx_org_invitations_email`); signups
-            // are infrequent, so the unconditional query is negligible.
+            // A pending invitation for this exact email overrides the signup
+            // gate (Infisical-style breakage avoidance) so an invited user can
+            // complete signup even when signup is locked down. It is matched on
+            // EMAIL ALONE — the invitation token is not available at signup —
+            // so it is NOT proof of inbox ownership (it only means an org admin
+            // typed this address) and must NEVER auto-verify the email. See the
+            // `emailVerified` decision below. The lookup is index-covered
+            // (`idx_org_invitations_email`); signups are infrequent, so the
+            // unconditional query is negligible.
             const invited = await hasPendingInvitationByEmail(user.email);
             const gateActive =
               envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0;
@@ -811,12 +812,17 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
               : _realmResolver
                 ? await _realmResolver(headers)
                 : "platform";
-            // Auto-verify when a trusted social provider produced the row
-            // (the BA OAuth callback path) OR when the email is invited — both
-            // are independent proofs of ownership.
+            // Auto-verify ONLY when a trusted social provider produced the row
+            // (the BA OAuth callback path). A pending invitation is deliberately
+            // NOT a verification signal: it is matched on email alone, so
+            // granting `emailVerified` here would let anyone mint a verified
+            // account for any unclaimed address (create org → self-invite that
+            // email → sign up) AND would defeat the OIDC end-user adopter's
+            // `emailVerified === true` takeover guard. Invited users verify
+            // their inbox through the normal flow, like everyone else.
             const autoVerify = shouldAutoVerifyEmailOnCreate(ctx);
             const data: Record<string, unknown> = { realm };
-            if (autoVerify || invited) data.emailVerified = true;
+            if (autoVerify) data.emailVerified = true;
             return { data };
           },
           after: async (user, context) => {

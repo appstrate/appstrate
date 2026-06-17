@@ -390,7 +390,6 @@ describe("Organizations API", () => {
         orgId: ctx.orgId,
         role: "member",
         invitedBy: ctx.user.id,
-        skipEmail: true,
       });
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${invitation.id}`, {
@@ -456,7 +455,6 @@ describe("Organizations API", () => {
         orgId: ctx.orgId,
         role: "member",
         invitedBy: ctx.user.id,
-        skipEmail: true,
       });
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${invitation.id}`, {

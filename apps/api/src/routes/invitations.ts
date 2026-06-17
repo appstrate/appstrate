@@ -118,8 +118,23 @@ router.post("/:token/accept", async (c) => {
     });
   }
 
-  await addMember(invitation.orgId, session.user.id, invitation.role as AssignableRole);
-  await markInvitationAccepted(invitation.id, session.user.id);
+  // Claim the single-use token and add the membership in ONE transaction so
+  // the two writes can never half-apply (user joined but invite still pending,
+  // or vice versa). The claim is conditional on `status = 'pending'`, so two
+  // concurrent accepts can't both succeed — the loser sees 0 rows claimed and
+  // is reported as already-accepted. `addMember` is idempotent (it swallows the
+  // unique violation), so an existing membership keeps the claim valid.
+  const claimed = await db.transaction(async (tx) => {
+    const won = await markInvitationAccepted(invitation.id, session.user.id, tx);
+    if (!won) return false;
+    await addMember(invitation.orgId, session.user.id, invitation.role as AssignableRole, tx);
+    return true;
+  });
+
+  if (!claimed) {
+    // A concurrent accept consumed the token between our read and our claim.
+    throw gone("invitation_accepted", "Invitation already accepted");
+  }
 
   // Bare joined-org resource — same shape as the items in GET /api/orgs
   // (issue #657). The web accept page reads `id` to pin the org store.
