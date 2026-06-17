@@ -60,6 +60,12 @@ import {
   readProjectFile,
   writeProjectFile,
 } from "../lib/install/project.ts";
+import {
+  formatComposeUpgradeResult,
+  resolveComposeUpgradeDir,
+  runComposeUpgrade,
+  type ComposeUpgradeDeps,
+} from "../lib/install/compose-upgrade.ts";
 import { CLI_VERSION } from "../lib/version.ts";
 
 export interface InstallOptions {
@@ -262,6 +268,45 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
         autoConfirm,
         bootstrap,
       });
+    }
+  } catch (err) {
+    exitWithError(err);
+  }
+}
+
+/**
+ * `appstrate install --upgrade-compose` (issue #515) — surgically strip
+ * stale duplicated env defaults from an existing install's
+ * `docker-compose.yml`. Standalone maintenance op: no tier prompt, no
+ * `.env` touch, no Docker. The flag short-circuits the normal install
+ * flow in `cli.ts` so the heavy interactive path never runs.
+ *
+ * `deps` is a DI seam for tests — production wires the real filesystem
+ * I/O inside `runComposeUpgrade`.
+ */
+export async function composeUpgradeCommand(
+  opts: { dir?: string },
+  deps: ComposeUpgradeDeps = {},
+): Promise<void> {
+  intro("Appstrate compose upgrade");
+  try {
+    const dir = resolveComposeUpgradeDir(opts.dir);
+    const outcome = await runComposeUpgrade(dir, deps);
+    clack.note(formatComposeUpgradeResult(outcome), "docker-compose.yml");
+    switch (outcome.status) {
+      case "no-install":
+        // A wrong --dir (or no install) is a user-actionable failure —
+        // exit non-zero so scripts notice instead of assuming success.
+        throw new Error(`No docker-compose.yml found under ${dir}.`);
+      case "clean":
+        outro("Already up to date — nothing to upgrade.");
+        return;
+      case "refused-only":
+        outro("No automatic changes made — see the manual edits above.");
+        return;
+      case "upgraded":
+        outro("Compose file upgraded. Restart the stack to apply.");
+        return;
     }
   } catch (err) {
     exitWithError(err);

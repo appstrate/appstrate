@@ -297,6 +297,23 @@ docker compose up -d
 
 Migrations run automatically on startup via the `appstrate-migrate` service.
 
+### Keeping `docker-compose.yml` in sync
+
+Env defaults live in the platform's schema, not the compose file. An older
+on-disk `docker-compose.yml` can still pin a stale default (e.g. `MODULES`)
+that masks newer schema values. `appstrate doctor` flags this under a
+**Compose drift** section when it detects a local install. To strip the
+stale duplicated defaults — backing up the file first and preserving any
+edits you made (extra services, mounts, comments) — run:
+
+```bash
+appstrate install --upgrade-compose          # ~/appstrate
+appstrate install --upgrade-compose --dir /srv/appstrate
+```
+
+It never touches `.env` or runs Docker; restart the stack afterwards
+(`docker compose up -d`) to apply.
+
 ## Configuration
 
 See `.env.example` for all available environment variables. Key settings:
