@@ -4,7 +4,7 @@ import { and, eq, or, inArray, isNull, count, desc, sql, type SQL } from "drizzl
 import { db } from "@appstrate/db/client";
 import { runs, notifications, organizationMembers } from "@appstrate/db/schema";
 import { scopedWhere } from "../../lib/db-helpers.ts";
-import { actorFilter, type Actor } from "../../lib/actor.ts";
+import { actorFilter, actorMatch, type Actor } from "../../lib/actor.ts";
 import { listRunsWithFilter } from "./runs.ts";
 import type { AppScope } from "../../lib/scope.ts";
 
@@ -12,17 +12,17 @@ import type { AppScope } from "../../lib/scope.ts";
 //
 // Notifications live in their own per-recipient table (`notifications`),
 // one row per recipient, with per-user read-state by construction (issue
-// #667). The recipient is the same nullable `{userId, endUserId}` pair used
-// everywhere else; the caller's own rows are selected with the shared
-// type-aware `actorFilter`, which keys on `actor.type` to match exactly the
-// one recipient column that applies — so correctness does not rest on the
-// (unenforced) assumption that user ids and end-user ids never collide.
+// #667). The recipient is a single polymorphic `(recipientType, recipientId)`
+// tuple — the undistorted `Actor` shape. The caller's own rows are selected
+// with the generic `actorMatch`, which matches both the type and the id, so
+// correctness does not rest on the (unenforced) assumption that user ids and
+// end-user ids never collide.
 
-/** Match the caller's own notifications by their recipient column. */
+/** Match the caller's own notifications by their recipient tuple. */
 function recipientFilter(actor: Actor): SQL {
-  return actorFilter(actor, {
-    userId: notifications.userId,
-    endUserId: notifications.endUserId,
+  return actorMatch(actor, {
+    typeCol: notifications.recipientType,
+    idCol: notifications.recipientId,
   });
 }
 
@@ -38,7 +38,8 @@ export interface NotificationDto {
 
 export interface NotificationListResult {
   data: NotificationDto[];
-  total: number;
+  /** True when another page follows (keyset pagination — see listNotifications). */
+  has_more: boolean;
 }
 
 /**
@@ -87,11 +88,11 @@ export async function createRunNotifications(scope: AppScope, runId: string): Pr
     payload,
   };
 
-  let rows: Array<typeof base & { userId?: string; endUserId?: string }>;
+  let rows: Array<typeof base & { recipientType: string; recipientId: string }>;
   if (run.userId) {
-    rows = [{ ...base, userId: run.userId }];
+    rows = [{ ...base, recipientType: "user", recipientId: run.userId }];
   } else if (run.endUserId) {
-    rows = [{ ...base, endUserId: run.endUserId }];
+    rows = [{ ...base, recipientType: "end_user", recipientId: run.endUserId }];
   } else {
     // Actor-less run → fan out to org admins/owners only.
     const admins = await db
@@ -103,7 +104,7 @@ export async function createRunNotifications(scope: AppScope, runId: string): Pr
           inArray(organizationMembers.role, ["owner", "admin"]),
         ),
       );
-    rows = admins.map((m) => ({ ...base, userId: m.userId }));
+    rows = admins.map((m) => ({ ...base, recipientType: "user", recipientId: m.userId }));
   }
 
   if (rows.length === 0) return 0;
@@ -230,38 +231,60 @@ export async function getUnreadCountsByAgent(
   return result;
 }
 
+/**
+ * Recipient-scoped notification feed, newest first, keyset-paginated.
+ *
+ * Ordering is `(created_at DESC, id DESC)` — chronological, with `id` as the
+ * unique tiebreak. The cursor (`startingAfter`) is a plain notification id;
+ * its `(created_at, id)` coordinate is resolved by a scalar subquery so the
+ * row-value comparison stays consistent with the ORDER BY. That keeps deep
+ * pages a tight `idx_notifications_feed` range scan (no OFFSET count) and is
+ * skip/duplicate-safe under concurrent inserts — a notification arriving
+ * mid-pagination can never shift rows past the cursor. A stale/unknown
+ * cursor resolves to NULL → empty page (the caller restarts from the head).
+ */
 export async function listNotifications(
   scope: AppScope,
   actor: Actor,
-  options: { unread?: boolean; limit?: number; offset?: number } = {},
+  options: { unread?: boolean; limit?: number; startingAfter?: string } = {},
 ): Promise<NotificationListResult> {
-  const { unread = false, limit = 20, offset = 0 } = options;
+  const { unread = false, startingAfter } = options;
+  const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
+  const fetchLimit = limit + 1; // one extra row to detect has_more
+
+  const extra: SQL[] = [recipientFilter(actor)];
+  if (unread) extra.push(isNull(notifications.readAt));
+  if (startingAfter) {
+    extra.push(
+      sql`(${notifications.createdAt}, ${notifications.id}) < ((SELECT created_at FROM notifications WHERE id = ${startingAfter}), ${startingAfter})`,
+    );
+  }
+
   const where = scopedWhere(notifications, {
     orgId: scope.orgId,
     applicationId: scope.applicationId,
-    extra: [recipientFilter(actor), ...(unread ? [isNull(notifications.readAt)] : [])],
+    extra,
   })!;
 
-  const [rows, [totalRow]] = await Promise.all([
-    db
-      .select({
-        id: notifications.id,
-        type: notifications.type,
-        runId: notifications.runId,
-        payload: notifications.payload,
-        readAt: notifications.readAt,
-        createdAt: notifications.createdAt,
-      })
-      .from(notifications)
-      .where(where)
-      .orderBy(desc(notifications.createdAt))
-      .limit(limit)
-      .offset(offset),
-    db.select({ count: count() }).from(notifications).where(where),
-  ]);
+  const rows = await db
+    .select({
+      id: notifications.id,
+      type: notifications.type,
+      runId: notifications.runId,
+      payload: notifications.payload,
+      readAt: notifications.readAt,
+      createdAt: notifications.createdAt,
+    })
+    .from(notifications)
+    .where(where)
+    .orderBy(desc(notifications.createdAt), desc(notifications.id))
+    .limit(fetchLimit);
+
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
 
   return {
-    data: rows.map((r) => ({
+    data: page.map((r) => ({
       id: r.id,
       type: r.type,
       run_id: r.runId,
@@ -269,7 +292,7 @@ export async function listNotifications(
       read_at: r.readAt?.toISOString() ?? null,
       created_at: r.createdAt.toISOString(),
     })),
-    total: totalRow?.count ?? 0,
+    has_more: hasMore,
   };
 }
 

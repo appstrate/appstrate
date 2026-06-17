@@ -17,7 +17,7 @@ import {
 } from "../../../src/services/state/notifications.ts";
 import { db } from "@appstrate/db/client";
 import { notifications } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 const app = getTestApp();
 
@@ -197,8 +197,9 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       expect(await listNotifications(authHeaders(ctx))).toHaveLength(0);
       // …but still present without the filter.
       const all = await app.request("/api/notifications", { headers: authHeaders(ctx) });
-      const allBody = (await all.json()) as { data: NotificationDto[]; total: number };
-      expect(allBody.total).toBe(1);
+      const allBody = (await all.json()) as { data: NotificationDto[]; has_more: boolean };
+      expect(allBody.data).toHaveLength(1);
+      expect(allBody.has_more).toBe(false);
       expect(allBody.data[0]!.run_id).toBe(run.id);
     });
 
@@ -388,20 +389,23 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       const run = await seedNotifiedRun({ agentName: "eu-pos", actor: { endUserId: eu.id } });
 
       const rows = await db
-        .select({ endUserId: notifications.endUserId, userId: notifications.userId })
+        .select({
+          recipientType: notifications.recipientType,
+          recipientId: notifications.recipientId,
+        })
         .from(notifications)
         .where(eq(notifications.runId, run.id));
       expect(rows).toHaveLength(1);
-      expect(rows[0]!.endUserId).toBe(eu.id);
-      expect(rows[0]!.userId).toBeNull();
+      expect(rows[0]!.recipientType).toBe("end_user");
+      expect(rows[0]!.recipientId).toBe(eu.id);
     });
   });
 
-  // ─── end-user recipient mark path (type-aware actorFilter) ──
+  // ─── end-user recipient mark path (polymorphic actorMatch) ──
   //
-  // The recipient filter keys on actor.type to select exactly one column, so
-  // an end-user marks only end-user rows and a dashboard user never matches an
-  // end-user row (and vice-versa) — independent of any id-prefix convention.
+  // The recipient filter matches both recipientType and recipientId, so an
+  // end-user marks only end-user rows and a dashboard user never matches an
+  // end-user row (and vice-versa) — even when the two ids share a value.
 
   describe("end-user recipient mark path", () => {
     const readAtOf = async (runId: string): Promise<Date | null> => {
@@ -439,57 +443,44 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     });
   });
 
-  // ─── notifications_one_recipient CHECK ──────────────────────
+  // ─── recipient NOT NULL (polymorphic recipient integrity) ───
 
-  describe("notifications_one_recipient CHECK", () => {
-    // Assert the insert is rejected *specifically* by the one-recipient CHECK
-    // (not incidentally by some other NOT NULL/FK), so the test can't pass for
-    // the wrong reason if the schema later changes. The driver wraps the pg
-    // error; the constraint name surfaces on the `cause` chain (verified under
-    // both PGlite and postgres.js — SQLSTATE 23514).
-    async function expectOneRecipientViolation(p: Promise<unknown>): Promise<void> {
+  describe("recipient columns are NOT NULL", () => {
+    // The polymorphic recipient is two plain NOT NULL columns — no XOR CHECK to
+    // maintain. The schema types make both required at compile time; this is
+    // the DB-level guard that a raw insert omitting recipient_id is rejected
+    // (SQLSTATE 23502), so the integrity does not rest on the TS layer alone.
+    async function expectNotNullViolation(p: Promise<unknown>, column: string): Promise<void> {
       let err: unknown;
       try {
         await p;
       } catch (e) {
         err = e;
       }
-      expect(err, "expected the insert to be rejected by the CHECK").toBeDefined();
+      expect(err, "expected the insert to be rejected by NOT NULL").toBeDefined();
       const cause = (err as { cause?: { message?: string } })?.cause;
       const detail = String(cause?.message ?? cause ?? (err as Error)?.message ?? err);
-      expect(detail).toContain("notifications_one_recipient");
+      // 23502 = not_null_violation; the column name surfaces in the message.
+      expect(detail).toContain(column);
     }
 
-    it("rejects a row with both a user and an end-user recipient", async () => {
-      const eu = await seedEndUser({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        name: "Both",
-      });
-      await expectOneRecipientViolation(
-        db
-          .insert(notifications)
-          .values({
-            orgId: ctx.orgId,
-            applicationId: ctx.defaultAppId,
-            userId: ctx.user.id,
-            endUserId: eu.id,
-            type: "run_completed",
-          })
-          .execute(),
+    it("rejects a row with no recipient_id", async () => {
+      await expectNotNullViolation(
+        db.execute(
+          sql`INSERT INTO notifications (org_id, application_id, recipient_type, type)
+              VALUES (${ctx.orgId}, ${ctx.defaultAppId}, 'user', 'run_completed')`,
+        ),
+        "recipient_id",
       );
     });
 
-    it("rejects a row with neither recipient", async () => {
-      await expectOneRecipientViolation(
-        db
-          .insert(notifications)
-          .values({
-            orgId: ctx.orgId,
-            applicationId: ctx.defaultAppId,
-            type: "run_completed",
-          })
-          .execute(),
+    it("rejects a row with no recipient_type", async () => {
+      await expectNotNullViolation(
+        db.execute(
+          sql`INSERT INTO notifications (org_id, application_id, recipient_id, type)
+              VALUES (${ctx.orgId}, ${ctx.defaultAppId}, ${ctx.user.id}, 'run_completed')`,
+        ),
+        "recipient_type",
       );
     });
   });
@@ -503,7 +494,8 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       await db.insert(notifications).values({
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        recipientType: "user",
+        recipientId: ctx.user.id,
         type: "run_completed",
         payload: { status: "success" },
       });
@@ -519,27 +511,85 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     });
   });
 
-  // ─── GET /api/notifications pagination + ordering ───────────
+  // ─── GET /api/notifications keyset pagination + ordering ────
 
-  describe("GET /api/notifications pagination + ordering", () => {
-    it("orders newest-first, paginates with total, and sets a next Link", async () => {
+  describe("GET /api/notifications keyset pagination", () => {
+    /** Parse the `?startingAfter=<id>` cursor out of a `rel="next"` Link. */
+    function nextCursor(linkHeader: string | null): string | null {
+      if (!linkHeader) return null;
+      const m = linkHeader.match(/[?&]startingAfter=([^&>]+)>;\s*rel="next"/);
+      return m ? decodeURIComponent(m[1]!) : null;
+    }
+
+    it("orders newest-first and exposes a next-page cursor when more remain", async () => {
       await seedNotifiedRun({ agentName: "p1", actor: { userId: ctx.user.id } });
       await seedNotifiedRun({ agentName: "p2", actor: { userId: ctx.user.id } });
       await seedNotifiedRun({ agentName: "p3", actor: { userId: ctx.user.id } });
 
-      const res = await app.request("/api/notifications?limit=2&offset=0", {
-        headers: authHeaders(ctx),
-      });
+      const res = await app.request("/api/notifications?limit=2", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: NotificationDto[]; total: number };
-      expect(body.total).toBe(3);
+      const body = (await res.json()) as { data: NotificationDto[]; has_more: boolean };
       expect(body.data).toHaveLength(2);
+      expect(body.has_more).toBe(true);
       // created_at descending (newest first).
       expect(new Date(body.data[0]!.created_at).getTime()).toBeGreaterThanOrEqual(
         new Date(body.data[1]!.created_at).getTime(),
       );
-      // A further page exists → RFC 5988 next link.
-      expect(res.headers.get("Link") ?? "").toContain('rel="next"');
+      // A further page exists → RFC 5988 next link carrying the keyset cursor.
+      expect(nextCursor(res.headers.get("Link"))).toBe(body.data[1]!.id);
+    });
+
+    it("walks every page with no skip or duplicate, has_more flips false at the end", async () => {
+      // 5 notifications, paged 2 at a time → pages of [2, 2, 1].
+      for (let i = 0; i < 5; i++) {
+        await seedNotifiedRun({ agentName: `walk-${i}`, actor: { userId: ctx.user.id } });
+      }
+
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      // Bound the loop defensively so a pagination bug fails fast, not hangs.
+      while (pages < 10) {
+        pages++;
+        const url: string =
+          "/api/notifications?limit=2" + (cursor ? `&startingAfter=${cursor}` : "");
+        const res = await app.request(url, { headers: authHeaders(ctx) });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: NotificationDto[]; has_more: boolean };
+        seen.push(...body.data.map((n) => n.id));
+        if (!body.has_more) break;
+        cursor = body.data.at(-1)!.id;
+        expect(cursor).not.toBeNull();
+      }
+
+      expect(pages).toBe(3);
+      expect(seen).toHaveLength(5);
+      // No duplicates across pages.
+      expect(new Set(seen).size).toBe(5);
+      // Strictly newest-first across the whole walk (ids are random, so assert
+      // via created_at by re-reading is overkill — the per-page order assertion
+      // above plus the no-dup/no-skip set check pins the keyset invariant).
+    });
+
+    it("an unread filter paginates independently of read rows", async () => {
+      for (let i = 0; i < 3; i++) {
+        await seedNotifiedRun({ agentName: `uf-${i}`, actor: { userId: ctx.user.id } });
+      }
+      // Mark the newest one read.
+      const firstId = (await listNotifications(authHeaders(ctx)))[0]!.id;
+      await app.request(`/api/notifications/${firstId}/read`, {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
+
+      const res = await app.request("/api/notifications?unread=true&limit=2", {
+        headers: authHeaders(ctx),
+      });
+      const body = (await res.json()) as { data: NotificationDto[]; has_more: boolean };
+      // 2 unread remain → exactly one page, no more.
+      expect(body.data).toHaveLength(2);
+      expect(body.has_more).toBe(false);
+      expect(body.data.some((n) => n.id === firstId)).toBe(false);
     });
   });
 

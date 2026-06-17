@@ -1,19 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  pgTable,
-  text,
-  uuid,
-  timestamp,
-  jsonb,
-  index,
-  uniqueIndex,
-  check,
-} from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
-import { applications, endUsers } from "./applications.ts";
+import { applications } from "./applications.ts";
 import { runs } from "./runs.ts";
 
 /**
@@ -24,11 +14,24 @@ import { runs } from "./runs.ts";
  * global: marking a notification read flipped it for every viewer, and a
  * non-owner's mark-as-read silently matched zero rows (issue #667).
  *
- * Each notification belongs to exactly one recipient, modelled with the
- * same nullable `{userId, endUserId}` pair the rest of the codebase uses
- * for actor identity (`runs`, `integration_connections`, the SSE
- * subscriber, `lib/actor.ts`). A dashboard user OR an end-user — never
- * both — enforced by the `notifications_one_recipient` CHECK.
+ * The recipient is modelled as a single polymorphic pair
+ * (`recipientType` + `recipientId`) — the same shape as the `Actor`
+ * abstraction (`@appstrate/connect`: `{ type: "user" | "end_user", id }`).
+ * Storing the actor undistorted (rather than projecting it onto two
+ * nullable `{userId, endUserId}` columns the way `runs` does) keeps the
+ * recipient a single indexable tuple: one feed index instead of an
+ * OR-across-two-columns bitmap, one dedup index instead of two, and no XOR
+ * CHECK. It also extends to future recipient kinds (team, org, system) by
+ * adding a `recipientType` value — no schema change.
+ *
+ * Trade-off: `recipientId` cannot carry a foreign key (it points at two
+ * tables), so there is no per-recipient `ON DELETE CASCADE`. The `orgId` /
+ * `applicationId` FKs still cascade (deleting an org/app drops its
+ * notifications); the narrower "delete one user/end-user but keep the app"
+ * case is handled by explicit cleanup at the deletion sites
+ * (`deleteEndUser`, org member removal). This is the standard polymorphic
+ * recipient posture — dedicated notification systems (Knock, Novu) treat
+ * the recipient as an opaque external id, not a joined row.
  *
  * `type` + `runId` play the standard `entity_type` / `entity_id` roles so
  * the table extends to non-run notifications (invitations, billing) later
@@ -52,9 +55,11 @@ export const notifications = pgTable(
       .references(() => applications.id, {
         onDelete: "cascade",
       }),
-    // Recipient — exactly one of the two is set (CHECK below).
-    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
-    endUserId: text("end_user_id").references(() => endUsers.id, { onDelete: "cascade" }),
+    // Recipient — polymorphic. `recipientType` is the actor kind
+    // ("user" | "end_user" today), `recipientId` the actor id. No FK: the
+    // id spans two tables; cleanup is explicit at the deletion sites.
+    recipientType: text("recipient_type").notNull(),
+    recipientId: text("recipient_id").notNull(),
     // Notification kind. "run_completed" today; extensible.
     type: text("type").notNull(),
     // Originating entity (the run, for "run_completed"). Null for types
@@ -67,37 +72,44 @@ export const notifications = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // Unread-badge / list query: `org_id = ? AND application_id = ? AND
-    // (user_id = ? OR end_user_id = ?) AND read_at IS NULL`. The recipient is
-    // an OR across two columns, which a single composite btree cannot serve as
-    // a range — so split into one partial index per recipient column. Postgres
-    // bitmap-ORs the two for the OR predicate, and each is a tight
-    // (org, app, recipient) seek restricted to unread rows by the partial
-    // WHERE. `org_id` leads because every query filters it first (scopedWhere).
-    index("idx_notifications_unread_user")
-      .on(table.orgId, table.applicationId, table.userId)
+    // Feed read + keyset pagination: `org_id = ? AND application_id = ? AND
+    // recipient_type = ? AND recipient_id = ? ORDER BY created_at DESC, id
+    // DESC`. The recipient is now a single (type, id) tuple, so one composite
+    // btree serves the whole seek — no bitmap-OR. The trailing
+    // (created_at DESC, id DESC) is the keyset tiebreak, so deep pages stay a
+    // tight index range scan instead of an offset count + sort.
+    index("idx_notifications_feed").on(
+      table.orgId,
+      table.applicationId,
+      table.recipientType,
+      table.recipientId,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
+    // Unread badge/count + unread feed. Partial on unread rows so it stays
+    // small and tight. The (org, app, recipient) prefix serves the unread
+    // count; the full key with the created_at/id tail serves the unread
+    // keyset feed.
+    index("idx_notifications_unread")
+      .on(
+        table.orgId,
+        table.applicationId,
+        table.recipientType,
+        table.recipientId,
+        table.createdAt.desc(),
+        table.id.desc(),
+      )
       .where(sql`${table.readAt} IS NULL`),
-    index("idx_notifications_unread_end_user")
-      .on(table.orgId, table.applicationId, table.endUserId)
-      .where(sql`${table.readAt} IS NULL`),
+    // Backs the run_id FK ON DELETE CASCADE + by-run lookups
+    // (markNotificationReadByRun).
     index("idx_notifications_run").on(table.runId),
     // Defense-in-depth against a double fan-out: at most one notification of
     // a given type per (run, recipient). The fan-out path is already
-    // exactly-once (finalizeRun CAS winner), so these never fire in practice
-    // — but they make a duplicate structurally impossible if that invariant
-    // ever regresses. Two partial indexes because the recipient is split
-    // across two columns.
-    uniqueIndex("uq_notifications_run_user_type")
-      .on(table.runId, table.userId, table.type)
-      .where(sql`${table.userId} IS NOT NULL AND ${table.runId} IS NOT NULL`),
-    uniqueIndex("uq_notifications_run_end_user_type")
-      .on(table.runId, table.endUserId, table.type)
-      .where(sql`${table.endUserId} IS NOT NULL AND ${table.runId} IS NOT NULL`),
-    // Exactly one recipient column populated. XOR via inequality of the
-    // two NULL-tests.
-    check(
-      "notifications_one_recipient",
-      sql`(${table.userId} IS NULL) <> (${table.endUserId} IS NULL)`,
-    ),
+    // exactly-once (finalizeRun CAS winner), so this never fires in practice
+    // — but it makes a duplicate structurally impossible if that invariant
+    // ever regresses. A single index now that the recipient is one tuple.
+    uniqueIndex("uq_notifications_run_recipient_type")
+      .on(table.runId, table.recipientType, table.recipientId, table.type)
+      .where(sql`${table.runId} IS NOT NULL`),
   ],
 );

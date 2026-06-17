@@ -129,20 +129,21 @@ function enrichedRunSelect(actor: Actor | null) {
 /**
  * Per-recipient unread flag for the run's notification, computed as a
  * correlated EXISTS against the `notifications` table (issue #667). The
- * recipient column is chosen by `actor.type` — the same type-aware match the
- * notifications service uses — so a dashboard user and an end-user never see
- * each other's read-state. Read state lives ONLY in `notifications`; runs
- * carry no notification flag of their own. When the read is not actor-scoped
- * (e.g. a system/sidecar read with `actor === null`), unread is constant
- * `false` — the badge is a dashboard-recipient concept.
+ * recipient is matched on the polymorphic `(recipientType, recipientId)`
+ * tuple — the same match the notifications service uses — so a dashboard
+ * user and an end-user never see each other's read-state. Read state lives
+ * ONLY in `notifications`; runs carry no notification flag of their own. When
+ * the read is not actor-scoped (e.g. a system/sidecar read with
+ * `actor === null`), unread is constant `false` — the badge is a
+ * dashboard-recipient concept.
  */
 function unreadForActor(actor: Actor | null): SQL<boolean> {
   if (!actor) return sql<boolean>`false`;
-  const recipientCol = actor.type === "end_user" ? notifications.endUserId : notifications.userId;
   return sql<boolean>`exists (
     select 1 from ${notifications}
     where ${notifications.runId} = ${runs.id}
-      and ${recipientCol} = ${actor.id}
+      and ${notifications.recipientType} = ${actor.type}
+      and ${notifications.recipientId} = ${actor.id}
       and ${notifications.readAt} is null
   )`;
 }

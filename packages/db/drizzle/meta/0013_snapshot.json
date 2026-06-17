@@ -1,5 +1,5 @@
 {
-  "id": "1d4e8e7a-d611-4dcd-bed7-cb4b8eb537cb",
+  "id": "1465099e-5853-4fec-bc83-4c1781fcba4b",
   "prevId": "695ee164-9a0b-4405-9fe6-508d69c1f8e3",
   "version": "7",
   "dialect": "postgresql",
@@ -4313,17 +4313,17 @@
           "primaryKey": false,
           "notNull": true
         },
-        "user_id": {
-          "name": "user_id",
+        "recipient_type": {
+          "name": "recipient_type",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "end_user_id": {
-          "name": "end_user_id",
+        "recipient_id": {
+          "name": "recipient_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "type": {
           "name": "type",
@@ -4358,8 +4358,8 @@
         }
       },
       "indexes": {
-        "idx_notifications_unread_user": {
-          "name": "idx_notifications_unread_user",
+        "idx_notifications_feed": {
+          "name": "idx_notifications_feed",
           "columns": [
             {
               "expression": "org_id",
@@ -4374,20 +4374,37 @@
               "nulls": "last"
             },
             {
-              "expression": "user_id",
+              "expression": "recipient_type",
               "isExpression": false,
               "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recipient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "where": "\"notifications\".\"read_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
         },
-        "idx_notifications_unread_end_user": {
-          "name": "idx_notifications_unread_end_user",
+        "idx_notifications_unread": {
+          "name": "idx_notifications_unread",
           "columns": [
             {
               "expression": "org_id",
@@ -4402,9 +4419,27 @@
               "nulls": "last"
             },
             {
-              "expression": "end_user_id",
+              "expression": "recipient_type",
               "isExpression": false,
               "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recipient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
               "nulls": "last"
             }
           ],
@@ -4429,8 +4464,8 @@
           "method": "btree",
           "with": {}
         },
-        "uq_notifications_run_user_type": {
-          "name": "uq_notifications_run_user_type",
+        "uq_notifications_run_recipient_type": {
+          "name": "uq_notifications_run_recipient_type",
           "columns": [
             {
               "expression": "run_id",
@@ -4439,7 +4474,13 @@
               "nulls": "last"
             },
             {
-              "expression": "user_id",
+              "expression": "recipient_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recipient_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -4452,35 +4493,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"notifications\".\"user_id\" IS NOT NULL AND \"notifications\".\"run_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "uq_notifications_run_end_user_type": {
-          "name": "uq_notifications_run_end_user_type",
-          "columns": [
-            {
-              "expression": "run_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "end_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"notifications\".\"end_user_id\" IS NOT NULL AND \"notifications\".\"run_id\" IS NOT NULL",
+          "where": "\"notifications\".\"run_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -4505,24 +4518,6 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "notifications_user_id_user_id_fk": {
-          "name": "notifications_user_id_user_id_fk",
-          "tableFrom": "notifications",
-          "tableTo": "user",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "notifications_end_user_id_end_users_id_fk": {
-          "name": "notifications_end_user_id_end_users_id_fk",
-          "tableFrom": "notifications",
-          "tableTo": "end_users",
-          "columnsFrom": ["end_user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "notifications_run_id_runs_id_fk": {
           "name": "notifications_run_id_runs_id_fk",
           "tableFrom": "notifications",
@@ -4536,12 +4531,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "notifications_one_recipient": {
-          "name": "notifications_one_recipient",
-          "value": "(\"notifications\".\"user_id\" IS NULL) <> (\"notifications\".\"end_user_id\" IS NULL)"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.integration_connections": {

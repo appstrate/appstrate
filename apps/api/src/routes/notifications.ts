@@ -16,13 +16,14 @@ import {
 import { listGlobalRuns, type GlobalRunKind } from "../services/state/runs.ts";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 import { getAppScope } from "../lib/scope.ts";
-import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
+import { setOffsetLinkHeader, setCursorLinkHeader } from "../lib/pagination-link.ts";
 
 export function createNotificationsRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/notifications — paginated list for the current recipient.
-  // `?unread=true` filters to unread only.
+  // GET /api/notifications — recipient-scoped feed, newest first.
+  // Keyset-paginated: `?startingAfter=<id>` follows the `Link: rel="next"`
+  // cursor (Stripe-style). `?unread=true` filters to unread only.
   router.get("/notifications", async (c) => {
     const actor = getActor(c);
     const scope = getAppScope(c);
@@ -34,14 +35,10 @@ export function createNotificationsRouter() {
       .max(100)
       .catch(20)
       .parse(c.req.query("limit") ?? 20);
-    const offset = z.coerce
-      .number()
-      .int()
-      .min(0)
-      .catch(0)
-      .parse(c.req.query("offset") ?? 0);
-    const result = await listNotifications(scope, actor, { unread, limit, offset });
-    setOffsetLinkHeader({ c, limit, offset, total: result.total });
+    const startingAfter = c.req.query("startingAfter");
+    const result = await listNotifications(scope, actor, { unread, limit, startingAfter });
+    const lastId = result.data.at(-1)?.id;
+    setCursorLinkHeader({ c, hasMore: result.has_more, lastId });
     return c.json(result);
   });
 
@@ -75,9 +72,10 @@ export function createNotificationsRouter() {
   });
 
   // PUT /api/notifications/read/:runId — mark the caller's notification for a
-  // run read, keyed by run id (the run-detail page holds the run id, not the
-  // notification id). Complements PUT /notifications/:id/read. Idempotent 204
-  // — a missing run or non-recipient is a no-op, not a 404.
+  // run read, keyed by run id. First-class convenience for callers that hold a
+  // run id but not the notification id (the run-detail page marks the run's
+  // notification read on open). Complements PUT /notifications/:id/read.
+  // Idempotent 204 — a missing run or non-recipient is a no-op, not a 404.
   router.put("/notifications/read/:runId", async (c) => {
     const actor = getActor(c);
     const scope = getAppScope(c);

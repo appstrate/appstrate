@@ -31,7 +31,7 @@ export const notificationsPaths = {
       tags: ["Notifications"],
       summary: "List notifications",
       description:
-        "Paginated list of the current recipient's notifications, newest first. `?unread=true` returns unread only.",
+        'Keyset-paginated list of the current recipient\'s notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -49,10 +49,12 @@ export const notificationsPaths = {
           schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
         },
         {
-          name: "offset",
+          name: "startingAfter",
           in: "query",
           required: false,
-          schema: { type: "integer", minimum: 0, default: 0 },
+          schema: { type: "string", format: "uuid" },
+          description:
+            'Keyset cursor — return notifications after this id (newest-first order). Supplied by the `Link: rel="next"` header.',
         },
       ],
       responses: {
@@ -67,10 +69,13 @@ export const notificationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["data", "total"],
+                required: ["data", "has_more"],
                 properties: {
                   data: { type: "array", items: notificationObject },
-                  total: { type: "integer", description: "Total matching notifications" },
+                  has_more: {
+                    type: "boolean",
+                    description: "True when another page follows — page via the Link header cursor",
+                  },
                 },
               },
               example: {
@@ -84,7 +89,7 @@ export const notificationsPaths = {
                     created_at: "2026-01-15T10:31:12Z",
                   },
                 ],
-                total: 1,
+                has_more: false,
               },
             },
           },

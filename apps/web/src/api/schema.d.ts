@@ -2016,7 +2016,7 @@ export interface paths {
         };
         /**
          * List notifications
-         * @description Paginated list of the current recipient's notifications, newest first. `?unread=true` returns unread only.
+         * @description Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only.
          */
         get: operations["listNotifications"];
         put?: never;
@@ -11841,7 +11841,8 @@ export interface operations {
                 /** @description When true, only unread notifications are returned */
                 unread?: boolean;
                 limit?: number;
-                offset?: number;
+                /** @description Keyset cursor — return notifications after this id (newest-first order). Supplied by the `Link: rel="next"` header. */
+                startingAfter?: string;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -11878,7 +11879,7 @@ export interface operations {
                      *           "created_at": "2026-01-15T10:31:12Z"
                      *         }
                      *       ],
-                     *       "total": 1
+                     *       "has_more": false
                      *     }
                      */
                     "application/json": {
@@ -11904,8 +11905,8 @@ export interface operations {
                             /** Format: date-time */
                             created_at: string;
                         }[];
-                        /** @description Total matching notifications */
-                        total: number;
+                        /** @description True when another page follows — page via the Link header cursor */
+                        has_more: boolean;
                     };
                 };
             };
