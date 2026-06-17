@@ -2,7 +2,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { organizationMembers, orgInvitations } from "@appstrate/db/schema";
+import { organizationMembers, orgInvitations, user } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
@@ -299,6 +299,75 @@ describe("Invitations API", () => {
         headers: { Cookie: member.cookie },
       });
       expect(res.status).toBe(404);
+    });
+  });
+
+  // When an invited user authenticates via a social provider (Google/GitHub) on
+  // the invite page, Better Auth's OAuth callback marks the brand-new account
+  // `emailVerified = true` (see shouldAutoVerifyEmailOnCreate + its unit test
+  // auth-social-email-verify.test.ts — that path can't be driven end-to-end here
+  // because the harness intentionally runs no fake OAuth2 server against BA).
+  // These tests pin what the accept endpoint actually guarantees for that case:
+  // ownership is enforced by the session-email ↔ invitation-email match (the
+  // session email is the provider-asserted address), NOT by the platform's
+  // `emailVerified` flag — the accept route never reads it. A provider-verified
+  // session is represented by `createTestUser({ emailVerified: true })`.
+  describe("POST /invite/:token/accept — social-login invitee (provider-verified session)", () => {
+    it("a provider-verified session joins on email match and stays verified", async () => {
+      const social = await createTestUser({
+        email: "social-invitee@test.com",
+        emailVerified: true,
+      });
+
+      const inv = await seedInvitation({
+        orgId: ctx.orgId,
+        email: "social-invitee@test.com",
+        role: "member",
+        invitedBy: ctx.user.id,
+      });
+
+      const res = await app.request(`/invite/${inv.token}/accept`, {
+        method: "POST",
+        headers: { Cookie: social.cookie },
+      });
+
+      expect(res.status).toBe(200);
+      await assertDbHas(
+        organizationMembers,
+        and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, social.id))!,
+      );
+      // Accept must not disturb the provider-established verification.
+      const userRow = await getDbRow(user, eq(user.id, social.id));
+      expect(userRow?.emailVerified).toBe(true);
+    });
+
+    it("rejects a provider-verified session whose email does not match the invite", async () => {
+      // Logged in with a (verified) Google identity, but for a different address
+      // than the one invited — the provider identity is the gate, so 403.
+      const social = await createTestUser({
+        email: "other-google@test.com",
+        emailVerified: true,
+      });
+
+      const inv = await seedInvitation({
+        orgId: ctx.orgId,
+        email: "invited-target@test.com",
+        invitedBy: ctx.user.id,
+      });
+
+      const res = await app.request(`/invite/${inv.token}/accept`, {
+        method: "POST",
+        headers: { Cookie: social.cookie },
+      });
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as any;
+      expect(body.code).toBe("email_mismatch");
+      await assertDbCount(
+        organizationMembers,
+        and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, social.id))!,
+        0,
+      );
     });
   });
 
