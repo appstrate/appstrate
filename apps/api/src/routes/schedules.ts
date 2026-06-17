@@ -32,6 +32,11 @@ import { runConfigOverrideSchema, scheduleInputSchema } from "../lib/jsonb-schem
 // loses to admin pins at fire time. Shape: { "@scope/integration": "<connection_id>" }.
 const connectionOverridesSchema = z.record(z.string(), z.string());
 
+// Per-dependency version overrides frozen on the schedule row (#666/#686).
+// Same wire shape as the run-route's dependency_overrides; keys may name a
+// declared skill OR integration. Shape: { "@scope/dep": "draft" | "<spec>" }.
+const dependencyOverridesSchema = z.record(z.string(), z.string());
+
 export const createScheduleSchema = z.object({
   name: z.string().optional(),
   cron_expression: z.string().min(1, "cron_expression is required"),
@@ -46,6 +51,7 @@ export const createScheduleSchema = z.object({
   proxy_id_override: z.string().optional(),
   version_override: z.string().optional(),
   connection_overrides: connectionOverridesSchema.optional(),
+  dependency_overrides: dependencyOverridesSchema.optional(),
 });
 
 export const updateScheduleSchema = z.object({
@@ -60,6 +66,7 @@ export const updateScheduleSchema = z.object({
   proxy_id_override: z.string().nullable().optional(),
   version_override: z.string().nullable().optional(),
   connection_overrides: connectionOverridesSchema.nullable().optional(),
+  dependency_overrides: dependencyOverridesSchema.nullable().optional(),
 });
 
 export function createSchedulesRouter() {
@@ -135,6 +142,7 @@ export function createSchedulesRouter() {
         proxyIdOverride: data.proxy_id_override ?? null,
         versionOverride: data.version_override ?? null,
         connectionOverrides: data.connection_overrides ?? null,
+        dependencyOverrides: data.dependency_overrides ?? null,
       });
       await recordAuditFromContext(c, {
         action: "schedule.created",
@@ -193,6 +201,7 @@ export function createSchedulesRouter() {
       proxyIdOverride: data.proxy_id_override,
       versionOverride: data.version_override,
       connectionOverrides: data.connection_overrides,
+      dependencyOverrides: data.dependency_overrides,
     });
     // Mirror schedule.created: explicit camelCase keys (dominant audit
     // convention — see api-keys.ts, modules/webhooks/routes.ts). Only
@@ -210,6 +219,8 @@ export function createSchedulesRouter() {
     if (data.version_override !== undefined) auditAfter.versionOverride = data.version_override;
     if (data.connection_overrides !== undefined)
       auditAfter.connectionOverrides = data.connection_overrides;
+    if (data.dependency_overrides !== undefined)
+      auditAfter.dependencyOverrides = data.dependency_overrides;
     await recordAuditFromContext(c, {
       action: "schedule.updated",
       resourceType: "schedule",

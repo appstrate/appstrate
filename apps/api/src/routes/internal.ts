@@ -51,7 +51,11 @@ import {
   resolveLiveIntegrationCredentials,
   serializeIntegrationCredentialsWire,
 } from "../services/integration-credentials-resolver.ts";
-import { fetchIntegrationManifest } from "../services/integration-service.ts";
+import {
+  fetchIntegrationManifest,
+  readIntegrationManifestAt,
+  resolvedIntegrationVersionToDescriptor,
+} from "../services/integration-service.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
 
 /**
@@ -75,6 +79,16 @@ async function verifyRunToken(c: Context): Promise<{
      * per-run overrides past the kickoff handoff.
      */
     resolvedConnections: Record<string, { connectionId: string; source: string }> | null;
+    /**
+     * Snapshot of each declared integration's resolved manifest version frozen
+     * at run kickoff (#686). The credentials resolver reads the integration
+     * manifest AT this version so a mid-run MITM refresh sees the same
+     * delivery/auth plan the spawn used.
+     */
+    resolvedIntegrationVersions: Record<
+      string,
+      { version: string | null; source: "version" | "draft" | "system" }
+    > | null;
   };
 }> {
   const authHeader = c.req.header("Authorization");
@@ -104,6 +118,7 @@ async function verifyRunToken(c: Context): Promise<{
       modelCredentialId: runs.modelCredentialId,
       runOrigin: runs.runOrigin,
       resolvedConnections: runs.resolvedConnections,
+      resolvedIntegrationVersions: runs.resolvedIntegrationVersions,
     })
     .from(runs)
     .where(eq(runs.id, runId))
@@ -130,6 +145,7 @@ async function verifyRunToken(c: Context): Promise<{
       modelCredentialId: run.modelCredentialId ?? null,
       runOrigin: run.runOrigin,
       resolvedConnections: run.resolvedConnections ?? null,
+      resolvedIntegrationVersions: run.resolvedIntegrationVersions ?? null,
     },
   };
 }
@@ -340,6 +356,7 @@ export function createInternalRouter() {
       agentPackageId: run.packageId,
       actor,
       resolvedConnections: run.resolvedConnections,
+      resolvedIntegrationVersions: run.resolvedIntegrationVersions,
     });
     logger.info("Integration credentials delivered", {
       runId,
@@ -378,6 +395,7 @@ export function createInternalRouter() {
           agentPackageId: run.packageId,
           actor,
           resolvedConnections: run.resolvedConnections,
+          resolvedIntegrationVersions: run.resolvedIntegrationVersions,
         },
         { forceRefresh: true },
       );
@@ -483,7 +501,15 @@ export function createInternalRouter() {
    */
   async function assertAgentReferencesMcpServer(
     mcpServerId: string,
-    run: { packageId: string; orgId: string; applicationId: string },
+    run: {
+      packageId: string;
+      orgId: string;
+      applicationId: string;
+      resolvedIntegrationVersions: Record<
+        string,
+        { version: string | null; source: "version" | "draft" | "system" }
+      > | null;
+    },
     runId: string,
   ): Promise<void> {
     const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
@@ -502,7 +528,16 @@ export function createInternalRouter() {
         )
         .limit(1);
       if (!installRow) continue;
-      const res = await fetchIntegrationManifest(integrationId);
+      // Read the integration manifest AT the version frozen for this run
+      // (#686) so the authz check sees the same `source.server.name` the spawn
+      // resolver did. No frozen entry (soft-resolved / legacy run) → draft.
+      const frozen = run.resolvedIntegrationVersions?.[integrationId];
+      const res = frozen
+        ? await readIntegrationManifestAt(
+            integrationId,
+            resolvedIntegrationVersionToDescriptor(frozen),
+          )
+        : await fetchIntegrationManifest(integrationId);
       if (!res.ok) continue;
       const ref = getLocalServerRef(res.manifest);
       if (ref?.name === mcpServerId) return;

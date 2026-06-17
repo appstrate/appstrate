@@ -355,6 +355,15 @@ interface CreateRunParams {
     { connectionId: string; source: string; label?: string | null; accountId?: string | null }
   > | null;
   /**
+   * Snapshot of each declared integration's resolved manifest version at
+   * kickoff (#686). Persisted on `runs.resolved_integration_versions` so the
+   * runtime credential path reads the SAME version the spawn resolver used.
+   */
+  resolvedIntegrationVersions?: Record<
+    string,
+    { version: string | null; source: "version" | "draft" | "system" }
+  > | null;
+  /**
    * `model_provider_credentials.id` snapshotted at run creation. Pinned
    * here so the OAuth model token resolver can reject any other
    * credentialId requested via the run's signed token. Set only for
@@ -406,6 +415,9 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
       : {}),
     ...(params.resolvedConnections !== undefined
       ? { resolvedConnections: params.resolvedConnections }
+      : {}),
+    ...(params.resolvedIntegrationVersions !== undefined
+      ? { resolvedIntegrationVersions: params.resolvedIntegrationVersions }
       : {}),
   });
 }
