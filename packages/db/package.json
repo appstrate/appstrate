@@ -31,7 +31,7 @@
     "@electric-sql/pglite": "^0.5.2",
     "better-auth": "1.7.0-beta.4",
     "drizzle-orm": "^0.45.2",
-    "nodemailer": "^8.0.7",
+    "nodemailer": "^9.0.0",
     "postgres": "^3.4.9",
     "zod": "^4.4.3"
   },
