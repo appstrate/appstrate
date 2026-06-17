@@ -112,7 +112,9 @@ test.describe("Run dependency resolution (#666)", () => {
     });
 
     expect(res.status()).toBe(400);
-    expect(JSON.stringify(await res.json()).toLowerCase()).toContain("declared skill dependency");
+    expect(JSON.stringify(await res.json()).toLowerCase()).toContain(
+      "declared skill or integration dependency",
+    );
   });
 
   test("fails loud with 422 for an unsatisfiable manifest pin", async ({
