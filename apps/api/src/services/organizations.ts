@@ -12,6 +12,7 @@ import {
   runLogs,
   packages,
   orgInvitations,
+  notifications,
 } from "@appstrate/db/schema";
 import { and, eq, inArray, count, sql } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
@@ -269,6 +270,21 @@ export async function removeMember(orgId: string, userId: string): Promise<void>
   if (deleted.length === 0) {
     throw new Error("Failed to remove member: member not found");
   }
+
+  // The member's runs stay in the org for history, so their notifications are
+  // not cascaded away. Notifications carry the recipient as a polymorphic
+  // (recipientType, recipientId) tuple with NO foreign key — delete the
+  // departing member's notifications across the org explicitly so they don't
+  // orphan. (org/application FK cascades only fire on org/app deletion.)
+  await db
+    .delete(notifications)
+    .where(
+      and(
+        eq(notifications.orgId, orgId),
+        eq(notifications.recipientType, "user"),
+        eq(notifications.recipientId, userId),
+      ),
+    );
 }
 
 export async function updateMemberRole(

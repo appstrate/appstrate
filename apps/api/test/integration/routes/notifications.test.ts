@@ -15,9 +15,11 @@ import {
   createRunNotifications,
   markNotificationReadByRun,
 } from "../../../src/services/state/notifications.ts";
+import { deleteEndUser } from "../../../src/services/end-users.ts";
+import { removeMember } from "../../../src/services/organizations.ts";
 import { db } from "@appstrate/db/client";
 import { notifications } from "@appstrate/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 const app = getTestApp();
 
@@ -482,6 +484,60 @@ describe("Notifications API (per-recipient, issue #667)", () => {
         ),
         "recipient_type",
       );
+    });
+  });
+
+  // ─── recipient cleanup on deletion (replaces FK cascade) ────
+  //
+  // The polymorphic recipientId carries no foreign key, so deleting a
+  // user/end-user does not cascade their notifications. The deletion sites
+  // (deleteEndUser, removeMember) clean them up explicitly — covered here.
+
+  describe("recipient cleanup on deletion", () => {
+    const countForRecipient = async (type: string, id: string): Promise<number> => {
+      const rows = await db
+        .select({ id: notifications.id })
+        .from(notifications)
+        .where(and(eq(notifications.recipientType, type), eq(notifications.recipientId, id)));
+      return rows.length;
+    };
+
+    it("deleteEndUser removes the end-user's notifications (incl. run-less)", async () => {
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        name: "EU cleanup",
+      });
+      // A run-less notification: only the explicit cleanup (not the run
+      // cascade) can remove this one — proves the delete is real, not
+      // incidental to the end-user's runs cascading.
+      await db.insert(notifications).values({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        recipientType: "end_user",
+        recipientId: eu.id,
+        type: "run_completed",
+        payload: { status: "success" },
+      });
+      expect(await countForRecipient("end_user", eu.id)).toBe(1);
+
+      await deleteEndUser(scope(), eu.id);
+      expect(await countForRecipient("end_user", eu.id)).toBe(0);
+    });
+
+    it("removeMember removes the departing member's notifications, leaving others", async () => {
+      const userB = await createTestUser();
+      await addOrgMember(ctx.orgId, userB.id, "admin");
+      // Actor-less run → one notification each for the owner (A) and admin (B).
+      await seedNotifiedRun({ agentName: "cleanup-agent", actor: "schedule" });
+      expect(await countForRecipient("user", userB.id)).toBe(1);
+      expect(await countForRecipient("user", ctx.user.id)).toBe(1);
+
+      await removeMember(ctx.orgId, userB.id);
+
+      // B's notification is gone; A (still a member) keeps theirs.
+      expect(await countForRecipient("user", userB.id)).toBe(0);
+      expect(await countForRecipient("user", ctx.user.id)).toBe(1);
     });
   });
 
