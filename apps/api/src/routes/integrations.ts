@@ -62,6 +62,7 @@ import {
   readIntegrationAuth,
   serializeIntegrationConnection,
   upsertIntegrationOAuthClient,
+  usesAutoProvisionedClient,
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
 import { createConnectRunExecutor } from "../services/connect/connect-run-launcher.ts";
@@ -393,6 +394,19 @@ export function createIntegrationsRouter() {
       const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
       const body = parseBody(oauthClientSchema, await c.req.json());
+      // Reject a manual client on an auto-provisioned (remote MCP) auth. Its
+      // token endpoint only accepts a DCR/CIMD-acquired public client, so a
+      // hand-entered client_id points at the wrong OAuth server and, once
+      // stored, silently disables auto-registration (ensureIntegrationOAuthClient
+      // returns the stale client instead of running DCR) — surfacing later as an
+      // opaque `invalid_client` at the authorize redirect. The UI hides the form
+      // for these auths; this guards the API/curl path too.
+      const { manifest, auth } = await readIntegrationAuth(scope, packageId, authKey);
+      if (usesAutoProvisionedClient(manifest, auth)) {
+        throw invalidRequest(
+          `Integration '${packageId}' auth '${authKey}' provisions its OAuth client automatically at connect time (DCR/CIMD); a manual client must not be registered. Connect without supplying credentials, or delete the existing client to restore auto-registration.`,
+        );
+      }
       const client = await upsertIntegrationOAuthClient(scope, packageId, authKey, {
         clientId: body.client_id,
         clientSecret: body.client_secret,

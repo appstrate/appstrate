@@ -40,6 +40,41 @@ describe("registerDynamicClient (RFC 7591)", () => {
     expect(captured!.body.scope).toBe("read write");
   });
 
+  it("registers for the refresh_token grant when requested", async () => {
+    let body: Record<string, unknown> = {};
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return jsonResponse({ client_id: "c-refresh" });
+    }) as unknown as typeof fetch;
+
+    await registerDynamicClient({
+      registrationEndpoint: "https://as/register",
+      redirectUri: "https://app/cb",
+      clientName: "X",
+      grantTypes: ["authorization_code", "refresh_token"],
+      fetchImpl,
+    });
+    // Without the refresh_token grant in the registration, the AS never issues
+    // a refresh token (Claude Code #7744) — assert it's threaded through.
+    expect(body.grant_types).toEqual(["authorization_code", "refresh_token"]);
+  });
+
+  it("defaults grant_types to authorization_code only when none requested", async () => {
+    let body: Record<string, unknown> = {};
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return jsonResponse({ client_id: "c-default" });
+    }) as unknown as typeof fetch;
+
+    await registerDynamicClient({
+      registrationEndpoint: "https://as/register",
+      redirectUri: "https://app/cb",
+      clientName: "X",
+      fetchImpl,
+    });
+    expect(body.grant_types).toEqual(["authorization_code"]);
+  });
+
   it("defaults token_endpoint_auth_method to none and omits scope when empty", async () => {
     let body: Record<string, unknown> = {};
     const fetchImpl = (async (_url: string, init?: RequestInit) => {

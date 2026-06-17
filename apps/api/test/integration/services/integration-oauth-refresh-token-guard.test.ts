@@ -143,4 +143,119 @@ describe("integration OAuth2 — refresh_token connect-time guard", () => {
     // Stored refresh_token survives — connection stays refreshable.
     expect(await storedRefreshToken(created.id)).toBe("rt-keep");
   });
+
+  // ── AS-capability-aware softening (MCP-spec refresh) ──────────────────────
+  // The base MANIFEST declares explicit endpoints with NO issuer, so capability
+  // is unknown → strict default (refuse), exercised by the tests above. These
+  // two cover an issuer-declaring auth where RFC 8414 `grant_types_supported`
+  // tells us whether a missing refresh token is expected or a misconfig.
+
+  function issuerManifest(id: string, issuer: string): Record<string, unknown> {
+    return {
+      name: id,
+      version: "1.0.0",
+      type: "integration",
+      schema_version: "0.1",
+      source: { kind: "remote", remote: { url: `${issuer}/mcp`, transport: "streamable-http" } },
+      auths: {
+        primary: {
+          type: "oauth2",
+          issuer,
+          authorization_endpoint: `${issuer}/authorize`,
+          token_endpoint: `${issuer}/token`,
+          token_endpoint_auth_method: "none",
+          authorized_uris: [`${issuer}/**`],
+          delivery: {
+            http: {
+              in: "header",
+              name: "Authorization",
+              prefix: "Bearer",
+              value: "{$credential.access_token}",
+            },
+          },
+        },
+      },
+    };
+  }
+
+  /**
+   * Run `fn` with global fetch stubbed to serve an RFC 8414 discovery document
+   * for `issuer` advertising the given `grant_types_supported`. A distinct
+   * issuer per test keeps the per-issuer discovery cache from bleeding across
+   * cases. Only the well-known is served; no userinfo_endpoint, so `complete`
+   * skips the userinfo fetch.
+   */
+  async function withDiscovery<T>(
+    issuer: string,
+    grantTypesSupported: string[] | undefined,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async (input: Request | URL | string) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes("/.well-known/")) {
+        return new Response(
+          JSON.stringify({
+            issuer,
+            authorization_endpoint: `${issuer}/authorize`,
+            token_endpoint: `${issuer}/token`,
+            ...(grantTypesSupported ? { grant_types_supported: grantTypesSupported } : {}),
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response("Not Found", { status: 404 });
+    }) as unknown as typeof fetch;
+    return fn().finally(() => {
+      globalThis.fetch = orig;
+    });
+  }
+
+  it("persists a short-lived no-refresh token when the AS advertises no refresh_token grant (ClickUp MCP)", async () => {
+    const id = "@orga/mcp-norefresh";
+    const issuer = "https://mcp-norefresh.example";
+    await seedPackage({
+      id,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: issuerManifest(id, issuer),
+    });
+    const conn = await withDiscovery(issuer, ["authorization_code"], () =>
+      strategy.complete(
+        { ...connectCtx, integrationId: id },
+        {
+          kind: "oauth2-result",
+          result: { ...result({ refreshToken: undefined }), packageId: id },
+        },
+      ),
+    );
+    // Persisted (not refused), no refresh token — re-auth happens at expiry.
+    expect(await storedRefreshToken(conn.id)).toBeUndefined();
+    expect((await db.select().from(integrationConnections)).length).toBe(1);
+  });
+
+  it("still refuses a short-lived no-refresh token when the AS DOES advertise the refresh_token grant", async () => {
+    const id = "@orga/mcp-refreshcapable";
+    const issuer = "https://mcp-refresh.example";
+    await seedPackage({
+      id,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: issuerManifest(id, issuer),
+    });
+    await expect(
+      withDiscovery(issuer, ["authorization_code", "refresh_token"], () =>
+        strategy.complete(
+          { ...connectCtx, integrationId: id },
+          {
+            kind: "oauth2-result",
+            result: { ...result({ refreshToken: undefined }), packageId: id },
+          },
+        ),
+      ),
+    ).rejects.toThrow(/refresh token/i);
+    expect((await db.select().from(integrationConnections)).length).toBe(0);
+  });
 });

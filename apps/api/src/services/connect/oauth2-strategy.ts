@@ -255,23 +255,63 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       if (existing?.refresh_token) refreshToken = existing.refresh_token;
     }
 
-    // Fail-fast: a short-lived token (`expires_at` set) with no `refresh_token`
-    // is unrenewable — it 401s within the hour and can never self-refresh,
-    // silently bricking the connection and every schedule on it. Refuse BEFORE
-    // persistence so a born-dead row never lands in `integration_connections`.
-    // Provider-agnostic: catches any OAuth integration missing offline-access
-    // config, not a hard-coded IdP (same posture as the identity-claims gate).
+    // A short-lived token (`expires_at` set) with no `refresh_token` is only a
+    // misconfig when the authorization server CAN issue refresh tokens. Many MCP
+    // servers (e.g. ClickUp MCP) advertise no `refresh_token` grant at all (RFC
+    // 8414 `grant_types_supported`) — for them an access-only token is expected,
+    // and the connection should persist and re-authorise at expiry
+    // (needs_reconnection), not be refused outright. Keep the hard refusal for
+    // servers that DO support refresh yet returned none — a real offline-access
+    // misconfig (e.g. the original `@appstrate/gmail` self-disconnect: Google
+    // without `access_type=offline` + `prompt=consent`).
     if (result.expiresAt && !refreshToken) {
-      logger.warn("Integration OAuth returned short-lived token with no refresh_token", {
-        packageId: result.packageId,
-        authKey: result.authKey,
-        ...(result.connectionId ? { connectionId: result.connectionId } : {}),
-      });
-      throw invalidRequest(
-        `'${result.packageId}' returned a short-lived access token but no refresh token, so ` +
-          `the connection cannot be kept alive. The integration's OAuth configuration is missing ` +
-          `offline access (for Google: access_type=offline + prompt=consent), or a prior grant ` +
-          `must be revoked in your account settings and re-authorised.`,
+      let refreshGrantSupported = true; // strict default when capability is unknown
+      if (auth.issuer) {
+        try {
+          const disc = await resolveOAuthEndpoints({
+            issuer: auth.issuer,
+            ...(auth.authorization_endpoint
+              ? { authorizationEndpoint: auth.authorization_endpoint }
+              : {}),
+            ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
+          });
+          if (disc.grantTypesSupported) {
+            refreshGrantSupported = disc.grantTypesSupported.includes("refresh_token");
+          }
+        } catch (err) {
+          // Discovery failure → keep the strict default (refuse). Logged for triage.
+          logger.warn("Integration refresh-grant capability discovery failed", {
+            packageId: result.packageId,
+            authKey: result.authKey,
+            err: String(err),
+          });
+        }
+      }
+      if (refreshGrantSupported) {
+        // Refuse BEFORE persistence so a born-dead row never lands in
+        // `integration_connections`.
+        logger.warn("Integration OAuth returned short-lived token with no refresh_token", {
+          packageId: result.packageId,
+          authKey: result.authKey,
+          ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+        });
+        throw invalidRequest(
+          `'${result.packageId}' returned a short-lived access token but no refresh token, so ` +
+            `the connection cannot be kept alive. The integration's OAuth configuration is missing ` +
+            `offline access (for Google: access_type=offline + prompt=consent), or a prior grant ` +
+            `must be revoked in your account settings and re-authorised.`,
+        );
+      }
+      // AS issues access-only tokens (no `refresh_token` grant advertised).
+      // Persist; the connection surfaces needs_reconnection at expiry for a
+      // manual re-auth — the only renewal path such a server supports.
+      logger.info(
+        "Integration OAuth connection persisted without a refresh token — authorization server advertises no refresh_token grant; re-authorisation required at expiry",
+        {
+          packageId: result.packageId,
+          authKey: result.authKey,
+          ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+        },
       );
     }
 
