@@ -108,6 +108,13 @@ function OAuthClientForm({
   // needs configuring. `null` = follow that default; a boolean = user toggled.
   const [open, setOpen] = useState<boolean | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Auto-provisioned (remote MCP) auths hide the manual client form by default.
+  // Their token endpoint only accepts a DCR/CIMD-acquired public client, so a
+  // hand-entered client_id almost always points at the wrong OAuth server and
+  // silently disables auto-registration (the stored client makes the backend
+  // skip DCR). Keep an opt-in escape hatch for the rare server that needs a
+  // pre-registered public client.
+  const [showManualForm, setShowManualForm] = useState(false);
 
   if (isLoading) return <LoadingState />;
 
@@ -135,6 +142,9 @@ function OAuthClientForm({
   // (manual registration is optional in that case); open otherwise so an admin
   // who must register a client sees the form straight away.
   const isOpen = open === null ? !configured && !autoProvisioned : open;
+  // For auto-provisioned auths the manual form is opt-in (advanced); for classic
+  // confidential clients it is always shown — registering one is mandatory.
+  const showManualClientForm = !autoProvisioned || showManualForm;
 
   return (
     <>
@@ -176,96 +186,134 @@ function OAuthClientForm({
               {t("integration.oauthClient.autoProvisionedHint")}
             </p>
           )}
-          {client && (
+          {autoProvisioned && client && (
+            <div
+              className="bg-warning/10 mb-3 space-y-2 rounded-md p-3"
+              data-testid={`oauth-client-auto-warning-${authKey}`}
+            >
+              <p className="text-warning text-xs">
+                {t("integration.oauthClient.autoProvisionedManualWarning")}
+              </p>
+              <p className="text-muted-foreground text-xs">
+                {t("integration.oauthClient.registered", { clientId: client.client_id })}
+              </p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmDelete(true)}
+                disabled={del.isPending}
+                data-testid={`oauth-client-auto-delete-${authKey}`}
+              >
+                <Trash2 size={14} className="text-destructive" />
+                {t("integration.oauthClient.btnDelete")}
+              </Button>
+            </div>
+          )}
+          {!autoProvisioned && client && (
             <p className="text-muted-foreground mb-3 text-xs">
               {t("integration.oauthClient.registered", { clientId: client.client_id })}
             </p>
           )}
-          <form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}>
-            <div className="space-y-1">
-              <Label htmlFor={`cid-${authKey}`} className="text-xs">
-                {t("integration.oauthClient.clientId")}
-              </Label>
-              <Input
-                id={`cid-${authKey}`}
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-                placeholder={client?.client_id ?? ""}
-                data-testid={`oauth-clientid-${authKey}`}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor={`csecret-${authKey}`} className="text-xs">
-                {t("integration.oauthClient.clientSecret")}
-              </Label>
-              <Input
-                id={`csecret-${authKey}`}
-                type="password"
-                value={clientSecret}
-                onChange={(e) => setClientSecret(e.target.value)}
-                disabled={publicClient}
-                placeholder={client?.has_client_secret ? "••••••••" : ""}
-                data-testid={`oauth-clientsecret-${authKey}`}
-              />
-            </div>
-            <div className="space-y-1 sm:col-span-2">
-              <Label htmlFor={`redir-${authKey}`} className="text-xs">
-                {t("integration.oauthClient.redirectUri")}
-              </Label>
-              <Input
-                id={`redir-${authKey}`}
-                type="url"
-                value={redirectUri}
-                onChange={(e) => setRedirectUri(e.target.value)}
-                placeholder={client?.redirect_uri ?? ""}
-              />
-              {/* AFPS §7.10 — surface `auths.<key>.callback_url_hint`.
+          {autoProvisioned && !showManualForm && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="mb-2"
+              onClick={() => setShowManualForm(true)}
+              data-testid={`oauth-client-manual-toggle-${authKey}`}
+            >
+              {t("integration.oauthClient.registerManually")}
+            </Button>
+          )}
+          {showManualClientForm && (
+            <form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}>
+              <div className="space-y-1">
+                <Label htmlFor={`cid-${authKey}`} className="text-xs">
+                  {t("integration.oauthClient.clientId")}
+                </Label>
+                <Input
+                  id={`cid-${authKey}`}
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  placeholder={client?.client_id ?? ""}
+                  data-testid={`oauth-clientid-${authKey}`}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor={`csecret-${authKey}`} className="text-xs">
+                  {t("integration.oauthClient.clientSecret")}
+                </Label>
+                <Input
+                  id={`csecret-${authKey}`}
+                  type="password"
+                  value={clientSecret}
+                  onChange={(e) => setClientSecret(e.target.value)}
+                  disabled={publicClient}
+                  placeholder={client?.has_client_secret ? "••••••••" : ""}
+                  data-testid={`oauth-clientsecret-${authKey}`}
+                />
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <Label htmlFor={`redir-${authKey}`} className="text-xs">
+                  {t("integration.oauthClient.redirectUri")}
+                </Label>
+                <Input
+                  id={`redir-${authKey}`}
+                  type="url"
+                  value={redirectUri}
+                  onChange={(e) => setRedirectUri(e.target.value)}
+                  placeholder={client?.redirect_uri ?? ""}
+                />
+                {/* AFPS §7.10 — surface `auths.<key>.callback_url_hint`.
                   Read-only display; the actual redirectUri value lives in
                   the input above. */}
-              {authDecl?.callback_url_hint && (
-                <p
-                  className="text-muted-foreground text-[0.7rem]"
-                  data-testid={`callback-url-hint-${authKey}`}
-                >
-                  <span className="font-semibold">
-                    {t("integration.oauthClient.callbackUrlHint")}:
-                  </span>{" "}
-                  <span className="font-mono">{authDecl.callback_url_hint}</span>
-                </p>
-              )}
-            </div>
-            <label className="flex items-center gap-2 text-sm sm:col-span-2">
-              <Checkbox
-                checked={publicClient}
-                onCheckedChange={(c) => setPublicClient(Boolean(c))}
-              />
-              {t("integration.oauthClient.publicClient")}
-            </label>
-            <div className="flex items-center gap-2 sm:col-span-2">
-              <Button
-                type="submit"
-                size="sm"
-                disabled={upsert.isPending || clientId.trim() === ""}
-                data-testid={`oauth-client-save-${authKey}`}
-              >
-                {client
-                  ? t("integration.oauthClient.btnRotate")
-                  : t("integration.oauthClient.btnRegister")}
-              </Button>
-              {client && (
+                {authDecl?.callback_url_hint && (
+                  <p
+                    className="text-muted-foreground text-[0.7rem]"
+                    data-testid={`callback-url-hint-${authKey}`}
+                  >
+                    <span className="font-semibold">
+                      {t("integration.oauthClient.callbackUrlHint")}:
+                    </span>{" "}
+                    <span className="font-mono">{authDecl.callback_url_hint}</span>
+                  </p>
+                )}
+              </div>
+              <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                <Checkbox
+                  checked={publicClient}
+                  onCheckedChange={(c) => setPublicClient(Boolean(c))}
+                />
+                {t("integration.oauthClient.publicClient")}
+              </label>
+              <div className="flex items-center gap-2 sm:col-span-2">
                 <Button
-                  type="button"
-                  variant="ghost"
+                  type="submit"
                   size="sm"
-                  onClick={() => setConfirmDelete(true)}
-                  disabled={del.isPending}
+                  disabled={upsert.isPending || clientId.trim() === ""}
+                  data-testid={`oauth-client-save-${authKey}`}
                 >
-                  <Trash2 size={14} className="text-destructive" />
-                  {t("integration.oauthClient.btnDelete")}
+                  {client
+                    ? t("integration.oauthClient.btnRotate")
+                    : t("integration.oauthClient.btnRegister")}
                 </Button>
-              )}
-            </div>
-          </form>
+                {client && !autoProvisioned && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirmDelete(true)}
+                    disabled={del.isPending}
+                  >
+                    <Trash2 size={14} className="text-destructive" />
+                    {t("integration.oauthClient.btnDelete")}
+                  </Button>
+                )}
+              </div>
+            </form>
+          )}
         </CollapsibleContent>
       </Collapsible>
       <ConfirmModal
