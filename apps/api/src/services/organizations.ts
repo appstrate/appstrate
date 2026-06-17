@@ -257,34 +257,37 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 export async function removeMember(orgId: string, userId: string): Promise<void> {
-  const deleted = await db
-    .delete(organizationMembers)
-    .where(
-      scopedWhere(organizationMembers, {
-        orgId,
-        extra: [eq(organizationMembers.userId, userId)],
-      }),
-    )
-    .returning({ orgId: organizationMembers.orgId });
+  // One transaction: the member row and the member's notifications are removed
+  // atomically. The member's runs stay in the org for history, so their
+  // notifications are not cascaded away — and since notifications carry the
+  // recipient as a polymorphic (recipientType, recipientId) tuple with NO
+  // foreign key, nothing else would clean them up (org/application FK cascades
+  // only fire on org/app deletion). A throw inside rolls both back.
+  await db.transaction(async (tx) => {
+    const deleted = await tx
+      .delete(organizationMembers)
+      .where(
+        scopedWhere(organizationMembers, {
+          orgId,
+          extra: [eq(organizationMembers.userId, userId)],
+        }),
+      )
+      .returning({ orgId: organizationMembers.orgId });
 
-  if (deleted.length === 0) {
-    throw new Error("Failed to remove member: member not found");
-  }
+    if (deleted.length === 0) {
+      throw new Error("Failed to remove member: member not found");
+    }
 
-  // The member's runs stay in the org for history, so their notifications are
-  // not cascaded away. Notifications carry the recipient as a polymorphic
-  // (recipientType, recipientId) tuple with NO foreign key — delete the
-  // departing member's notifications across the org explicitly so they don't
-  // orphan. (org/application FK cascades only fire on org/app deletion.)
-  await db
-    .delete(notifications)
-    .where(
-      and(
-        eq(notifications.orgId, orgId),
-        eq(notifications.recipientType, "user"),
-        eq(notifications.recipientId, userId),
-      ),
-    );
+    await tx
+      .delete(notifications)
+      .where(
+        and(
+          eq(notifications.orgId, orgId),
+          eq(notifications.recipientType, "user"),
+          eq(notifications.recipientId, userId),
+        ),
+      );
+  });
 }
 
 export async function updateMemberRole(

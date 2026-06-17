@@ -260,28 +260,32 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
   // cascade them. Run-linked notifications are dropped transitively when the
   // end-user's runs cascade, but a future run-less end-user notification would
   // orphan — so delete the recipient's notifications explicitly. Scoped to the
-  // app for tenant safety.
-  await db
-    .delete(notifications)
-    .where(
-      and(
-        eq(notifications.recipientType, "end_user"),
-        eq(notifications.recipientId, endUserId),
-        eq(notifications.orgId, scope.orgId),
-        eq(notifications.applicationId, scope.applicationId),
-      ),
-    );
+  // app for tenant safety. Both deletes run in one transaction so a failure
+  // mid-way can't leave the end-user gone but their notifications stranded
+  // (or vice-versa).
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(notifications)
+      .where(
+        and(
+          eq(notifications.recipientType, "end_user"),
+          eq(notifications.recipientId, endUserId),
+          eq(notifications.orgId, scope.orgId),
+          eq(notifications.applicationId, scope.applicationId),
+        ),
+      );
 
-  // Delete end-user — cascades handle connections, runs
-  await db
-    .delete(endUsers)
-    .where(
-      and(
-        eq(endUsers.id, endUserId),
-        eq(endUsers.orgId, scope.orgId),
-        eq(endUsers.applicationId, scope.applicationId),
-      ),
-    );
+    // Delete end-user — cascades handle connections, runs
+    await tx
+      .delete(endUsers)
+      .where(
+        and(
+          eq(endUsers.id, endUserId),
+          eq(endUsers.orgId, scope.orgId),
+          eq(endUsers.applicationId, scope.applicationId),
+        ),
+      );
+  });
 
   logger.info("End-user deleted via API", {
     endUserId,

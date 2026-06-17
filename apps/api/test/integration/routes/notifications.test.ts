@@ -17,8 +17,10 @@ import {
 } from "../../../src/services/state/notifications.ts";
 import { deleteEndUser } from "../../../src/services/end-users.ts";
 import { removeMember } from "../../../src/services/organizations.ts";
+import { synthesiseFinalize } from "../../../src/services/run-event-ingestion.ts";
+import { encrypt } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
-import { notifications } from "@appstrate/db/schema";
+import { notifications, runs } from "@appstrate/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 
 const app = getTestApp();
@@ -162,6 +164,86 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       ]);
       // Exactly one of the two racers wins the insert; the other no-ops.
       expect(a + b).toBe(1);
+
+      const rows = await db
+        .select({ id: notifications.id })
+        .from(notifications)
+        .where(eq(notifications.runId, run.id));
+      expect(rows).toHaveLength(1);
+    });
+  });
+
+  // ─── Fan-out through the REAL finalizeRun path ──────────────
+  //
+  // The tests above call createRunNotifications directly. This one drives the
+  // actual terminal-run convergence (synthesiseFinalize → finalizeRun → CAS →
+  // broadcast → awaited fan-out) so the wiring at run-event-ingestion.ts — not
+  // just the fan-out function — is covered.
+
+  describe("fan-out via finalizeRun", () => {
+    it("a run finalized through finalizeRun creates exactly one notification for its actor", async () => {
+      await seedAgent({
+        id: "@notiforg/finalize-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      }).catch(() => {});
+      const run = await seedRun({
+        packageId: "@notiforg/finalize-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        status: "running",
+        userId: ctx.user.id,
+      });
+      // finalizeRun reads a sink context (needs an encrypted sink secret) and
+      // applies the zero-token heuristic — seed a non-zero usage so the run
+      // stays `success` instead of being flipped to `failed`.
+      await db
+        .update(runs)
+        .set({
+          sinkSecretEncrypted: encrypt("test-sink-secret"),
+          sinkExpiresAt: new Date(Date.now() + 60_000),
+          tokenUsage: { input_tokens: 10, output_tokens: 5 },
+        })
+        .where(eq(runs.id, run.id));
+
+      await synthesiseFinalize(run.id, { status: "success" });
+
+      // Run converged terminal via the CAS.
+      const [row] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, run.id));
+      expect(row!.status).toBe("success");
+
+      // Exactly one notification, carrying the run's status, for the actor.
+      const data = await listNotifications(authHeaders(ctx));
+      expect(data).toHaveLength(1);
+      expect(data[0]!.run_id).toBe(run.id);
+      expect(data[0]!.payload?.status).toBe("success");
+    });
+
+    it("a re-finalize (idempotent CAS) does not create a second notification", async () => {
+      await seedAgent({
+        id: "@notiforg/finalize-twice",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      }).catch(() => {});
+      const run = await seedRun({
+        packageId: "@notiforg/finalize-twice",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        status: "running",
+        userId: ctx.user.id,
+      });
+      await db
+        .update(runs)
+        .set({
+          sinkSecretEncrypted: encrypt("test-sink-secret"),
+          sinkExpiresAt: new Date(Date.now() + 60_000),
+          tokenUsage: { input_tokens: 10, output_tokens: 5 },
+        })
+        .where(eq(runs.id, run.id));
+
+      await synthesiseFinalize(run.id, { status: "success" });
+      // Second finalize is a CAS no-op (sink already closed) → no fan-out re-run.
+      await synthesiseFinalize(run.id, { status: "success" });
 
       const rows = await db
         .select({ id: notifications.id })
@@ -337,6 +419,23 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       const counts = ((await res.json()) as { counts: Record<string, number> }).counts;
       expect(counts["@notiforg/agent-a"]).toBe(2);
       expect(counts["@notiforg/agent-b"]).toBe(1);
+    });
+
+    it("excludes notifications already marked read", async () => {
+      await seedNotifiedRun({ agentName: "cba", actor: { userId: ctx.user.id } });
+      await seedNotifiedRun({ agentName: "cba", actor: { userId: ctx.user.id } });
+      // Mark the newest of the two read → the unread group must drop to 1.
+      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
+      await app.request(`/api/notifications/${id}/read`, {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
+
+      const res = await app.request("/api/notifications/unread-counts-by-agent", {
+        headers: authHeaders(ctx),
+      });
+      const counts = ((await res.json()) as { counts: Record<string, number> }).counts;
+      expect(counts["@notiforg/cba"]).toBe(1);
     });
   });
 
@@ -555,6 +654,27 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       expect(await countForRecipient("user", userB.id)).toBe(0);
       expect(await countForRecipient("user", ctx.user.id)).toBe(1);
     });
+
+    it("removeMember leaves end-user notifications intact (cleanup is recipient-typed)", async () => {
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        name: "EU survives",
+      });
+      await seedNotifiedRun({ agentName: "eu-survive", actor: { endUserId: eu.id } });
+
+      const userB = await createTestUser();
+      await addOrgMember(ctx.orgId, userB.id, "admin");
+      await seedNotifiedRun({ agentName: "member-run", actor: "schedule" });
+      expect(await countForRecipient("user", userB.id)).toBe(1);
+
+      await removeMember(ctx.orgId, userB.id);
+
+      // The member's row is cleaned; the end-user (same id-space, different
+      // recipientType) is untouched — proves the delete filters on type.
+      expect(await countForRecipient("user", userB.id)).toBe(0);
+      expect(await countForRecipient("end_user", eu.id)).toBe(1);
+    });
   });
 
   // ─── unread-counts-by-agent: null agent_id ──────────────────
@@ -641,6 +761,79 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       // Strictly newest-first across the whole walk (ids are random, so assert
       // via created_at by re-reading is overkill — the per-page order assertion
       // above plus the no-dup/no-skip set check pins the keyset invariant).
+    });
+
+    it("paginates correctly across rows sharing an identical created_at (tuple tiebreak)", async () => {
+      // All five rows get the SAME created_at, so the keyset's (created_at, id)
+      // tuple comparison must fall back to the id tiebreak — the entire reason
+      // the cursor is a tuple and not a bare timestamp. A timestamp-only cursor
+      // would skip or loop here.
+      const fixed = new Date("2026-01-01T00:00:00.000Z");
+      for (let i = 0; i < 5; i++) {
+        await db.insert(notifications).values({
+          orgId: ctx.orgId,
+          applicationId: ctx.defaultAppId,
+          recipientType: "user",
+          recipientId: ctx.user.id,
+          type: "run_completed",
+          payload: { agent_id: "@notiforg/tie", status: "success" },
+          createdAt: fixed,
+        });
+      }
+
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      while (pages < 10) {
+        pages++;
+        const url: string =
+          "/api/notifications?limit=2" + (cursor ? `&startingAfter=${cursor}` : "");
+        const res = await app.request(url, { headers: authHeaders(ctx) });
+        const body = (await res.json()) as { data: NotificationDto[]; has_more: boolean };
+        seen.push(...body.data.map((n) => n.id));
+        if (!body.has_more) break;
+        cursor = body.data.at(-1)!.id;
+      }
+      expect(seen).toHaveLength(5);
+      expect(new Set(seen).size).toBe(5); // no duplicate, no skip
+    });
+
+    it("an unknown/stale startingAfter cursor returns an empty page (not the head)", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const res = await app.request(
+        "/api/notifications?limit=10&startingAfter=00000000-0000-0000-0000-000000000000",
+        { headers: authHeaders(ctx) },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: NotificationDto[]; has_more: boolean };
+      expect(body.data).toHaveLength(0);
+      expect(body.has_more).toBe(false);
+    });
+
+    it("has_more is false on a final page that holds exactly `limit` rows", async () => {
+      // 4 rows, limit 2 → pages of [2, 2]; the second page is full yet last.
+      // Exercises the limit+1 fetch probe at its boundary (fetch 3, get ≤2).
+      for (let i = 0; i < 4; i++) {
+        await seedNotifiedRun({ agentName: `bound-${i}`, actor: { userId: ctx.user.id } });
+      }
+      const r1 = await app.request("/api/notifications?limit=2", { headers: authHeaders(ctx) });
+      const b1 = (await r1.json()) as { data: NotificationDto[]; has_more: boolean };
+      expect(b1.data).toHaveLength(2);
+      expect(b1.has_more).toBe(true);
+
+      const r2 = await app.request(
+        `/api/notifications?limit=2&startingAfter=${b1.data.at(-1)!.id}`,
+        {
+          headers: authHeaders(ctx),
+        },
+      );
+      const b2 = (await r2.json()) as { data: NotificationDto[]; has_more: boolean };
+      expect(b2.data).toHaveLength(2);
+      expect(b2.has_more).toBe(false);
+      // Cross-page ordering: page 2's first row is older-or-equal to page 1's last.
+      expect(new Date(b1.data.at(-1)!.created_at).getTime()).toBeGreaterThanOrEqual(
+        new Date(b2.data[0]!.created_at).getTime(),
+      );
     });
 
     it("an unread filter paginates independently of read rows", async () => {

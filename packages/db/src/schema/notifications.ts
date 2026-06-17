@@ -85,24 +85,20 @@ export const notifications = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // Feed read + keyset pagination: `org_id = ? AND application_id = ? AND
-    // recipient_type = ? AND recipient_id = ? ORDER BY created_at DESC, id
-    // DESC`. The recipient is now a single (type, id) tuple, so one composite
-    // btree serves the whole seek — no bitmap-OR. The trailing
-    // (created_at DESC, id DESC) is the keyset tiebreak, so deep pages stay a
-    // tight index range scan instead of an offset count + sort.
-    index("idx_notifications_feed").on(
-      table.orgId,
-      table.applicationId,
-      table.recipientType,
-      table.recipientId,
-      table.createdAt.desc(),
-      table.id.desc(),
-    ),
-    // Unread badge/count + unread feed. Partial on unread rows so it stays
-    // small and tight. The (org, app, recipient) prefix serves the unread
-    // count; the full key with the created_at/id tail serves the unread
-    // keyset feed.
+    // The bell only ever queries unread rows (count, unread feed, unread
+    // counts-by-agent), so a single PARTIAL index keyed
+    // `(org, app, recipient_type, recipient_id, created_at DESC, id DESC)
+    // WHERE read_at IS NULL` backs every hot read: the (org, app, recipient)
+    // prefix serves the unread count, the created_at/id tail serves the unread
+    // keyset feed. The recipient is one (type, id) tuple, so this is a single
+    // composite seek — no bitmap-OR.
+    //
+    // A non-partial twin would only serve the `unread=false` (full-history)
+    // list, which has no consumer today (the bell never reads read rows). That
+    // index was dropped to cut maintenance on the fan-out write path; re-add it
+    // (and pair it with a retention policy) when a paged full-history feed
+    // ships. Until then the rare `unread=false` call seq-scans + sorts — fine
+    // at a recipient's row counts.
     index("idx_notifications_unread")
       .on(
         table.orgId,

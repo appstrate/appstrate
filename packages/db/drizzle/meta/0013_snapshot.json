@@ -1,5 +1,5 @@
 {
-  "id": "db55ac94-45c7-4e1a-9b06-cdd2e9513bc1",
+  "id": "2c08f174-672b-4fa4-972c-0e7f2cf36035",
   "prevId": "695ee164-9a0b-4405-9fe6-508d69c1f8e3",
   "version": "7",
   "dialect": "postgresql",
@@ -4358,51 +4358,6 @@
         }
       },
       "indexes": {
-        "idx_notifications_feed": {
-          "name": "idx_notifications_feed",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "application_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "recipient_type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "recipient_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_notifications_unread": {
           "name": "idx_notifications_unread",
           "columns": [

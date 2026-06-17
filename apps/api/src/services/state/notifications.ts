@@ -95,6 +95,14 @@ export async function createRunNotifications(scope: AppScope, runId: string): Pr
     rows = [{ ...base, recipientType: "end_user", recipientId: run.endUserId }];
   } else {
     // Actor-less run → fan out to org admins/owners only.
+    //
+    // Bounded race: a member removed between this SELECT and the INSERT (or
+    // whose run finalizes after they were removed) gets a notification they can
+    // no longer see — org-context middleware blocks a non-member from reading
+    // it, so it is invisible, not leaked, and is reaped when the org is
+    // deleted. Re-validating membership at insert time would only narrow, not
+    // close, the window (removal can still land after the INSERT), so we accept
+    // the harmless orphan rather than pay for a row lock on every fan-out.
     const admins = await db
       .select({ userId: organizationMembers.userId })
       .from(organizationMembers)
@@ -255,8 +263,15 @@ export async function listNotifications(
   const extra: SQL[] = [recipientFilter(actor)];
   if (unread) extra.push(isNull(notifications.readAt));
   if (startingAfter) {
+    // Resolve the cursor's (created_at, id) coordinate with a scalar subquery
+    // scoped to the SAME tenant + recipient as the outer query. Scoping is
+    // deliberate: an unscoped lookup would (a) be a weak existence oracle for
+    // notification UUIDs and (b) let a stale/foreign cursor borrow another
+    // tenant's timestamp as the bound. Scoped, an unknown/foreign/stale cursor
+    // resolves to NULL → the row-value comparison is NULL → empty page (the
+    // caller restarts from the head), which is the correct stale-cursor result.
     extra.push(
-      sql`(${notifications.createdAt}, ${notifications.id}) < ((SELECT created_at FROM notifications WHERE id = ${startingAfter}), ${startingAfter})`,
+      sql`(${notifications.createdAt}, ${notifications.id}) < ((SELECT created_at FROM notifications WHERE id = ${startingAfter} AND org_id = ${scope.orgId} AND application_id = ${scope.applicationId} AND recipient_type = ${actor.type} AND recipient_id = ${actor.id}), ${startingAfter})`,
     );
   }
 
