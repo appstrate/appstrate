@@ -337,9 +337,9 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     });
   });
 
-  // ─── Deprecated alias: PUT /api/notifications/read/{runId} ──
+  // ─── PUT /api/notifications/read/{runId} (mark-by-run) ──
 
-  describe("PUT /api/notifications/read/{runId} (deprecated)", () => {
+  describe("PUT /api/notifications/read/{runId}", () => {
     it("marks the caller's notification for a run read", async () => {
       const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
 

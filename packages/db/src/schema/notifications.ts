@@ -83,10 +83,10 @@ export const notifications = pgTable(
     index("idx_notifications_run").on(table.runId),
     // Defense-in-depth against a double fan-out: at most one notification of
     // a given type per (run, recipient). The fan-out path is already
-    // exactly-once (finalizeRun CAS winner) and the backfill is historical-
-    // only, so these never fire in practice — but they make a duplicate
-    // structurally impossible if either invariant ever regresses. Two
-    // partial indexes because the recipient is split across two columns.
+    // exactly-once (finalizeRun CAS winner), so these never fire in practice
+    // — but they make a duplicate structurally impossible if that invariant
+    // ever regresses. Two partial indexes because the recipient is split
+    // across two columns.
     uniqueIndex("uq_notifications_run_user_type")
       .on(table.runId, table.userId, table.type)
       .where(sql`${table.userId} IS NOT NULL AND ${table.runId} IS NOT NULL`),

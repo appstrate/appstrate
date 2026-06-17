@@ -68,7 +68,13 @@ export async function createRunNotifications(scope: AppScope, runId: string): Pr
       status: runs.status,
     })
     .from(runs)
-    .where(and(eq(runs.id, runId), eq(runs.orgId, scope.orgId)))
+    .where(
+      scopedWhere(runs, {
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
+        extra: [eq(runs.id, runId)],
+      }),
+    )
     .limit(1);
   if (!run) return 0;
 
