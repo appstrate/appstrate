@@ -14,7 +14,7 @@ const logger = createLogger("info");
 import type { BeforeSignupContext, AfterSignupContext } from "@appstrate/core/module";
 import { db } from "./client.ts";
 import * as schema from "./schema.ts";
-import { profiles, orgInvitations, organizations, user } from "./schema.ts";
+import { profiles, orgInvitations, user } from "./schema.ts";
 import { getEnv } from "@appstrate/env";
 import {
   evaluateSignupPolicy,
@@ -372,10 +372,6 @@ function buildBasePlugins(
               try {
                 const normalizedEmail = email.toLowerCase().trim();
 
-                // Parse callbackURL from the magic link to determine context
-                const callbackURL = new URL(rawUrl).searchParams.get("callbackURL") ?? "";
-                const isInvitation = callbackURL.startsWith("/invite/");
-
                 // Rewrite the verify URL to route through the OIDC module's
                 // confirmation interstitial so that one-shot token consumption
                 // is gated behind an explicit click. Without this, email
@@ -409,65 +405,16 @@ function buildBasePlugins(
                 }
                 const url = rewritten.toString();
 
-                let subject: string;
-                let html: string;
-
-                if (isInvitation) {
-                  // Extract invitation token from callbackURL: /invite/{token}/accept
-                  const invitationToken = callbackURL.split("/")[2];
-                  const [invitation] = invitationToken
-                    ? await db
-                        .select({
-                          orgId: orgInvitations.orgId,
-                          role: orgInvitations.role,
-                          invitedBy: orgInvitations.invitedBy,
-                        })
-                        .from(orgInvitations)
-                        .where(eq(orgInvitations.token, invitationToken))
-                        .limit(1)
-                    : [];
-
-                  if (invitation) {
-                    const [orgRow, inviterRow] = await Promise.all([
-                      db
-                        .select({ name: organizations.name })
-                        .from(organizations)
-                        .where(eq(organizations.id, invitation.orgId))
-                        .limit(1)
-                        .then(([r]) => r),
-                      invitation.invitedBy
-                        ? db
-                            .select({ displayName: profiles.displayName, name: user.name })
-                            .from(user)
-                            .leftJoin(profiles, eq(profiles.id, user.id))
-                            .where(eq(user.id, invitation.invitedBy))
-                            .limit(1)
-                            .then(([r]) => r)
-                        : null,
-                    ]);
-
-                    ({ subject, html } = renderEmail("invitation", {
-                      email: normalizedEmail,
-                      inviteUrl: url,
-                      orgName: orgRow?.name ?? "Organisation",
-                      inviterName: inviterRow?.displayName || inviterRow?.name || "Un membre",
-                      role: invitation.role,
-                      locale: "fr",
-                    }));
-                  } else {
-                    ({ subject, html } = renderEmail("magic-link", {
-                      email: normalizedEmail,
-                      url,
-                      locale: "fr",
-                    }));
-                  }
-                } else {
-                  ({ subject, html } = renderEmail("magic-link", {
-                    email: normalizedEmail,
-                    url,
-                    locale: "fr",
-                  }));
-                }
+                // Magic-link is now a pure passwordless-login channel. The
+                // invitation flow no longer rides on magic-link: an invited
+                // user opens the `/invite/{token}` page and authenticates
+                // through the standard login/signup path, then accepts. So a
+                // single generic template covers every magic-link send.
+                const { subject, html } = renderEmail("magic-link", {
+                  email: normalizedEmail,
+                  url,
+                  locale: "fr",
+                });
 
                 const override = getSmtpOverride();
                 const transport = override?.transport ?? smtpTransport!;
@@ -788,14 +735,8 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
             const headers = ctx?.headers ?? ctx?.request?.headers ?? null;
             // Platform-level signup gate (self-hosting lockdown). Runs FIRST
             // so the cheapest, most specific decision wins before any module
-            // hook. Skipped entirely when neither restriction is configured
-            // (open mode = single env read, no policy eval, no DB query).
-            //
-            // The invitation lookup is always performed when at least one
-            // restriction is active, because a pending invitation overrides
-            // BOTH closed mode and the domain allowlist. The lookup is
-            // index-covered (`idx_org_invitations_email`) — negligible cost
-            // for the only path where a restriction applies.
+            // hook. A pending invitation overrides BOTH closed mode and the
+            // domain allowlist (see `invited` below).
             const envForGate = getEnv();
             // Bootstrap-token redemption (#344 Layer 2b) — explicitly
             // bypasses the `AUTH_DISABLE_SIGNUP` gate. The redeem route
@@ -814,12 +755,21 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
             // both gates (Infisical-style breakage avoidance), matching
             // the non-bypass evaluator's logic.
             const bootstrapTokenBypass = isBootstrapTokenRedemptionActive();
+            // A pending invitation for this exact email overrides the signup
+            // gate (Infisical-style breakage avoidance) so an invited user can
+            // complete signup even when signup is locked down. It is matched on
+            // EMAIL ALONE — the invitation token is not available at signup —
+            // so it is NOT proof of inbox ownership (it only means an org admin
+            // typed this address) and must NEVER auto-verify the email. See the
+            // `emailVerified` decision below. The lookup is index-covered
+            // (`idx_org_invitations_email`); signups are infrequent, so the
+            // unconditional query is negligible.
+            const invited = await hasPendingInvitationByEmail(user.email);
             const gateActive =
               envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0;
             if (gateActive) {
-              const hasInvite = await hasPendingInvitationByEmail(user.email);
               if (bootstrapTokenBypass) {
-                if (envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0 && !hasInvite) {
+                if (envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0 && !invited) {
                   if (!isAllowedSignupDomain(user.email)) {
                     logger.info("auth: bootstrap-token bypass blocked by domain allowlist", {
                       email: user.email,
@@ -831,7 +781,7 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
                   }
                 }
               } else {
-                const decision = evaluateSignupPolicy(user.email, hasInvite);
+                const decision = evaluateSignupPolicy(user.email, invited);
                 if (!decision.allowed) {
                   logger.info("auth: platform signup gate blocked signup", {
                     email: user.email,
@@ -862,6 +812,14 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
               : _realmResolver
                 ? await _realmResolver(headers)
                 : "platform";
+            // Auto-verify ONLY when a trusted social provider produced the row
+            // (the BA OAuth callback path). A pending invitation is deliberately
+            // NOT a verification signal: it is matched on email alone, so
+            // granting `emailVerified` here would let anyone mint a verified
+            // account for any unclaimed address (create org → self-invite that
+            // email → sign up) AND would defeat the OIDC end-user adopter's
+            // `emailVerified === true` takeover guard. Invited users verify
+            // their inbox through the normal flow, like everyone else.
             const autoVerify = shouldAutoVerifyEmailOnCreate(ctx);
             const data: Record<string, unknown> = { realm };
             if (autoVerify) data.emailVerified = true;

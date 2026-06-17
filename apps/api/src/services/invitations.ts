@@ -6,10 +6,10 @@ import { eq, and, lt, desc } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { getAppConfig } from "../lib/app-config.ts";
 import { sendEmail } from "./email.ts";
-import { getAuth } from "@appstrate/db/auth";
-import { logger } from "../lib/logger.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
+
+/** Accepts either the base client or an open transaction handle. */
+type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** Roles assignable via invitation (excludes owner — transferred, not invited). */
 export const ASSIGNABLE_ROLES = ["viewer", "member", "admin"] as const;
@@ -34,13 +34,11 @@ export async function createInvitation({
   orgId,
   role,
   invitedBy,
-  skipEmail,
 }: {
   email: string;
   orgId: string;
   role: AssignableRole;
   invitedBy: string;
-  skipEmail?: boolean;
 }) {
   const normalizedEmail = email.toLowerCase().trim();
 
@@ -72,12 +70,12 @@ export async function createInvitation({
 
   if (!invitation) throw new Error("Failed to create invitation");
 
-  if (!skipEmail && getAppConfig().features.smtp) {
+  if (getAppConfig().features.smtp) {
     const [orgName, inviterName] = await Promise.all([
       getOrgName(orgId),
       getInviterName(invitedBy),
     ]);
-    const inviteUrl = `${getEnv().APP_URL}/invite/${token}/accept`;
+    const inviteUrl = `${getEnv().APP_URL}/invite/${token}`;
     void sendEmail("invitation", {
       to: normalizedEmail,
       email: normalizedEmail,
@@ -110,11 +108,24 @@ export async function getOrgInvitations(orgId: string) {
     .orderBy(desc(orgInvitations.createdAt));
 }
 
-export async function markInvitationAccepted(invitationId: string, userId: string) {
-  await db
+/**
+ * Atomically claim a single-use invitation: flips `pending → accepted` only if
+ * it is still pending, in one conditional UPDATE. Returns `true` if THIS call
+ * won the claim, `false` if the row was already consumed (lost a concurrent
+ * race). The `WHERE status = 'pending'` guard is what makes two simultaneous
+ * accepts safe — the row lock lets exactly one UPDATE match.
+ */
+export async function markInvitationAccepted(
+  invitationId: string,
+  userId: string,
+  tx: DbOrTx = db,
+): Promise<boolean> {
+  const claimed = await tx
     .update(orgInvitations)
     .set({ status: "accepted", acceptedBy: userId, acceptedAt: new Date() })
-    .where(eq(orgInvitations.id, invitationId));
+    .where(and(eq(orgInvitations.id, invitationId), eq(orgInvitations.status, "pending")))
+    .returning({ id: orgInvitations.id });
+  return claimed.length > 0;
 }
 
 export async function cancelInvitation(invitationId: string, orgId: string) {
@@ -162,33 +173,6 @@ export async function getInviterName(userId: string): Promise<string> {
     .where(eq(user.id, userId))
     .limit(1);
   return row?.displayName || row?.name || "Un membre";
-}
-
-/**
- * Trigger Better Auth magic link for an existing user invitation.
- * The callbackURL contains the invitation token — the sendMagicLink callback
- * in auth.ts detects this and sends the invitation email instead of the generic one.
- */
-export async function sendMagicLinkInvitation(invitation: {
-  id: string;
-  token: string;
-  email: string;
-}) {
-  try {
-    await getAuth().api.signInMagicLink({
-      body: {
-        email: invitation.email,
-        callbackURL: `/invite/${invitation.token}/accept`,
-      },
-      headers: new Headers(),
-    });
-  } catch (err) {
-    logger.error("Failed to send magic link invitation", {
-      error: getErrorMessage(err),
-      email: invitation.email,
-      invitationId: invitation.id,
-    });
-  }
 }
 
 export async function expireOldInvitations() {

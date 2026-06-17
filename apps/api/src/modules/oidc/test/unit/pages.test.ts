@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { renderLoginPage } from "../../pages/login.ts";
+import { renderRegisterPage } from "../../pages/register.ts";
 import { renderConsentPage } from "../../pages/consent.ts";
 import { renderMagicLinkPage } from "../../pages/magic-link.ts";
 import { renderForgotPasswordPage } from "../../pages/forgot-password.ts";
@@ -43,6 +44,50 @@ describe("renderLoginPage", () => {
     }).value;
     expect(out).not.toContain(`<script>x()</script>`);
     expect(out).toContain("&quot;&gt;&lt;script&gt;x()&lt;/script&gt;");
+  });
+
+  it("locks the email field (readonly) and moves autofocus to password when lockEmail is set", () => {
+    const out = renderLoginPage({
+      ...DEFAULT_PROPS,
+      queryString: "",
+      email: "invited@acme.com",
+      lockEmail: true,
+    }).value;
+    expect(out).toContain('value="invited@acme.com"');
+    expect(out).toContain("readonly");
+    // The locked field gives up autofocus; the only autofocus is on password.
+    expect(out.match(/autofocus/g)).toHaveLength(1);
+  });
+
+  it("keeps the email field editable (no readonly) by default", () => {
+    const out = renderLoginPage({
+      ...DEFAULT_PROPS,
+      queryString: "",
+      email: "x@y.com",
+    }).value;
+    expect(out).not.toContain("readonly");
+  });
+});
+
+describe("renderRegisterPage", () => {
+  it("locks the email field (readonly) when lockEmail is set", () => {
+    const out = renderRegisterPage({
+      ...DEFAULT_PROPS,
+      queryString: "",
+      email: "invited@acme.com",
+      lockEmail: true,
+    }).value;
+    expect(out).toContain('value="invited@acme.com"');
+    expect(out).toContain("readonly");
+  });
+
+  it("keeps the email field editable (no readonly) by default", () => {
+    const out = renderRegisterPage({
+      ...DEFAULT_PROPS,
+      queryString: "",
+      email: "x@y.com",
+    }).value;
+    expect(out).not.toContain("readonly");
   });
 });
 

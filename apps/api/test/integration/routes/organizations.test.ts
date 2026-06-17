@@ -14,7 +14,7 @@ import {
 } from "../../helpers/auth.ts";
 import { createInvitation } from "../../../src/services/invitations.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
-import { assertDbHas } from "../../helpers/assertions.ts";
+import { assertDbHas, assertDbMissing } from "../../helpers/assertions.ts";
 import {
   organizations,
   orgInvitations,
@@ -266,7 +266,7 @@ describe("Organizations API", () => {
   });
 
   describe("POST /api/orgs/:orgId/members", () => {
-    it("adds existing user directly when SMTP is disabled", async () => {
+    it("creates an invitation even for an existing user (no silent direct-add)", async () => {
       const ctx = await createTestContext({ orgSlug: "memberorg" });
       const member = await createTestUser({ email: "member@test.com" });
 
@@ -278,17 +278,17 @@ describe("Organizations API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      // Bare created member — same shape as the members list in GET /api/orgs/:orgId
-      expect(body.userId).toBe(member.id);
-      expect(body.role).toBe("member");
+      // Always a bare invitation — never a direct member add (the invitee
+      // must accept first, so consent is explicit).
+      expect(body.id).toBeTruthy();
+      expect(body.token).toBeTruthy();
       expect(body.email).toBe("member@test.com");
-      expect(body.joinedAt).toBeTruthy();
-      // No operation scraps
-      expect(body).not.toHaveProperty("added");
-      expect(body).not.toHaveProperty("invited");
+      expect(body.role).toBe("member");
+      expect(body).not.toHaveProperty("userId");
 
-      // Verify membership in DB
-      await assertDbHas(organizationMembers, eq(organizationMembers.userId, member.id));
+      // The invitation exists; no membership has been created yet.
+      await assertDbHas(orgInvitations, eq(orgInvitations.email, "member@test.com"));
+      await assertDbMissing(organizationMembers, eq(organizationMembers.userId, member.id));
     });
 
     it("creates invitation for non-existing user", async () => {
@@ -328,7 +328,7 @@ describe("Organizations API", () => {
       expect(res.status).toBe(400);
     });
 
-    it("handles adding already existing member gracefully", async () => {
+    it("creates an invitation even when the email already belongs to a member", async () => {
       const ctx = await createTestContext({ orgSlug: "memberorg" });
       const member = await createTestUser({ email: "already@test.com" });
       await addOrgMember(ctx.orgId, member.id, "member");
@@ -339,8 +339,10 @@ describe("Organizations API", () => {
         body: JSON.stringify({ email: "already@test.com" }),
       });
 
-      // addMember is idempotent — duplicate silently ignored, returns 201
+      // Re-inviting an existing member just creates a fresh pending invitation.
       expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.token).toBeTruthy();
     });
   });
 
@@ -388,7 +390,6 @@ describe("Organizations API", () => {
         orgId: ctx.orgId,
         role: "member",
         invitedBy: ctx.user.id,
-        skipEmail: true,
       });
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${invitation.id}`, {
@@ -454,7 +455,6 @@ describe("Organizations API", () => {
         orgId: ctx.orgId,
         role: "member",
         invitedBy: ctx.user.id,
-        skipEmail: true,
       });
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${invitation.id}`, {

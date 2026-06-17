@@ -62,6 +62,7 @@ const OIDC_REDIRECT_KEY = "appstrate_oidc_redirect";
 async function initPkceFlow(
   config: OidcConfig,
   redirectTo: string | undefined,
+  loginHint?: string,
 ): Promise<URLSearchParams> {
   const state = generateState();
   const codeVerifier = generateCodeVerifier();
@@ -76,7 +77,7 @@ async function initPkceFlow(
   // `validAudiences` (`${APP_URL}/api/auth`). The SPA never consumes the
   // minted tokens — the BA session cookie is the real auth — but the
   // grant still has to succeed, so `resource` is non-negotiable.
-  return new URLSearchParams({
+  const params = new URLSearchParams({
     response_type: "code",
     client_id: config.clientId,
     redirect_uri: config.callbackUrl,
@@ -89,6 +90,16 @@ async function initPkceFlow(
     code_challenge_method: "S256",
     resource: config.issuer,
   });
+
+  // OIDC `login_hint` (standard param) — the oauth-provider carries it
+  // through (signed) to the server-rendered login/register pages, which
+  // pre-fill and lock the email field. Used by the invitation flow to pin
+  // the invited address. Purely UX: the accept endpoint re-checks that the
+  // session email matches the invitation server-side, so a tampered field
+  // cannot escape it.
+  if (loginHint) params.set("login_hint", loginHint);
+
+  return params;
 }
 
 /**
@@ -98,12 +109,12 @@ async function initPkceFlow(
  * handles authentication. On success the browser lands on `/auth/callback`
  * with an authorization code.
  */
-export async function startOidcLogin(redirectTo?: string): Promise<void> {
+export async function startOidcLogin(redirectTo?: string, loginHint?: string): Promise<void> {
   const config = getOidcConfig();
   if (!config) {
     throw new Error("OIDC not configured — window.__APP_CONFIG__.oidc is missing");
   }
-  const params = await initPkceFlow(config, redirectTo);
+  const params = await initPkceFlow(config, redirectTo, loginHint);
   window.location.assign(`/api/auth/oauth2/authorize?${params.toString()}`);
 }
 
@@ -114,12 +125,12 @@ export async function startOidcLogin(redirectTo?: string): Promise<void> {
  * reusing the same `state`/`code_challenge`/`resource` that were generated
  * here, so the callback handler cannot tell login and signup apart.
  */
-export async function startOidcSignup(redirectTo?: string): Promise<void> {
+export async function startOidcSignup(redirectTo?: string, loginHint?: string): Promise<void> {
   const config = getOidcConfig();
   if (!config) {
     throw new Error("OIDC not configured — window.__APP_CONFIG__.oidc is missing");
   }
-  const params = await initPkceFlow(config, redirectTo);
+  const params = await initPkceFlow(config, redirectTo, loginHint);
   window.location.assign(`/api/oauth/register?${params.toString()}`);
 }
 

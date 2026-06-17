@@ -112,7 +112,9 @@ function randomSessionToken(): string {
  * production cookie — signature check + session row lookup).
  *
  * Rows seeded (mirrors what a real sign-up produces in SMTP-off mode):
- *   - `user`     — emailVerified=false, realm="platform"
+ *   - `user`     — emailVerified=false (pass `emailVerified: true` to mirror a
+ *                  social-login outcome, where BA's OAuth callback marks the
+ *                  brand-new row verified), realm="platform"
  *   - `profiles` — inserted by the BA `user.create.after` hook in prod
  *   - `account`  — providerId="credential" with the AUTH_FAST_TEST_HASH
  *                  SHA-256 password hash, so HTTP sign-in with the same
@@ -123,11 +125,17 @@ function randomSessionToken(): string {
  * `/api/auth/sign-up/email` directly.
  */
 export async function createTestUser(
-  overrides: Partial<{ email: string; name: string; password: string }> = {},
+  overrides: Partial<{
+    email: string;
+    name: string;
+    password: string;
+    emailVerified: boolean;
+  }> = {},
 ): Promise<TestUser & { cookie: string }> {
   const email = (overrides.email ?? `test-${nextId()}@test.com`).toLowerCase();
   const name = overrides.name ?? `Test User ${nextId()}`;
   const password = overrides.password ?? "TestPassword123!";
+  const emailVerified = overrides.emailVerified ?? false;
 
   const userId = crypto.randomUUID();
   const token = randomSessionToken();
@@ -136,7 +144,7 @@ export async function createTestUser(
   // with this password verifies against the account row.
   const passwordHash = new Bun.CryptoHasher("sha256").update(password).digest("hex");
 
-  await db.insert(userTable).values({ id: userId, name, email, realm: "platform" });
+  await db.insert(userTable).values({ id: userId, name, email, emailVerified, realm: "platform" });
   await Promise.all([
     db.insert(profiles).values({ id: userId, displayName: name || email, language: "fr" }),
     db.insert(accountTable).values({

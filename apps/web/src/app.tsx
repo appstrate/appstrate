@@ -388,7 +388,6 @@ export function App() {
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/magic-link" element={<MagicLinkPage />} />
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
-          <Route path="/invite/:token/accept" element={<InviteAcceptPage />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </ErrorBoundary>
@@ -443,7 +442,6 @@ export function App() {
             />
           )}
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
-          <Route path="/invite/:token/accept" element={<InviteAcceptPage />} />
           <Route
             path="/welcome"
             element={
