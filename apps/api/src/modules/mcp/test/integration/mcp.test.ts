@@ -122,7 +122,7 @@ describe("mcp discovery + auth gate", () => {
     const prmRes = await app.request(`/.well-known/oauth-protected-resource/api/mcp/o/${orgId}`);
     expect(prmRes.status).toBe(200);
     const prm = (await prmRes.json()) as { authorization_servers: string[] };
-    const advertisedAs = prm.authorization_servers[0];
+    const advertisedAs = prm.authorization_servers[0]!;
     expect(typeof advertisedAs).toBe("string");
 
     // RFC 8414 §3.1 path-insertion: `https://host/path` → `https://host/.well-known/oauth-authorization-server/path`.
