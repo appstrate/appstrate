@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { pgTable, text, uuid, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  uuid,
+  timestamp,
+  jsonb,
+  index,
+  uniqueIndex,
+  check,
+} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organizations } from "./organizations.ts";
 import { applications } from "./applications.ts";
@@ -55,10 +64,14 @@ export const notifications = pgTable(
       .references(() => applications.id, {
         onDelete: "cascade",
       }),
-    // Recipient — polymorphic. `recipientType` is the actor kind
-    // ("user" | "end_user" today), `recipientId` the actor id. No FK: the
-    // id spans two tables; cleanup is explicit at the deletion sites.
-    recipientType: text("recipient_type").notNull(),
+    // Recipient — polymorphic. `recipientType` is the actor kind,
+    // `recipientId` the actor id. Mirrors the `package_persistence`
+    // convention: `text` + a TS union (the `Actor` kinds) for compile-time
+    // safety + a CHECK for DB integrity — NOT a pgEnum, which the codebase
+    // reserves for closed-set semantics (roles, statuses) and which would
+    // need an ALTER TYPE to add a kind. No FK: the id spans two tables;
+    // cleanup is explicit at the deletion sites.
+    recipientType: text("recipient_type").notNull().$type<"user" | "end_user">(),
     recipientId: text("recipient_id").notNull(),
     // Notification kind. "run_completed" today; extensible.
     type: text("type").notNull(),
@@ -111,5 +124,10 @@ export const notifications = pgTable(
     uniqueIndex("uq_notifications_run_recipient_type")
       .on(table.runId, table.recipientType, table.recipientId, table.type)
       .where(sql`${table.runId} IS NOT NULL`),
+    // DB-level guard mirroring the `$type` union above and the
+    // `pkp_actor_type_valid` CHECK on `package_persistence`. A raw insert with
+    // an unknown recipient kind is rejected (the TS union only guards the ORM
+    // path).
+    check("notifications_recipient_type_valid", sql`recipient_type IN ('user', 'end_user')`),
   ],
 );

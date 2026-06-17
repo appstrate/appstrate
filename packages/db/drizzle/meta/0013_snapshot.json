@@ -1,5 +1,5 @@
 {
-  "id": "1465099e-5853-4fec-bc83-4c1781fcba4b",
+  "id": "db55ac94-45c7-4e1a-9b06-cdd2e9513bc1",
   "prevId": "695ee164-9a0b-4405-9fe6-508d69c1f8e3",
   "version": "7",
   "dialect": "postgresql",
@@ -4531,7 +4531,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "notifications_recipient_type_valid": {
+          "name": "notifications_recipient_type_valid",
+          "value": "recipient_type IN ('user', 'end_user')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.integration_connections": {

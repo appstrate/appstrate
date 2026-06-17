@@ -485,6 +485,22 @@ describe("Notifications API (per-recipient, issue #667)", () => {
         "recipient_type",
       );
     });
+
+    it("rejects an unknown recipient_type via the CHECK (not just the TS union)", async () => {
+      let err: unknown;
+      try {
+        await db.execute(
+          sql`INSERT INTO notifications (org_id, application_id, recipient_type, recipient_id, type)
+              VALUES (${ctx.orgId}, ${ctx.defaultAppId}, 'robot', ${ctx.user.id}, 'run_completed')`,
+        );
+      } catch (e) {
+        err = e;
+      }
+      expect(err, "expected the insert to be rejected by the CHECK").toBeDefined();
+      const cause = (err as { cause?: { message?: string } })?.cause;
+      const detail = String(cause?.message ?? cause ?? (err as Error)?.message ?? err);
+      expect(detail).toContain("notifications_recipient_type_valid");
+    });
   });
 
   // ─── recipient cleanup on deletion (replaces FK cascade) ────
@@ -494,7 +510,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
   // (deleteEndUser, removeMember) clean them up explicitly — covered here.
 
   describe("recipient cleanup on deletion", () => {
-    const countForRecipient = async (type: string, id: string): Promise<number> => {
+    const countForRecipient = async (type: "user" | "end_user", id: string): Promise<number> => {
       const rows = await db
         .select({ id: notifications.id })
         .from(notifications)

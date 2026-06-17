@@ -8,7 +8,8 @@ CREATE TABLE "notifications" (
 	"run_id" text,
 	"payload" jsonb,
 	"read_at" timestamp with time zone,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "notifications_recipient_type_valid" CHECK (recipient_type IN ('user', 'end_user'))
 );
 --> statement-breakpoint
 DROP INDEX "idx_runs_notification";--> statement-breakpoint

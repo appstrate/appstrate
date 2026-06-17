@@ -51,7 +51,10 @@ export function actorFilter(actor: Actor, cols: { userId: Column; endUserId: Col
  * `notifications` table, which stores the recipient as a single (type, id)
  * tuple rather than the nullable `{userId, endUserId}` pair.
  */
-export function actorRecipient(actor: Actor): { recipientType: string; recipientId: string } {
+export function actorRecipient(actor: Actor): {
+  recipientType: Actor["type"];
+  recipientId: string;
+} {
   return { recipientType: actor.type, recipientId: actor.id };
 }
 

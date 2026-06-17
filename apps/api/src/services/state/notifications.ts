@@ -88,7 +88,7 @@ export async function createRunNotifications(scope: AppScope, runId: string): Pr
     payload,
   };
 
-  let rows: Array<typeof base & { recipientType: string; recipientId: string }>;
+  let rows: Array<typeof base & { recipientType: "user" | "end_user"; recipientId: string }>;
   if (run.userId) {
     rows = [{ ...base, recipientType: "user", recipientId: run.userId }];
   } else if (run.endUserId) {
