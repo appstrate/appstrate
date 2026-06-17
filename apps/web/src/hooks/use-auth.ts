@@ -105,6 +105,22 @@ export class AuthRefreshError extends Error {
 }
 
 /**
+ * Thrown by `changeEmail()` so the caller can distinguish a 409 address
+ * collision (a dedicated "email already in use" message) from any other
+ * failure without reaching into the raw Better Auth result shape — the
+ * seam is the only place that touches `authClient`.
+ */
+export class EmailChangeError extends Error {
+  constructor(
+    public conflict: boolean,
+    message: string,
+  ) {
+    super(message);
+    this.name = "EmailChangeError";
+  }
+}
+
+/**
  * Resync auth state from the server cookie and assert that a user was
  * established. Use after any flow that should have left a valid session
  * behind (OIDC callback, invite accept, email change). On the no-user
@@ -258,6 +274,52 @@ export function useAuth() {
     if (result.error) throw new Error(result.error.message);
   }, []);
 
+  // ─── Password recovery / passwordless (OSS-only at runtime) ─────────────
+  //
+  // These recovery flows have no OIDC branch on purpose: when the OIDC module
+  // is configured, `HostedAuthGate` / `useHostedAuthRedirect` redirect the
+  // forgot-password / reset-password / magic-link routes to the hosted IdP
+  // *before* their forms ever render, so these methods are only reachable in
+  // OSS mode. They live on the seam (not inline in the pages) solely so the
+  // ESLint `auth-client` ban can guarantee no page bypasses that redirect.
+
+  const requestPasswordReset = useCallback(async (email: string) => {
+    const result = await authClient.requestPasswordReset({
+      email,
+      redirectTo: "/reset-password",
+    });
+    if (result.error) throw new Error(result.error.message);
+  }, []);
+
+  const resetPassword = useCallback(async (token: string, newPassword: string) => {
+    const result = await authClient.resetPassword({ newPassword, token });
+    if (result.error) throw new Error(result.error.message);
+  }, []);
+
+  const startMagicLink = useCallback(async (email: string) => {
+    const result = await authClient.signIn.magicLink({ email, callbackURL: "/" });
+    if (result.error) throw new Error(result.error.message);
+  }, []);
+
+  // ─── Authenticated account management (no OIDC entry redirect) ───────────
+  //
+  // changeEmail / listLinkedAccounts operate on the *existing* session from
+  // inside the dashboard — they are not unauthenticated entry points, so they
+  // run natively in both modes. Routed through the seam only for the ban.
+
+  const changeEmail = useCallback(async (newEmail: string) => {
+    const result = await authClient.changeEmail({ newEmail });
+    if (result.error) {
+      throw new EmailChangeError(result.error.status === 409, result.error.message ?? "");
+    }
+  }, []);
+
+  const listLinkedAccounts = useCallback(async () => {
+    const result = await authClient.listAccounts();
+    if (result.error) throw new Error(result.error.message);
+    return result.data ?? [];
+  }, []);
+
   return {
     user: state.user,
     profile: state.profile,
@@ -273,5 +335,10 @@ export function useAuth() {
     linkGithub,
     unlinkAccount,
     resendVerificationEmail,
+    requestPasswordReset,
+    resetPassword,
+    startMagicLink,
+    changeEmail,
+    listLinkedAccounts,
   };
 }
