@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Register page — redirects to the OIDC signup flow when configured, falls
- * back to the built-in RegisterForm when the OIDC module is not loaded.
+ * Register page — the built-in email/password form (OSS mode).
+ *
+ * In OIDC mode this component never renders: `HostedAuthGate` (wired in
+ * `app.tsx`) redirects to the hosted register page before it mounts.
  *
  * In closed mode (issue #228), if `AUTH_BOOTSTRAP_OWNER_EMAIL` is set
  * server-side, the email field is pre-filled and locked so the bootstrap
@@ -10,34 +12,15 @@
  * server-side signup gate is the real authority — this is just UX.
  */
 
-import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { AuthLayout } from "../components/auth-layout";
 import { RegisterForm } from "../components/register-form";
-import { Spinner } from "../components/spinner";
 import { useAppConfig } from "../hooks/use-app-config";
 import { deriveDisplayNameFromEmail } from "../lib/derive-display-name";
 
 export function RegisterPage() {
   const { t } = useTranslation(["settings"]);
   const { bootstrapOwnerEmail } = useAppConfig();
-  const oidcConfig = (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
-
-  useEffect(() => {
-    if (oidcConfig) {
-      import("../modules/oidc/lib/oidc").then(({ startOidcSignup }) => {
-        startOidcSignup();
-      });
-    }
-  }, [oidcConfig]);
-
-  if (oidcConfig) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Spinner />
-      </div>
-    );
-  }
 
   return (
     <AuthLayout>

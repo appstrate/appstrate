@@ -12,23 +12,18 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { useAuth } from "../../hooks/use-auth";
 import { useAppConfig } from "../../hooks/use-app-config";
-import { authClient } from "../../lib/auth-client";
 import { GoogleIcon, GitHubIcon } from "../../components/icons";
 
 function LinkedAccountsSection() {
   const { t } = useTranslation(["settings", "common"]);
   const { features } = useAppConfig();
-  const { linkGoogle, linkGithub, unlinkAccount } = useAuth();
+  const { linkGoogle, linkGithub, unlinkAccount, listLinkedAccounts } = useAuth();
   const [unlinking, setUnlinking] = useState<string | false>(false);
   const [linking, setLinking] = useState<string | false>(false);
 
   const { data: accounts, refetch } = useQuery({
     queryKey: ["linked-accounts"],
-    queryFn: async () => {
-      const result = await authClient.listAccounts();
-      if (result.error) throw new Error(result.error.message);
-      return result.data ?? [];
-    },
+    queryFn: () => listLinkedAccounts(),
   });
 
   if (!features.googleAuth && !features.githubAuth) return null;

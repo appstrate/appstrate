@@ -9,10 +9,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthLayout } from "../components/auth-layout";
 import { AuthSuccessState } from "../components/auth-success-state";
-import { authClient } from "../lib/auth-client";
+import { useAuth } from "../hooks/use-auth";
 
 export function MagicLinkPage() {
   const { t } = useTranslation(["settings", "common"]);
+  const { startMagicLink } = useAuth();
   const location = useLocation();
   const prefillEmail = (location.state as { email?: string })?.email ?? "";
 
@@ -26,7 +27,7 @@ export function MagicLinkPage() {
     setState("submitting");
     setError(null);
     try {
-      await authClient.signIn.magicLink({ email: email.trim(), callbackURL: "/" });
+      await startMagicLink(email.trim());
       setState("sent");
     } catch {
       setError(t("magicLink.error"));
