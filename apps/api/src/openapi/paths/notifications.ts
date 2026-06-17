@@ -1,6 +1,101 @@
 // SPDX-License-Identifier: Apache-2.0
 
+const notificationObject = {
+  type: "object",
+  required: ["id", "type", "run_id", "payload", "read_at", "created_at"],
+  properties: {
+    id: { type: "string", format: "uuid", description: "Notification id" },
+    type: { type: "string", description: "Notification kind, e.g. run_completed" },
+    run_id: {
+      type: ["string", "null"],
+      description: "Originating run id, when the notification references one",
+    },
+    payload: {
+      type: ["object", "null"],
+      additionalProperties: true,
+      description: "Render-without-join data (agent_id, status)",
+    },
+    read_at: {
+      type: ["string", "null"],
+      format: "date-time",
+      description: "When the recipient marked it read; null if unread",
+    },
+    created_at: { type: "string", format: "date-time" },
+  },
+} as const;
+
 export const notificationsPaths = {
+  "/api/notifications": {
+    get: {
+      operationId: "listNotifications",
+      tags: ["Notifications"],
+      summary: "List notifications",
+      description:
+        "Paginated list of the current recipient's notifications, newest first. `?unread=true` returns unread only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "unread",
+          in: "query",
+          required: false,
+          schema: { type: "boolean" },
+          description: "When true, only unread notifications are returned",
+        },
+        {
+          name: "limit",
+          in: "query",
+          required: false,
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+        },
+        {
+          name: "offset",
+          in: "query",
+          required: false,
+          schema: { type: "integer", minimum: 0, default: 0 },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Notification list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            Link: { $ref: "#/components/headers/Link" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["data", "total"],
+                properties: {
+                  data: { type: "array", items: notificationObject },
+                  total: { type: "integer", description: "Total matching notifications" },
+                },
+              },
+              example: {
+                data: [
+                  {
+                    id: "550e8400-e29b-41d4-a716-446655440000",
+                    type: "run_completed",
+                    run_id: "exec_cm4jkl012",
+                    payload: { agent_id: "@acme/email-sorter", status: "success" },
+                    read_at: null,
+                    created_at: "2026-01-15T10:31:12Z",
+                  },
+                ],
+                total: 1,
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/notifications/unread-count": {
     get: {
       operationId: "getUnreadNotificationCount",
@@ -81,12 +176,47 @@ export const notificationsPaths = {
       },
     },
   },
-  "/api/notifications/read/{runId}": {
+  "/api/notifications/{id}/read": {
     put: {
       operationId: "markNotificationRead",
       tags: ["Notifications"],
       summary: "Mark a notification as read",
-      description: "Marks the notification for a specific run as read.",
+      description:
+        "Marks a single notification read for the current recipient. Idempotent (204 even if already read); returns 404 when the notification does not belong to the caller.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          description: "Notification id",
+        },
+      ],
+      responses: {
+        "204": {
+          description: "Notification marked as read (idempotent — 204 even if it was already read)",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/notifications/read/{runId}": {
+    put: {
+      operationId: "markNotificationReadByRun",
+      tags: ["Notifications"],
+      summary: "Mark a run's notification as read (deprecated)",
+      deprecated: true,
+      description:
+        "DEPRECATED (issue #667): mark the caller's notification for a run read, keyed by run id. Superseded by `PUT /api/notifications/{id}/read`. Idempotent (always 204). Removed in a follow-up release.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },

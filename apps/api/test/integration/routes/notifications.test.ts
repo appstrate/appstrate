@@ -3,13 +3,28 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  addOrgMember,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedEndUser } from "../../helpers/seed.ts";
-import { addOrgMember, createTestUser } from "../../helpers/auth.ts";
+import { createRunNotifications } from "../../../src/services/state/notifications.ts";
 
 const app = getTestApp();
 
-describe("Notifications API", () => {
+interface NotificationDto {
+  id: string;
+  type: string;
+  run_id: string | null;
+  payload: { agent_id?: string; status?: string } | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+describe("Notifications API (per-recipient, issue #667)", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -17,297 +32,300 @@ describe("Notifications API", () => {
     ctx = await createTestContext({ orgSlug: "notiforg" });
   });
 
-  /**
-   * Seed an agent and N runs with notifiedAt set (so they count as unread).
-   * Returns the agent and the seeded run records.
-   */
-  async function seedNotifiableRuns(count: number, agentName = "notif-agent") {
-    const agent = await seedAgent({
-      id: `@notiforg/${agentName}`,
-      orgId: ctx.orgId,
-      createdBy: ctx.user.id,
-    });
+  const scope = () => ({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
 
-    const runRecords = [];
-    for (let i = 0; i < count; i++) {
-      const run = await seedRun({
-        packageId: agent.id,
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
-        status: "success",
-        notifiedAt: new Date(),
-      });
-      runRecords.push(run);
-    }
-
-    return { agent, runs: runRecords };
+  /** Headers for an arbitrary user acting within ctx's org/app. */
+  function headersFor(user: { cookie: string }): Record<string, string> {
+    return {
+      Cookie: user.cookie,
+      "X-Org-Id": ctx.orgId,
+      "X-Application-Id": ctx.defaultAppId,
+    };
   }
 
-  // ─── GET /api/notifications/unread-count ───────────────────
+  /**
+   * Seed an agent + a run, then run the real fan-out. Returns the run record.
+   * `actor` controls the recipient model: own user, an end-user, or none
+   * (schedule / actor-less → fan out to all org members).
+   */
+  async function seedNotifiedRun(opts: {
+    agentName?: string;
+    actor: { userId: string } | { endUserId: string } | "schedule";
+    status?: "success" | "failed";
+  }) {
+    const agentName = opts.agentName ?? "notif-agent";
+    const id = `@notiforg/${agentName}`;
+    await seedAgent({ id, orgId: ctx.orgId, createdBy: ctx.user.id }).catch(() => {});
+    const run = await seedRun({
+      packageId: id,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: opts.status ?? "success",
+      notifiedAt: new Date(),
+      ...(opts.actor === "schedule" ? {} : opts.actor),
+    });
+    await createRunNotifications(scope(), run.id);
+    return run;
+  }
 
-  describe("GET /api/notifications/unread-count", () => {
-    it("returns 0 when no runs exist", async () => {
-      const res = await app.request("/api/notifications/unread-count", {
-        headers: authHeaders(ctx),
-      });
+  async function unreadCount(headers: Record<string, string>): Promise<number> {
+    const res = await app.request("/api/notifications/unread-count", { headers });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { count: number }).count;
+  }
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { count: number };
-      expect(body.count).toBe(0);
+  async function listNotifications(headers: Record<string, string>): Promise<NotificationDto[]> {
+    const res = await app.request("/api/notifications?unread=true", { headers });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { data: NotificationDto[] }).data;
+  }
+
+  // ─── Fan-out ───────────────────────────────────────────────
+
+  describe("fan-out on finalize", () => {
+    it("creates exactly one notification for a dashboard-user run", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      expect(await unreadCount(authHeaders(ctx))).toBe(1);
     });
 
-    it("returns count after seeding notifiable runs", async () => {
-      await seedNotifiableRuns(3);
-
-      const res = await app.request("/api/notifications/unread-count", {
-        headers: authHeaders(ctx),
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { count: number };
-      expect(body.count).toBe(3);
-    });
-
-    it("does not count runs without notifiedAt", async () => {
-      await seedAgent({
-        id: "@notiforg/silent-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-      await seedRun({
-        packageId: "@notiforg/silent-agent",
+    it("end-user run notifies the end-user, not org members", async () => {
+      const eu = await seedEndUser({
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
-        status: "success",
-        // notifiedAt is null by default — should not be counted
+        name: "External",
       });
+      await seedNotifiedRun({ agentName: "eu-agent", actor: { endUserId: eu.id } });
 
-      const res = await app.request("/api/notifications/unread-count", {
+      // The triggering org member is NOT a recipient.
+      expect(await unreadCount(authHeaders(ctx))).toBe(0);
+    });
+
+    it("schedule / actor-less run fans out to every org member", async () => {
+      const userB = await createTestUser();
+      await addOrgMember(ctx.orgId, userB.id);
+
+      await seedNotifiedRun({ agentName: "sched-agent", actor: "schedule" });
+
+      expect(await unreadCount(authHeaders(ctx))).toBe(1);
+      expect(await unreadCount(headersFor(userB))).toBe(1);
+    });
+  });
+
+  // ─── GET /api/notifications ─────────────────────────────────
+
+  describe("GET /api/notifications", () => {
+    it("returns the recipient's notifications with payload", async () => {
+      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+
+      const data = await listNotifications(authHeaders(ctx));
+      expect(data).toHaveLength(1);
+      expect(data[0]!.run_id).toBe(run.id);
+      expect(data[0]!.type).toBe("run_completed");
+      expect(data[0]!.payload?.agent_id).toBe("@notiforg/notif-agent");
+      expect(data[0]!.payload?.status).toBe("success");
+      expect(data[0]!.read_at).toBeNull();
+    });
+
+    it("unread=true hides already-read notifications", async () => {
+      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const data = await listNotifications(authHeaders(ctx));
+      const id = data[0]!.id;
+
+      await app.request(`/api/notifications/${id}/read`, {
+        method: "PUT",
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { count: number };
-      expect(body.count).toBe(0);
+      expect(await listNotifications(authHeaders(ctx))).toHaveLength(0);
+      // …but still present without the filter.
+      const all = await app.request("/api/notifications", { headers: authHeaders(ctx) });
+      const allBody = (await all.json()) as { data: NotificationDto[]; total: number };
+      expect(allBody.total).toBe(1);
+      expect(allBody.data[0]!.run_id).toBe(run.id);
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/notifications/unread-count");
+      const res = await app.request("/api/notifications");
       expect(res.status).toBe(401);
+    });
+  });
+
+  // ─── PUT /api/notifications/{id}/read ───────────────────────
+
+  describe("PUT /api/notifications/{id}/read", () => {
+    it("marks the recipient's notification read (count drops)", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
+
+      const res = await app.request(`/api/notifications/${id}/read`, {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(204);
+      expect(await unreadCount(authHeaders(ctx))).toBe(0);
+    });
+
+    it("is idempotent — already-read returns 204", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
+      const headers = authHeaders(ctx);
+
+      const first = await app.request(`/api/notifications/${id}/read`, { method: "PUT", headers });
+      expect(first.status).toBe(204);
+      const second = await app.request(`/api/notifications/${id}/read`, { method: "PUT", headers });
+      expect(second.status).toBe(204);
+    });
+
+    it("returns 404 for an unknown notification id", async () => {
+      const res = await app.request(
+        "/api/notifications/00000000-0000-0000-0000-000000000000/read",
+        { method: "PUT", headers: authHeaders(ctx) },
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 404 when a member tries to mark another member's notification (the bug)", async () => {
+      const userB = await createTestUser();
+      await addOrgMember(ctx.orgId, userB.id);
+
+      // A run owned by user A → only A gets a notification.
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
+
+      // User B (same org) cannot mark A's notification — 404, not a silent 204.
+      const res = await app.request(`/api/notifications/${id}/read`, {
+        method: "PUT",
+        headers: headersFor(userB),
+      });
+      expect(res.status).toBe(404);
+      // A's notification is untouched.
+      expect(await unreadCount(authHeaders(ctx))).toBe(1);
+    });
+  });
+
+  // ─── Per-user read isolation (core of issue #667) ───────────
+
+  describe("per-user read isolation", () => {
+    it("A marking a fanned-out notification read leaves B's unread", async () => {
+      const userB = await createTestUser();
+      await addOrgMember(ctx.orgId, userB.id);
+
+      // Schedule run → one notification each for A and B.
+      await seedNotifiedRun({ agentName: "iso-agent", actor: "schedule" });
+      expect(await unreadCount(authHeaders(ctx))).toBe(1);
+      expect(await unreadCount(headersFor(userB))).toBe(1);
+
+      // A marks their own copy read.
+      const aId = (await listNotifications(authHeaders(ctx)))[0]!.id;
+      const res = await app.request(`/api/notifications/${aId}/read`, {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(204);
+
+      // A is now read, B is still unread — the bug is fixed.
+      expect(await unreadCount(authHeaders(ctx))).toBe(0);
+      expect(await unreadCount(headersFor(userB))).toBe(1);
+    });
+  });
+
+  // ─── PUT /api/notifications/read-all ────────────────────────
+
+  describe("PUT /api/notifications/read-all", () => {
+    it("marks only the caller's notifications read", async () => {
+      const userB = await createTestUser();
+      await addOrgMember(ctx.orgId, userB.id);
+      await seedNotifiedRun({ agentName: "all-agent", actor: "schedule" });
+
+      const res = await app.request("/api/notifications/read-all", {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { updated_count: number }).updated_count).toBe(1);
+
+      expect(await unreadCount(authHeaders(ctx))).toBe(0);
+      // B's copy is untouched.
+      expect(await unreadCount(headersFor(userB))).toBe(1);
+    });
+
+    it("returns 0 when nothing is unread", async () => {
+      const res = await app.request("/api/notifications/read-all", {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { updated_count: number }).updated_count).toBe(0);
     });
   });
 
   // ─── GET /api/notifications/unread-counts-by-agent ──────────
 
   describe("GET /api/notifications/unread-counts-by-agent", () => {
-    it("returns empty counts when no runs exist", async () => {
-      const res = await app.request("/api/notifications/unread-counts-by-agent", {
-        headers: authHeaders(ctx),
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        counts: Record<string, number>;
-      };
-      expect(body.counts).toEqual({});
-    });
-
-    it("returns counts grouped by agent", async () => {
-      await seedNotifiableRuns(2, "agent-a");
-      await seedNotifiableRuns(1, "agent-b");
+    it("groups unread counts by agent id from the payload", async () => {
+      await seedNotifiedRun({ agentName: "agent-a", actor: { userId: ctx.user.id } });
+      await seedNotifiedRun({ agentName: "agent-a", actor: { userId: ctx.user.id } });
+      await seedNotifiedRun({ agentName: "agent-b", actor: { userId: ctx.user.id } });
 
       const res = await app.request("/api/notifications/unread-counts-by-agent", {
         headers: authHeaders(ctx),
       });
-
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        counts: Record<string, number>;
-      };
-      expect(body.counts["@notiforg/agent-a"]).toBe(2);
-      expect(body.counts["@notiforg/agent-b"]).toBe(1);
+      const counts = ((await res.json()) as { counts: Record<string, number> }).counts;
+      expect(counts["@notiforg/agent-a"]).toBe(2);
+      expect(counts["@notiforg/agent-b"]).toBe(1);
     });
   });
 
-  // ─── PUT /api/notifications/read/:runId ──────────────
+  // ─── Deprecated alias: PUT /api/notifications/read/{runId} ──
 
-  describe("PUT /api/notifications/read/:runId", () => {
-    it("marks a notifiable run as read", async () => {
-      const { runs: runRecords } = await seedNotifiableRuns(1);
-      const runId = runRecords[0]!.id;
-
-      const res = await app.request(`/api/notifications/read/${runId}`, {
-        method: "PUT",
-        headers: authHeaders(ctx),
-      });
-
-      expect(res.status).toBe(204);
-
-      // Verify the count dropped
-      const countRes = await app.request("/api/notifications/unread-count", {
-        headers: authHeaders(ctx),
-      });
-      const countBody = (await countRes.json()) as { count: number };
-      expect(countBody.count).toBe(0);
-    });
-
-    it("returns 204 for non-existent run (idempotent ack)", async () => {
-      const res = await app.request("/api/notifications/read/exec_nonexistent", {
-        method: "PUT",
-        headers: authHeaders(ctx),
-      });
-
-      expect(res.status).toBe(204);
-    });
-
-    it("returns 204 for run without notifiedAt (idempotent ack)", async () => {
-      await seedAgent({
-        id: "@notiforg/no-notif",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-      const run = await seedRun({
-        packageId: "@notiforg/no-notif",
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
-        status: "success",
-      });
+  describe("PUT /api/notifications/read/{runId} (deprecated)", () => {
+    it("marks the caller's notification for a run read", async () => {
+      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
 
       const res = await app.request(`/api/notifications/read/${run.id}`, {
         method: "PUT",
         headers: authHeaders(ctx),
       });
+      expect(res.status).toBe(204);
+      expect(await unreadCount(authHeaders(ctx))).toBe(0);
+    });
 
+    it("is an idempotent ack for an unknown run (204, never 404)", async () => {
+      const res = await app.request(
+        "/api/notifications/read/00000000-0000-0000-0000-000000000000",
+        { method: "PUT", headers: authHeaders(ctx) },
+      );
       expect(res.status).toBe(204);
     });
   });
 
-  // ─── PUT /api/notifications/read-all ───────────────────────
+  // ─── Tenant isolation ───────────────────────────────────────
 
-  describe("PUT /api/notifications/read-all", () => {
-    it("marks all unread notifications as read", async () => {
-      await seedNotifiableRuns(3);
+  describe("org isolation", () => {
+    it("a notification in another org is invisible", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
 
-      const res = await app.request("/api/notifications/read-all", {
-        method: "PUT",
-        headers: authHeaders(ctx),
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { updated_count: number };
-      expect(body.updated_count).toBe(3);
-
-      // Verify the count is now 0
-      const countRes = await app.request("/api/notifications/unread-count", {
-        headers: authHeaders(ctx),
-      });
-      const countBody = (await countRes.json()) as { count: number };
-      expect(countBody.count).toBe(0);
-    });
-
-    it("returns 0 when no unread notifications exist", async () => {
-      const res = await app.request("/api/notifications/read-all", {
-        method: "PUT",
-        headers: authHeaders(ctx),
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { updated_count: number };
-      expect(body.updated_count).toBe(0);
-    });
-
-    it("does not mark already-read notifications again", async () => {
-      await seedAgent({
-        id: "@notiforg/already-read",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-      await seedRun({
-        packageId: "@notiforg/already-read",
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
-        status: "success",
-        notifiedAt: new Date(),
-        readAt: new Date(),
-      });
-
-      const res = await app.request("/api/notifications/read-all", {
-        method: "PUT",
-        headers: authHeaders(ctx),
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { updated_count: number };
-      expect(body.updated_count).toBe(0);
+      const otherCtx = await createTestContext({ orgSlug: "othernotiforg" });
+      expect(await unreadCount(authHeaders(otherCtx))).toBe(0);
     });
   });
 
-  // ─── GET /api/runs (org runs, ?user=me filter) ──
+  // ─── GET /api/runs (org runs, ?user=me filter) — unchanged by #667 ──
 
   describe("GET /api/runs", () => {
     it("returns empty list when no runs exist", async () => {
-      const res = await app.request("/api/runs", {
-        headers: authHeaders(ctx),
-      });
-
+      const res = await app.request("/api/runs", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: unknown[];
-        total: number;
-      };
-      expect(body.data).toBeArray();
+      const body = (await res.json()) as { data: unknown[]; total: number };
       expect(body.data).toHaveLength(0);
       expect(body.total).toBe(0);
-    });
-
-    it("returns seeded runs with total count", async () => {
-      await seedAgent({
-        id: "@notiforg/list-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-      await seedRun({
-        packageId: "@notiforg/list-agent",
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
-        status: "success",
-      });
-      await seedRun({
-        packageId: "@notiforg/list-agent",
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
-        status: "failed",
-      });
-
-      const res = await app.request("/api/runs", {
-        headers: authHeaders(ctx),
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: { id: string; status: string }[];
-        total: number;
-      };
-      expect(body.data).toBeArray();
-      expect(body.data).toHaveLength(2);
-      expect(body.total).toBe(2);
     });
 
     it("returns all org runs including other members by default", async () => {
       const otherUser = await createTestUser();
       await addOrgMember(ctx.orgId, otherUser.id);
-
-      await seedAgent({
-        id: "@notiforg/shared-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
+      await seedAgent({ id: "@notiforg/shared-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       await seedRun({
         packageId: "@notiforg/shared-agent",
         orgId: ctx.orgId,
@@ -323,15 +341,9 @@ describe("Notifications API", () => {
         status: "success",
       });
 
-      const res = await app.request("/api/runs", {
-        headers: authHeaders(ctx),
-      });
-
+      const res = await app.request("/api/runs", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: unknown[];
-        total: number;
-      };
+      const body = (await res.json()) as { data: unknown[]; total: number };
       expect(body.data).toHaveLength(2);
       expect(body.total).toBe(2);
     });
@@ -339,12 +351,7 @@ describe("Notifications API", () => {
     it("filters to current user only with ?user=me", async () => {
       const otherUser = await createTestUser();
       await addOrgMember(ctx.orgId, otherUser.id);
-
-      await seedAgent({
-        id: "@notiforg/filter-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
+      await seedAgent({ id: "@notiforg/filter-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       await seedRun({
         packageId: "@notiforg/filter-agent",
         orgId: ctx.orgId,
@@ -360,29 +367,19 @@ describe("Notifications API", () => {
         status: "success",
       });
 
-      const res = await app.request("/api/runs?user=me", {
-        headers: authHeaders(ctx),
-      });
-
+      const res = await app.request("/api/runs?user=me", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: { userId: string }[];
-        total: number;
-      };
+      const body = (await res.json()) as { data: { userId: string }[]; total: number };
       expect(body.data).toHaveLength(1);
       expect(body.total).toBe(1);
       expect(body.data[0]!.userId).toBe(ctx.user.id);
     });
 
-    it("respects limit parameter", async () => {
-      await seedAgent({
-        id: "@notiforg/limit-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
+    it("respects limit + offset", async () => {
+      await seedAgent({ id: "@notiforg/page-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       for (let i = 0; i < 5; i++) {
         await seedRun({
-          packageId: "@notiforg/limit-agent",
+          packageId: "@notiforg/page-agent",
           orgId: ctx.orgId,
           applicationId: ctx.defaultAppId,
           userId: ctx.user.id,
@@ -390,73 +387,31 @@ describe("Notifications API", () => {
         });
       }
 
-      const res = await app.request("/api/runs?limit=2", {
-        headers: authHeaders(ctx),
-      });
-
+      const res = await app.request("/api/runs?limit=2&offset=3", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: unknown[];
-        total: number;
-      };
-      expect(body.data).toHaveLength(2);
-      expect(body.total).toBe(5);
-    });
-
-    it("respects offset parameter", async () => {
-      await seedAgent({
-        id: "@notiforg/offset-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-      for (let i = 0; i < 5; i++) {
-        await seedRun({
-          packageId: "@notiforg/offset-agent",
-          orgId: ctx.orgId,
-          applicationId: ctx.defaultAppId,
-          userId: ctx.user.id,
-          status: "success",
-        });
-      }
-
-      const res = await app.request("/api/runs?limit=10&offset=3", {
-        headers: authHeaders(ctx),
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: unknown[];
-        total: number;
-      };
+      const body = (await res.json()) as { data: unknown[]; total: number };
       expect(body.data).toHaveLength(2);
       expect(body.total).toBe(5);
     });
 
     it("respects org isolation", async () => {
-      const otherCtx = await createTestContext({ orgSlug: "otherotherorg" });
+      const otherCtx = await createTestContext({ orgSlug: "isolatedrunorg" });
       await seedAgent({
-        id: "@otherotherorg/secret-agent",
+        id: "@isolatedrunorg/secret-agent",
         orgId: otherCtx.orgId,
         createdBy: otherCtx.user.id,
       });
       await seedRun({
-        packageId: "@otherotherorg/secret-agent",
+        packageId: "@isolatedrunorg/secret-agent",
         orgId: otherCtx.orgId,
         applicationId: otherCtx.defaultAppId,
         userId: otherCtx.user.id,
         status: "success",
       });
 
-      // Request from original context should see 0 runs
-      const res = await app.request("/api/runs", {
-        headers: authHeaders(ctx),
-      });
-
+      const res = await app.request("/api/runs", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: unknown[];
-        total: number;
-      };
+      const body = (await res.json()) as { data: unknown[]; total: number };
       expect(body.data).toHaveLength(0);
       expect(body.total).toBe(0);
     });
@@ -464,114 +419,6 @@ describe("Notifications API", () => {
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/runs");
       expect(res.status).toBe(401);
-    });
-  });
-
-  // ─── End-user run notifications ─────────────────────────────
-
-  describe("End-user run notifications", () => {
-    it("marks end-user run as read when viewed by org member", async () => {
-      await seedAgent({
-        id: "@notiforg/eu-notif-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-      const eu = await seedEndUser({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        name: "External User",
-      });
-      const run = await seedRun({
-        packageId: "@notiforg/eu-notif-agent",
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        endUserId: eu.id,
-        status: "success",
-        notifiedAt: new Date(),
-      });
-
-      // Org member marks the end-user run as read
-      const res = await app.request(`/api/notifications/read/${run.id}`, {
-        method: "PUT",
-        headers: authHeaders(ctx),
-      });
-
-      expect(res.status).toBe(204);
-    });
-
-    it("counts end-user runs in unread count for org members", async () => {
-      await seedAgent({
-        id: "@notiforg/eu-count-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-      const eu = await seedEndUser({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        name: "EU Count Test",
-      });
-      await seedRun({
-        packageId: "@notiforg/eu-count-agent",
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        endUserId: eu.id,
-        status: "success",
-        notifiedAt: new Date(),
-      });
-
-      const res = await app.request("/api/notifications/unread-count", {
-        headers: authHeaders(ctx),
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { count: number };
-      expect(body.count).toBe(1);
-    });
-
-    it("mark-all-read includes end-user runs", async () => {
-      await seedAgent({
-        id: "@notiforg/eu-markall-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-      const eu = await seedEndUser({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        name: "EU MarkAll",
-      });
-      await seedRun({
-        packageId: "@notiforg/eu-markall-agent",
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        endUserId: eu.id,
-        status: "success",
-        notifiedAt: new Date(),
-      });
-      // Also seed an own-user run
-      await seedRun({
-        packageId: "@notiforg/eu-markall-agent",
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
-        status: "success",
-        notifiedAt: new Date(),
-      });
-
-      const markRes = await app.request("/api/notifications/read-all", {
-        method: "PUT",
-        headers: authHeaders(ctx),
-      });
-
-      expect(markRes.status).toBe(200);
-      const markBody = (await markRes.json()) as { updated_count: number };
-      expect(markBody.updated_count).toBe(2);
-
-      // Verify count is now 0
-      const countRes = await app.request("/api/notifications/unread-count", {
-        headers: authHeaders(ctx),
-      });
-      const countBody = (await countRes.json()) as { count: number };
-      expect(countBody.count).toBe(0);
     });
   });
 });

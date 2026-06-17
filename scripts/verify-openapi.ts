@@ -287,8 +287,10 @@ const expectedEndpoints = [
   "GET /api/docs",
 
   // Notifications
+  "GET /api/notifications",
   "GET /api/notifications/unread-count",
   "GET /api/notifications/unread-counts-by-agent",
+  "PUT /api/notifications/{id}/read",
   "PUT /api/notifications/read/{runId}",
   "PUT /api/notifications/read-all",
   "GET /api/runs",

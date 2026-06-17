@@ -85,6 +85,13 @@
       "when": 1781594303211,
       "tag": "0011_aromatic_korvac",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1781703445471,
+      "tag": "0012_notifications",
+      "breakpoints": true
     }
   ]
 }

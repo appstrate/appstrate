@@ -36,6 +36,7 @@ import { getEnv } from "@appstrate/env";
 import { runWithSpan, recordRunDuration, recordRunTerminal } from "../observability/index.ts";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
 import { updateRun, appendRunLog, computeRunCost } from "./state/runs.ts";
+import { createRunNotifications } from "./state/notifications.ts";
 import {
   addMemories as addUnifiedMemories,
   upsertPinned,
@@ -632,6 +633,21 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     );
   } catch (err) {
     logger.error("finalize: appendRunLog terminal row failed", {
+      runId: run.id,
+      err: getErrorMessage(err),
+    });
+  }
+
+  // Fan out in-app notifications — one row per recipient (issue #667).
+  // Only the CAS winner reaches here, so this runs exactly once per run.
+  // Post-CAS best-effort: the run is already terminal, so a transient
+  // INSERT failure must not 500 the runner finalize nor strand the
+  // broadcast below. The legacy `runs.notifiedAt` flag is still written by
+  // the CAS update above for one release (dual-write soft transition).
+  try {
+    await createRunNotifications(scope, run.id);
+  } catch (err) {
+    logger.error("finalize: notification fan-out failed (run already terminal)", {
       runId: run.id,
       err: getErrorMessage(err),
     });

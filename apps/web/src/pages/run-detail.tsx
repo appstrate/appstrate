@@ -22,7 +22,7 @@ import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
 import { RunRow } from "../components/run-row";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
-import { useMarkRead } from "../hooks/use-notifications";
+import { useMarkReadByRun } from "../hooks/use-notifications";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
 import { formatDateField } from "../lib/markdown";
@@ -61,14 +61,16 @@ export function RunDetailPage() {
 
   const qc = useQueryClient();
 
-  const markRead = useMarkRead();
+  const markRead = useMarkReadByRun();
 
-  // Auto-mark notification as read when viewing an run
+  // Auto-mark notification as read when viewing a run. `run.notifiedAt` still
+  // flags that a notification was created (dual-write during the #667
+  // transition); the mark is idempotent so re-firing on view is harmless.
   useEffect(() => {
-    if (run && runId && run.notifiedAt && !run.readAt) {
+    if (run && runId && run.notifiedAt) {
       markRead.mutate({ params: { path: { runId } } });
     }
-  }, [run?.notifiedAt, run?.readAt, runId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [run?.notifiedAt, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runAgent = useRunAgent(packageId);
   const cancelRun = useCancelRun();
