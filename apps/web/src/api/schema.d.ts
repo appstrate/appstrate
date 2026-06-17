@@ -21,6 +21,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/.well-known/oauth-authorization-server/api/auth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * OAuth 2.0 Authorization Server Metadata (RFC 8414 path-inserted)
+         * @description Same document as `/.well-known/oauth-authorization-server`. The advertised issuer is `${APP_URL}/api/auth`, so RFC 8414 path-aware clients insert the issuer path after `.well-known` and request the metadata document here.
+         */
+        get: operations["oauthServerMetadataPathInserted"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/.well-known/oauth-protected-resource/api/mcp/o/{org}": {
         parameters: {
             query?: never;
@@ -53,6 +73,26 @@ export interface paths {
          * @description RFC-compliant discovery endpoint. Mounted at the HTTP origin root (NOT under `/api`) per OIDC Discovery 1.0 §4.
          */
         get: operations["oidcDiscovery"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/.well-known/openid-configuration/api/auth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * OpenID Connect discovery document (RFC 8414 path-inserted)
+         * @description Same document as `/.well-known/openid-configuration`. The advertised issuer is `${APP_URL}/api/auth`, so RFC 8414 path-aware clients insert the issuer path after `.well-known` and request the discovery document here.
+         */
+        get: operations["oidcDiscoveryPathInserted"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5337,6 +5377,24 @@ export interface operations {
             };
         };
     };
+    oauthServerMetadataPathInserted: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorization server metadata document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     mcpProtectedResourceMetadata: {
         parameters: {
             query?: never;
@@ -5369,6 +5427,24 @@ export interface operations {
         };
     };
     oidcDiscovery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OpenID Configuration document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    oidcDiscoveryPathInserted: {
         parameters: {
             query?: never;
             header?: never;
