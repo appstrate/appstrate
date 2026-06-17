@@ -1,0 +1,105 @@
+{
+  "name": "@appstrate/canva-mcp",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Canva",
+  "description": "Canva integration backed by Canva's official remote MCP server (mcp.canva.com/mcp). The sidecar opens a Streamable HTTP MCP client and injects the actor's OAuth2 access token as `Authorization: Bearer …` on every request. Authorization uses standards-based onboarding: RFC 9728 protected-resource discovery, RFC 8414 authorization-server metadata, RFC 7591 Dynamic Client Registration (public client, `token_endpoint_auth_method: none`), and RFC 7636 PKCE (S256). Canva's authorization server issues rotating one-time-use refresh tokens; the platform's token-refresh service persists each rotated refresh token. Niveau-2 scope model applies: per-tool `required_scopes` drive incremental consent — an agent only requests the Canva scopes its selected tools need. Some tools are plan-gated upstream (resize = Pro+, autofill/brand templates/brand kits = Enterprise).",
+  "keywords": ["design", "marketing"],
+  "license": "Apache-2.0",
+  "icon": "canva",
+  "source": {
+    "kind": "remote",
+    "remote": {
+      "url": "https://mcp.canva.com/mcp",
+      "transport": "streamable-http"
+    }
+  },
+  "auths": {
+    "oauth": {
+      "type": "oauth2",
+      "issuer": "https://mcp.canva.com",
+      "token_endpoint_auth_method": "none",
+      "code_challenge_methods_supported": ["S256"],
+      "default_scopes": ["profile:read", "design:meta:read", "design:content:read"],
+      "scope_catalog": [
+        { "value": "profile:read", "label": "Read user profile" },
+        { "value": "design:meta:read", "label": "Read design metadata" },
+        { "value": "design:content:read", "label": "Read design content" },
+        { "value": "design:content:write", "label": "Create and edit designs" },
+        { "value": "folder:read", "label": "Read folders" },
+        { "value": "folder:write", "label": "Create and organize folders" },
+        { "value": "asset:read", "label": "Read assets" },
+        { "value": "asset:write", "label": "Upload assets" },
+        { "value": "comment:read", "label": "Read comments" },
+        { "value": "comment:write", "label": "Write comments" },
+        { "value": "brandtemplate:meta:read", "label": "Read brand template metadata" },
+        { "value": "brandtemplate:content:read", "label": "Read brand template content" },
+        { "value": "brandtemplate:content:write", "label": "Publish brand templates" },
+        { "value": "brandkit:read", "label": "Read brand kits" },
+        { "value": "help:answers:read", "label": "Read Canva help answers" },
+        { "value": "help:answers:write", "label": "Write Canva help answers" }
+      ],
+      "authorized_uris": ["https://mcp.canva.com/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "upload-asset-from-url": { "required_scopes": { "oauth": ["asset:write"] } },
+    "get-assets": { "required_scopes": { "oauth": ["asset:read"] } },
+    "autofill-design": {
+      "required_scopes": { "oauth": ["brandtemplate:content:read", "design:content:write"] }
+    },
+    "get-brand-template-dataset": {
+      "required_scopes": { "oauth": ["brandtemplate:meta:read"] }
+    },
+    "search-brand-templates": { "required_scopes": { "oauth": ["brandtemplate:meta:read"] } },
+    "list-brand-kits": { "required_scopes": { "oauth": ["brandkit:read"] } },
+    "comment-on-design": { "required_scopes": { "oauth": ["comment:write"] } },
+    "reply-to-comment": { "required_scopes": { "oauth": ["comment:write"] } },
+    "list-comments": { "required_scopes": { "oauth": ["comment:read"] } },
+    "list-replies": { "required_scopes": { "oauth": ["comment:read"] } },
+    "search-designs": { "required_scopes": { "oauth": ["design:meta:read"] } },
+    "get-design": { "required_scopes": { "oauth": ["design:meta:read"] } },
+    "get-design-pages": { "required_scopes": { "oauth": ["design:content:read"] } },
+    "get-design-content": { "required_scopes": { "oauth": ["design:content:read"] } },
+    "get-presenter-notes": { "required_scopes": { "oauth": ["design:content:read"] } },
+    "get-design-export-formats": { "required_scopes": { "oauth": ["design:meta:read"] } },
+    "generate-design": { "required_scopes": { "oauth": ["design:content:write"] } },
+    "create-design-from-candidate": { "required_scopes": { "oauth": ["design:content:write"] } },
+    "request-outline-review": { "required_scopes": { "oauth": ["design:content:read"] } },
+    "generate-design-structured": { "required_scopes": { "oauth": ["design:content:write"] } },
+    "import-design-from-url": { "required_scopes": { "oauth": ["design:content:write"] } },
+    "export-design": { "required_scopes": { "oauth": ["design:content:read"] } },
+    "create-folder": { "required_scopes": { "oauth": ["folder:write"] } },
+    "list-folder-items": { "required_scopes": { "oauth": ["folder:read"] } },
+    "search-folders": { "required_scopes": { "oauth": ["folder:read"] } },
+    "move-item-to-folder": { "required_scopes": { "oauth": ["folder:write"] } },
+    "resize-design": { "required_scopes": { "oauth": ["design:content:write"] } },
+    "start-editing-transaction": { "required_scopes": { "oauth": ["design:content:write"] } },
+    "perform-editing-operations": { "required_scopes": { "oauth": ["design:content:write"] } },
+    "commit-editing-transaction": { "required_scopes": { "oauth": ["design:content:write"] } },
+    "cancel-editing-transaction": { "required_scopes": { "oauth": ["design:content:write"] } },
+    "get-design-thumbnail": { "required_scopes": { "oauth": ["design:meta:read"] } }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}
