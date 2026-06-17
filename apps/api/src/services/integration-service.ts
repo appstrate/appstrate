@@ -14,10 +14,12 @@ import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema
 import { integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { mcpServerManifestSchema, type McpServerManifest } from "@appstrate/core/mcp-server";
+import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { getSystemPackages } from "./system-packages.ts";
 import type { IntegrationSummary } from "@appstrate/shared-types";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { pickVersion } from "./run-launcher/db-package-catalog.ts";
+import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { logger } from "../lib/logger.ts";
 
 export type { IntegrationSummary };
@@ -133,48 +135,37 @@ export async function fetchMcpServerManifest(packageId: string): Promise<McpServ
   return parsed.data;
 }
 
+// ---------------------------------------------------------------------------
+// Spawn-time package version resolution (single kernel)
+// ---------------------------------------------------------------------------
+
 /**
- * Discriminated failure modes for {@link resolveMcpServerForSpawn} — distinct
- * from "package missing" so the spawn resolver can log WHY an integration was
- * skipped (a leaked diagnosis cycle in prod traced to the silent
- * stale-draft/latest-bytes split; see issue #588).
+ * Discriminated failure modes shared by every spawn-time package resolution.
+ * Distinct from "package missing" so callers can log WHY a package was skipped
+ * (a leaked diagnosis cycle in prod traced to the silent stale-draft/latest-bytes
+ * split; see issue #588).
  */
-export type McpServerResolveFailure =
+export type PublishedManifestFailure =
   | "not_found"
-  | "not_mcp_server"
+  | "wrong_type"
   | "invalid_manifest"
-  /** A published version exists, but none satisfied `source.server.version`. */
+  /** A published version exists, but none satisfied the pin. */
   | "unsatisfiable_pin"
   /** The package exists but has no published version to run. */
   | "no_published_version";
 
-export type McpServerResolution =
-  | {
-      ok: true;
-      manifest: McpServerManifest;
-      /**
-       * The CONCRETE version the spawn will run. `null` for system
-       * mcp-servers (single version served from the boot registry — no
-       * `package_versions` row, no `?version=` needed on the byte route).
-       */
-      version: string | null;
-      /** `"system"` → boot registry bytes; `"version"` → published `.afps`. */
-      source: "system" | "version";
-    }
-  | { ok: false; reason: McpServerResolveFailure };
+type PublishedManifestResolution =
+  | { ok: true; rawManifest: unknown; version: string | null; source: "system" | "version" }
+  | { ok: false; reason: PublishedManifestFailure };
 
 /**
- * Resolve a referenced `mcp-server` package to a CONCRETE version, honoring the
- * `source.server.version` pin, and return that version's manifest.
- *
- * This is the single resolution contract for the local-source spawn path. It
- * replaces the previous split where the manifest was read from
- * `packages.draft_manifest` (version-blind) while the runnable bytes came from
- * the latest non-yanked `package_versions` row (pin-blind, and independent of
- * the manifest version) — so a `publish` that didn't also overwrite the draft
- * left the run executing one version's bytes under another version's manifest
- * (issue #588). Here the manifest comes from `package_versions.manifest` for the
- * SAME `version` the byte route is told to serve, so they can never skew.
+ * Resolve a package to a CONCRETE published version honoring its pin, and
+ * return that version's RAW manifest (unparsed — the caller validates with the
+ * schema for its package type). This is the single version-resolution kernel
+ * behind both the mcp-server spawn path (#588) and the integration spawn path
+ * (#686): the manifest comes from `package_versions.manifest` for the SAME
+ * `version` the byte route is told to serve, so manifest and bytes can never
+ * skew.
  *
  * Resolution order mirrors every other platform catalog: exact → dist-tag →
  * semver range (yanked versions visible only to an exact pin). A missing /
@@ -184,22 +175,18 @@ export type McpServerResolution =
  * Unscoped (no orgId filter) — callers already hold an auth context (run token
  * / service-internal call), matching {@link fetchMcpServerManifest}.
  */
-export async function resolveMcpServerForSpawn(
+async function resolvePublishedManifest(
   packageId: string,
+  expectedType: "integration" | "mcp-server",
   pin?: string | null,
-): Promise<McpServerResolution> {
-  // System mcp-servers are loaded once at boot and served from the in-memory
+): Promise<PublishedManifestResolution> {
+  // System packages are loaded once at boot and served from the in-memory
   // registry by id — there is no `package_versions` row to pin against, and the
   // byte route resolves them the same way (issue #588 only concerns
   // separately-versioned local packages).
   const sys = getSystemPackages().get(packageId);
   if (sys) {
-    const parsed = mcpServerManifestSchema.safeParse(sys.manifest);
-    if (!parsed.success) {
-      logger.warn("system mcp-server manifest failed validation", { packageId });
-      return { ok: false, reason: "invalid_manifest" };
-    }
-    return { ok: true, manifest: parsed.data, version: null, source: "system" };
+    return { ok: true, rawManifest: sys.manifest, version: null, source: "system" };
   }
 
   const [pkgRow] = await db
@@ -207,17 +194,8 @@ export async function resolveMcpServerForSpawn(
     .from(packages)
     .where(eq(packages.id, packageId))
     .limit(1);
-  if (!pkgRow) {
-    logger.info("referenced mcp-server package not found", { packageId });
-    return { ok: false, reason: "not_found" };
-  }
-  if (pkgRow.type !== "mcp-server") {
-    logger.warn("referenced package is not an mcp-server", {
-      packageId,
-      actualType: pkgRow.type,
-    });
-    return { ok: false, reason: "not_mcp_server" };
-  }
+  if (!pkgRow) return { ok: false, reason: "not_found" };
+  if (pkgRow.type !== expectedType) return { ok: false, reason: "wrong_type" };
 
   const [versionRows, tagRows] = await Promise.all([
     db
@@ -237,40 +215,254 @@ export async function resolveMcpServerForSpawn(
       .where(eq(packageDistTags.packageId, packageId)),
   ]);
 
-  if (versionRows.length === 0) {
-    logger.warn("referenced mcp-server has no published version", { packageId, pin });
-    return { ok: false, reason: "no_published_version" };
-  }
+  if (versionRows.length === 0) return { ok: false, reason: "no_published_version" };
 
-  // Missing/empty pin → "latest" (the working-copy default; the org run path
-  // treats `source.server.version` as advisory). `pickVersion` applies the
-  // canonical exact → dist-tag → range resolution and the yanked-visibility
-  // rule shared with `DbPackageCatalog`.
+  // Missing/empty pin → "latest". `pickVersion` applies the canonical
+  // exact → dist-tag → range resolution and the yanked-visibility rule shared
+  // with `DbPackageCatalog`.
   const spec = pin && pin.trim().length > 0 ? pin.trim() : "latest";
   const picked = pickVersion(
     spec,
     versionRows.map((v) => ({ version: v.version, integrity: v.integrity, yanked: v.yanked })),
     tagRows,
   );
-  if (!picked) {
-    logger.warn("source.server.version pin could not be satisfied for mcp-server", {
-      packageId,
-      pin: spec,
-      available: versionRows.map((v) => v.version),
-    });
-    return { ok: false, reason: "unsatisfiable_pin" };
-  }
+  if (!picked) return { ok: false, reason: "unsatisfiable_pin" };
 
   const row = versionRows.find((v) => v.version === picked.version);
-  const parsed = mcpServerManifestSchema.safeParse(row?.manifest);
+  return { ok: true, rawManifest: row?.manifest, version: picked.version, source: "version" };
+}
+
+/**
+ * Discriminated failure modes for {@link resolveMcpServerForSpawn}. Mirrors
+ * {@link PublishedManifestFailure} with the mcp-server-specific `not_mcp_server`
+ * name preserved for existing call-site logging.
+ */
+export type McpServerResolveFailure =
+  | "not_found"
+  | "not_mcp_server"
+  | "invalid_manifest"
+  | "unsatisfiable_pin"
+  | "no_published_version";
+
+export type McpServerResolution =
+  | {
+      ok: true;
+      manifest: McpServerManifest;
+      /**
+       * The CONCRETE version the spawn will run. `null` for system
+       * mcp-servers (single version served from the boot registry — no
+       * `package_versions` row, no `?version=` needed on the byte route).
+       */
+      version: string | null;
+      /** `"system"` → boot registry bytes; `"version"` → published `.afps`. */
+      source: "system" | "version";
+    }
+  | { ok: false; reason: McpServerResolveFailure };
+
+/**
+ * Resolve a referenced `mcp-server` package to a CONCRETE version, honoring the
+ * `source.server.version` pin, and return that version's manifest. Thin wrapper
+ * over {@link resolvePublishedManifest} + MCPB schema validation.
+ */
+export async function resolveMcpServerForSpawn(
+  packageId: string,
+  pin?: string | null,
+): Promise<McpServerResolution> {
+  const res = await resolvePublishedManifest(packageId, "mcp-server", pin);
+  if (!res.ok) {
+    const reason: McpServerResolveFailure =
+      res.reason === "wrong_type" ? "not_mcp_server" : res.reason;
+    logger.warn("mcp-server could not be resolved for spawn", { packageId, pin, reason });
+    return { ok: false, reason };
+  }
+  const parsed = mcpServerManifestSchema.safeParse(res.rawManifest);
   if (!parsed.success) {
-    logger.warn("mcp-server version manifest failed validation", {
-      packageId,
-      version: picked.version,
-    });
+    logger.warn("mcp-server manifest failed validation", { packageId, version: res.version });
     return { ok: false, reason: "invalid_manifest" };
   }
-  return { ok: true, manifest: parsed.data, version: picked.version, source: "version" };
+  return { ok: true, manifest: parsed.data, version: res.version, source: res.source };
+}
+
+// ---------------------------------------------------------------------------
+// Integration manifest version resolution (#686)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which concrete source an integration manifest is read from for a run. Frozen
+ * at kickoff (per declared integration) and reused by every later reader so the
+ * spawn spec and the long-lived runtime credential path can never skew.
+ *
+ *   - `draft`   → the mutable working copy (`packages.draft_manifest`) — opted
+ *                 into per-run via `dependency_overrides[id] === "draft"`.
+ *   - `system`  → the in-memory boot registry (system integrations).
+ *   - `version` → a published `package_versions` row (the pinned version).
+ */
+export type SpawnVersionDescriptor =
+  | { kind: "draft" }
+  | { kind: "system" }
+  | { kind: "version"; version: string };
+
+/** Frozen resolution recorded on `runs.resolved_integration_versions`. */
+export interface ResolvedIntegrationVersion {
+  version: string | null;
+  source: "version" | "draft" | "system";
+}
+export type ResolvedIntegrationVersionMap = Record<string, ResolvedIntegrationVersion>;
+
+function descriptorToResolved(d: SpawnVersionDescriptor): ResolvedIntegrationVersion {
+  return d.kind === "version"
+    ? { version: d.version, source: "version" }
+    : { version: null, source: d.kind };
+}
+
+/** Map a frozen snapshot entry back into the descriptor the readers consume. */
+export function resolvedIntegrationVersionToDescriptor(
+  entry: ResolvedIntegrationVersion,
+): SpawnVersionDescriptor {
+  switch (entry.source) {
+    case "draft":
+      return { kind: "draft" };
+    case "system":
+      return { kind: "system" };
+    case "version":
+      // A `version` source always froze a concrete version; fall back to the
+      // latest published only if the snapshot is somehow malformed.
+      return entry.version ? { kind: "version", version: entry.version } : { kind: "draft" };
+  }
+}
+
+/**
+ * Read an integration manifest AT a specific resolved version. The single
+ * manifest reader for a pinned integration — used both when seeding the
+ * kickoff cache and on the runtime credential path (which reads the frozen
+ * descriptor off the run row).
+ */
+export async function readIntegrationManifestAt(
+  packageId: string,
+  descriptor: SpawnVersionDescriptor,
+): Promise<IntegrationManifestLoadResult> {
+  if (descriptor.kind === "draft") return fetchIntegrationManifestUncached(packageId);
+
+  if (descriptor.kind === "system") {
+    const sys = getSystemPackages().get(packageId);
+    if (!sys) return { ok: false, failure: { kind: "not_found" } };
+    const parsed = integrationManifestSchema.safeParse(sys.manifest);
+    if (!parsed.success) return { ok: false, failure: { kind: "invalid_manifest" } };
+    return { ok: true, manifest: parsed.data };
+  }
+
+  const [row] = await db
+    .select({ manifest: packageVersions.manifest })
+    .from(packageVersions)
+    .where(
+      and(
+        eq(packageVersions.packageId, packageId),
+        eq(packageVersions.version, descriptor.version),
+      ),
+    )
+    .limit(1);
+  if (!row) return { ok: false, failure: { kind: "not_found" } };
+  const parsed = integrationManifestSchema.safeParse(row.manifest);
+  if (!parsed.success) return { ok: false, failure: { kind: "invalid_manifest" } };
+  return { ok: true, manifest: parsed.data };
+}
+
+/**
+ * Read an integration manifest for a RUN, honoring the version frozen on
+ * `runs.resolved_integration_versions` (#686). The single decision point for
+ * "frozen version vs draft" — used by every run-scoped reader (credentials
+ * resolver, byte-route authz) so the "no frozen entry → draft" fallback lives
+ * in ONE place instead of a ternary duplicated per call site.
+ *
+ *   - `frozen` present → read AT that descriptor (the spawn used the same).
+ *   - `frozen` absent (legacy run / soft-resolved integration) → draft, via the
+ *     shared per-call-graph `cache` when provided.
+ */
+export function readIntegrationManifestForRun(
+  packageId: string,
+  frozen: ResolvedIntegrationVersion | null | undefined,
+  cache?: IntegrationManifestCache,
+): Promise<IntegrationManifestLoadResult> {
+  return frozen
+    ? readIntegrationManifestAt(packageId, resolvedIntegrationVersionToDescriptor(frozen))
+    : fetchIntegrationManifest(packageId, cache);
+}
+
+export type RunIntegrationVersionsResult =
+  | { ok: true; versions: ResolvedIntegrationVersionMap }
+  | { ok: false; unresolved: Array<{ name: string; versionSpec: string }> };
+
+/**
+ * Resolve EVERY declared integration to a concrete manifest version for a run,
+ * honoring each `dependencies.integrations.<id>` pin (and any per-run
+ * `dependency_overrides`) against PUBLISHED versions — the integration-axis
+ * sibling of `RunPackageCatalog` (#666) and the connection cascade snapshot
+ * (#199). This is the single point the pin is enforced:
+ *
+ *   - Seeds the shared `manifestCache` with the resolved manifest keyed by
+ *     packageId, so every kickoff reader threading that cache (connection
+ *     cascade, spawn resolver, pin checks) honors the pin with NO per-caller
+ *     change.
+ *   - Returns the frozen `{ version, source }` map to persist on
+ *     `runs.resolved_integration_versions`, which the runtime credential path
+ *     reads back so a mid-run MITM refresh resolves the SAME version.
+ *
+ * An unsatisfiable pin (incl. a never-published dependency) is reported as
+ * `unresolved` so the caller fails loud with a structured `dependency_unresolved`
+ * (422) rather than silently spawning the draft. Soft failures (package
+ * missing / wrong type / invalid manifest) are left unseeded — the spawn
+ * resolver already drops such integrations with a warning, and the runtime
+ * reader falls back to the draft, matching pre-#686 behavior.
+ */
+export async function resolveRunIntegrationVersions(params: {
+  agentManifest: Record<string, unknown>;
+  dependencyOverrides?: Record<string, string> | null;
+  manifestCache?: IntegrationManifestCache;
+}): Promise<RunIntegrationVersionsResult> {
+  const entries = parseManifestIntegrations(params.agentManifest);
+  const versions: ResolvedIntegrationVersionMap = {};
+  const unresolved: Array<{ name: string; versionSpec: string }> = [];
+
+  for (const entry of entries) {
+    const override = params.dependencyOverrides?.[entry.id];
+    let descriptor: SpawnVersionDescriptor;
+
+    if (override === VERSION_SELECTOR_DRAFT) {
+      descriptor = { kind: "draft" };
+    } else {
+      // A non-draft override replaces the manifest pin; otherwise the pin wins.
+      const spec = override ?? entry.version;
+      const res = await resolvePublishedManifest(entry.id, "integration", spec);
+      if (res.ok) {
+        descriptor =
+          res.source === "system" ? { kind: "system" } : { kind: "version", version: res.version! };
+      } else if (res.reason === "unsatisfiable_pin" || res.reason === "no_published_version") {
+        // A real pin that cannot be met — fail loud, never fall back to draft.
+        unresolved.push({ name: entry.id, versionSpec: spec || "*" });
+        continue;
+      } else {
+        // not_found / wrong_type / invalid — soft. Leave the cache unseeded so
+        // the spawn resolver's own miss-handling skips the integration and the
+        // runtime reader falls back to draft (pre-#686 behavior).
+        logger.info("integration version left unresolved; falling back to draft", {
+          integrationId: entry.id,
+          reason: res.reason,
+        });
+        continue;
+      }
+    }
+
+    // Seed the shared per-run manifest cache so every kickoff reader gets the
+    // pinned manifest transparently (one entry per integration, overwriting any
+    // draft entry an earlier readiness pass may have memoized).
+    if (params.manifestCache) {
+      params.manifestCache.set(entry.id, readIntegrationManifestAt(entry.id, descriptor));
+    }
+    versions[entry.id] = descriptorToResolved(descriptor);
+  }
+
+  if (unresolved.length > 0) return { ok: false, unresolved };
+  return { ok: true, versions };
 }
 
 // ---------------------------------------------------------------------------

@@ -125,6 +125,18 @@ export const runs = pgTable(
           { connectionId: string; source: string; label?: string | null; accountId?: string | null }
         >
       >(),
+    // Snapshot of the integration manifest VERSION resolved per declared
+    // integration at run kickoff (#686). Shape:
+    // { "@scope/integration": { version: "1.4.2" | null, source: "version" | "draft" | "system" } }.
+    // Frozen here so every manifest read for THIS run — the kickoff spawn
+    // spec AND the long-lived runtime credential/MITM-refresh path — resolves
+    // the same version, never re-deriving against a catalog that may gain a
+    // newer published version mid-run. `version: null` for `draft`/`system`
+    // sources (no `package_versions` row). The sibling of `resolvedConnections`
+    // for the manifest-version axis; absent integrations fall back to draft.
+    resolvedIntegrationVersions: jsonb("resolved_integration_versions").$type<
+      Record<string, { version: string | null; source: "version" | "draft" | "system" }>
+    >(),
     apiKeyId: text("api_key_id").references(() => apiKeys.id, {
       onDelete: "set null",
     }),
@@ -589,6 +601,13 @@ export const schedules = pgTable(
     // creation/edit (mirrors `configOverride`). Same shape as
     // `runs.connectionOverrides`. Loses to admin pin at fire time.
     connectionOverrides: jsonb("connection_overrides").$type<Record<string, string>>(),
+    // Per-schedule dependency version overrides — frozen at schedule
+    // creation/edit, forwarded to each fired run's `runs.dependencyOverrides`
+    // (#666/#686). Shape: { "@scope/dep": "draft" | "<semver|dist-tag>" }.
+    // Keys may name a declared skill OR integration dependency; `"draft"` opts
+    // that dependency into its working copy for the dev edit loop, any other
+    // value replaces the manifest pin. Mirrors `runs.dependencyOverrides`.
+    dependencyOverrides: jsonb("dependency_overrides").$type<Record<string, string>>(),
     lastRunAt: timestamp("last_run_at", { withTimezone: true }),
     nextRunAt: timestamp("next_run_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

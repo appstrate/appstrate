@@ -131,6 +131,12 @@ export const schedulesPaths = {
                     'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ "@scope/integration": "<connection_id>" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire.',
                   additionalProperties: { type: "string" },
                 },
+                dependency_overrides: {
+                  type: "object",
+                  description:
+                    'Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them.',
+                  additionalProperties: { type: "string" },
+                },
               },
             },
           },
@@ -163,6 +169,7 @@ export const schedulesPaths = {
                 proxy_id_override: null,
                 version_override: null,
                 connection_overrides: null,
+                dependency_overrides: null,
                 last_run_at: null,
                 next_run_at: "2026-01-16T09:00:00Z",
                 createdAt: "2026-01-15T10:30:00Z",
@@ -226,6 +233,7 @@ export const schedulesPaths = {
                 proxy_id_override: null,
                 version_override: "1.2.0",
                 connection_overrides: null,
+                dependency_overrides: null,
                 last_run_at: "2026-01-15T09:00:00Z",
                 next_run_at: "2026-01-16T09:00:00Z",
                 createdAt: "2026-01-14T14:00:00Z",
@@ -277,6 +285,12 @@ export const schedulesPaths = {
                   type: ["object", "null"],
                   description:
                     "Per-integration connection picks frozen on the schedule. Pass `null` to clear.",
+                  additionalProperties: { type: "string" },
+                },
+                dependency_overrides: {
+                  type: ["object", "null"],
+                  description:
+                    'Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear.',
                   additionalProperties: { type: "string" },
                 },
               },

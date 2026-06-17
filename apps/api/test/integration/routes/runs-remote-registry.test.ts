@@ -299,6 +299,97 @@ describe("POST /api/runs/remote — kind: registry", () => {
     expect(body.code).toBe("draft_with_spec");
   });
 
+  it("rejects a dependency_overrides key the agent does not declare (400)", async () => {
+    await seedPublishedAgent(ctx, "1.2.3");
+
+    const res = await post({
+      source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "1.2.3" },
+      applicationId: ctx.defaultAppId,
+      input: {},
+      // Mirrors the platform run route: the freeze KEY gate runs on remote too.
+      dependency_overrides: { "@acme/not-a-dep": "draft" },
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a malformed dependency_overrides value (400)", async () => {
+    await seedPublishedAgent(ctx, "1.2.3");
+
+    const res = await post({
+      source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "1.2.3" },
+      applicationId: ctx.defaultAppId,
+      input: {},
+      dependency_overrides: { "@acme/briefing": "not a version!!" },
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("forwards a declared dependency_overrides onto the run row", async () => {
+    // Skill the agent depends on — must exist + be installed so readiness
+    // passes and the run reaches the dependency-freeze + row insert.
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: "@acme/helper",
+      type: "skill",
+      draftManifest: {
+        name: "@acme/helper",
+        display_name: "Helper",
+        version: "1.0.0",
+        type: "skill",
+        schema_version: "0.1",
+        author: "tester",
+      } as unknown as Record<string, unknown>,
+      draftContent: "helper",
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/helper");
+
+    // Agent declaring a skill dependency — its id is a valid override KEY.
+    const manifest = {
+      name: "@acme/briefing",
+      display_name: "Briefing Agent",
+      version: "2.0.0",
+      type: "agent",
+      description: "Test agent",
+      schema_version: "0.1",
+      author: "tester",
+      timeout: 300,
+      dependencies: { skills: { "@acme/helper": "^1.0.0" }, mcp_servers: {}, integrations: {} },
+    } as unknown as Record<string, unknown>;
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: "@acme/briefing",
+      type: "agent",
+      draftManifest: manifest,
+      draftContent: PROMPT,
+    });
+    const versionRow = await seedPackageVersion({
+      packageId: "@acme/briefing",
+      version: "2.0.0",
+      integrity: "sha256-test",
+      artifactSize: 1024,
+      manifest,
+    });
+    await db
+      .insert(packageDistTags)
+      .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
+    await uploadPackageZip("@acme/briefing", "2.0.0", buildMinimalZip(manifest, PROMPT));
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
+
+    const res = await post({
+      source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "2.0.0" },
+      applicationId: ctx.defaultAppId,
+      input: {},
+      dependency_overrides: { "@acme/helper": "draft" },
+    });
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string };
+    const [run] = await db.select().from(runs).where(eq(runs.id, body.id)).limit(1);
+    expect(run!.dependencyOverrides).toEqual({ "@acme/helper": "draft" });
+  });
+
   it("accepts an integrity hint without rejecting on drift", async () => {
     await seedPublishedAgent(ctx, "1.2.3");
     const res = await post({
