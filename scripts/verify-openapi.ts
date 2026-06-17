@@ -1389,6 +1389,11 @@ const RESPONSE_SCHEMA_ALLOWLIST = new Set<string>([
   // by the SPA's typed client.
   "GET /.well-known/oauth-authorization-server 200",
   "GET /.well-known/openid-configuration 200",
+  // RFC 8414 path-inserted variants — same Better-Auth-owned document, served
+  // for clients that derive the discovery URL from the `${APP_URL}/api/auth`
+  // issuer path (e.g. the Claude MCP SDK).
+  "GET /.well-known/oauth-authorization-server/api/auth 200",
+  "GET /.well-known/openid-configuration/api/auth 200",
   "GET /api/auth/oauth2/authorize 200",
   "GET /api/auth/oauth2/userinfo 200",
   "POST /api/auth/oauth2/revoke 200",

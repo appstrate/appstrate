@@ -2316,16 +2316,30 @@ export function createOidcRouter() {
 
   // ── OIDC discovery ──────────────────────────────────────────────────────────
 
-  router.get("/.well-known/openid-configuration", async (c: Context<AppEnv>) => {
+  const serveOpenIdConfig = async (c: Context<AppEnv>) => {
     const payload = await getOidcAuthApi().getOpenIdConfig({ headers: c.req.raw.headers });
     c.header("cache-control", "public, max-age=3600");
     return c.json(payload as never);
-  });
-  router.get("/.well-known/oauth-authorization-server", async (c: Context<AppEnv>) => {
+  };
+  const serveOAuthServerConfig = async (c: Context<AppEnv>) => {
     const payload = await getOidcAuthApi().getOAuthServerConfig({ headers: c.req.raw.headers });
     c.header("cache-control", "public, max-age=3600");
     return c.json(payload as never);
-  });
+  };
+
+  // Origin-root form (RFC 5785 / RFC 8414) — OIDC client libraries that apply no
+  // path-insertion look here.
+  router.get("/.well-known/openid-configuration", serveOpenIdConfig);
+  router.get("/.well-known/oauth-authorization-server", serveOAuthServerConfig);
+  // Path-inserted form — the advertised authorization-server identifier is
+  // `${APP_URL}/api/auth` (issuer carries the `/api/auth` path), so RFC 8414
+  // path-aware clients (e.g. the Claude MCP SDK, reached via the
+  // `oauth-protected-resource` `authorization_servers` entry) build the discovery
+  // URL by inserting the issuer path after `.well-known`. Without these aliases
+  // the request falls through to the SPA `/*` catch-all and is answered with
+  // `index.html`, so the client's `JSON.parse` fails on the leading `<`.
+  router.get("/.well-known/openid-configuration/api/auth", serveOpenIdConfig);
+  router.get("/.well-known/oauth-authorization-server/api/auth", serveOAuthServerConfig);
 
   // ── Phase 3 admin oversight (#251) ─────────────────────────────────────────
   //

@@ -200,8 +200,11 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
   const REDIRECT = "http://localhost:9931/callback";
 
   /** Register a public self-service client via RFC 7591 DCR. */
-  async function registerDcrClient(request: APIRequestContext): Promise<string> {
-    const res = await request.post(`${BASE}/api/auth/oauth2/register`, {
+  async function registerDcrClient(
+    request: APIRequestContext,
+    registrationEndpoint = `${BASE}/api/auth/oauth2/register`,
+  ): Promise<string> {
+    const res = await request.post(registrationEndpoint, {
       headers: { "Content-Type": "application/json" },
       data: {
         client_name: "Claude Code (e2e)",
@@ -223,11 +226,12 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
     request: APIRequestContext,
     cookie: string,
     clientId: string,
+    authorizationEndpoint = `${BASE}/api/auth/oauth2/authorize`,
   ): Promise<{ code: string; verifier: string }> {
     const verifier = randomVerifier();
     const challenge = await sha256Base64Url(verifier);
     const authorizeUrl =
-      `${BASE}/api/auth/oauth2/authorize?` +
+      `${authorizationEndpoint}?` +
       new URLSearchParams({
         response_type: "code",
         client_id: clientId,
@@ -286,8 +290,9 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
     code: string,
     verifier: string,
     resource: string,
+    tokenEndpoint = `${BASE}/api/auth/oauth2/token`,
   ) {
-    const res = await request.post(`${BASE}/api/auth/oauth2/token`, {
+    const res = await request.post(tokenEndpoint, {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       form: {
         grant_type: "authorization_code",
@@ -431,6 +436,85 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
         headers: { ...headers, "X-Application-Id": orgContext.org.defaultAppId },
       });
       expect(lifted.status()).toBe(401);
+    } finally {
+      await anon.dispose();
+    }
+  });
+
+  // This is the one test that exercises the discovery chain the way a strict
+  // RFC 9728 → RFC 8414 client (the Claude / claude.ai MCP connector) does:
+  // start from the 401 challenge, follow `resource_metadata` to the PRM, take
+  // `authorization_servers[0]`, and DERIVE the AS-metadata URL by inserting the
+  // issuer's path after `.well-known` — instead of hard-coding `/api/auth/...`.
+  // Crucially it runs against the FULL booted server, which has the SPA `/*`
+  // catch-all. The in-process bun:test harness has no SPA fallback, so an
+  // unmounted well-known there 404s; only here does it fall through to
+  // `index.html`. That is exactly the bug that shipped: the path-inserted
+  // discovery URL returned the SPA shell, so the connector's `JSON.parse` failed
+  // with "Unrecognized token '<'" and onboarding never started. This test
+  // onboards end-to-end using ONLY discovered endpoints, so it fails if any of
+  // them is unreachable or non-JSON.
+  test("onboards via the full discovery chain using only discovered endpoints", async ({
+    playwright,
+    orgContext,
+  }) => {
+    const anon = await playwright.request.newContext();
+    try {
+      const mcpUrl = mcpUrlForOrg(orgContext.org.orgId);
+
+      // 1. Tokenless initialize → 401 + RFC 9728 challenge carrying the PRM URL.
+      const challengeRes = await anon.post(mcpUrl, {
+        headers: { "Content-Type": "application/json", Accept: MCP_ACCEPT },
+        data: INIT,
+      });
+      expect(challengeRes.status()).toBe(401);
+      const challenge = challengeRes.headers()["www-authenticate"] ?? "";
+      const prmUrl = challenge.match(/resource_metadata="([^"]+)"/)?.[1];
+      expect(prmUrl, "challenge advertises resource_metadata").toBeTruthy();
+
+      // 2. PRM → authorization_servers[0] (the AS issuer identifier).
+      const prmRes = await anon.get(prmUrl!);
+      expect(prmRes.status()).toBe(200);
+      expect(prmRes.headers()["content-type"] ?? "").toContain("json");
+      const prm = (await prmRes.json()) as { authorization_servers: string[] };
+      const issuer = prm.authorization_servers[0]!;
+      expect(typeof issuer).toBe("string");
+
+      // 3. RFC 8414 §3.1 path-insertion — the step that broke. The derived URL
+      //    MUST return the metadata document as JSON, not the SPA shell.
+      const issuerUrl = new URL(issuer);
+      const discoveryUrl = `${issuerUrl.origin}/.well-known/oauth-authorization-server${issuerUrl.pathname.replace(/\/$/, "")}`;
+      const asRes = await anon.get(discoveryUrl);
+      expect(asRes.status(), `discovery URL ${discoveryUrl} must resolve`).toBe(200);
+      expect(
+        asRes.headers()["content-type"] ?? "",
+        "path-inserted discovery URL must be JSON, not the SPA shell",
+      ).toContain("json");
+      const asMeta = (await asRes.json()) as {
+        issuer: string;
+        registration_endpoint: string;
+        authorization_endpoint: string;
+        token_endpoint: string;
+      };
+      expect(asMeta.issuer).toBe(issuer); // RFC 8414 §3.3 byte-match
+
+      // 4. Onboard using ONLY the discovered endpoints (DCR → PKCE → token).
+      const clientId = await registerDcrClient(anon, asMeta.registration_endpoint);
+      const { code, verifier } = await authorizeToCode(
+        anon,
+        orgContext.auth.cookie,
+        clientId,
+        asMeta.authorization_endpoint,
+      );
+      const minted = await exchange(anon, clientId, code, verifier, mcpUrl, asMeta.token_endpoint);
+      expect(minted.status).toBe(200);
+      const accessToken = minted.body.access_token as string;
+      expect(typeof accessToken).toBe("string");
+
+      // 5. The discovered-and-minted token drives the org's MCP endpoint.
+      const init = await mcpRpc(anon, mcpUrl, { Authorization: `Bearer ${accessToken}` }, INIT);
+      expect(init.status).toBe(200);
+      expect(init.envelope.result?.serverInfo).toBeTruthy();
     } finally {
       await anon.dispose();
     }
