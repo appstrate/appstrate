@@ -737,6 +737,27 @@ describe("OAuth client CRUD", () => {
     expect(res.status).toBe(400);
   });
 
+  it("refuses a manual client on an auto-provisioned (remote MCP) auth (400)", async () => {
+    // The auto-DCR auth's token endpoint only accepts a public client acquired
+    // via DCR/CIMD; a hand-entered client_id points at the wrong OAuth server
+    // and, once stored, silently disables auto-registration. The PUT route must
+    // reject it (mirrors the UI hiding the form) so the trap can't be created
+    // via curl either.
+    await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
+    const res = await app.request("/api/integrations/@myorg/remote-mcp/oauth-clients/oauth", {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "L8NTR0830JX39XG8MWYFZ9ZV0WBARPLR", client_secret: "x" }),
+    });
+    expect(res.status).toBe(400);
+    // Nothing persisted — DCR stays the only path.
+    const rows = await db
+      .select()
+      .from(integrationOauthClients)
+      .where(eq(integrationOauthClients.integrationId, "@myorg/remote-mcp"));
+    expect(rows).toHaveLength(0);
+  });
+
   it("forbids a non-admin member from persisting an OAuth client secret (403)", async () => {
     // PUT .../oauth-clients/:authKey requires `integrations:install`, which
     // the `member` role does not hold (it only has read/connect/disconnect).
