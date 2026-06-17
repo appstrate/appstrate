@@ -92,7 +92,6 @@ export const notificationsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -213,10 +212,9 @@ export const notificationsPaths = {
     put: {
       operationId: "markNotificationReadByRun",
       tags: ["Notifications"],
-      summary: "Mark a run's notification as read (deprecated)",
-      deprecated: true,
+      summary: "Mark a run's notification as read",
       description:
-        "DEPRECATED (issue #667): mark the caller's notification for a run read, keyed by run id. Superseded by `PUT /api/notifications/{id}/read`. Idempotent (always 204). Removed in a follow-up release.",
+        "Mark the caller's notification for a run read, keyed by run id — complements `PUT /api/notifications/{id}/read` for callers that hold a run id but not the notification id. Idempotent: a missing run or non-recipient is a no-op, always 204.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },

@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { pgTable, text, uuid, timestamp, jsonb, index, check } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  uuid,
+  timestamp,
+  jsonb,
+  index,
+  uniqueIndex,
+  check,
+} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
@@ -60,6 +69,18 @@ export const notifications = pgTable(
       .on(table.applicationId, table.userId, table.endUserId)
       .where(sql`${table.readAt} IS NULL`),
     index("idx_notifications_run").on(table.runId),
+    // Defense-in-depth against a double fan-out: at most one notification of
+    // a given type per (run, recipient). The fan-out path is already
+    // exactly-once (finalizeRun CAS winner) and the backfill is historical-
+    // only, so these never fire in practice — but they make a duplicate
+    // structurally impossible if either invariant ever regresses. Two
+    // partial indexes because the recipient is split across two columns.
+    uniqueIndex("uq_notifications_run_user_type")
+      .on(table.runId, table.userId, table.type)
+      .where(sql`${table.userId} IS NOT NULL AND ${table.runId} IS NOT NULL`),
+    uniqueIndex("uq_notifications_run_end_user_type")
+      .on(table.runId, table.endUserId, table.type)
+      .where(sql`${table.endUserId} IS NOT NULL AND ${table.runId} IS NOT NULL`),
     // Exactly one recipient column populated. XOR via inequality of the
     // two NULL-tests.
     check(

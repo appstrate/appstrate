@@ -19,6 +19,8 @@ ALTER TABLE "notifications" ADD CONSTRAINT "notifications_end_user_id_end_users_
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_run_id_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."runs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "idx_notifications_unread" ON "notifications" USING btree ("application_id","user_id","end_user_id") WHERE "notifications"."read_at" IS NULL;--> statement-breakpoint
 CREATE INDEX "idx_notifications_run" ON "notifications" USING btree ("run_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_notifications_run_user_type" ON "notifications" USING btree ("run_id","user_id","type") WHERE "notifications"."user_id" IS NOT NULL AND "notifications"."run_id" IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_notifications_run_end_user_type" ON "notifications" USING btree ("run_id","end_user_id","type") WHERE "notifications"."end_user_id" IS NOT NULL AND "notifications"."run_id" IS NOT NULL;--> statement-breakpoint
 -- Backfill (issue #667): migrate the run-row notification state
 -- (runs.notified_at / runs.read_at) into per-recipient notification rows.
 -- created_at is set to the original notified_at to preserve ordering, and
@@ -37,12 +39,13 @@ SELECT r."org_id", r."application_id", r."end_user_id", 'run_completed', r."id",
        r."read_at", r."notified_at"
 FROM "runs" r
 WHERE r."notified_at" IS NOT NULL AND r."user_id" IS NULL AND r."end_user_id" IS NOT NULL;--> statement-breakpoint
--- 3. Schedule runs (no actor at all) → one row per current org member,
---    copying read_at to every member (the old global flag's effect).
+-- 3. Actor-less runs (no user, no end-user) → one row per org admin/owner,
+--    copying read_at to each (the old global flag's effect, bounded to the
+--    members who manage org/system schedules — see createRunNotifications).
 INSERT INTO "notifications" ("org_id", "application_id", "user_id", "type", "run_id", "payload", "read_at", "created_at")
 SELECT r."org_id", r."application_id", m."user_id", 'run_completed', r."id",
        jsonb_build_object('agent_id', r."package_id", 'status', r."status"),
        r."read_at", r."notified_at"
 FROM "runs" r
-JOIN "org_members" m ON m."org_id" = r."org_id"
+JOIN "org_members" m ON m."org_id" = r."org_id" AND m."role" IN ('owner', 'admin')
 WHERE r."notified_at" IS NOT NULL AND r."user_id" IS NULL AND r."end_user_id" IS NULL;

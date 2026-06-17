@@ -1,5 +1,5 @@
 {
-  "id": "cc3b2430-213d-4842-8260-b39f3eb1cf4e",
+  "id": "ced31d94-96f5-40a4-b328-9f99cd0d72ab",
   "prevId": "932ea6cb-110e-4b41-8ff4-de6baeca3589",
   "version": "7",
   "dialect": "postgresql",
@@ -4452,6 +4452,62 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_notifications_run_user_type": {
+          "name": "uq_notifications_run_user_type",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"notifications\".\"user_id\" IS NOT NULL AND \"notifications\".\"run_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_notifications_run_end_user_type": {
+          "name": "uq_notifications_run_end_user_type",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "end_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"notifications\".\"end_user_id\" IS NOT NULL AND \"notifications\".\"run_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

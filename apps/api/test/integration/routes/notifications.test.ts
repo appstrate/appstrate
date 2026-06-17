@@ -100,14 +100,27 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       expect(await unreadCount(authHeaders(ctx))).toBe(0);
     });
 
-    it("schedule / actor-less run fans out to every org member", async () => {
-      const userB = await createTestUser();
-      await addOrgMember(ctx.orgId, userB.id);
+    it("actor-less run fans out to org admins/owners only, not plain members", async () => {
+      const admin = await createTestUser();
+      await addOrgMember(ctx.orgId, admin.id, "admin");
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
 
       await seedNotifiedRun({ agentName: "sched-agent", actor: "schedule" });
 
+      // ctx.user is the org owner → recipient; the admin → recipient.
       expect(await unreadCount(authHeaders(ctx))).toBe(1);
-      expect(await unreadCount(headersFor(userB))).toBe(1);
+      expect(await unreadCount(headersFor(admin))).toBe(1);
+      // Plain member is NOT a recipient.
+      expect(await unreadCount(headersFor(member))).toBe(0);
+    });
+
+    it("is idempotent — a second fan-out for the same run creates no duplicate", async () => {
+      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const again = await createRunNotifications(scope(), run.id);
+
+      expect(again).toBe(0); // unique guard → onConflictDoNothing
+      expect(await unreadCount(authHeaders(ctx))).toBe(1);
     });
   });
 
@@ -208,9 +221,10 @@ describe("Notifications API (per-recipient, issue #667)", () => {
   describe("per-user read isolation", () => {
     it("A marking a fanned-out notification read leaves B's unread", async () => {
       const userB = await createTestUser();
-      await addOrgMember(ctx.orgId, userB.id);
+      // Both admins so the actor-less run fans out to each of them.
+      await addOrgMember(ctx.orgId, userB.id, "admin");
 
-      // Schedule run → one notification each for A and B.
+      // Actor-less run → one notification each for A (owner) and B (admin).
       await seedNotifiedRun({ agentName: "iso-agent", actor: "schedule" });
       expect(await unreadCount(authHeaders(ctx))).toBe(1);
       expect(await unreadCount(headersFor(userB))).toBe(1);
@@ -234,7 +248,8 @@ describe("Notifications API (per-recipient, issue #667)", () => {
   describe("PUT /api/notifications/read-all", () => {
     it("marks only the caller's notifications read", async () => {
       const userB = await createTestUser();
-      await addOrgMember(ctx.orgId, userB.id);
+      // Admin so the actor-less run fans out to B too.
+      await addOrgMember(ctx.orgId, userB.id, "admin");
       await seedNotifiedRun({ agentName: "all-agent", actor: "schedule" });
 
       const res = await app.request("/api/notifications/read-all", {

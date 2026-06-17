@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, eq, or, isNull, count, desc, sql, type SQL } from "drizzle-orm";
+import { and, eq, or, inArray, isNull, count, desc, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, notifications, organizationMembers } from "@appstrate/db/schema";
 import { scopedWhere } from "../../lib/db-helpers.ts";
@@ -44,7 +44,13 @@ export interface NotificationListResult {
  * Recipients (issue #667):
  *  - run triggered by a dashboard user → that user
  *  - run triggered by an end-user      → that end-user
- *  - schedule / no actor               → every current org member
+ *  - actor-less run (owner-less org / system schedule, where the scheduler
+ *    copied a null userId+endUserId onto the run) → org admins/owners only.
+ *    Owned schedules carry the owner's userId onto the run, so they hit the
+ *    first branch (one notification, no fan-out). Restricting the actor-less
+ *    case to admins bounds row growth and avoids bell-spamming every member
+ *    for a schedule nobody personally owns; plain members still see the run
+ *    in the runs list.
  *
  * Best-effort by contract: the caller wraps this in try/catch — the run is
  * already terminal, a notification write must never fail the run.
@@ -77,17 +83,29 @@ export async function createRunNotifications(scope: AppScope, runId: string): Pr
   } else if (run.endUserId) {
     rows = [{ ...base, endUserId: run.endUserId }];
   } else {
-    // Schedule or actor-less run → fan out to all current org members.
-    const members = await db
+    // Actor-less run → fan out to org admins/owners only.
+    const admins = await db
       .select({ userId: organizationMembers.userId })
       .from(organizationMembers)
-      .where(eq(organizationMembers.orgId, scope.orgId));
-    rows = members.map((m) => ({ ...base, userId: m.userId }));
+      .where(
+        and(
+          eq(organizationMembers.orgId, scope.orgId),
+          inArray(organizationMembers.role, ["owner", "admin"]),
+        ),
+      );
+    rows = admins.map((m) => ({ ...base, userId: m.userId }));
   }
 
   if (rows.length === 0) return 0;
-  await db.insert(notifications).values(rows);
-  return rows.length;
+  // onConflictDoNothing: a re-fire (the CAS should prevent it, but be safe)
+  // collides with the (run_id, recipient, type) unique indexes and is a no-op
+  // rather than an error. Return the count actually inserted.
+  const inserted = await db
+    .insert(notifications)
+    .values(rows)
+    .onConflictDoNothing()
+    .returning({ id: notifications.id });
+  return inserted.length;
 }
 
 /**
@@ -124,10 +142,11 @@ export async function markNotificationRead(
 }
 
 /**
- * Deprecated alias: mark read by run id rather than notification id, for the
- * pre-#667 `PUT /api/notifications/read/{runId}` endpoint. Marks the caller's
- * own notification(s) for that run read. Idempotent ack — never errors on a
- * non-recipient (preserves the old contract); removed in a follow-up release.
+ * Mark the caller's notification(s) for a run read, keyed by run id rather
+ * than notification id. First-class convenience for callers that hold a run
+ * id but not the notification id — the run-detail page marks the run's
+ * notification read on open. Idempotent ack: never errors on a missing run
+ * or non-recipient (nothing to mark is a no-op, not a 404).
  */
 export async function markNotificationReadByRun(
   scope: AppScope,

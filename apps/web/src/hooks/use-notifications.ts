@@ -79,8 +79,8 @@ export function useMarkRead() {
 
 /**
  * Mark the caller's notification for a run read, keyed by run id — used by the
- * run-detail page, which knows the run but not the notification id. Backed by
- * the deprecated `PUT /api/notifications/read/{runId}` alias (issue #667).
+ * run-detail page, which holds the run id but not the notification id.
+ * Backed by `PUT /api/notifications/read/{runId}`.
  */
 export function useMarkReadByRun() {
   const qc = useQueryClient();

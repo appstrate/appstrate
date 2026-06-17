@@ -2056,9 +2056,8 @@ export interface paths {
         };
         get?: never;
         /**
-         * Mark a run's notification as read (deprecated)
-         * @deprecated
-         * @description DEPRECATED (issue #667): mark the caller's notification for a run read, keyed by run id. Superseded by `PUT /api/notifications/{id}/read`. Idempotent (always 204). Removed in a follow-up release.
+         * Mark a run's notification as read
+         * @description Mark the caller's notification for a run read, keyed by run id — complements `PUT /api/notifications/{id}/read` for callers that hold a run id but not the notification id. Idempotent: a missing run or non-recipient is a no-op, always 204.
          */
         put: operations["markNotificationReadByRun"];
         post?: never;
@@ -11913,7 +11912,6 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
         };
     };
     markAllNotificationsRead: {

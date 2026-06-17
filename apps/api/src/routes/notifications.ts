@@ -74,10 +74,10 @@ export function createNotificationsRouter() {
     return c.body(null, 204);
   });
 
-  // PUT /api/notifications/read/:runId — DEPRECATED (issue #667). Pre-#667
-  // alias that marks the caller's notification for a run read by run id.
-  // Kept one release for backward compatibility; superseded by
-  // PUT /api/notifications/:id/read. Idempotent 204, never 404 (old contract).
+  // PUT /api/notifications/read/:runId — mark the caller's notification for a
+  // run read, keyed by run id (the run-detail page holds the run id, not the
+  // notification id). Complements PUT /notifications/:id/read. Idempotent 204
+  // — a missing run or non-recipient is a no-op, not a 404.
   router.put("/notifications/read/:runId", async (c) => {
     const actor = getActor(c);
     const scope = getAppScope(c);
