@@ -1,7 +1,7 @@
 CREATE TABLE "notifications" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"org_id" uuid NOT NULL,
-	"application_id" text,
+	"application_id" text NOT NULL,
 	"user_id" text,
 	"end_user_id" text,
 	"type" text NOT NULL,

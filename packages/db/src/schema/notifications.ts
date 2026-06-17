@@ -42,11 +42,16 @@ export const notifications = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    // Same app-scoping as runs. Nullable because non-app-scoped
-    // notification types (future) may have no application context.
-    applicationId: text("application_id").references(() => applications.id, {
-      onDelete: "cascade",
-    }),
+    // Same app-scoping as runs. NOT NULL: every notification is app-scoped
+    // (the `scopedWhere` reader always filters `application_id = ?`, so a NULL
+    // would be unreachable). A future org-global notification type would need
+    // both a nullable column and a scopedWhere change — deferred until it
+    // exists (YAGNI) rather than shipping an unqueryable NULL today.
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, {
+        onDelete: "cascade",
+      }),
     // Recipient — exactly one of the two is set (CHECK below).
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     endUserId: text("end_user_id").references(() => endUsers.id, { onDelete: "cascade" }),

@@ -11,7 +11,10 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedEndUser, seedApplication } from "../../helpers/seed.ts";
-import { createRunNotifications } from "../../../src/services/state/notifications.ts";
+import {
+  createRunNotifications,
+  markNotificationReadByRun,
+} from "../../../src/services/state/notifications.ts";
 import { db } from "@appstrate/db/client";
 import { notifications, runs } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -124,6 +127,47 @@ describe("Notifications API (per-recipient, issue #667)", () => {
 
       expect(again).toBe(0); // unique guard → onConflictDoNothing
       expect(await unreadCount(authHeaders(ctx))).toBe(1);
+    });
+
+    it("carries a failed run's status through to the payload", async () => {
+      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id }, status: "failed" });
+
+      const data = await listNotifications(authHeaders(ctx));
+      expect(data).toHaveLength(1);
+      expect(data[0]!.run_id).toBe(run.id);
+      expect(data[0]!.payload?.status).toBe("failed");
+    });
+
+    it("is exactly-once under a concurrent double fan-out (unique index, not just app logic)", async () => {
+      // Seed the run without fanning out, then fire the fan-out twice
+      // concurrently — the partial unique indexes must enforce a single row
+      // even when onConflictDoNothing races with itself.
+      await seedAgent({
+        id: "@notiforg/race-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      }).catch(() => {});
+      const run = await seedRun({
+        packageId: "@notiforg/race-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        status: "success",
+        notifiedAt: new Date(),
+        userId: ctx.user.id,
+      });
+
+      const [a, b] = await Promise.all([
+        createRunNotifications(scope(), run.id),
+        createRunNotifications(scope(), run.id),
+      ]);
+      // Exactly one of the two racers wins the insert; the other no-ops.
+      expect(a + b).toBe(1);
+
+      const rows = await db
+        .select({ id: notifications.id })
+        .from(notifications)
+        .where(eq(notifications.runId, run.id));
+      expect(rows).toHaveLength(1);
     });
   });
 
@@ -355,16 +399,76 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     });
   });
 
+  // ─── end-user recipient mark path (type-aware actorFilter) ──
+  //
+  // The recipient filter keys on actor.type to select exactly one column, so
+  // an end-user marks only end-user rows and a dashboard user never matches an
+  // end-user row (and vice-versa) — independent of any id-prefix convention.
+
+  describe("end-user recipient mark path", () => {
+    const readAtOf = async (runId: string): Promise<Date | null> => {
+      const [row] = await db
+        .select({ readAt: notifications.readAt })
+        .from(notifications)
+        .where(eq(notifications.runId, runId));
+      return row!.readAt;
+    };
+
+    it("an end-user actor marks their own notification read", async () => {
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        name: "EU mark",
+      });
+      const run = await seedNotifiedRun({ agentName: "eu-mark", actor: { endUserId: eu.id } });
+      expect(await readAtOf(run.id)).toBeNull();
+
+      await markNotificationReadByRun(scope(), run.id, { type: "end_user", id: eu.id });
+      expect(await readAtOf(run.id)).not.toBeNull();
+    });
+
+    it("a dashboard user does NOT match an end-user's notification row", async () => {
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        name: "EU isolated",
+      });
+      const run = await seedNotifiedRun({ agentName: "eu-iso", actor: { endUserId: eu.id } });
+
+      // Same id value passed under the wrong actor type must not clear the row.
+      await markNotificationReadByRun(scope(), run.id, { type: "user", id: eu.id });
+      expect(await readAtOf(run.id)).toBeNull();
+    });
+  });
+
   // ─── notifications_one_recipient CHECK ──────────────────────
 
   describe("notifications_one_recipient CHECK", () => {
+    // Assert the insert is rejected *specifically* by the one-recipient CHECK
+    // (not incidentally by some other NOT NULL/FK), so the test can't pass for
+    // the wrong reason if the schema later changes. The driver wraps the pg
+    // error; the constraint name surfaces on the `cause` chain (verified under
+    // both PGlite and postgres.js — SQLSTATE 23514).
+    async function expectOneRecipientViolation(p: Promise<unknown>): Promise<void> {
+      let err: unknown;
+      try {
+        await p;
+      } catch (e) {
+        err = e;
+      }
+      expect(err, "expected the insert to be rejected by the CHECK").toBeDefined();
+      const cause = (err as { cause?: { message?: string } })?.cause;
+      const detail = String(cause?.message ?? cause ?? (err as Error)?.message ?? err);
+      expect(detail).toContain("notifications_one_recipient");
+    }
+
     it("rejects a row with both a user and an end-user recipient", async () => {
       const eu = await seedEndUser({
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
         name: "Both",
       });
-      await expect(
+      await expectOneRecipientViolation(
         db
           .insert(notifications)
           .values({
@@ -375,11 +479,11 @@ describe("Notifications API (per-recipient, issue #667)", () => {
             type: "run_completed",
           })
           .execute(),
-      ).rejects.toThrow();
+      );
     });
 
     it("rejects a row with neither recipient", async () => {
-      await expect(
+      await expectOneRecipientViolation(
         db
           .insert(notifications)
           .values({
@@ -388,7 +492,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
             type: "run_completed",
           })
           .execute(),
-      ).rejects.toThrow();
+      );
     });
   });
 
@@ -533,25 +637,54 @@ describe("Notifications API (per-recipient, issue #667)", () => {
   // ─── Legacy runs.readAt dual-write (#667 transition) ────────
 
   describe("legacy runs.readAt dual-write", () => {
-    it("mark-by-id also clears the run's legacy readAt flag", async () => {
+    const readAtOf = async (runId: string): Promise<Date | null> => {
+      const [row] = await db.select({ readAt: runs.readAt }).from(runs).where(eq(runs.id, runId));
+      return row!.readAt;
+    };
+
+    it("mark-by-id also clears the run's legacy readAt flag (was NULL before)", async () => {
       const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      expect(await readAtOf(run.id)).toBeNull(); // pre-condition pinned
       const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
       await app.request(`/api/notifications/${id}/read`, {
         method: "PUT",
         headers: authHeaders(ctx),
       });
-      const [row] = await db.select({ readAt: runs.readAt }).from(runs).where(eq(runs.id, run.id));
-      expect(row!.readAt).not.toBeNull();
+      expect(await readAtOf(run.id)).not.toBeNull();
     });
 
-    it("mark-by-run also clears the run's legacy readAt flag", async () => {
+    it("mark-by-run also clears the run's legacy readAt flag (was NULL before)", async () => {
       const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      expect(await readAtOf(run.id)).toBeNull();
       await app.request(`/api/notifications/read/${run.id}`, {
         method: "PUT",
         headers: authHeaders(ctx),
       });
-      const [row] = await db.select({ readAt: runs.readAt }).from(runs).where(eq(runs.id, run.id));
-      expect(row!.readAt).not.toBeNull();
+      expect(await readAtOf(run.id)).not.toBeNull();
+    });
+
+    it("mark-by-id leaves OTHER runs' legacy readAt untouched", async () => {
+      const target = await seedNotifiedRun({
+        agentName: "dw-target",
+        actor: { userId: ctx.user.id },
+      });
+      const other = await seedNotifiedRun({
+        agentName: "dw-other",
+        actor: { userId: ctx.user.id },
+      });
+
+      const targetNotif = (await listNotifications(authHeaders(ctx))).find(
+        (n) => n.run_id === target.id,
+      )!;
+      await app.request(`/api/notifications/${targetNotif.id}/read`, {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
+
+      expect(await readAtOf(target.id)).not.toBeNull();
+      // The mark is keyed by the notification's run id — the other run's flag
+      // must stay NULL.
+      expect(await readAtOf(other.id)).toBeNull();
     });
   });
 

@@ -3,7 +3,10 @@
 import { and, eq, or, inArray, isNull, isNotNull, count, desc, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, notifications, organizationMembers } from "@appstrate/db/schema";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { scopedWhere } from "../../lib/db-helpers.ts";
+import { actorFilter, type Actor } from "../../lib/actor.ts";
+import { logger } from "../../lib/logger.ts";
 import { listRunsWithFilter } from "./runs.ts";
 import type { AppScope } from "../../lib/scope.ts";
 
@@ -11,15 +14,18 @@ import type { AppScope } from "../../lib/scope.ts";
 //
 // Notifications live in their own per-recipient table (`notifications`),
 // one row per recipient, with per-user read-state by construction (issue
-// #667). The recipient is identified by the same nullable
-// `{userId, endUserId}` pair used everywhere else; an actor id matches at
-// most one of the two columns (user ids are UUID-ish, end-user ids carry
-// the `eu_` prefix — they never collide), so a single OR filter scopes a
-// query to the caller's own notifications without needing the actor type.
+// #667). The recipient is the same nullable `{userId, endUserId}` pair used
+// everywhere else; the caller's own rows are selected with the shared
+// type-aware `actorFilter`, which keys on `actor.type` to match exactly the
+// one recipient column that applies — so correctness does not rest on the
+// (unenforced) assumption that user ids and end-user ids never collide.
 
-/** Match the caller's own notifications by recipient column (user OR end-user). */
-function recipientFilter(actorId: string): SQL {
-  return or(eq(notifications.userId, actorId), eq(notifications.endUserId, actorId))!;
+/** Match the caller's own notifications by their recipient column. */
+function recipientFilter(actor: Actor): SQL {
+  return actorFilter(actor, {
+    userId: notifications.userId,
+    endUserId: notifications.endUserId,
+  });
 }
 
 /** Shape returned to the notifications list endpoint. */
@@ -117,22 +123,36 @@ export async function createRunNotifications(scope: AppScope, runId: string): Pr
  * those already notified and still unread — a verbatim port of the pre-#667
  * mark queries. Best-effort relative to the authoritative notifications write.
  */
-async function legacyMarkRunsRead(scope: AppScope, actorId: string, runId?: string): Promise<void> {
-  await db
-    .update(runs)
-    .set({ readAt: new Date() })
-    .where(
-      scopedWhere(runs, {
-        orgId: scope.orgId,
-        applicationId: scope.applicationId,
-        extra: [
-          ...(runId ? [eq(runs.id, runId)] : []),
-          actorOrOrgFilter(actorId),
-          isNotNull(runs.notifiedAt),
-          isNull(runs.readAt),
-        ],
-      }),
-    );
+async function legacyMarkRunsRead(scope: AppScope, actor: Actor, runId?: string): Promise<void> {
+  // Best-effort relative to the authoritative notifications write: the
+  // per-recipient UPDATE has already committed by the time we get here, so a
+  // failure of this transitional mirror (lock timeout, transient) must not
+  // surface as an error to the caller — swallow and log, matching the
+  // best-effort contract of the finalize fan-out. Dropped here only means a
+  // legacy run-list/schedule badge lags until the next mark; the authoritative
+  // state is correct.
+  try {
+    await db
+      .update(runs)
+      .set({ readAt: sql`now()` })
+      .where(
+        scopedWhere(runs, {
+          orgId: scope.orgId,
+          applicationId: scope.applicationId,
+          extra: [
+            ...(runId ? [eq(runs.id, runId)] : []),
+            actorOrOrgFilter(actor),
+            isNotNull(runs.notifiedAt),
+            isNull(runs.readAt),
+          ],
+        }),
+      );
+  } catch (err) {
+    logger.warn("notifications: legacy runs.readAt dual-write failed (non-fatal)", {
+      runId,
+      err: getErrorMessage(err),
+    });
+  }
 }
 
 /**
@@ -150,12 +170,12 @@ async function legacyMarkRunsRead(scope: AppScope, actorId: string, runId?: stri
 export async function markNotificationRead(
   scope: AppScope,
   notificationId: string,
-  actorId: string,
+  actor: Actor,
 ): Promise<boolean> {
   const where = scopedWhere(notifications, {
     orgId: scope.orgId,
     applicationId: scope.applicationId,
-    extra: [eq(notifications.id, notificationId), recipientFilter(actorId)],
+    extra: [eq(notifications.id, notificationId), recipientFilter(actor)],
   })!;
 
   const updated = await db
@@ -166,7 +186,7 @@ export async function markNotificationRead(
   if (updated.length === 0) return false;
 
   const runId = updated[0]!.runId;
-  if (runId) await legacyMarkRunsRead(scope, actorId, runId);
+  if (runId) await legacyMarkRunsRead(scope, actor, runId);
   return true;
 }
 
@@ -180,45 +200,42 @@ export async function markNotificationRead(
 export async function markNotificationReadByRun(
   scope: AppScope,
   runId: string,
-  actorId: string,
+  actor: Actor,
 ): Promise<void> {
   await db
     .update(notifications)
-    .set({ readAt: new Date() })
+    .set({ readAt: sql`now()` })
     .where(
       scopedWhere(notifications, {
         orgId: scope.orgId,
         applicationId: scope.applicationId,
         extra: [
           eq(notifications.runId, runId),
-          recipientFilter(actorId),
+          recipientFilter(actor),
           isNull(notifications.readAt),
         ],
       }),
     );
-  await legacyMarkRunsRead(scope, actorId, runId);
+  await legacyMarkRunsRead(scope, actor, runId);
 }
 
-export async function markAllNotificationsRead(scope: AppScope, actorId: string): Promise<number> {
+export async function markAllNotificationsRead(scope: AppScope, actor: Actor): Promise<number> {
   const updated = await db
     .update(notifications)
-    .set({ readAt: new Date() })
+    .set({ readAt: sql`now()` })
     .where(
       scopedWhere(notifications, {
         orgId: scope.orgId,
         applicationId: scope.applicationId,
-        extra: [recipientFilter(actorId), isNull(notifications.readAt)],
+        extra: [recipientFilter(actor), isNull(notifications.readAt)],
       }),
     )
     .returning({ id: notifications.id });
-  await legacyMarkRunsRead(scope, actorId);
+  await legacyMarkRunsRead(scope, actor);
   return updated.length;
 }
 
-export async function getUnreadNotificationCount(
-  scope: AppScope,
-  actorId: string,
-): Promise<number> {
+export async function getUnreadNotificationCount(scope: AppScope, actor: Actor): Promise<number> {
   const [row] = await db
     .select({ count: count() })
     .from(notifications)
@@ -226,7 +243,7 @@ export async function getUnreadNotificationCount(
       scopedWhere(notifications, {
         orgId: scope.orgId,
         applicationId: scope.applicationId,
-        extra: [recipientFilter(actorId), isNull(notifications.readAt)],
+        extra: [recipientFilter(actor), isNull(notifications.readAt)],
       }),
     );
   return row?.count ?? 0;
@@ -234,7 +251,7 @@ export async function getUnreadNotificationCount(
 
 export async function getUnreadCountsByAgent(
   scope: AppScope,
-  actorId: string,
+  actor: Actor,
 ): Promise<Record<string, number>> {
   const agentId = sql<string | null>`${notifications.payload}->>'agent_id'`;
   const rows = await db
@@ -244,11 +261,7 @@ export async function getUnreadCountsByAgent(
       scopedWhere(notifications, {
         orgId: scope.orgId,
         applicationId: scope.applicationId,
-        extra: [
-          recipientFilter(actorId),
-          isNull(notifications.readAt),
-          sql`${agentId} IS NOT NULL`,
-        ],
+        extra: [recipientFilter(actor), isNull(notifications.readAt), sql`${agentId} IS NOT NULL`],
       }),
     )
     .groupBy(agentId);
@@ -262,14 +275,14 @@ export async function getUnreadCountsByAgent(
 
 export async function listNotifications(
   scope: AppScope,
-  actorId: string,
+  actor: Actor,
   options: { unread?: boolean; limit?: number; offset?: number } = {},
 ): Promise<NotificationListResult> {
   const { unread = false, limit = 20, offset = 0 } = options;
   const where = scopedWhere(notifications, {
     orgId: scope.orgId,
     applicationId: scope.applicationId,
-    extra: [recipientFilter(actorId), ...(unread ? [isNull(notifications.readAt)] : [])],
+    extra: [recipientFilter(actor), ...(unread ? [isNull(notifications.readAt)] : [])],
   })!;
 
   const [rows, [totalRow]] = await Promise.all([
@@ -308,21 +321,21 @@ export async function listNotifications(
 // Unrelated to notifications, but the handler shares this module. The
 // "my runs" view keeps the original actor-or-org-visible semantics.
 
-function actorOwnershipFilter(actorId: string): SQL {
-  return or(eq(runs.userId, actorId), eq(runs.endUserId, actorId))!;
+function actorOwnershipFilter(actor: Actor): SQL {
+  return actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId });
 }
 
 /**
  * Filter: actor-owned OR org-visible runs (no dashboard user) — covers
  * self-triggered runs, schedule-triggered runs, and end-user runs.
  */
-function actorOrOrgFilter(actorId: string): SQL {
-  return or(actorOwnershipFilter(actorId), isNull(runs.userId))!;
+function actorOrOrgFilter(actor: Actor): SQL {
+  return or(actorOwnershipFilter(actor), isNull(runs.userId))!;
 }
 
 export async function listUserRuns(
   scope: AppScope,
-  actorId: string,
+  actor: Actor,
   options: { limit?: number; offset?: number } = {},
 ) {
   const { limit = 20, offset = 0 } = options;
@@ -330,7 +343,7 @@ export async function listUserRuns(
     scopedWhere(runs, {
       orgId: scope.orgId,
       applicationId: scope.applicationId,
-      extra: [actorOrOrgFilter(actorId)],
+      extra: [actorOrOrgFilter(actor)],
     })!,
     limit,
     offset,

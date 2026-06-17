@@ -40,7 +40,7 @@ export function createNotificationsRouter() {
       .min(0)
       .catch(0)
       .parse(c.req.query("offset") ?? 0);
-    const result = await listNotifications(scope, actor.id, { unread, limit, offset });
+    const result = await listNotifications(scope, actor, { unread, limit, offset });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);
   });
@@ -49,7 +49,7 @@ export function createNotificationsRouter() {
   router.get("/notifications/unread-count", async (c) => {
     const actor = getActor(c);
     const scope = getAppScope(c);
-    const count = await getUnreadNotificationCount(scope, actor.id);
+    const count = await getUnreadNotificationCount(scope, actor);
     return c.json({ count });
   });
 
@@ -57,7 +57,7 @@ export function createNotificationsRouter() {
   router.get("/notifications/unread-counts-by-agent", async (c) => {
     const actor = getActor(c);
     const scope = getAppScope(c);
-    const counts = await getUnreadCountsByAgent(scope, actor.id);
+    const counts = await getUnreadCountsByAgent(scope, actor);
     return c.json({ counts });
   });
 
@@ -69,7 +69,7 @@ export function createNotificationsRouter() {
     // Idempotent for the recipient (204 whether it was unread or already
     // read); 404 when the notification isn't the caller's — no silent no-op
     // for non-recipients (issue #667).
-    const ok = await markNotificationRead(scope, id, actor.id);
+    const ok = await markNotificationRead(scope, id, actor);
     if (!ok) throw notFound("Notification not found");
     return c.body(null, 204);
   });
@@ -82,7 +82,7 @@ export function createNotificationsRouter() {
     const actor = getActor(c);
     const scope = getAppScope(c);
     const runId = c.req.param("runId");
-    await markNotificationReadByRun(scope, runId, actor.id);
+    await markNotificationReadByRun(scope, runId, actor);
     return c.body(null, 204);
   });
 
@@ -91,7 +91,7 @@ export function createNotificationsRouter() {
   router.put("/notifications/read-all", async (c) => {
     const actor = getActor(c);
     const scope = getAppScope(c);
-    const updated = await markAllNotificationsRead(scope, actor.id);
+    const updated = await markAllNotificationsRead(scope, actor);
     return c.json({ updated_count: updated });
   });
 
@@ -119,7 +119,7 @@ export function createNotificationsRouter() {
 
     // End-users always see only their own runs — same semantic as before.
     if (userFilter === "me" || endUser) {
-      const result = await listUserRuns(scope, actor.id, { limit, offset });
+      const result = await listUserRuns(scope, actor, { limit, offset });
       setOffsetLinkHeader({ c, limit, offset, total: result.total });
       return c.json(result);
     }
