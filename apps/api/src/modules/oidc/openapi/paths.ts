@@ -527,6 +527,26 @@ export const oidcPaths = {
       responses: { "200": { description: "Authorization server metadata document." } },
     },
   },
+  "/.well-known/openid-configuration/api/auth": {
+    get: {
+      operationId: "oidcDiscoveryPathInserted",
+      tags: ["OAuth Clients"],
+      summary: "OpenID Connect discovery document (RFC 8414 path-inserted)",
+      description:
+        "Same document as `/.well-known/openid-configuration`. The advertised issuer is `${APP_URL}/api/auth`, so RFC 8414 path-aware clients insert the issuer path after `.well-known` and request the discovery document here.",
+      responses: { "200": { description: "OpenID Configuration document." } },
+    },
+  },
+  "/.well-known/oauth-authorization-server/api/auth": {
+    get: {
+      operationId: "oauthServerMetadataPathInserted",
+      tags: ["OAuth Clients"],
+      summary: "OAuth 2.0 Authorization Server Metadata (RFC 8414 path-inserted)",
+      description:
+        "Same document as `/.well-known/oauth-authorization-server`. The advertised issuer is `${APP_URL}/api/auth`, so RFC 8414 path-aware clients insert the issuer path after `.well-known` and request the metadata document here.",
+      responses: { "200": { description: "Authorization server metadata document." } },
+    },
+  },
 
   // ─── Logout ─────────────────────────────────────────────────────────────
 
