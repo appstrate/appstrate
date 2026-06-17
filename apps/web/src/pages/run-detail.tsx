@@ -64,12 +64,11 @@ export function RunDetailPage() {
   const markRead = useMarkReadByRun();
 
   // Auto-mark notification as read when viewing a terminal run. Keyed on
-  // `status` (not `notifiedAt`): the SSE run patch carries `status` but not
-  // `notifiedAt` (see `runUpdateToRunPatch`), so a run that finalizes while
-  // the page is open marks read the moment status flips terminal — `notifiedAt`
-  // would stay null in the cache until a full refetch. Idempotent server-side
-  // (no-op for a non-recipient / already-read), and `status` is stable once
-  // terminal so the effect does not re-fire on subsequent renders.
+  // `status`: the SSE run patch carries `status` (see `runUpdateToRunPatch`),
+  // so a run that finalizes while the page is open marks read the moment
+  // status flips terminal. Idempotent server-side (no-op for a non-recipient /
+  // already-read), and `status` is stable once terminal so the effect does not
+  // re-fire on subsequent renders.
   useEffect(() => {
     const terminal = !!status && !(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
     if (run && runId && terminal) {

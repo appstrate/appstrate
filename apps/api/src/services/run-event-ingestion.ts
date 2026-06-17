@@ -457,7 +457,6 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
       duration: resolvedDurationMs,
       cost: cost > 0 ? cost : null,
       sinkClosedAt: now,
-      notifiedAt: now,
       // Per-run checkpoint snapshot — read by `getRecentRuns` to feed the
       // sidecar `run_history` tool. The unified `package_persistence`
       // store only keeps the latest checkpoint per actor (last-write-wins
@@ -646,9 +645,9 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // status broadcast below — the broadcast is what updates the UI and fires
   // webhooks. Best-effort by contract: the run is already terminal, so a
   // transient INSERT failure is logged and swallowed, never failing the
-  // runner finalize. The legacy `runs.notifiedAt` flag is still written
-  // atomically in the CAS update above for one release (dual-write soft
-  // transition), so the run-list badge survives a dropped fan-out.
+  // runner finalize. The `notifications` table is the sole source of
+  // notification read-state; a dropped fan-out means a missing bell entry, not
+  // a stuck run-list badge (the badge derives from the same table).
   void createRunNotifications(scope, run.id).catch((err) => {
     logger.error("finalize: notification fan-out failed (run already terminal)", {
       runId: run.id,

@@ -138,7 +138,7 @@ The exceptions to "wire = snake_case". Each has explicit documented reason.
 
 These specific field names stay camelCase on **Drizzle, wire DTOs, OpenAPI, frontend reads** — same convention from SQL up to the JSON wire:
 
-**Timestamps**: `createdAt`, `updatedAt`, `expiresAt`, `revokedAt`, `lastUsedAt`, `notifiedAt`, `readAt`
+**Timestamps**: `createdAt`, `updatedAt`, `expiresAt`, `revokedAt`, `lastUsedAt`
 
 **Universal FK to ubiquitous tables**: `id`, `userId`, `orgId`, `applicationId`, `packageId`, `endUserId`, `apiKeyId`, `scheduleId`, `modelCredentialId`
 
@@ -423,7 +423,7 @@ This is the single canonical contract for frontend, SDK, github-action, and MCP 
 
 **Cloud billing wire**: `usage_percent`, `credits_used`, `credit_quota`, `period_end`, `cancel_at_period_end`, `plan_id`, `return_url`
 
-**Universal DB convention** (camelCase carve-out on wire): `id`, `createdAt`, `updatedAt`, `expiresAt`, `revokedAt`, `lastUsedAt`, `notifiedAt`, `readAt`, `runNumber`, `userId`, `orgId`, `applicationId`, `packageId`, `endUserId`, `apiKeyId`, `scheduleId`, `runOrigin`, `contextSnapshot`, `modelCredentialId`
+**Universal DB convention** (camelCase carve-out on wire): `id`, `createdAt`, `updatedAt`, `expiresAt`, `revokedAt`, `lastUsedAt`, `runNumber`, `userId`, `orgId`, `applicationId`, `packageId`, `endUserId`, `apiKeyId`, `scheduleId`, `runOrigin`, `contextSnapshot`, `modelCredentialId`
 
 **⚠️ The carve-out is this EXACT list — not a pattern.** Only the timestamp fields (`*At`) and id fields (`id`, `*Id`) above stay camelCase. Look-alikes that are NOT on the list are domain fields and go **snake_case on the wire**, even though they resemble a carve-out:
 
@@ -535,7 +535,7 @@ rg "(\.|:\s+)(displayName|schemaVersion|forkedFrom|runningRuns|usedByAgents|reus
 
 ```bash
 # Universal DB convention should stay camelCase
-rg "(\.|:\s+)(created_at|updated_at|user_id|org_id|application_id|package_id|end_user_id|api_key_id|schedule_id|expires_at|revoked_at|last_used_at|notified_at|read_at|run_number|run_origin|context_snapshot|model_credential_id)\b" -t ts -t tsx
+rg "(\.|:\s+)(created_at|updated_at|user_id|org_id|application_id|package_id|end_user_id|api_key_id|schedule_id|expires_at|revoked_at|last_used_at|run_number|run_origin|context_snapshot|model_credential_id)\b" -t ts -t tsx
 ```
 
 ### Find Drizzle pgTable with snake_case TS fields (bug)

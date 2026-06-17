@@ -18,7 +18,7 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
 
   // Running + unread counts scoped to this schedule's runs
   const runningRuns = runs?.filter((e) => ACTIVE_RUN_STATUSES.has(e.status)).length ?? 0;
-  const unreadCount = runs?.filter((e) => e.notifiedAt != null && e.readAt == null).length ?? 0;
+  const unreadCount = runs?.filter((e) => e.unread).length ?? 0;
 
   const isActive = schedule.enabled ?? true;
   const lastRunNumber = runs?.[0]?.runNumber ?? 0;

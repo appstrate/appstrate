@@ -521,8 +521,6 @@ export const schemas = {
       "completed_at",
       "duration",
       "cost",
-      "notifiedAt",
-      "readAt",
       "runNumber",
       "token_usage",
       "version_label",
@@ -546,6 +544,7 @@ export const schemas = {
       "schedule_name",
       "connections_used",
       "package_ephemeral",
+      "unread",
     ],
     properties: {
       id: { type: "string" },
@@ -710,16 +709,10 @@ export const schemas = {
         description:
           "Inline runs only. Snapshot of the prompt submitted at run time. Null once the shadow has been compacted.",
       },
-      notifiedAt: {
-        type: ["string", "null"],
-        format: "date-time",
+      unread: {
+        type: "boolean",
         description:
-          "When the user was notified of run completion (in-app notification). Null until notification fires.",
-      },
-      readAt: {
-        type: ["string", "null"],
-        format: "date-time",
-        description: "When the user marked the run notification as read. Null until acknowledged.",
+          "True when the requesting recipient has an unread notification for this run (issue #667). Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count.",
       },
       runNumber: {
         type: ["integer", "null"],

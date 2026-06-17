@@ -4822,16 +4822,8 @@ export interface components {
             } | null;
             /** @description Inline runs only. Snapshot of the prompt submitted at run time. Null once the shadow has been compacted. */
             inline_prompt?: string | null;
-            /**
-             * Format: date-time
-             * @description When the user was notified of run completion (in-app notification). Null until notification fires.
-             */
-            notifiedAt: string | null;
-            /**
-             * Format: date-time
-             * @description When the user marked the run notification as read. Null until acknowledged.
-             */
-            readAt: string | null;
+            /** @description True when the requesting recipient has an unread notification for this run (issue #667). Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count. */
+            unread: boolean;
             /** @description Per-(app, package) monotonic counter assigned at run creation. Stable identifier for UI display. */
             runNumber: number | null;
             /**
@@ -6261,8 +6253,7 @@ export interface operations {
                      *       "completed_at": null,
                      *       "duration": null,
                      *       "cost": null,
-                     *       "notifiedAt": null,
-                     *       "readAt": null,
+                     *       "unread": false,
                      *       "runNumber": 17,
                      *       "token_usage": null,
                      *       "version_label": "1.2.0",
@@ -16197,8 +16188,7 @@ export interface operations {
                      *       "completed_at": null,
                      *       "duration": null,
                      *       "cost": null,
-                     *       "notifiedAt": null,
-                     *       "readAt": null,
+                     *       "unread": false,
                      *       "runNumber": 1,
                      *       "token_usage": null,
                      *       "version_label": null,
@@ -16519,8 +16509,7 @@ export interface operations {
                      *       "completed_at": "2026-01-15T10:31:12Z",
                      *       "duration": 72000,
                      *       "cost": 0.0034,
-                     *       "notifiedAt": "2026-01-15T10:31:12Z",
-                     *       "readAt": null,
+                     *       "unread": true,
                      *       "runNumber": 17,
                      *       "token_usage": {
                      *         "input_tokens": 8200,
@@ -16626,8 +16615,7 @@ export interface operations {
                      *       "completed_at": "2026-01-15T10:30:45Z",
                      *       "duration": 45000,
                      *       "cost": 0.0012,
-                     *       "notifiedAt": null,
-                     *       "readAt": null,
+                     *       "unread": false,
                      *       "runNumber": 18,
                      *       "token_usage": null,
                      *       "version_label": "1.2.0",

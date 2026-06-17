@@ -16,7 +16,7 @@ import {
   markNotificationReadByRun,
 } from "../../../src/services/state/notifications.ts";
 import { db } from "@appstrate/db/client";
-import { notifications, runs } from "@appstrate/db/schema";
+import { notifications } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 
 const app = getTestApp();
@@ -67,7 +67,6 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       status: opts.status ?? "success",
-      notifiedAt: new Date(),
       ...(opts.actor === "schedule" ? {} : opts.actor),
     });
     await createRunNotifications(scope(), run.id);
@@ -152,7 +151,6 @@ describe("Notifications API (per-recipient, issue #667)", () => {
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
         status: "success",
-        notifiedAt: new Date(),
         userId: ctx.user.id,
       });
 
@@ -634,57 +632,53 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     });
   });
 
-  // ─── Legacy runs.readAt dual-write (#667 transition) ────────
+  // ─── Per-recipient `unread` flag on enriched runs (badge source) ──
+  //
+  // The run-list / schedule-card unread badges read `EnrichedRun.unread`,
+  // derived from the notifications table for the requesting actor (issue
+  // #667). No `runs.notifiedAt` / `runs.readAt` columns exist any more — the
+  // notifications table is the single source of read-state.
 
-  describe("legacy runs.readAt dual-write", () => {
-    const readAtOf = async (runId: string): Promise<Date | null> => {
-      const [row] = await db.select({ readAt: runs.readAt }).from(runs).where(eq(runs.id, runId));
-      return row!.readAt;
+  describe("enriched run `unread` flag", () => {
+    const unreadOf = async (
+      headers: Record<string, string>,
+      runId: string,
+    ): Promise<boolean | undefined> => {
+      const res = await app.request("/api/runs", { headers });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ id: string; unread: boolean }> };
+      return body.data.find((r) => r.id === runId)?.unread;
     };
 
-    it("mark-by-id also clears the run's legacy readAt flag (was NULL before)", async () => {
+    it("is true while the recipient's notification is unread, false after mark", async () => {
       const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
-      expect(await readAtOf(run.id)).toBeNull(); // pre-condition pinned
+      expect(await unreadOf(authHeaders(ctx), run.id)).toBe(true);
+
       const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
       await app.request(`/api/notifications/${id}/read`, {
         method: "PUT",
         headers: authHeaders(ctx),
       });
-      expect(await readAtOf(run.id)).not.toBeNull();
+      expect(await unreadOf(authHeaders(ctx), run.id)).toBe(false);
     });
 
-    it("mark-by-run also clears the run's legacy readAt flag (was NULL before)", async () => {
-      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
-      expect(await readAtOf(run.id)).toBeNull();
-      await app.request(`/api/notifications/read/${run.id}`, {
-        method: "PUT",
-        headers: authHeaders(ctx),
-      });
-      expect(await readAtOf(run.id)).not.toBeNull();
-    });
+    it("is per-recipient — A marking read does not clear B's unread flag", async () => {
+      const userB = await createTestUser();
+      await addOrgMember(ctx.orgId, userB.id, "admin");
+      // Actor-less run → one notification each for A (owner) and B (admin).
+      const run = await seedNotifiedRun({ agentName: "unread-iso", actor: "schedule" });
 
-    it("mark-by-id leaves OTHER runs' legacy readAt untouched", async () => {
-      const target = await seedNotifiedRun({
-        agentName: "dw-target",
-        actor: { userId: ctx.user.id },
-      });
-      const other = await seedNotifiedRun({
-        agentName: "dw-other",
-        actor: { userId: ctx.user.id },
-      });
+      expect(await unreadOf(authHeaders(ctx), run.id)).toBe(true);
+      expect(await unreadOf(headersFor(userB), run.id)).toBe(true);
 
-      const targetNotif = (await listNotifications(authHeaders(ctx))).find(
-        (n) => n.run_id === target.id,
-      )!;
-      await app.request(`/api/notifications/${targetNotif.id}/read`, {
+      const aId = (await listNotifications(authHeaders(ctx)))[0]!.id;
+      await app.request(`/api/notifications/${aId}/read`, {
         method: "PUT",
         headers: authHeaders(ctx),
       });
 
-      expect(await readAtOf(target.id)).not.toBeNull();
-      // The mark is keyed by the notification's run id — the other run's flag
-      // must stay NULL.
-      expect(await readAtOf(other.id)).toBeNull();
+      expect(await unreadOf(authHeaders(ctx), run.id)).toBe(false);
+      expect(await unreadOf(headersFor(userB), run.id)).toBe(true);
     });
   });
 

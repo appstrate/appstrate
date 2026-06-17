@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, eq, or, inArray, isNull, isNotNull, count, desc, sql, type SQL } from "drizzle-orm";
+import { and, eq, or, inArray, isNull, count, desc, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, notifications, organizationMembers } from "@appstrate/db/schema";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { actorFilter, type Actor } from "../../lib/actor.ts";
-import { logger } from "../../lib/logger.ts";
 import { listRunsWithFilter } from "./runs.ts";
 import type { AppScope } from "../../lib/scope.ts";
 
@@ -115,47 +113,6 @@ export async function createRunNotifications(scope: AppScope, runId: string): Pr
 }
 
 /**
- * Transition dual-write (#667): the run-list and schedule-card surfaces still
- * derive their "unread" badge from the legacy global `runs.readAt` flag.
- * Mirror the per-recipient mark onto it so those surfaces clear until they are
- * migrated onto the notifications table (removed in the follow-up that drops
- * `runs.notifiedAt` / `runs.readAt`). Scoped to runs the actor can see, only
- * those already notified and still unread — a verbatim port of the pre-#667
- * mark queries. Best-effort relative to the authoritative notifications write.
- */
-async function legacyMarkRunsRead(scope: AppScope, actor: Actor, runId?: string): Promise<void> {
-  // Best-effort relative to the authoritative notifications write: the
-  // per-recipient UPDATE has already committed by the time we get here, so a
-  // failure of this transitional mirror (lock timeout, transient) must not
-  // surface as an error to the caller — swallow and log, matching the
-  // best-effort contract of the finalize fan-out. Dropped here only means a
-  // legacy run-list/schedule badge lags until the next mark; the authoritative
-  // state is correct.
-  try {
-    await db
-      .update(runs)
-      .set({ readAt: sql`now()` })
-      .where(
-        scopedWhere(runs, {
-          orgId: scope.orgId,
-          applicationId: scope.applicationId,
-          extra: [
-            ...(runId ? [eq(runs.id, runId)] : []),
-            actorOrOrgFilter(actor),
-            isNotNull(runs.notifiedAt),
-            isNull(runs.readAt),
-          ],
-        }),
-      );
-  } catch (err) {
-    logger.warn("notifications: legacy runs.readAt dual-write failed (non-fatal)", {
-      runId,
-      err: getErrorMessage(err),
-    });
-  }
-}
-
-/**
  * Mark a single notification read. Idempotent for the recipient (already-read
  * → still `true`); returns `false` only when the notification does not exist
  * or does not belong to the caller, which the route maps to `404`.
@@ -182,12 +139,8 @@ export async function markNotificationRead(
     .update(notifications)
     .set({ readAt: sql`COALESCE(${notifications.readAt}, now())` })
     .where(where)
-    .returning({ id: notifications.id, runId: notifications.runId });
-  if (updated.length === 0) return false;
-
-  const runId = updated[0]!.runId;
-  if (runId) await legacyMarkRunsRead(scope, actor, runId);
-  return true;
+    .returning({ id: notifications.id });
+  return updated.length > 0;
 }
 
 /**
@@ -216,7 +169,6 @@ export async function markNotificationReadByRun(
         ],
       }),
     );
-  await legacyMarkRunsRead(scope, actor, runId);
 }
 
 export async function markAllNotificationsRead(scope: AppScope, actor: Actor): Promise<number> {
@@ -231,7 +183,6 @@ export async function markAllNotificationsRead(scope: AppScope, actor: Actor): P
       }),
     )
     .returning({ id: notifications.id });
-  await legacyMarkRunsRead(scope, actor);
   return updated.length;
 }
 
@@ -347,5 +298,6 @@ export async function listUserRuns(
     })!,
     limit,
     offset,
+    actor,
   );
 }

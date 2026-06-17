@@ -148,6 +148,7 @@ export function createNotificationsRouter() {
       status,
       startDate,
       endDate,
+      actor,
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);
