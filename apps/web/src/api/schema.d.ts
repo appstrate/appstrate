@@ -16168,6 +16168,10 @@ export interface operations {
                     };
                     applicationId: string;
                     input?: Record<string, never>;
+                    /** @description Per-run dependency version overrides (#666/#686). Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. `"draft"` opts that dependency into its working copy; any other value replaces the manifest pin. An unsatisfiable pin aborts the run with `dependency_unresolved` (422). */
+                    dependency_overrides?: {
+                        [key: string]: string;
+                    };
                     /** @description Caller-provided execution-environment metadata (os, cli version, git sha). Capped at 16 KiB serialised. */
                     contextSnapshot?: Record<string, never>;
                     sink?: {

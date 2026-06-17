@@ -210,6 +210,32 @@ export function parseManifestIntegrations(
 }
 
 /**
+ * Collect the ids of every dependency a run may legitimately override via
+ * `dependency_overrides` — bundled **skills** (`buildAgentPackage`) and spawned
+ * **integrations** (`resolveRunIntegrationVersions`). The single source of truth
+ * for the run-path override KEY gate, so skills and integrations are never
+ * enumerated independently at the call site (#666/#686).
+ *
+ * Intentionally LENIENT (mirrors the two underlying readers): skills come from
+ * `dependencies.skills` keys verbatim, integrations from
+ * {@link parseManifestIntegrations}. `mcp_servers` are deliberately excluded —
+ * an mcp-server is pinned via its integration's `source.server.version`, not a
+ * `dependency_overrides` key (the byte route serves system/published only), so
+ * an mcp-server override key must stay an unknown-key 400.
+ */
+export function collectOverridableDependencyIds(manifest: Record<string, unknown>): Set<string> {
+  const deps = (manifest.dependencies ?? {}) as { skills?: Record<string, unknown> };
+  const ids = new Set<string>();
+  for (const id of Object.keys(deps.skills ?? {})) {
+    if (id) ids.add(id);
+  }
+  for (const entry of parseManifestIntegrations(manifest)) {
+    ids.add(entry.id);
+  }
+  return ids;
+}
+
+/**
  * Write integration entries back to a manifest in the AFPS split form:
  * the semver range goes to `dependencies.integrations.<id>` (a bare string,
  * §4.1) and the per-integration configuration goes to

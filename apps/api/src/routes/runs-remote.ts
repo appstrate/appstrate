@@ -32,6 +32,7 @@ import { getActor } from "../lib/actor.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
+import { isValidDependencyOverride } from "../services/input-parser.ts";
 import { insertShadowPackage, buildShadowLoadedPackage } from "../services/inline-run.ts";
 import { createRun } from "../services/run-creation.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
@@ -99,6 +100,18 @@ const CreateRemoteRunBodySchema = z
     ]),
     applicationId: z.string().min(1),
     input: z.record(z.string(), z.unknown()).optional().default({}),
+    // Per-run dependency version overrides (#666/#686) — run-level, applies to
+    // both source shapes. `"draft"` opts a declared skill/integration into its
+    // working copy; any other value replaces the manifest pin. Mirrors the
+    // platform run route's value gate (`isValidDependencyOverride`); the KEY
+    // gate + pin resolution happen in `freezeRunSpawnDependencies`.
+    dependency_overrides: z
+      .record(z.string(), z.string())
+      .optional()
+      .refine(
+        (m) => !m || Object.values(m).every(isValidDependencyOverride),
+        '`dependency_overrides` values must be "draft" or a valid version spec (semver range or dist-tag)',
+      ),
     contextSnapshot: z
       .record(z.string(), z.unknown())
       .optional()
@@ -285,6 +298,12 @@ export function createRunsRemoteRouter() {
         config: effectiveConfig,
         modelId: modelIdOverride,
         proxyId: proxyIdOverride,
+        // Normalize an empty map to null (mirrors the platform run route): a
+        // non-null map on the row means the run carried explicit overrides.
+        dependencyOverrides:
+          body.dependency_overrides && Object.keys(body.dependency_overrides).length > 0
+            ? body.dependency_overrides
+            : null,
         apiKeyId: c.get("apiKeyId") ?? undefined,
         sink: body.sink ? { ttlSeconds: body.sink.ttl_seconds } : undefined,
         contextSnapshot: body.contextSnapshot,

@@ -26,6 +26,9 @@ import {
   resolvedIntegrationVersionToDescriptor,
   type IntegrationManifestCache,
 } from "../../../src/services/integration-service.ts";
+import { freezeRunSpawnDependencies } from "../../../src/services/run-pipeline.ts";
+import { ApiError } from "../../../src/lib/errors.ts";
+import type { LoadedPackage } from "../../../src/types/index.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
@@ -180,6 +183,47 @@ describe("resolveRunIntegrationVersions — integration manifest pin (#686)", ()
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.unresolved[0]?.name).toBe(INTEG);
+  });
+
+  // freezeRunSpawnDependencies is the shared kickoff unit BOTH origins use —
+  // platform (`prepareAndExecuteRun`) and remote (`run-creation.createRun`).
+  // Locking it here covers the remote path's enforcement without standing up
+  // the readiness/connection cascade: remote calls the identical function.
+  describe("freezeRunSpawnDependencies — shared origin gate", () => {
+    function agentPkg(pin: string): LoadedPackage {
+      return { manifest: agentManifest(pin) } as unknown as LoadedPackage;
+    }
+
+    it("freezes the satisfiable pin to the published version", async () => {
+      await seedDraft(ctx);
+      await seedPublished("1.0.0");
+      await seedPublished("1.5.0");
+
+      const versions = await freezeRunSpawnDependencies({ agent: agentPkg("^1.0.0") });
+      expect(versions[INTEG]).toEqual({ version: "1.5.0", source: "version" });
+    });
+
+    it("throws dependency_unresolved (422) on an unsatisfiable pin — same as remote", async () => {
+      await seedDraft(ctx);
+      await seedPublished("1.0.0");
+
+      const err = await freezeRunSpawnDependencies({ agent: agentPkg("^3.0.0") }).catch((e) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).status).toBe(422);
+      expect((err as ApiError).code).toBe("dependency_unresolved");
+    });
+
+    it("throws 400 on a dependency_overrides key the agent does not declare", async () => {
+      await seedDraft(ctx);
+      await seedPublished("1.0.0");
+
+      const err = await freezeRunSpawnDependencies({
+        agent: agentPkg("^1.0.0"),
+        dependencyOverrides: { "@pinorg/not-declared": "draft" },
+      }).catch((e) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).status).toBe(400);
+    });
   });
 
   it("runtime parity: readIntegrationManifestAt reads the SAME version the snapshot froze", async () => {

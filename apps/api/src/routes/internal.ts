@@ -51,11 +51,7 @@ import {
   resolveLiveIntegrationCredentials,
   serializeIntegrationCredentialsWire,
 } from "../services/integration-credentials-resolver.ts";
-import {
-  fetchIntegrationManifest,
-  readIntegrationManifestAt,
-  resolvedIntegrationVersionToDescriptor,
-} from "../services/integration-service.ts";
+import { readIntegrationManifestForRun } from "../services/integration-service.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
 
 /**
@@ -531,13 +527,10 @@ export function createInternalRouter() {
       // Read the integration manifest AT the version frozen for this run
       // (#686) so the authz check sees the same `source.server.name` the spawn
       // resolver did. No frozen entry (soft-resolved / legacy run) → draft.
-      const frozen = run.resolvedIntegrationVersions?.[integrationId];
-      const res = frozen
-        ? await readIntegrationManifestAt(
-            integrationId,
-            resolvedIntegrationVersionToDescriptor(frozen),
-          )
-        : await fetchIntegrationManifest(integrationId);
+      const res = await readIntegrationManifestForRun(
+        integrationId,
+        run.resolvedIntegrationVersions?.[integrationId],
+      );
       if (!res.ok) continue;
       const ref = getLocalServerRef(res.manifest);
       if (ref?.name === mcpServerId) return;

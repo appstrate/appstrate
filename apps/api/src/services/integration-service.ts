@@ -367,6 +367,27 @@ export async function readIntegrationManifestAt(
   return { ok: true, manifest: parsed.data };
 }
 
+/**
+ * Read an integration manifest for a RUN, honoring the version frozen on
+ * `runs.resolved_integration_versions` (#686). The single decision point for
+ * "frozen version vs draft" — used by every run-scoped reader (credentials
+ * resolver, byte-route authz) so the "no frozen entry → draft" fallback lives
+ * in ONE place instead of a ternary duplicated per call site.
+ *
+ *   - `frozen` present → read AT that descriptor (the spawn used the same).
+ *   - `frozen` absent (legacy run / soft-resolved integration) → draft, via the
+ *     shared per-call-graph `cache` when provided.
+ */
+export function readIntegrationManifestForRun(
+  packageId: string,
+  frozen: ResolvedIntegrationVersion | null | undefined,
+  cache?: IntegrationManifestCache,
+): Promise<IntegrationManifestLoadResult> {
+  return frozen
+    ? readIntegrationManifestAt(packageId, resolvedIntegrationVersionToDescriptor(frozen))
+    : fetchIntegrationManifest(packageId, cache);
+}
+
 export type RunIntegrationVersionsResult =
   | { ok: true; versions: ResolvedIntegrationVersionMap }
   | { ok: false; unresolved: Array<{ name: string; versionSpec: string }> };

@@ -47,9 +47,7 @@ import {
 } from "./integration-connections.ts";
 import { computeRequiredScopes } from "./integration-scope-resolver.ts";
 import {
-  fetchIntegrationManifest,
-  readIntegrationManifestAt,
-  resolvedIntegrationVersionToDescriptor,
+  readIntegrationManifestForRun,
   type ResolvedIntegrationVersion,
 } from "./integration-service.ts";
 
@@ -367,12 +365,7 @@ async function loadIntegrationManifest(
 ): Promise<IntegrationManifest> {
   // Read AT the version frozen for this run (#686) so the delivery/auth plan
   // matches the spawn. No frozen entry → draft (legacy / soft-resolved).
-  const res = frozenVersion
-    ? await readIntegrationManifestAt(
-        integrationId,
-        resolvedIntegrationVersionToDescriptor(frozenVersion),
-      )
-    : await fetchIntegrationManifest(integrationId);
+  const res = await readIntegrationManifestForRun(integrationId, frozenVersion);
   if (res.ok) return res.manifest;
   switch (res.failure.kind) {
     case "not_found":
