@@ -58,6 +58,16 @@ export interface OAuthEndpointResolution {
    * the auto-DCR orchestrator; never applied to the connect flow itself.
    */
   registrationEndpoint?: string;
+  /**
+   * RFC 8414 §2 `grant_types_supported` as projected from the discovery
+   * document. Drives two MCP-spec refresh behaviours: registering a DCR client
+   * for the `refresh_token` grant ONLY when the AS advertises it (else the AS
+   * never issues a refresh token — Claude Code #7744), and deciding whether a
+   * connection that came back without a refresh token is a misconfig (AS
+   * supports refresh) or expected (AS issues access-only tokens, e.g. ClickUp
+   * MCP). `undefined` when the document omits the field.
+   */
+  grantTypesSupported?: string[];
 }
 
 export interface ResolveOAuthEndpointsInput {
@@ -128,6 +138,7 @@ interface CachedDiscovery {
   codeChallengeMethodsSupported?: string[];
   userinfoEndpoint?: string;
   registrationEndpoint?: string;
+  grantTypesSupported?: string[];
   /** Discovered endpoints (NOT applied unless manifest leaves them undeclared). */
   discoveredAuthorizationEndpoint?: string;
   discoveredTokenEndpoint?: string;
@@ -158,6 +169,7 @@ export async function resolveOAuthEndpoints(
   let codeChallengeMethodsSupported: string[] | undefined;
   let userinfoEndpoint: string | undefined;
   let registrationEndpoint: string | undefined;
+  let grantTypesSupported: string[] | undefined;
 
   // No issuer — nothing to discover.
   if (!input.issuer) {
@@ -180,12 +192,14 @@ export async function resolveOAuthEndpoints(
     codeChallengeMethodsSupported = cached.codeChallengeMethodsSupported;
     userinfoEndpoint = cached.userinfoEndpoint;
     registrationEndpoint = cached.registrationEndpoint;
+    grantTypesSupported = cached.grantTypesSupported;
     return {
       authorizationEndpoint,
       tokenEndpoint,
       ...(codeChallengeMethodsSupported !== undefined ? { codeChallengeMethodsSupported } : {}),
       ...(userinfoEndpoint !== undefined ? { userinfoEndpoint } : {}),
       ...(registrationEndpoint !== undefined ? { registrationEndpoint } : {}),
+      ...(grantTypesSupported !== undefined ? { grantTypesSupported } : {}),
     };
   }
 
@@ -242,6 +256,16 @@ export async function resolveOAuthEndpoints(
         // Malformed — ignore.
       }
     }
+    // RFC 8414 §2 — project `grant_types_supported` (first well-shaped array).
+    // Consumed by auto-DCR (request the refresh_token grant only when listed)
+    // and the connect-time refresh-token guard. Absent ⇒ undefined.
+    if (
+      grantTypesSupported === undefined &&
+      Array.isArray(doc.grant_types_supported) &&
+      doc.grant_types_supported.every((g): g is string => typeof g === "string")
+    ) {
+      grantTypesSupported = doc.grant_types_supported;
+    }
     if (
       discoveredAuthorizationEndpoint &&
       discoveredTokenEndpoint &&
@@ -263,7 +287,8 @@ export async function resolveOAuthEndpoints(
     discoveredTokenEndpoint !== undefined ||
     codeChallengeMethodsSupported !== undefined ||
     userinfoEndpoint !== undefined ||
-    registrationEndpoint !== undefined;
+    registrationEndpoint !== undefined ||
+    grantTypesSupported !== undefined;
   if (anyDiscovered) {
     discoveryCache.set(configuredIssuer, {
       discoveredAuthorizationEndpoint,
@@ -271,6 +296,7 @@ export async function resolveOAuthEndpoints(
       codeChallengeMethodsSupported,
       userinfoEndpoint,
       registrationEndpoint,
+      grantTypesSupported,
     });
   }
 
@@ -288,6 +314,7 @@ export async function resolveOAuthEndpoints(
     ...(codeChallengeMethodsSupported !== undefined ? { codeChallengeMethodsSupported } : {}),
     ...(userinfoEndpoint !== undefined ? { userinfoEndpoint } : {}),
     ...(registrationEndpoint !== undefined ? { registrationEndpoint } : {}),
+    ...(grantTypesSupported !== undefined ? { grantTypesSupported } : {}),
   };
 }
 
@@ -298,6 +325,7 @@ interface DiscoveryDocument {
   userinfo_endpoint?: unknown;
   code_challenge_methods_supported?: unknown;
   registration_endpoint?: unknown;
+  grant_types_supported?: unknown;
 }
 
 /** Best-effort fetch + parse of a discovery document. Returns `null` on any failure. */

@@ -743,10 +743,20 @@ export async function ensureIntegrationOAuthClient(
   // re-registration. There is no automatic re-registration on `invalid_client`.
   try {
     const dcrAuthMethod = toSupportedTokenEndpointAuthMethod(auth.token_endpoint_auth_method);
+    // MCP-spec refresh: register for the `refresh_token` grant only when the AS
+    // advertises it (RFC 8414 `grant_types_supported`). Without it the client is
+    // registered for authorization_code alone, so the AS never issues a refresh
+    // token (Claude Code #7744) and the connection can't self-renew. Conditional,
+    // not unconditional: a server that lacks the grant (e.g. ClickUp MCP) may
+    // reject a registration that requests it.
+    const grantTypes = endpoints.grantTypesSupported?.includes("refresh_token")
+      ? ["authorization_code", "refresh_token"]
+      : ["authorization_code"];
     const registration = await registerDynamicClient({
       registrationEndpoint,
       redirectUri,
       clientName: `Appstrate (${host})`,
+      grantTypes,
       ...(auth.default_scopes && auth.default_scopes.length > 0
         ? { scopes: auth.default_scopes }
         : {}),

@@ -33,6 +33,16 @@ export interface RegisterDynamicClientInput {
    * AS requires a client secret.
    */
   tokenEndpointAuthMethod?: TokenEndpointAuthMethod;
+  /**
+   * Grant types to register (RFC 7591 `grant_types`). Defaults to
+   * `["authorization_code"]`. Pass `["authorization_code","refresh_token"]` to
+   * obtain refresh-token capability — but only when the AS advertises the
+   * `refresh_token` grant (RFC 8414 `grant_types_supported`): a server that
+   * doesn't support it may reject a registration that requests it. Registering
+   * for authorization_code alone is why an AS never issues a refresh token
+   * (Claude Code #7744), so the connection can't self-renew.
+   */
+  grantTypes?: string[];
   /** Testing seam — defaults to global `fetch`. */
   fetchImpl?: typeof fetch;
 }
@@ -100,7 +110,7 @@ export async function registerDynamicClient(
   const body: Record<string, unknown> = {
     client_name: input.clientName,
     redirect_uris: [input.redirectUri],
-    grant_types: ["authorization_code"],
+    grant_types: input.grantTypes ?? ["authorization_code"],
     response_types: ["code"],
     token_endpoint_auth_method: tokenEndpointAuthMethod,
     ...(input.scopes && input.scopes.length > 0 ? { scope: input.scopes.join(" ") } : {}),
