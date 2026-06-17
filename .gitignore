@@ -46,7 +46,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Runtime storage (user uploads, execution files)
 data/
-storage/
+# Anchored to the repo root: an unanchored `storage/` matches ANY directory
+# named `storage` at any depth — it was silently swallowing the source dir
+# `apps/web/src/modules/storage/` (the storage module page).
+/storage/
 
 # Vendored static data (committed). The `data/` rule above catches every
 # such directory globally; whitelist the paths we ship in the repo.
