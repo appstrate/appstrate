@@ -152,12 +152,14 @@ async function resolveOne(
   requiredAuthKey: string | undefined,
   manifestCache?: IntegrationManifestCache,
 ): Promise<IntegrationSpawnSpec | null> {
-  // (a) Package exists + integration type — read the latest manifest
-  // straight off `packages.draft_manifest`. System integrations have
-  // `source = 'system'`; org integrations have `org_id` set to the
-  // run's org. The runtime never resolves against a yanked version —
-  // we always use the package's draft manifest, which the publish path
-  // keeps pinned to the live "latest" snapshot.
+  // (a) Package exists + integration type. The manifest is read through the
+  // per-run `manifestCache`, which `resolveRunIntegrationVersions` seeds at
+  // kickoff (#686) with the manifest AT the version the
+  // `dependencies.integrations.<id>` pin resolved to (published / system /
+  // draft-override). So this read honors the pin transparently; only when no
+  // entry was seeded (soft-resolved or non-run callers) does it fall back to
+  // `packages.draft_manifest`. An unsatisfiable integration pin already failed
+  // the run loud upstream, before we get here.
   const res = await fetchIntegrationManifest(integrationId, manifestCache);
   if (!res.ok) {
     switch (res.failure.kind) {
