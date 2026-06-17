@@ -50,62 +50,23 @@ describe("Invitations API", () => {
     });
   });
 
-  describe("POST /invite/:token/accept (public)", () => {
-    it("accepts invitation for new user", async () => {
+  describe("POST /invite/:token/accept (session required)", () => {
+    it("returns 401 when there is no authenticated session", async () => {
       const inv = await seedInvitation({
         orgId: ctx.orgId,
-        email: "joining@test.com",
+        email: "anon@test.com",
         invitedBy: ctx.user.id,
       });
 
-      const res = await app.request(`/invite/${inv.token}/accept`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          password: "SecurePass123!",
-          displayName: "New Member",
-        }),
-      });
+      const res = await app.request(`/invite/${inv.token}/accept`, { method: "POST" });
 
-      expect(res.status).toBe(200);
-      // Bare joined-org resource — same shape as the items in GET /api/orgs
+      expect(res.status).toBe(401);
       const body = (await res.json()) as any;
-      expect(body.id).toBe(ctx.orgId);
-      expect(body.name).toBeTruthy();
-      expect(body.slug).toBe("inviteorg");
-      expect(body.role).toBe("member");
-      expect(body.createdAt).toBeTruthy();
-      expect(body).not.toHaveProperty("success");
-      // New-user flow sets the session cookie on the response
-      expect(res.headers.get("set-cookie")).toBeTruthy();
+      expect(body.code).toBe("authentication_required");
     });
 
-    it("rejects already accepted invitation", async () => {
-      const inv = await seedInvitation({
-        orgId: ctx.orgId,
-        email: "double@test.com",
-        invitedBy: ctx.user.id,
-      });
-
-      // Accept first time
-      await app.request(`/invite/${inv.token}/accept`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: "SecurePass123!" }),
-      });
-
-      // Try to accept again
-      const res = await app.request(`/invite/${inv.token}/accept`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: "SecurePass123!" }),
-      });
-
-      expect(res.status).toBe(410);
-    });
-
-    it("accepts invitation for existing user when authenticated with matching email", async () => {
-      const existingUser = await createTestUser({ email: "existing@test.com" });
+    it("joins the org for an authenticated user whose email matches", async () => {
+      const member = await createTestUser({ email: "existing@test.com" });
 
       const inv = await seedInvitation({
         orgId: ctx.orgId,
@@ -116,46 +77,95 @@ describe("Invitations API", () => {
 
       const res = await app.request(`/invite/${inv.token}/accept`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Cookie: existingUser.cookie,
-        },
-        body: JSON.stringify({}),
+        headers: { Cookie: member.cookie },
       });
 
       expect(res.status).toBe(200);
-      // Bare joined-org resource with the invitation's role
+      // Bare joined-org resource with the invitation's role.
       const body = (await res.json()) as any;
       expect(body.id).toBe(ctx.orgId);
       expect(body.slug).toBe("inviteorg");
       expect(body.role).toBe("admin");
       expect(body).not.toHaveProperty("success");
-      expect(body).not.toHaveProperty("requires_login");
     });
 
-    it("accepts for an unauthenticated existing user and returns the joined org", async () => {
-      await createTestUser({ email: "noauth@test.com" });
+    it("marks the invitation accepted (and rejects a second accept with 410)", async () => {
+      const member = await createTestUser({ email: "double@test.com" });
 
       const inv = await seedInvitation({
         orgId: ctx.orgId,
-        email: "noauth@test.com",
+        email: "double@test.com",
         invitedBy: ctx.user.id,
       });
 
-      // Accept without session cookie
-      const res = await app.request(`/invite/${inv.token}/accept`, {
+      const first = await app.request(`/invite/${inv.token}/accept`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        headers: { Cookie: member.cookie },
+      });
+      expect(first.status).toBe(200);
+
+      const second = await app.request(`/invite/${inv.token}/accept`, {
+        method: "POST",
+        headers: { Cookie: member.cookie },
+      });
+      expect(second.status).toBe(410);
+    });
+
+    it("returns 403 when the session email does not match the invitation", async () => {
+      const wrongUser = await createTestUser({ email: "wrong@test.com" });
+
+      const inv = await seedInvitation({
+        orgId: ctx.orgId,
+        email: "target@test.com",
+        invitedBy: ctx.user.id,
       });
 
+      const res = await app.request(`/invite/${inv.token}/accept`, {
+        method: "POST",
+        headers: { Cookie: wrongUser.cookie },
+      });
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as any;
+      expect(body.code).toBe("email_mismatch");
+    });
+
+    it("is idempotent when the user is already a member", async () => {
+      const member = await createTestUser({ email: "idempotent@test.com" });
+      const { addOrgMember } = await import("../../helpers/auth.ts");
+
+      // Pre-add the user as member (simulates double-click / race).
+      await addOrgMember(ctx.orgId, member.id, "member");
+
+      const inv = await seedInvitation({
+        orgId: ctx.orgId,
+        email: "idempotent@test.com",
+        invitedBy: ctx.user.id,
+      });
+
+      const res = await app.request(`/invite/${inv.token}/accept`, {
+        method: "POST",
+        headers: { Cookie: member.cookie },
+      });
+
+      // Should succeed (idempotent), not 500.
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.id).toBe(ctx.orgId);
-      expect(body.role).toBe(inv.role);
     });
 
-    it("reports isNewUser=false in info when user exists", async () => {
+    it("returns 404 for an unknown token", async () => {
+      const member = await createTestUser({ email: "whoever@test.com" });
+      const res = await app.request(`/invite/nonexistent-token/accept`, {
+        method: "POST",
+        headers: { Cookie: member.cookie },
+      });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("GET /invite/:token/info — is_new_user", () => {
+    it("reports is_new_user=false when the invited email already has an account", async () => {
       await createTestUser({ email: "known@test.com" });
 
       const inv = await seedInvitation({
@@ -170,58 +180,6 @@ describe("Invitations API", () => {
       const body = (await res.json()) as any;
       expect(body.is_new_user).toBe(false);
       expect(body.email).toBe("known@test.com");
-    });
-
-    it("returns 403 when authenticated user's email does not match invitation", async () => {
-      const wrongUser = await createTestUser({ email: "wrong@test.com" });
-      await createTestUser({ email: "target@test.com" });
-
-      const inv = await seedInvitation({
-        orgId: ctx.orgId,
-        email: "target@test.com",
-        invitedBy: ctx.user.id,
-      });
-
-      const res = await app.request(`/invite/${inv.token}/accept`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Cookie: wrongUser.cookie,
-        },
-        body: JSON.stringify({}),
-      });
-
-      expect(res.status).toBe(403);
-      const body = (await res.json()) as any;
-      expect(body.code).toBe("email_mismatch");
-    });
-
-    it("accepts invitation when existing user re-accepts (idempotent addMember)", async () => {
-      const existingUser = await createTestUser({ email: "idempotent@test.com" });
-      const { addOrgMember } = await import("../../helpers/auth.ts");
-
-      // Pre-add the user as member (simulates double-click / race)
-      await addOrgMember(ctx.orgId, existingUser.id, "member");
-
-      const inv = await seedInvitation({
-        orgId: ctx.orgId,
-        email: "idempotent@test.com",
-        invitedBy: ctx.user.id,
-      });
-
-      const res = await app.request(`/invite/${inv.token}/accept`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Cookie: existingUser.cookie,
-        },
-        body: JSON.stringify({}),
-      });
-
-      // Should succeed (idempotent), not 500
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.id).toBe(ctx.orgId);
     });
   });
 });

@@ -6,10 +6,7 @@ import { eq, and, lt, desc } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { getAppConfig } from "../lib/app-config.ts";
 import { sendEmail } from "./email.ts";
-import { getAuth } from "@appstrate/db/auth";
-import { logger } from "../lib/logger.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
 
 /** Roles assignable via invitation (excludes owner — transferred, not invited). */
 export const ASSIGNABLE_ROLES = ["viewer", "member", "admin"] as const;
@@ -77,7 +74,7 @@ export async function createInvitation({
       getOrgName(orgId),
       getInviterName(invitedBy),
     ]);
-    const inviteUrl = `${getEnv().APP_URL}/invite/${token}/accept`;
+    const inviteUrl = `${getEnv().APP_URL}/invite/${token}`;
     void sendEmail("invitation", {
       to: normalizedEmail,
       email: normalizedEmail,
@@ -162,33 +159,6 @@ export async function getInviterName(userId: string): Promise<string> {
     .where(eq(user.id, userId))
     .limit(1);
   return row?.displayName || row?.name || "Un membre";
-}
-
-/**
- * Trigger Better Auth magic link for an existing user invitation.
- * The callbackURL contains the invitation token — the sendMagicLink callback
- * in auth.ts detects this and sends the invitation email instead of the generic one.
- */
-export async function sendMagicLinkInvitation(invitation: {
-  id: string;
-  token: string;
-  email: string;
-}) {
-  try {
-    await getAuth().api.signInMagicLink({
-      body: {
-        email: invitation.email,
-        callbackURL: `/invite/${invitation.token}/accept`,
-      },
-      headers: new Headers(),
-    });
-  } catch (err) {
-    logger.error("Failed to send magic link invitation", {
-      error: getErrorMessage(err),
-      email: invitation.email,
-      invitationId: invitation.id,
-    });
-  }
 }
 
 export async function expireOldInvitations() {

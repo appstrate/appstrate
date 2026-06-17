@@ -10746,8 +10746,8 @@
               }
             }
           },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "description": "Invitation email does not match the authenticated session",

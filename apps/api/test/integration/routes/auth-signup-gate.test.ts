@@ -78,6 +78,29 @@ describe("Platform signup gate — issue #228", () => {
     });
   });
 
+  describe("invited-email auto-verification", () => {
+    it("marks the email verified when a pending invitation exists (any signup method)", async () => {
+      const ctx: TestContext = await createTestContext({ orgSlug: "verifyorg" });
+      await seedInvitation({
+        orgId: ctx.orgId,
+        email: "invited-verify@example.com",
+        invitedBy: ctx.user.id,
+      });
+
+      const res = await attemptSignup("invited-verify@example.com");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { user?: { emailVerified?: boolean } };
+      expect(body.user?.emailVerified).toBe(true);
+    });
+
+    it("leaves the email unverified for a non-invited signup", async () => {
+      const res = await attemptSignup("solo-unverified@example.com");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { user?: { emailVerified?: boolean } };
+      expect(body.user?.emailVerified).toBe(false);
+    });
+  });
+
   describe("AUTH_DISABLE_SIGNUP=true", () => {
     beforeEach(() => {
       setAuthEnv({ AUTH_DISABLE_SIGNUP: "true" });

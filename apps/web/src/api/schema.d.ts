@@ -2335,10 +2335,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Add or invite a member
-         * @description Add a user to the org (if they exist) or create an invitation with a magic link token.
+         * Invite a member
+         * @description Create a pending invitation for the given email (new and existing users alike). The invitee joins by opening the invite link, authenticating through the standard login/signup flow, then explicitly accepting. When SMTP is configured an invitation email is sent; otherwise the admin shares the returned token out of band.
          */
-        post: operations["addOrInviteMember"];
+        post: operations["inviteMember"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4068,7 +4068,7 @@ export interface paths {
         put?: never;
         /**
          * Accept invitation
-         * @description Accept an invitation. Creates user account if new, adds to org, sets session cookie.
+         * @description Accept an invitation. Requires an authenticated Better Auth session whose email matches the invitation; adds the user to the org and returns the joined organization. Account creation happens beforehand through the standard login/signup flow, never here.
          */
         post: operations["acceptInvitation"];
         delete?: never;
@@ -12668,7 +12668,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    addOrInviteMember: {
+    inviteMember: {
         parameters: {
             query?: never;
             header?: never;
@@ -12691,7 +12691,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Polymorphic bare resource: when the user already exists (and no invitation flow applies) they are added directly and the created member is returned (OrgMember — discriminate on `userId`); otherwise an invitation is created and returned (OrgInvitationInfo — discriminate on `id` + `token`). Both use the same serializers as the lists in GET /api/orgs/{orgId}. */
+            /** @description Invitation created — bare OrgInvitationInfo (same shape as the items in the invitations list in GET /api/orgs/{orgId}). */
             201: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -12699,7 +12699,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OrgMember"] | components["schemas"]["OrgInvitationInfo"];
+                    /**
+                     * @example {
+                     *       "id": "inv_abc123",
+                     *       "email": "newuser@example.com",
+                     *       "role": "member",
+                     *       "token": "inv_abc123def456",
+                     *       "expiresAt": "2026-02-01T00:00:00Z",
+                     *       "createdAt": "2026-01-25T00:00:00Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["OrgInvitationInfo"];
                 };
             };
             400: components["responses"]["ValidationError"];
@@ -18211,17 +18221,9 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    /** @description Password (required for new users, minimum 8 characters) */
-                    password?: string;
-                    displayName?: string;
-                };
-            };
-        };
+        requestBody?: never;
         responses: {
-            /** @description Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs, with `role` set to the invitation role). For new users a session cookie is set via Set-Cookie. */
+            /** @description Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs, with `role` set to the invitation role). */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -18241,7 +18243,7 @@ export interface operations {
                     "application/json": components["schemas"]["Organization"];
                 };
             };
-            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
             /** @description Invitation email does not match the authenticated session */
             403: {
                 headers: {
