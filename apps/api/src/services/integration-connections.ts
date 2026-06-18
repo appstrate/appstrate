@@ -685,18 +685,17 @@ function customConnectClient(client: IntegrationOAuthClientWithSecret): Resolved
  * single home for the client-selection precedence (previously inlined in
  * `OAuth2Strategy.begin`). An integration auth may be served by the org's own
  * per-application custom clients (BYO-app, the N loaded into
- * `resolved.customClients`) AND/OR an env-provided system client. `client_ref`
- * is a flat client id:
- *   - Explicit `requestedRef` → that exact client (system id, validated against
- *     this auth; or one of the org's loaded custom clients by its id). Unknown →
- *     error, never a silent fallback.
- *   - No ref → the default custom client when one is flagged (deliberate
- *     BYO-app), else the default system client (shared, zero-config), else the
- *     first custom client.
+ * `resolved.customClients`) AND/OR an env-provided system client. New
+ * connections always use the **default** — there is no per-connect picker:
+ *   - The default custom client when one is flagged (deliberate BYO-app), else
+ *     the default system client (shared, zero-config), else the first custom
+ *     client.
  * Auto-provisioned remote-MCP auths (DCR/CIMD) keep their own (custom) client
  * and are never served by a system entry. Throws the operator-facing error when
  * no client can be resolved. The returned `clientRef` is pinned on the
- * connection so token refresh resolves the same credentials.
+ * connection so token refresh resolves the same credentials. The choice of
+ * which client is the default is an admin action (`setDefaultIntegrationClient`,
+ * the model-provider `setDefaultModel` analogue), not a connect-time argument.
  */
 export function resolveConnectClient(
   integrationId: string,
@@ -704,39 +703,12 @@ export function resolveConnectClient(
   manifest: IntegrationManifest,
   auth: AfpsManifestAuth,
   resolved: ResolvedOAuthConnect,
-  requestedRef: string | undefined,
 ): ResolvedConnectClient {
   const autoProvisioned = usesAutoProvisionedClient(manifest, auth);
   const customClients = resolved.customClients;
 
-  // Explicit selection by client id.
-  if (requestedRef) {
-    const sys = resolveSystemClientForAuth(requestedRef, integrationId, authKey);
-    if (sys) {
-      // An auto-provisioned (DCR/CIMD) auth provisions its own client and is
-      // never served by a system entry — reject loudly rather than silently
-      // using the DCR client.
-      if (autoProvisioned) {
-        throw invalidRequest(
-          `Integration '${integrationId}' auth '${authKey}' provisions its OAuth client automatically; a system client cannot be selected.`,
-        );
-      }
-      return systemConnectClient(sys);
-    }
-    // Custom: must match one of the org's loaded (scope-resolved) clients — a
-    // custom id from another app/integration/auth is not in this list, so
-    // cross-app selection is structurally impossible here.
-    const picked = customClients.find((c) => c.id === requestedRef);
-    if (picked) {
-      return customConnectClient(picked);
-    }
-    throw invalidRequest(
-      `Unknown OAuth client '${requestedRef}' for '${integrationId}' auth '${authKey}'`,
-    );
-  }
-
-  // No explicit ref — the default. Among the N custom (BYO-app) clients the one
-  // flagged `is_default` wins; an admin can move the flag to the system client
+  // The default. Among the N custom (BYO-app) clients the one flagged
+  // `is_default` wins; an admin can move the flag to the system client
   // (no custom default), in which case the default system client wins. With no
   // default custom and no system client, the first custom is the connectable
   // fallback. Mirrors `org_models.is_default` + the model resolution cascade.

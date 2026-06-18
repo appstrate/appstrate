@@ -271,10 +271,6 @@ export function useInitiateIntegrationOAuth() {
         scopes?: string[];
         force_account_select?: boolean;
         connection_id?: string;
-        // Pin which registered client mints the connection (a `client_ref` from
-        // GET .../clients). Omitted → the backend default (org custom client when
-        // registered, else the system client).
-        client_ref?: string;
       };
     }) => {
       const { data } = await client.POST(
@@ -350,8 +346,8 @@ export function useRotateIntegrationOAuthClient() {
  * OAuth clients available to connect this auth: the org's custom (BYO-app)
  * client plus any platform-provided system clients, each with `source` and
  * which is the default. Secrets are never returned. Drives the detail page's
- * client list and the connect "se connecter avec…" picker; `client_ref` is the
- * value `POST .../connect/oauth2` accepts to pin a specific client.
+ * admin clients CRUD table (register/rotate/delete/set-default). New
+ * connections always use the default — there is no per-connect picker.
  */
 export function useIntegrationClients(packageId: string | undefined, authKey: string | undefined) {
   const scope = useOrgScope();

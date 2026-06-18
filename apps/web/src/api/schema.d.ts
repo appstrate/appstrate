@@ -1253,8 +1253,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List OAuth clients available to connect an integration auth
-         * @description Returns the org's custom (BYO-app) client plus any platform-provided system clients, with `source` and which is the default. Secrets are never returned. The `client_ref` values are accepted by the OAuth2 connect endpoint to pin a specific client.
+         * List the OAuth clients registered for an integration auth
+         * @description Returns the org's custom (BYO-app) clients plus any platform-provided system clients, with `source` and which is the default. Secrets are never returned. Drives the admin clients CRUD table; new connections always use the default (no per-connect picker).
          */
         get: operations["listIntegrationClients"];
         put?: never;
@@ -9583,8 +9583,6 @@ export interface operations {
                     force_account_select?: boolean;
                     /** Format: uuid */
                     connection_id?: string;
-                    /** @description Which registered client to connect with — a flat client id (a value from GET .../auths/{authKey}/clients). Omitted → the default (org custom client when registered, else system client). */
-                    client_ref?: string;
                 };
             };
         };

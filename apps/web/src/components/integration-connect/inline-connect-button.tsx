@@ -93,13 +93,6 @@ interface InlineConnectButtonProps {
    * (e.g. refetch) rather than an assertion of success.
    */
   onConnected?: () => void;
-  /**
-   * Pin which registered OAuth client mints the connection (a `client_ref`
-   * from GET .../clients). Omitted → the backend default (org custom client
-   * when registered, else the system client). Only oauth2 auths honour it; the
-   * detail-page client picker sets it when a system and a custom client coexist.
-   */
-  clientRef?: string;
 }
 
 export function InlineConnectButton({
@@ -113,7 +106,6 @@ export function InlineConnectButton({
   connectionId,
   lockToAuthKey,
   onConnected,
-  clientRef,
 }: InlineConnectButtonProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: detail } = useIntegrationDetail(packageId);
@@ -146,7 +138,6 @@ export function InlineConnectButton({
         ...(scopes ? { scopes } : {}),
         ...(forceAccountSelect ? { forceAccountSelect: true } : {}),
         ...(connectionId ? { connectionId } : {}),
-        ...(clientRef ? { clientRef } : {}),
       })
         .then(() => onConnected?.())
         .catch(() => {});

@@ -41,13 +41,6 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select";
-import {
   Table,
   TableHeader,
   TableBody,
@@ -500,21 +493,6 @@ function ConnectAuthBlock({
   // or auto-provisioned at connect time (remote MCP CIMD/DCR). Shared gate.
   const clientMissing = isOAuth && !isOauthAuthConnectable(status);
 
-  // Available clients (system + custom) — only fetched for oauth2 auths. When
-  // both a system and a custom client exist the admin picks which one mints the
-  // connection; with a single client the backend default is unambiguous (no
-  // picker, no explicit client_ref). Shares the query with ClientsTable.
-  const { data: clients } = useIntegrationClients(
-    isOAuth ? packageId : undefined,
-    isOAuth ? status.auth_key : undefined,
-  );
-  const showClientPicker = isOAuth && isAdmin && (clients?.length ?? 0) > 1;
-  const defaultClientRef = clients?.find((c) => c.is_default)?.client_ref;
-  const [selectedClientRef, setSelectedClientRef] = useState<string | undefined>(undefined);
-  // Effective pick: the admin's choice, else the default. Only sent when a
-  // picker is shown — a single-client auth connects via backend precedence.
-  const connectClientRef = showClientPicker ? (selectedClientRef ?? defaultClientRef) : undefined;
-
   return (
     <div className="bg-card rounded-lg border p-4" data-testid={`auth-section-${status.auth_key}`}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -531,37 +509,14 @@ function ConnectAuthBlock({
             {isAdmin ? t("integration.auth.noClientHintAdmin") : t("integration.auth.noClientHint")}
           </p>
         ) : isAdmin ? (
-          <div className="flex flex-wrap items-center gap-2">
-            {showClientPicker && (
-              <Select value={connectClientRef} onValueChange={setSelectedClientRef}>
-                <SelectTrigger
-                  className="h-8 w-auto text-xs"
-                  data-testid={`connect-client-picker-${status.auth_key}`}
-                >
-                  <SelectValue placeholder={t("integration.clients.connectWith")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {clients!.map((client) => (
-                    <SelectItem key={client.client_ref} value={client.client_ref}>
-                      {client.source === "built-in"
-                        ? t("integration.clients.sourceBuiltIn")
-                        : t("integration.clients.sourceCustom")}{" "}
-                      · {client.client_id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            <InlineConnectButton
-              packageId={packageId}
-              authKey={status.auth_key}
-              intent="connect"
-              label={t("integration.auth.addAccount")}
-              forceAccountSelect={status.connections.length > 0}
-              lockToAuthKey
-              {...(connectClientRef ? { clientRef: connectClientRef } : {})}
-            />
-          </div>
+          <InlineConnectButton
+            packageId={packageId}
+            authKey={status.auth_key}
+            intent="connect"
+            label={t("integration.auth.addAccount")}
+            forceAccountSelect={status.connections.length > 0}
+            lockToAuthKey
+          />
         ) : null}
       </div>
 
@@ -1049,14 +1004,6 @@ function ConnectionsTable({
   canRenew: boolean;
 }) {
   const { t } = useTranslation("settings");
-  // Which client minted each connection — only meaningful for oauth2 auths. The
-  // column resolves `client_ref` → source + client_id; a connection is bound to
-  // its client (refresh uses it), so this answers "which client is in use".
-  const isOAuth = authType === "oauth2";
-  const { data: clients } = useIntegrationClients(
-    isOAuth ? packageId : undefined,
-    isOAuth ? authKey : undefined,
-  );
   if (connections.length === 0)
     return <p className="text-muted-foreground text-sm">{t("integration.auth.noConnection")}</p>;
   return (
@@ -1065,9 +1012,6 @@ function ConnectionsTable({
         <TableHeader>
           <TableRow>
             <TableHead className="text-xs">{t("integration.connection.col.account")}</TableHead>
-            {isOAuth && (
-              <TableHead className="text-xs">{t("integration.connection.col.client")}</TableHead>
-            )}
             <TableHead className="text-xs">{t("integration.connection.col.status")}</TableHead>
             <TableHead className="text-xs">{t("integration.connection.col.scopes")}</TableHead>
             <TableHead className="text-xs">{t("integration.connection.col.shared")}</TableHead>
@@ -1085,8 +1029,6 @@ function ConnectionsTable({
               authKey={authKey}
               authType={authType}
               canRenew={canRenew}
-              showClient={isOAuth}
-              client={clients?.find((x) => x.client_ref === c.client_ref)}
             />
           ))}
         </TableBody>
@@ -1101,8 +1043,6 @@ function ConnectionTableRow({
   authKey,
   authType,
   canRenew,
-  showClient,
-  client,
 }: {
   connection: IntegrationConnection;
   packageId: string;
@@ -1112,10 +1052,6 @@ function ConnectionTableRow({
   authType: IntegrationAuthType;
   /** False when no OAuth client is usable yet — admin must set one up first. */
   canRenew: boolean;
-  /** Render the "Client" cell (oauth2 auths only). */
-  showClient: boolean;
-  /** The resolved client descriptor for this connection's `client_ref`, if any. */
-  client?: IntegrationClient;
 }) {
   const { t } = useTranslation("settings");
   const updateConnection = useUpdateIntegrationConnection();
@@ -1212,37 +1148,6 @@ function ConnectionTableRow({
             </div>
           )}
         </TableCell>
-
-        {/* Client — which registered client minted (and refreshes) this connection */}
-        {showClient && (
-          <TableCell data-testid={`connection-client-${connection.id}`}>
-            {connection.client_ref ? (
-              client ? (
-                <span className="inline-flex items-center gap-1.5">
-                  <Badge variant={client.source === "built-in" ? "secondary" : "outline"}>
-                    {client.source === "built-in"
-                      ? t("integration.clients.sourceBuiltIn")
-                      : t("integration.clients.sourceCustom")}
-                  </Badge>
-                  <span className="text-muted-foreground font-mono text-[0.65rem]">
-                    {client.client_id}
-                  </span>
-                </span>
-              ) : (
-                // The pinned client is no longer listed (custom deleted / system
-                // entry removed) — show the raw ref so it is not silently hidden.
-                <span
-                  className="text-muted-foreground font-mono text-[0.65rem]"
-                  title={connection.client_ref}
-                >
-                  {connection.client_ref}
-                </span>
-              )
-            ) : (
-              <span className="text-muted-foreground text-xs">—</span>
-            )}
-          </TableCell>
-        )}
 
         {/* Status — connected / needs reconnection (+ renew) + expiry */}
         <TableCell>

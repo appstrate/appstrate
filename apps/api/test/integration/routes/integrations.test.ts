@@ -1305,26 +1305,6 @@ describe("multi-client: list + system-client connect", () => {
     expect(body.state).toBeTruthy();
   });
 
-  it("honours an explicit system client id", async () => {
-    seedSystem();
-    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
-      method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_ref: "gmail-system" }),
-    });
-    expect(res.status).toBe(200);
-  });
-
-  it("rejects an unknown client id with 400 even when a system client exists (no silent fallback)", async () => {
-    seedSystem();
-    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
-      method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_ref: "does-not-exist" }),
-    });
-    expect(res.status).toBe(400);
-  });
-
   it("still 403s when neither a custom nor a system client exists", async () => {
     const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
       method: "POST",
@@ -1334,47 +1314,24 @@ describe("multi-client: list + system-client connect", () => {
     expect(res.status).toBe(403);
   });
 
-  it("connects with the org's custom client by its id, using its client_id", async () => {
+  it("connects with the org's custom client by default when one is registered", async () => {
     seedSystem();
     await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ client_id: "org-client", client_secret: "org-secret" }),
     });
-    // Discover the custom client's id from the list endpoint, then pin it.
-    const list = (await (await listClients()).json()) as {
-      data: Array<{ client_ref: string; source: string }>;
-    };
-    const customRef = list.data.find((c) => c.source === "custom")!.client_ref;
+    // No per-connect picker — the first registered custom client becomes the
+    // default and wins over the system client.
     const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_ref: customRef }),
+      body: "{}",
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { auth_url: string };
     // Uses the ORG client_id, NOT the system one.
     expect(body.auth_url).toContain("client_id=org-client");
     expect(body.auth_url).not.toContain("sys-client");
-  });
-
-  it("rejects a system client id registered for a different integration (400)", async () => {
-    // A system client exists, but registered for another integration. Pinning it
-    // on @myorg/gmail must be rejected, not honoured.
-    initSystemIntegrationClients([
-      {
-        id: "foreign-system",
-        integrationId: "@other/thing",
-        authKey: "google",
-        clientId: "foreign-client",
-        clientSecret: "x",
-      },
-    ]);
-    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
-      method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_ref: "foreign-system" }),
-    });
-    expect(res.status).toBe(400);
   });
 });

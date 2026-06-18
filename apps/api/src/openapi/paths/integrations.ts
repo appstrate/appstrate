@@ -584,12 +584,12 @@ export const integrationsPaths = {
     get: {
       operationId: "listIntegrationClients",
       tags: ["Integrations"],
-      summary: "List OAuth clients available to connect an integration auth",
+      summary: "List the OAuth clients registered for an integration auth",
       description:
-        "Returns the org's custom (BYO-app) client plus any platform-provided " +
+        "Returns the org's custom (BYO-app) clients plus any platform-provided " +
         "system clients, with `source` and which is the default. Secrets are " +
-        "never returned. The `client_ref` values are accepted by the OAuth2 " +
-        "connect endpoint to pin a specific client.",
+        "never returned. Drives the admin clients CRUD table; new connections " +
+        "always use the default (no per-connect picker).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -719,14 +719,6 @@ export const integrationsPaths = {
                 scopes: { type: "array", items: { type: "string" } },
                 force_account_select: { type: "boolean" },
                 connection_id: { type: "string", format: "uuid" },
-                client_ref: {
-                  type: "string",
-                  description:
-                    "Which registered client to connect with — a flat client id (a value " +
-                    "from GET .../auths/{authKey}/clients). Omitted → the default (org custom " +
-                    "client when registered, else system client).",
-                  pattern: "^[\\w.-]+$",
-                },
               },
             },
           },

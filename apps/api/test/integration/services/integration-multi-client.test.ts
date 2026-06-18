@@ -477,7 +477,6 @@ describe("integration multi-client", () => {
         LOCAL_MANIFEST,
         OAUTH2_AUTH,
         customClient(true),
-        undefined,
       );
       expect(out.clientId).toBe("org-client-id");
     });
@@ -490,7 +489,6 @@ describe("integration multi-client", () => {
         LOCAL_MANIFEST,
         OAUTH2_AUTH,
         customClient(false),
-        undefined,
       );
       expect(out.clientId).toBe("sys-client.apps.googleusercontent.com");
     });
@@ -504,7 +502,6 @@ describe("integration multi-client", () => {
         LOCAL_MANIFEST,
         OAUTH2_AUTH,
         customClient(false),
-        undefined,
       );
       expect(out.clientId).toBe("org-client-id");
     });
@@ -541,25 +538,8 @@ describe("integration multi-client", () => {
           { id: "11111111-1111-4111-8111-111111111111", clientId: "a", isDefault: false },
           { id: "22222222-2222-4222-8222-222222222222", clientId: "b", isDefault: true },
         ]),
-        undefined,
       );
       expect(out.clientId).toBe("b");
-    });
-
-    it("honours an explicit requestedRef targeting a specific custom among N", () => {
-      const out = resolveConnectClient(
-        INTEGRATION,
-        AUTH_KEY,
-        LOCAL_MANIFEST,
-        OAUTH2_AUTH,
-        customClients([
-          { id: "11111111-1111-4111-8111-111111111111", clientId: "a", isDefault: true },
-          { id: "22222222-2222-4222-8222-222222222222", clientId: "b", isDefault: false },
-        ]),
-        "22222222-2222-4222-8222-222222222222",
-      );
-      expect(out.clientId).toBe("b");
-      expect(out.clientRef).toBe("22222222-2222-4222-8222-222222222222");
     });
   });
 

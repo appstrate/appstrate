@@ -115,14 +115,6 @@ export const connectOAuthSchema = z.object({
   scopes: z.array(z.string()).optional(),
   force_account_select: z.boolean().optional(),
   connection_id: z.uuid().optional(),
-  // Which registered client to connect with — a flat client id (system env id or
-  // custom `integration_oauth_clients.id`). Omitted → the default (org's custom
-  // client when registered, else the system client). `GET .../auths/:authKey/clients`
-  // enumerates valid ids.
-  client_ref: z
-    .string()
-    .regex(/^[\w.-]+$/, "client_ref must be a client id")
-    .optional(),
 });
 
 export const setDefaultClientSchema = z.object({
@@ -389,11 +381,11 @@ export function createIntegrationsRouter() {
 
   // ─── OAuth client registration (admin) ─────
 
-  // List every OAuth client available to connect this auth: the org's custom
-  // (BYO-app) client plus any env-provided system clients, with `source` and
-  // which is the default. Secrets are never returned. Drives the connect UI's
-  // "connect with…" picker. The `client_ref` here is what `POST .../connect/oauth2`
-  // accepts to pin a specific client.
+  // List every OAuth client registered for this auth: the org's custom
+  // (BYO-app) clients plus any env-provided system clients, with `source` and
+  // which is the default. Secrets are never returned. Drives the admin clients
+  // CRUD table (register/rotate/delete/set-default). New connections always use
+  // the default — there is no per-connect picker.
   router.get(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/clients",
     requirePermission("integrations", "read"),
@@ -632,7 +624,6 @@ export function createIntegrationsRouter() {
         {
           scopes,
           forceAccountSelect: body.force_account_select ?? false,
-          ...(body.client_ref ? { clientRef: body.client_ref } : {}),
         },
       );
       return c.json({ auth_url: result.redirectUrl, state: result.state });
