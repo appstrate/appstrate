@@ -207,8 +207,11 @@ export const integrationOauthClients = pgTable(
     /** Optional pre-registered redirect URI; falls back to the platform default at connect time. */
     redirectUri: text("redirect_uri"),
     // Whether this custom (BYO-app) client is the default for new connections.
-    // Mirrors `org_models.is_default`: among the N custom clients of an auth at
-    // most one is flagged default (DB-enforced by `idx_ioc_one_default`); the
+    // A per-row `is_default` boolean (not an org-level pointer) BECAUSE the
+    // default is scoped per `(application, integration, auth)` tuple — unlike the
+    // org-scoped model/proxy default, which uses an `organizations.default_*_id`
+    // pointer (org scope → pointer). Here, among the N custom clients of an auth
+    // at most one is flagged default (DB-enforced by `idx_ioc_one_default`); the
     // connect resolution cascade reads it (default custom → else system → else
     // first custom). New clients are flagged default by the service only when no
     // other custom default exists, so the column baseline is `false`.

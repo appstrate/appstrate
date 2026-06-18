@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels, organizations } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
@@ -17,7 +17,13 @@ import {
   type DecryptedModelProviderCredentials,
 } from "./model-providers/credentials.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
-import { mergeSystemAndDb, buildUpdateSet, scopedWhere, isUuid } from "../lib/db-helpers.ts";
+import {
+  mergeSystemAndDb,
+  buildUpdateSet,
+  scopedWhere,
+  createDefaultPointer,
+  isInvalidTextRepresentation,
+} from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import type { InferenceProbeRequest } from "@appstrate/core/module";
@@ -53,19 +59,22 @@ export function resolveModelMetadata(
 // --- Default pointer (org-level) ---
 
 /**
- * The org's default model id — a flat id naming a system model or an
+ * The org's default model pointer — a flat id naming a system model or an
  * `org_models.id` (UUID), or `null` when no explicit default is set (the
  * resolver then falls to the system-flagged model). Single read path for the
- * pointer so list/resolve agree.
+ * pointer so list/resolve agree. The four pointer operations (read, first-row
+ * promotion, set-default, dangling-clear) are the generic `createDefaultPointer`
+ * helper — shared byte-for-byte with `org-proxies`.
  */
-async function getDefaultModelId(orgId: string): Promise<string | null> {
-  const [row] = await db
-    .select({ defaultModelId: organizations.defaultModelId })
-    .from(organizations)
-    .where(eq(organizations.id, orgId))
-    .limit(1);
-  return row?.defaultModelId ?? null;
-}
+const defaultModel = createDefaultPointer({
+  table: orgModels,
+  pointerColumn: organizations.defaultModelId,
+  pointerField: "defaultModelId",
+  isSystem: isSystemModel,
+  scopeWhere: (orgId, rowId) =>
+    scopedWhere(orgModels, { orgId, extra: rowId !== undefined ? [eq(orgModels.id, rowId)] : [] }),
+  entityName: "Model",
+});
 
 // --- List (system + DB) ---
 
@@ -74,7 +83,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   const rows = await db.select().from(orgModels).where(scopedWhere(orgModels, { orgId }));
   // The default is an org-level pointer: when set, exactly that id is the
   // default (system or custom); when null, the system-flagged model wins.
-  const pointer = await getDefaultModelId(orgId);
+  const pointer = await defaultModel.getDefaultId(orgId);
   const now = toISORequired(new Date());
 
   // Resolve apiShape/baseUrl from the registry via the credential's providerId.
@@ -192,14 +201,6 @@ export async function createOrgModel(
   },
 ): Promise<string> {
   return db.transaction(async (tx) => {
-    // If this is the first model for the org, point the org default at it.
-    const existing = await tx
-      .select({ id: orgModels.id })
-      .from(orgModels)
-      .where(scopedWhere(orgModels, { orgId }))
-      .limit(1);
-    const isFirst = existing.length === 0;
-
     const [row] = await tx
       .insert(orgModels)
       .values({
@@ -217,12 +218,8 @@ export async function createOrgModel(
       })
       .returning({ id: orgModels.id });
 
-    if (isFirst) {
-      await tx
-        .update(organizations)
-        .set({ defaultModelId: row!.id, updatedAt: new Date() })
-        .where(eq(organizations.id, orgId));
-    }
+    // If this is the first model for the org, point the org default at it.
+    await defaultModel.promoteIfFirst(tx, orgId, row!.id);
     return row!.id;
   });
 }
@@ -263,10 +260,7 @@ export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<
     .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
   // If the deleted model was the org default, clear the now-dangling pointer so
   // the resolver falls cleanly to the system cascade (no stale-id badge).
-  await db
-    .update(organizations)
-    .set({ defaultModelId: null, updatedAt: new Date() })
-    .where(and(eq(organizations.id, orgId), eq(organizations.defaultModelId, modelDbId)));
+  await defaultModel.clearDanglingPointer(orgId, modelDbId);
 }
 
 /**
@@ -370,22 +364,7 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
   // Validate the target before storing it (mirrors the integration set-default
   // guard). A system id is trusted via the registry; a custom id must be a row
   // the org owns.
-  if (modelDbId !== null && !isSystemModel(modelDbId)) {
-    // A non-UUID id can't be a custom row PK — reject without hitting the
-    // `uuid` column (which would raise 22P02 → 500 instead of a clean 404).
-    const [row] = isUuid(modelDbId)
-      ? await db
-          .select({ id: orgModels.id })
-          .from(orgModels)
-          .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
-          .limit(1)
-      : [];
-    if (!row) throw notFound(`Model '${modelDbId}' not found`);
-  }
-  await db
-    .update(organizations)
-    .set({ defaultModelId: modelDbId, updatedAt: new Date() })
-    .where(eq(organizations.id, orgId));
+  await defaultModel.setDefault(orgId, modelDbId);
 }
 
 // --- Resolution ---
@@ -546,7 +525,7 @@ export async function resolveModel(
   // 2. Org default — the pointer names a system model or a custom row; load it
   //    directly. A stale pointer (deleted/disabled row) resolves to null and
   //    falls through to the system cascade.
-  const pointer = await getDefaultModelId(orgId);
+  const pointer = await defaultModel.getDefaultId(orgId);
   if (pointer) {
     const resolved = await loadModel(orgId, pointer);
     if (resolved) return resolved;
@@ -562,30 +541,6 @@ export async function resolveModel(
 
   // 4. No model configured
   return null;
-}
-
-/**
- * True when a DB error is Postgres `22P02` (invalid_text_representation) — the
- * class raised when a non-UUID string is compared against a `uuid` column.
- * Matches on the SQLSTATE code with a message fallback, and walks the `cause`
- * chain since Drizzle wraps the driver error in a `DrizzleQueryError`. Covers
- * both the Tier-0 embedded driver (PGlite) and a real server (postgres.js).
- */
-function isInvalidTextRepresentation(err: unknown): boolean {
-  let current: unknown = err;
-  for (let depth = 0; current != null && depth < 5; depth++) {
-    if (typeof current === "object") {
-      if ((current as { code?: unknown }).code === "22P02") return true;
-      const message = (current as { message?: unknown }).message;
-      if (typeof message === "string" && message.includes("invalid input syntax for type uuid")) {
-        return true;
-      }
-      current = (current as { cause?: unknown }).cause;
-    } else {
-      break;
-    }
-  }
-  return false;
 }
 
 export async function loadModel(orgId: string, modelDbId: string): Promise<ResolvedModel | null> {

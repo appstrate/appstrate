@@ -28,7 +28,7 @@ import { getModelProvider } from "./registry.ts";
 import type { ModelApiShape, OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 import type { ModelProviderIdentity } from "@appstrate/core/module";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
-import { getSystemModelProviderKeys } from "../model-registry.ts";
+import { getSystemModelProviderCredentials } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
 
@@ -538,7 +538,7 @@ export async function deleteModelProviderCredential(orgId: string, id: string): 
 export async function listOrgModelProviderCredentials(
   orgId: string,
 ): Promise<ModelProviderCredentialInfo[]> {
-  const system = getSystemModelProviderKeys();
+  const system = getSystemModelProviderCredentials();
   const now = toISORequired(new Date());
   const rows = await db
     .select()
@@ -626,7 +626,7 @@ export async function loadInferenceCredentials(
   // entry so downstream code (refresh worker, hooks) resolves the same
   // registered ModelProviderDefinition it would for a DB-stored
   // credential.
-  const systemKey = getSystemModelProviderKeys().get(id);
+  const systemKey = getSystemModelProviderCredentials().get(id);
   if (systemKey) {
     return {
       providerId: systemKey.providerId,

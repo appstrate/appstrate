@@ -16,6 +16,7 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { downloadVersionZip } from "../services/package-storage.ts";
 import { getSystemPackages } from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
+import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
@@ -594,10 +595,9 @@ async function assertOAuthModelCredential(
   } catch (err) {
     // PG `invalid_text_representation` (22P02) when the path param is not
     // a valid UUID — treat as not-found rather than leaking a 500. Drizzle
-    // wraps the underlying postgres.js error via `new Error(…, { cause })`.
-    const code =
-      (err as { code?: string })?.code ?? (err as { cause?: { code?: string } })?.cause?.code;
-    if (code === "22P02") {
+    // wraps the underlying postgres.js error via `new Error(…, { cause })`,
+    // so walk the cause chain via the shared detector.
+    if (isInvalidTextRepresentation(err)) {
       throw notFound(`OAuth model provider credential ${credentialId} not found`);
     }
     throw err;

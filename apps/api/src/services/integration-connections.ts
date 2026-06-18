@@ -47,7 +47,7 @@ import {
   listSystemIntegrationClientsFor,
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
-import { mergeSystemAndDb, setExactlyOneDefault } from "../lib/db-helpers.ts";
+import { mergeSystemAndDb, setExactlyOneDefault, isUuid } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
@@ -711,7 +711,8 @@ export function resolveConnectClient(
   // `is_default` wins; an admin can move the flag to the system client
   // (no custom default), in which case the default system client wins. With no
   // default custom and no system client, the first custom is the connectable
-  // fallback. Mirrors `org_models.is_default` + the model resolution cascade.
+  // fallback. Analogous to the org default-pointer resolution cascade in
+  // org-models.ts / org-proxies.ts, scoped per `(app, integration, auth)` here.
   const defaultCustom = customClients.find((c) => c.isDefault);
   if (defaultCustom) return customConnectClient(defaultCustom);
   if (!autoProvisioned) {
@@ -739,9 +740,6 @@ export function resolveConnectClient(
     `Administrator must register OAuth client credentials for '${integrationId}' auth '${authKey}' before connection`,
   );
 }
-
-/** RFC 4122 shape — a custom client id is the `integration_oauth_clients.id` UUID. */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Resolve a pinned `client_ref` (flat client id) to the OAuth client
@@ -778,7 +776,7 @@ export async function resolveIntegrationClientById(
   // A custom client id is the row's UUID PK. Anything else — a since-removed
   // system id, a remapped id, garbage — cannot be a custom row, so skip the
   // typed lookup (and avoid a `uuid` cast error on a non-UUID literal).
-  if (!UUID_RE.test(clientRef)) return null;
+  if (!isUuid(clientRef)) return null;
 
   // 2) Custom per-application client, by id AND fully scoped (escalation guard).
   const [row] = await db

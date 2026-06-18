@@ -49,7 +49,6 @@ export type TerminalRunStatus = (typeof terminalRunStatusValues)[number];
  */
 export const activeRunStatusValues = ["pending", "running"] as const;
 export const ACTIVE_RUN_STATUSES: ReadonlySet<RunStatus> = new Set(activeRunStatusValues);
-export type ActiveRunStatus = (typeof activeRunStatusValues)[number];
 
 /**
  * RunEvent types that mark a run as terminal — `run.success`, `run.failed`,
@@ -66,7 +65,6 @@ export const TERMINAL_RUN_EVENT_TYPES: ReadonlySet<string> = new Set([
 export const invitationStatusValues = ["pending", "accepted", "expired", "cancelled"] as const;
 export const invitationStatusEnum = pgEnum("invitation_status", invitationStatusValues);
 export const zInvitationStatusEnum = z.enum(invitationStatusValues);
-export type InvitationStatus = z.infer<typeof zInvitationStatusEnum>;
 
 export const packageTypeValues = [
   "agent",
@@ -85,7 +83,6 @@ export type PackageType = z.infer<typeof zPackageTypeEnum>;
 export const packageSourceValues = ["local", "system"] as const;
 export const packageSourceEnum = pgEnum("package_source", packageSourceValues);
 export const zPackageSourceEnum = z.enum(packageSourceValues);
-export type PackageSource = z.infer<typeof zPackageSourceEnum>;
 
 /**
  * Source discriminator for `llm_usage` rows. Each source has its own
@@ -95,7 +92,6 @@ export type PackageSource = z.infer<typeof zPackageSourceEnum>;
 export const llmUsageSourceValues = ["proxy", "runner"] as const;
 export const llmUsageSourceEnum = pgEnum("llm_usage_source", llmUsageSourceValues);
 export const zLlmUsageSourceEnum = z.enum(llmUsageSourceValues);
-export type LlmUsageSource = z.infer<typeof zLlmUsageSourceEnum>;
 
 /**
  * Distinguishes WHO controls the runner process — `platform` for
@@ -106,4 +102,3 @@ export type LlmUsageSource = z.infer<typeof zLlmUsageSourceEnum>;
 export const runOriginValues = ["platform", "remote"] as const;
 export const runOriginEnum = pgEnum("run_origin", runOriginValues);
 export const zRunOriginEnum = z.enum(runOriginValues);
-export type RunOrigin = z.infer<typeof zRunOriginEnum>;
