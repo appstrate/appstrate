@@ -406,14 +406,15 @@ export function App() {
               }
             />
           )}
-          <Route
-            path="/verify-email"
-            element={
-              <HostedAuthGate starter="login">
-                <VerifyEmailPage />
-              </HostedAuthGate>
-            }
-          />
+          {/*
+           * `/verify-email` is deliberately NOT gated: it is a post-signup
+           * interstitial (and verification-error display), not a login entry
+           * point. In OIDC + SMTP mode the server-rendered register flow can
+           * route an unauthenticated visitor here with `?email=` / `?error=`
+           * (see verify-email.tsx) — redirecting it to the hosted login would
+           * break that flow. It renders natively in both modes.
+           */}
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route
             path="/forgot-password"
             element={
