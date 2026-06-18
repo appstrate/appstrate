@@ -205,9 +205,23 @@ export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
 /**
  * OIDC logout — redirect through the server-side logout endpoint.
  * Clears the BA session cookie + the OIDC session on the IdP side.
+ *
+ * The post-logout redirect always lands on `/login` (the only URI the
+ * server validates against the client's registered `postLogoutRedirectUris`
+ * — an exact-match check, so a dynamic path like `/invite/:token` can't be
+ * passed there). To still return the user somewhere specific after they
+ * re-authenticate, `postLoginRedirect` is stashed in the same
+ * `OIDC_REDIRECT_KEY` that `handleOidcCallback` consumes: logout → `/login`
+ * → the gate re-runs `startOidcLogin(undefined)` (which does NOT overwrite
+ * the key) → the callback reads the stash and returns there. Used by the
+ * invite "log out and retry" path so a wrong-account user lands back on the
+ * invitation after signing in with the correct account.
  */
-export function startOidcLogout(): void {
+export function startOidcLogout(postLoginRedirect?: string): void {
   const config = getOidcConfig();
+  if (postLoginRedirect) {
+    sessionStorage.setItem(OIDC_REDIRECT_KEY, postLoginRedirect);
+  }
   if (!config) {
     window.location.assign("/login");
     return;
