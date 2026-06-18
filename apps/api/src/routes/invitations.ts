@@ -5,8 +5,7 @@ import { db } from "@appstrate/db/client";
 import { user } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { getAuth } from "@appstrate/db/auth";
-import { logger } from "../lib/logger.ts";
-import { ApiError, invalidRequest, internalError, gone } from "../lib/errors.ts";
+import { ApiError, gone } from "../lib/errors.ts";
 import {
   getInvitationByToken,
   markInvitationAccepted,
@@ -14,7 +13,6 @@ import {
   getOrgName,
   type AssignableRole,
 } from "../services/invitations.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { addMember, getOrgById } from "../services/organizations.ts";
 
 const router = new Hono();
@@ -67,15 +65,49 @@ router.get("/:token/info", async (c) => {
   });
 });
 
-// POST /invite/:token/accept — accept invitation (public)
+// POST /invite/:token/accept — authenticated user joins the org.
+//
+// Public route (registered before the platform auth middleware) but a valid
+// Better Auth session is REQUIRED: the caller authenticates first through the
+// platform-standard path (OIDC when the module is loaded, otherwise the
+// built-in email/password + social forms), then accepts. Account creation
+// never happens here — this endpoint has a single responsibility: bind an
+// already-authenticated user to the org named by the invitation token.
+//
+// Accept is a deliberate, session-bound POST: it is never a GET (no
+// state-change on link prefetch) and never auto-fires, so an email-client
+// prefetch or a logged-in stranger cannot silently join the org.
 router.post("/:token/accept", async (c) => {
   const token = c.req.param("token");
   const invitation = await getInvitationByToken(token);
   assertInvitationExists(invitation);
   assertInvitationUsable(invitation);
 
-  // Bare joined-org resource — same shape as the items in GET /api/orgs
-  // (issue #657). The web accept page reads `id` to pin the org store.
+  const session = await getAuth()
+    .api.getSession({ headers: c.req.raw.headers })
+    .catch(() => null);
+
+  if (!session?.user) {
+    throw new ApiError({
+      status: 401,
+      code: "authentication_required",
+      title: "Unauthorized",
+      detail: "Authentication is required to accept an invitation",
+    });
+  }
+
+  // The invitation is bound to a single email; the session must own it.
+  // This is also the security backstop for the email pinned client-side on
+  // the login/signup forms — a tampered email field cannot escape it.
+  if (session.user.email.toLowerCase() !== invitation.email.toLowerCase()) {
+    throw new ApiError({
+      status: 403,
+      code: "email_mismatch",
+      title: "Email mismatch",
+      detail: `This invitation is for ${invitation.email}`,
+    });
+  }
+
   const org = await getOrgById(invitation.orgId);
   if (!org) {
     throw new ApiError({
@@ -85,100 +117,34 @@ router.post("/:token/accept", async (c) => {
       detail: "Organization not found",
     });
   }
-  const joinedOrg = {
+
+  // Claim the single-use token and add the membership in ONE transaction so
+  // the two writes can never half-apply (user joined but invite still pending,
+  // or vice versa). The claim is conditional on `status = 'pending'`, so two
+  // concurrent accepts can't both succeed — the loser sees 0 rows claimed and
+  // is reported as already-accepted. `addMember` is idempotent (it swallows the
+  // unique violation), so an existing membership keeps the claim valid.
+  const claimed = await db.transaction(async (tx) => {
+    const won = await markInvitationAccepted(invitation.id, session.user.id, tx);
+    if (!won) return false;
+    await addMember(invitation.orgId, session.user.id, invitation.role as AssignableRole, tx);
+    return true;
+  });
+
+  if (!claimed) {
+    // A concurrent accept consumed the token between our read and our claim.
+    throw gone("invitation_accepted", "Invitation already accepted");
+  }
+
+  // Bare joined-org resource — same shape as the items in GET /api/orgs
+  // (issue #657). The web accept page reads `id` to pin the org store.
+  return c.json({
     id: org.id,
     name: org.name,
     slug: org.slug,
     role: invitation.role,
     createdAt: org.createdAt,
-  };
-
-  // Check if user already exists
-  const [existingUser] = await db
-    .select({ id: user.id })
-    .from(user)
-    .where(eq(user.email, invitation.email))
-    .limit(1);
-
-  if (!existingUser) {
-    // --- NEW USER: create account via Better Auth ---
-    const body = await c.req
-      .json<{ password?: string; displayName?: string }>()
-      .catch((): { password?: string; displayName?: string } => ({}));
-
-    if (!body.password || body.password.length < 8) {
-      throw invalidRequest("Password is required and must be at least 8 characters");
-    }
-
-    try {
-      // Sign up — creates user + account + profile (via databaseHook)
-      const signupRes = await getAuth().api.signUpEmail({
-        body: {
-          email: invitation.email,
-          password: body.password,
-          name: body.displayName?.trim() || invitation.email,
-        },
-      });
-
-      if (!signupRes?.user?.id) {
-        logger.error("Invitation signup failed — no user returned", {
-          email: invitation.email,
-        });
-        throw internalError();
-      }
-
-      const newUserId = signupRes.user.id;
-
-      // Sign in to get session cookie
-      const signinRes = await getAuth().api.signInEmail({
-        body: { email: invitation.email, password: body.password },
-        asResponse: true,
-      });
-
-      // Add member to org
-      await addMember(invitation.orgId, newUserId, invitation.role as AssignableRole);
-
-      await markInvitationAccepted(invitation.id, newUserId);
-
-      // Forward Set-Cookie from signin response
-      const setCookieHeader = signinRes.headers.get("set-cookie");
-      const headers = new Headers();
-      headers.set("Content-Type", "application/json");
-      if (setCookieHeader) {
-        headers.set("Set-Cookie", setCookieHeader);
-      }
-
-      return new Response(JSON.stringify(joinedOrg), { status: 200, headers });
-    } catch (err) {
-      if (err instanceof ApiError) throw err;
-      logger.error("Invitation accept failed (new user)", {
-        error: getErrorMessage(err),
-        email: invitation.email,
-      });
-      throw internalError();
-    }
-  } else {
-    // --- EXISTING USER ---
-    const session = await getAuth()
-      .api.getSession({ headers: c.req.raw.headers })
-      .catch(() => null);
-
-    // Prevent a logged-in user from accepting an invitation meant for a different email
-    if (session?.user && session.user.email.toLowerCase() !== invitation.email.toLowerCase()) {
-      throw new ApiError({
-        status: 403,
-        code: "email_mismatch",
-        title: "Email mismatch",
-        detail: `This invitation is for ${invitation.email}`,
-      });
-    }
-
-    await addMember(invitation.orgId, existingUser.id, invitation.role as AssignableRole);
-
-    await markInvitationAccepted(invitation.id, existingUser.id);
-
-    return c.json(joinedOrg);
-  }
+  });
 });
 
 export default router;

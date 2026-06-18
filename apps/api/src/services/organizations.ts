@@ -18,6 +18,9 @@ import { and, eq, inArray, count, sql } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 
+/** Accepts either the base client or an open transaction handle. */
+type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 interface OrgResult {
   id: string;
   name: string;
@@ -210,50 +213,19 @@ export async function getOrgMemberWithProfile(orgId: string, userId: string) {
   };
 }
 
-export async function findUserByEmail(email: string): Promise<{ id: string } | null> {
-  const [row] = await db.select({ id: user.id }).from(user).where(eq(user.email, email)).limit(1);
-
-  return row ?? null;
-}
-
 export async function addMember(
   orgId: string,
   userId: string,
   role: OrgRole = "member",
+  tx: DbOrTx = db,
 ): Promise<void> {
-  try {
-    await db.insert(organizationMembers).values({
-      orgId,
-      userId,
-      role,
-    });
-  } catch (err: unknown) {
-    // Drizzle wraps the postgres driver error in `DrizzleQueryError` whose
-    // `message` only says "Failed query: …" — the unique-violation details
-    // live on `err.cause` (with PG `code === "23505"`). Walk the cause chain
-    // so we match both the wrapped and the raw error shape.
-    if (isUniqueViolation(err)) {
-      // User is already a member — idempotent, silently ignore
-      return;
-    }
-    throw err;
-  }
-}
-
-function isUniqueViolation(err: unknown): boolean {
-  // Cap depth to defend against pathological / circular `cause` chains.
-  // Drizzle wraps once, postgres.js wraps once — 8 hops is generous.
-  let cur: unknown = err;
-  for (let depth = 0; cur != null && depth < 8; depth++) {
-    if (typeof cur === "object") {
-      const e = cur as { code?: unknown; message?: unknown };
-      if (e.code === "23505") return true;
-      const msg = typeof e.message === "string" ? e.message : "";
-      if (msg.includes("duplicate key") || msg.includes("unique constraint")) return true;
-    }
-    cur = (cur as { cause?: unknown }).cause;
-  }
-  return false;
+  // ON CONFLICT DO NOTHING makes this idempotent AND transaction-safe. A plain
+  // INSERT that hits the (org_id, user_id) PK would raise — and inside an
+  // enclosing transaction a raised statement ABORTS the whole transaction, so
+  // a caught-and-swallowed error would still poison the surrounding tx. The
+  // conflict clause turns "already a member" into a clean no-op (the existing
+  // row, and its role, are left untouched — no silent downgrade).
+  await tx.insert(organizationMembers).values({ orgId, userId, role }).onConflictDoNothing();
 }
 
 export async function removeMember(orgId: string, userId: string): Promise<void> {

@@ -803,6 +803,8 @@ export function createOidcRouter() {
     // banner instead of silently rendering a blank login page.
     const errorCode = url.searchParams.get("error");
     const errorMessage = errorCode ? mapLoginErrorCode(errorCode) : undefined;
+    // OIDC `login_hint` pins the email (invitation flow) — pre-fill + lock it.
+    const loginHint = url.searchParams.get("login_hint")?.toLowerCase().trim() || undefined;
     const body = renderLoginPage({
       queryString: stripErrorFromQueryString(url.search),
       branding: ctx.branding,
@@ -811,6 +813,8 @@ export function createOidcRouter() {
       smtpEnabled: ctx.features.smtp,
       allowSignup: allowSignupForClient(ctx.client),
       error: errorMessage,
+      email: loginHint,
+      lockEmail: !!loginHint,
     });
     return c.html(body.value);
   });
@@ -1093,12 +1097,16 @@ export function createOidcRouter() {
     // Same pending-client cookie as GET /api/oauth/login — covers the social
     // sign-in buttons surfaced on the register page.
     issuePendingClientCookie(c, ctx.client.clientId);
+    // OIDC `login_hint` pins the email (invitation flow) — pre-fill + lock it.
+    const loginHint = url.searchParams.get("login_hint")?.toLowerCase().trim() || undefined;
     const body = renderRegisterPage({
       queryString: url.search,
       branding: ctx.branding,
       csrfToken: ctx.csrfToken,
       socialProviders: ctx.socialProviders,
       allowSignup: true,
+      email: loginHint,
+      lockEmail: !!loginHint,
     });
     return c.html(body.value);
   });

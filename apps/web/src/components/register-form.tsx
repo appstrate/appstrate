@@ -22,11 +22,6 @@ type RegisterFormData = {
 
 interface RegisterFormProps extends React.ComponentPropsWithoutRef<"div"> {
   fixedEmail?: string;
-  onSubmitOverride?: (data: {
-    email: string;
-    password: string;
-    displayName: string;
-  }) => Promise<void>;
   header?: ReactNode | null;
   footer?: ReactNode | null;
   switchAuthSlot?: ReactNode;
@@ -51,7 +46,6 @@ interface RegisterFormProps extends React.ComponentPropsWithoutRef<"div"> {
 export function RegisterForm({
   className,
   fixedEmail,
-  onSubmitOverride,
   header,
   footer,
   switchAuthSlot,
@@ -78,23 +72,11 @@ export function RegisterForm({
 
   const onSubmit = async (data: RegisterFormData) => {
     try {
-      if (onSubmitOverride) {
-        await onSubmitOverride({
-          email: fixedEmail ?? data.email,
-          password: data.password,
-          displayName: data.displayName.trim() || "",
-        });
+      const result = await signup(data.email, data.password, data.displayName.trim() || undefined);
+      if (result.emailVerificationRequired) {
+        navigate("/verify-email", { state: { email: data.email } });
       } else {
-        const result = await signup(
-          data.email,
-          data.password,
-          data.displayName.trim() || undefined,
-        );
-        if (result.emailVerificationRequired) {
-          navigate("/verify-email", { state: { email: data.email } });
-        } else {
-          navigate(redirectAfterSignup);
-        }
+        navigate(redirectAfterSignup);
       }
     } catch (err) {
       setError("root", {

@@ -43,7 +43,7 @@ export const openApiInfo = {
     { name: "Organizations", description: "Organization and member management" },
     { name: "Profile", description: "User profile management" },
     { name: "Realtime", description: "Server-Sent Events (SSE) for real-time updates" },
-    { name: "Invitations", description: "Organization invitation magic links" },
+    { name: "Invitations", description: "Organization invitation acceptance" },
     { name: "Welcome", description: "Post-invite profile setup" },
     { name: "Health", description: "Health check" },
     { name: "Internal", description: "Container-to-host internal routes" },

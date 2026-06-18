@@ -82,30 +82,13 @@ export const invitationsPaths = {
       tags: ["Invitations"],
       summary: "Accept invitation",
       description:
-        "Accept an invitation. Creates user account if new, adds to org, sets session cookie.",
-      security: [],
+        "Accept an invitation. Requires an authenticated Better Auth session whose email matches the invitation; adds the user to the org and returns the joined organization. Account creation happens beforehand through the standard login/signup flow, never here.",
+      security: [{ cookieAuth: [] }],
       parameters: [{ name: "token", in: "path", required: true, schema: { type: "string" } }],
-      requestBody: {
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                password: {
-                  type: "string",
-                  minLength: 8,
-                  description: "Password (required for new users, minimum 8 characters)",
-                },
-                displayName: { type: "string" },
-              },
-            },
-          },
-        },
-      },
       responses: {
         "200": {
           description:
-            "Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs, with `role` set to the invitation role). For new users a session cookie is set via Set-Cookie.",
+            "Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs, with `role` set to the invitation role).",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -123,7 +106,7 @@ export const invitationsPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           description: "Invitation email does not match the authenticated session",
           content: {

@@ -9,10 +9,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthLayout } from "../components/auth-layout";
 import { AuthSuccessState } from "../components/auth-success-state";
-import { authClient } from "../lib/auth-client";
+import { useAuth } from "../hooks/use-auth";
 
 export function ForgotPasswordPage() {
   const { t } = useTranslation(["settings", "common"]);
+  const { requestPasswordReset } = useAuth();
   const [email, setEmail] = useState("");
   const [state, setState] = useState<"form" | "submitting" | "sent">("form");
   const [error, setError] = useState<string | null>(null);
@@ -23,10 +24,7 @@ export function ForgotPasswordPage() {
     setState("submitting");
     setError(null);
     try {
-      await authClient.requestPasswordReset({
-        email: email.trim(),
-        redirectTo: "/reset-password",
-      });
+      await requestPasswordReset(email.trim());
       setState("sent");
     } catch {
       setError(t("forgotPassword.error"));

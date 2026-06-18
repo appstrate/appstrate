@@ -29,6 +29,13 @@ export interface RegisterPageProps {
    * in that case instead of calling this function.
    */
   allowSignup?: boolean;
+  /**
+   * Lock the email field (read-only, pre-filled from `email`). Set when the
+   * authorize request carried an OIDC `login_hint` — the invitation flow
+   * pins the invited address. UX only: the invitation accept endpoint
+   * re-checks the session email server-side.
+   */
+  lockEmail?: boolean;
 }
 
 export function renderRegisterPage(props: RegisterPageProps): RawHtml {
@@ -58,7 +65,14 @@ export function renderRegisterPage(props: RegisterPageProps): RawHtml {
         autofocus
         value="${props.name ?? ""}"
       />
-      <input type="email" name="email" placeholder="Email" required value="${props.email ?? ""}" />
+      <input
+        type="email"
+        name="email"
+        placeholder="Email"
+        required
+        ${props.lockEmail ? html`readonly` : null}
+        value="${props.email ?? ""}"
+      />
       <input
         type="password"
         name="password"

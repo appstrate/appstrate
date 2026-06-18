@@ -10,10 +10,11 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { AuthLayout } from "../components/auth-layout";
 import { AuthSuccessState } from "../components/auth-success-state";
-import { authClient } from "../lib/auth-client";
+import { useAuth } from "../hooks/use-auth";
 
 export function ResetPasswordPage() {
   const { t } = useTranslation(["settings", "common"]);
+  const { resetPassword } = useAuth();
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token");
 
@@ -56,12 +57,7 @@ export function ResetPasswordPage() {
 
     setState("submitting");
     try {
-      const result = await authClient.resetPassword({ newPassword: password, token });
-      if (result.error) {
-        setError(t("resetPassword.invalidToken"));
-        setState("form");
-        return;
-      }
+      await resetPassword(token, password);
       setState("success");
     } catch {
       setError(t("resetPassword.invalidToken"));

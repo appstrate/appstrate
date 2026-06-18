@@ -214,11 +214,11 @@ export const organizationsPaths = {
   },
   "/api/orgs/{orgId}/members": {
     post: {
-      operationId: "addOrInviteMember",
+      operationId: "inviteMember",
       tags: ["Organizations"],
-      summary: "Add or invite a member",
+      summary: "Invite a member",
       description:
-        "Add a user to the org (if they exist) or create an invitation with a magic link token.",
+        "Create a pending invitation for the given email (new and existing users alike). The invitee joins by opening the invite link, authenticating through the standard login/signup flow, then explicitly accepting. When SMTP is configured an invitation email is sent; otherwise the admin shares the returned token out of band.",
       parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
       requestBody: {
         required: true,
@@ -238,41 +238,21 @@ export const organizationsPaths = {
       responses: {
         "201": {
           description:
-            "Polymorphic bare resource: when the user already exists (and no invitation flow applies) they are added directly and the created member is returned (OrgMember — discriminate on `userId`); otherwise an invitation is created and returned (OrgInvitationInfo — discriminate on `id` + `token`). Both use the same serializers as the lists in GET /api/orgs/{orgId}.",
+            "Invitation created — bare OrgInvitationInfo (same shape as the items in the invitations list in GET /api/orgs/{orgId}).",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              schema: {
-                oneOf: [
-                  { $ref: "#/components/schemas/OrgMember" },
-                  { $ref: "#/components/schemas/OrgInvitationInfo" },
-                ],
-              },
-              examples: {
-                memberAdded: {
-                  summary: "Existing user added directly",
-                  value: {
-                    userId: "usr_def456",
-                    displayName: "Bob",
-                    email: "bob@acme.com",
-                    role: "member",
-                    joinedAt: "2026-01-12T10:00:00Z",
-                  },
-                },
-                invitationCreated: {
-                  summary: "Invitation created",
-                  value: {
-                    id: "inv_abc123",
-                    email: "newuser@example.com",
-                    role: "member",
-                    token: "inv_abc123def456",
-                    expiresAt: "2026-02-01T00:00:00Z",
-                    createdAt: "2026-01-25T00:00:00Z",
-                  },
-                },
+              schema: { $ref: "#/components/schemas/OrgInvitationInfo" },
+              example: {
+                id: "inv_abc123",
+                email: "newuser@example.com",
+                role: "member",
+                token: "inv_abc123def456",
+                expiresAt: "2026-02-01T00:00:00Z",
+                createdAt: "2026-01-25T00:00:00Z",
               },
             },
           },
