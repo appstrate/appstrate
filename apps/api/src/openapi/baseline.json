@@ -291,6 +291,9 @@
           },
           "400": {
             "description": "Validation error"
+          },
+          "403": {
+            "description": "Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required. Body shape is owned by Better Auth."
           }
         }
       }
@@ -330,6 +333,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "redirect": {
+                      "type": "boolean"
+                    },
                     "user": {
                       "$ref": "#/components/schemas/User"
                     },
@@ -339,6 +345,7 @@
                   }
                 },
                 "example": {
+                  "redirect": false,
                   "user": {
                     "id": "usr_abc123",
                     "email": "alice@example.com",
@@ -495,11 +502,11 @@
         "description": "Returns the current session and user info.",
         "responses": {
           "200": {
-            "description": "Session info",
+            "description": "Session info, or `null` when there is no active session.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
+                  "type": ["object", "null"],
                   "properties": {
                     "user": {
                       "anyOf": [
@@ -1522,7 +1529,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version — 404 `no_published_version` if nothing is published), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Default when omitted: the latest published version when one exists, the draft otherwise** — programmatic callers (API, MCP, CLI, CI) run what was published unless they explicitly ask for the draft. The editor UI passes `version=draft` for test-runs. The run object's `version_ref` states which definition executed. Ignored for system agents."
+            "description": "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Omitting the parameter is strictly identical to `published`** — the latest published version, or `404 no_published_version` when nothing is published. The working copy is NEVER an implicit default: run it by passing `version=draft` explicitly (the editor UI does this for test-runs). This unified default keeps every caller — API, MCP, CLI, CI, schedules and the dashboard — coherent on every selector. The run object's `version_ref` states which definition executed. Ignored for system agents."
           }
         ],
         "requestBody": {
@@ -1549,11 +1556,19 @@
                   },
                   "config": {
                     "type": "object",
+                    "additionalProperties": true,
                     "description": "Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair."
                   },
                   "connection_overrides": {
                     "type": "object",
                     "description": "Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "dependency_overrides": {
+                    "type": "object",
+                    "description": "Per-run dependency version overrides (#666). Flat map: `{ \"@scope/skill\": \"draft\" | \"<semver|dist-tag>\" }`. By default every skill in the agent's closure resolves against PUBLISHED versions honoring its manifest pin; an entry here overrides that for a single run — `\"draft\"` pulls the dependency's mutable working copy (the skill edit loop: edit → run → observe, no republish), any other value replaces the pin with that spec. Run-scoped only (never stored in the manifest) and recorded on the run object so a run that consumed draft bytes is never mistaken for a reproducible one. An unsatisfiable pin (including a never-published dependency) returns 422 `dependency_unresolved` before the run starts — pass an override or publish the dependency to fix it.",
                     "additionalProperties": {
                       "type": "string"
                     }
@@ -1566,6 +1581,9 @@
                 },
                 "config": {
                   "dryRun": true
+                },
+                "dependency_overrides": {
+                  "@test/test-skill": "draft"
                 }
               }
             }
@@ -1573,7 +1591,7 @@
         },
         "responses": {
           "201": {
-            "description": "Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed. Under a rare concurrent-teardown race (the run is deleted between creation and serialization) the body may degrade to `{id}` only.",
+            "description": "Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -1623,8 +1641,7 @@
                   "completed_at": null,
                   "duration": null,
                   "cost": null,
-                  "notifiedAt": null,
-                  "readAt": null,
+                  "unread": false,
                   "runNumber": 17,
                   "token_usage": null,
                   "version_label": "1.2.0",
@@ -1641,6 +1658,7 @@
                   "contextSnapshot": null,
                   "modelCredentialId": "mpc_8h2k4m6n",
                   "connection_overrides": null,
+                  "dependency_overrides": null,
                   "user_name": null,
                   "end_user_name": null,
                   "api_key_name": null,
@@ -1956,7 +1974,7 @@
         },
         "responses": {
           "201": {
-            "description": "Inline run created — stream via SSE. The body is the created run resource (same shape as `GET /runs/{id}`); under a rare concurrent-teardown race (the run is deleted between creation and serialization) it may degrade to `{id}` only.",
+            "description": "Inline run created — stream via SSE. The body is the created run resource (same shape as `GET /runs/{id}`).",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -2003,8 +2021,7 @@
                   "completed_at": null,
                   "duration": null,
                   "cost": null,
-                  "notifiedAt": null,
-                  "readAt": null,
+                  "unread": false,
                   "runNumber": 1,
                   "token_usage": null,
                   "version_label": null,
@@ -2021,6 +2038,7 @@
                   "contextSnapshot": null,
                   "modelCredentialId": "mpc_8h2k4m6n",
                   "connection_overrides": null,
+                  "dependency_overrides": null,
                   "user_name": null,
                   "end_user_name": null,
                   "api_key_name": null,
@@ -2422,8 +2440,7 @@
                   "completed_at": "2026-01-15T10:31:12Z",
                   "duration": 72000,
                   "cost": 0.0034,
-                  "notifiedAt": "2026-01-15T10:31:12Z",
-                  "readAt": null,
+                  "unread": true,
                   "runNumber": 17,
                   "token_usage": {
                     "input_tokens": 8200,
@@ -2445,6 +2462,7 @@
                   "contextSnapshot": null,
                   "modelCredentialId": null,
                   "connection_overrides": null,
+                  "dependency_overrides": null,
                   "user_name": "Pierre",
                   "end_user_name": null,
                   "api_key_name": null,
@@ -2656,8 +2674,7 @@
                   "completed_at": "2026-01-15T10:30:45Z",
                   "duration": 45000,
                   "cost": 0.0012,
-                  "notifiedAt": null,
-                  "readAt": null,
+                  "unread": false,
                   "runNumber": 18,
                   "token_usage": null,
                   "version_label": "1.2.0",
@@ -2674,6 +2691,7 @@
                   "contextSnapshot": null,
                   "modelCredentialId": null,
                   "connection_overrides": null,
+                  "dependency_overrides": null,
                   "user_name": "Pierre",
                   "end_user_name": null,
                   "api_key_name": null,
@@ -2810,6 +2828,13 @@
                   },
                   "input": {
                     "type": "object"
+                  },
+                  "dependency_overrides": {
+                    "type": "object",
+                    "description": "Per-run dependency version overrides (#666/#686). Flat map `{ \"@scope/dep\": \"draft\" | \"<semver|dist-tag>\" }`; keys may name a declared skill OR integration. `\"draft\"` opts that dependency into its working copy; any other value replaces the manifest pin. An unsatisfiable pin aborts the run with `dependency_unresolved` (422).",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
                   },
                   "contextSnapshot": {
                     "type": "object",
@@ -3901,11 +3926,18 @@
                   },
                   "version_override": {
                     "type": "string",
-                    "description": "Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Default when omitted: the latest published version when one exists, the draft otherwise. The pinned definition (manifest + prompt) is resolved at each fire."
+                    "description": "Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitting it is identical to `published` (latest published version; the working copy is opt-in via `draft` only). The pinned definition (manifest + prompt) is resolved at each fire — a schedule inheriting (`published`) on a never-published agent skips the fire and logs a warning until a version is published or `draft` is pinned."
                   },
                   "connection_overrides": {
                     "type": "object",
                     "description": "Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ \"@scope/integration\": \"<connection_id>\" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire.",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "dependency_overrides": {
+                    "type": "object",
+                    "description": "Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ \"@scope/dep\": \"draft\" | \"<semver|dist-tag>\" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them.",
                     "additionalProperties": {
                       "type": "string"
                     }
@@ -3951,6 +3983,7 @@
                   "proxy_id_override": null,
                   "version_override": null,
                   "connection_overrides": null,
+                  "dependency_overrides": null,
                   "last_run_at": null,
                   "next_run_at": "2026-01-16T09:00:00Z",
                   "createdAt": "2026-01-15T10:30:00Z",
@@ -4041,6 +4074,7 @@
                   "proxy_id_override": null,
                   "version_override": "1.2.0",
                   "connection_overrides": null,
+                  "dependency_overrides": null,
                   "last_run_at": "2026-01-15T09:00:00Z",
                   "next_run_at": "2026-01-16T09:00:00Z",
                   "createdAt": "2026-01-14T14:00:00Z",
@@ -4114,11 +4148,18 @@
                   },
                   "version_override": {
                     "type": ["string", "null"],
-                    "description": "Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default: latest published version when one exists, draft otherwise)."
+                    "description": "Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default `published` — latest published version; the working copy is opt-in via `draft` only)."
                   },
                   "connection_overrides": {
                     "type": ["object", "null"],
                     "description": "Per-integration connection picks frozen on the schedule. Pass `null` to clear.",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "dependency_overrides": {
+                    "type": ["object", "null"],
+                    "description": "Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ \"@scope/dep\": \"draft\" | \"<semver|dist-tag>\" }`; skill or integration ids. Pass `null` to clear.",
                     "additionalProperties": {
                       "type": "string"
                     }
@@ -4354,7 +4395,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["object", "data", "hasMore"],
+                  "required": ["object", "data", "total", "hasMore"],
                   "properties": {
                     "object": {
                       "type": "string",
@@ -4364,7 +4405,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["id", "manifest", "orgId", "source"],
+                        "required": ["id"],
                         "properties": {
                           "id": {
                             "type": "string"
@@ -4388,6 +4429,9 @@
                           }
                         }
                       }
+                    },
+                    "total": {
+                      "type": "integer"
                     },
                     "hasMore": {
                       "type": "boolean"
@@ -7530,7 +7574,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["object", "data", "hasMore"],
+                  "required": ["object", "data", "total", "hasMore"],
                   "properties": {
                     "object": {
                       "type": "string",
@@ -7540,17 +7584,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": [
-                          "providerId",
-                          "displayName",
-                          "iconUrl",
-                          "apiShape",
-                          "defaultBaseUrl",
-                          "baseUrlOverridable",
-                          "authMode",
-                          "featured",
-                          "models"
-                        ],
+                        "required": ["providerId"],
                         "properties": {
                           "providerId": {
                             "type": "string"
@@ -7654,6 +7688,9 @@
                           }
                         }
                       }
+                    },
+                    "total": {
+                      "type": "integer"
                     },
                     "hasMore": {
                       "type": "boolean"
@@ -8082,6 +8119,79 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TestResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/model-provider-credentials/{id}/refresh-models": {
+      "post": {
+        "operationId": "refreshModelProviderCredentialModels",
+        "tags": ["Model Provider Credentials"],
+        "summary": "Empirically discover the models this credential serves",
+        "description": "Probes every discovery-candidate model against the live credential (1-token inference requests on the account's own quota) and persists the ids that answered as `available_model_ids`. Designed for subscription-backed OAuth providers (codex, claude-code) whose served model set depends on the account's plan and has no discovery endpoint. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Discovery outcome + the credential's current verified list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["outcome", "probed_count", "available_model_ids"],
+                  "properties": {
+                    "outcome": {
+                      "type": "string",
+                      "enum": ["ok", "auth_failed", "nothing_verified", "no_candidates"],
+                      "description": "`ok` — list persisted. `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — every probe failed (network incident or none served), previous list kept. `no_candidates` — provider declares no discovery candidates."
+                    },
+                    "probed_count": {
+                      "type": "integer"
+                    },
+                    "available_model_ids": {
+                      "type": ["array", "null"],
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -9197,6 +9307,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["id", "name", "slug", "role", "createdAt"],
                   "properties": {
                     "id": {
                       "type": "string",
@@ -9985,6 +10096,11 @@
         "tags": ["Profile"],
         "summary": "Batch lookup profiles",
         "description": "Retrieve display names for a list of user IDs.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -11389,6 +11505,143 @@
         }
       }
     },
+    "/api/notifications": {
+      "get": {
+        "operationId": "listNotifications",
+        "tags": ["Notifications"],
+        "summary": "List notifications",
+        "description": "Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel=\"next\"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "unread",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "When true, only unread notifications are returned"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "startingAfter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Keyset cursor — return notifications after this id (newest-first order). Supplied by the `Link: rel=\"next\"` header."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notification list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "Link": {
+                "$ref": "#/components/headers/Link"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "has_more"],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["id", "type", "run_id", "payload", "read_at", "created_at"],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "Notification id"
+                          },
+                          "type": {
+                            "type": "string",
+                            "description": "Notification kind, e.g. run_completed"
+                          },
+                          "run_id": {
+                            "type": ["string", "null"],
+                            "description": "Originating run id, when the notification references one"
+                          },
+                          "payload": {
+                            "type": ["object", "null"],
+                            "additionalProperties": true,
+                            "description": "Render-without-join data (agent_id, status)"
+                          },
+                          "read_at": {
+                            "type": ["string", "null"],
+                            "format": "date-time",
+                            "description": "When the recipient marked it read; null if unread"
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    },
+                    "has_more": {
+                      "type": "boolean",
+                      "description": "True when another page follows — page via the Link header cursor"
+                    }
+                  }
+                },
+                "example": {
+                  "data": [
+                    {
+                      "id": "550e8400-e29b-41d4-a716-446655440000",
+                      "type": "run_completed",
+                      "run_id": "exec_cm4jkl012",
+                      "payload": {
+                        "agent_id": "@acme/email-sorter",
+                        "status": "success"
+                      },
+                      "read_at": null,
+                      "created_at": "2026-01-15T10:31:12Z"
+                    }
+                  ],
+                  "has_more": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
     "/api/notifications/unread-count": {
       "get": {
         "operationId": "getUnreadNotificationCount",
@@ -11511,12 +11764,63 @@
         }
       }
     },
+    "/api/notifications/{id}/read": {
+      "put": {
+        "operationId": "markNotificationReadById",
+        "tags": ["Notifications"],
+        "summary": "Mark a notification as read",
+        "description": "Marks a single notification read for the current recipient. Idempotent (204 even if already read); returns 404 when the notification does not belong to the caller.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Notification id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Notification marked as read (idempotent — 204 even if it was already read)",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/api/notifications/read/{runId}": {
       "put": {
         "operationId": "markNotificationRead",
         "tags": ["Notifications"],
-        "summary": "Mark a notification as read",
-        "description": "Marks the notification for a specific run as read.",
+        "summary": "Mark a run's notification as read",
+        "description": "Mark the caller's notification for a run read, keyed by run id — complements `PUT /api/notifications/{id}/read` for callers that hold a run id but not the notification id. Idempotent: a missing run or non-recipient is a no-op, always 204.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15970,6 +16274,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
                     "object": {
                       "type": "string",
@@ -15980,6 +16285,10 @@
                       "items": {
                         "$ref": "#/components/schemas/ApplicationPackage"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean",
+                      "description": "Whether more results exist beyond this page"
                     }
                   }
                 }
@@ -18304,9 +18613,6 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
           }
         ],
         "responses": {
@@ -18390,7 +18696,7 @@
                       {
                         "id": "pkg_inbox_triage",
                         "type": "agent",
-                        "source": "org",
+                        "source": "local",
                         "name": "Inbox Triage",
                         "description": "Sorts incoming Gmail threads into priority buckets.",
                         "installed_in": ["app_default"]
@@ -18721,6 +19027,7 @@
       },
       "User": {
         "type": "object",
+        "additionalProperties": true,
         "required": ["id", "name", "email"],
         "properties": {
           "id": {
@@ -18822,7 +19129,7 @@
             "type": "string"
           },
           "displayName": {
-            "type": "string"
+            "type": ["string", "null"]
           }
         }
       },
@@ -19109,7 +19416,7 @@
           },
           "config": {
             "type": "object",
-            "required": ["current"],
+            "required": ["schema", "current"],
             "description": "AFPS schema wrapper for agent configuration (set once, reused across runs).",
             "properties": {
               "schema": {
@@ -19405,8 +19712,6 @@
           "completed_at",
           "duration",
           "cost",
-          "notifiedAt",
-          "readAt",
           "runNumber",
           "token_usage",
           "version_label",
@@ -19423,12 +19728,14 @@
           "contextSnapshot",
           "modelCredentialId",
           "connection_overrides",
+          "dependency_overrides",
           "user_name",
           "end_user_name",
           "api_key_name",
           "schedule_name",
           "connections_used",
-          "package_ephemeral"
+          "package_ephemeral",
+          "unread"
         ],
         "properties": {
           "id": {
@@ -19450,7 +19757,8 @@
             "enum": ["pending", "running", "success", "failed", "timeout", "cancelled"]
           },
           "input": {
-            "type": "object"
+            "type": ["object", "null"],
+            "additionalProperties": true
           },
           "result": {
             "type": ["object", "null"],
@@ -19470,7 +19778,8 @@
             }
           },
           "checkpoint": {
-            "type": "object"
+            "type": ["object", "null"],
+            "additionalProperties": true
           },
           "error": {
             "type": ["string", "null"]
@@ -19613,15 +19922,9 @@
             "type": ["string", "null"],
             "description": "Inline runs only. Snapshot of the prompt submitted at run time. Null once the shadow has been compacted."
           },
-          "notifiedAt": {
-            "type": ["string", "null"],
-            "format": "date-time",
-            "description": "When the user was notified of run completion (in-app notification). Null until notification fires."
-          },
-          "readAt": {
-            "type": ["string", "null"],
-            "format": "date-time",
-            "description": "When the user marked the run notification as read. Null until acknowledged."
+          "unread": {
+            "type": "boolean",
+            "description": "True when the requesting recipient has an unread notification for this run (issue #667). Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count."
           },
           "runNumber": {
             "type": ["integer", "null"],
@@ -19644,6 +19947,13 @@
           "connection_overrides": {
             "type": ["object", "null"],
             "description": "Per-integration connection picks for this run (flat-connections mechanism #2). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (#1).",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "dependency_overrides": {
+            "type": ["object", "null"],
+            "description": "Per-run dependency version overrides (#666). Flat map: `{ \"@scope/skill\": \"draft\" | \"<semver|dist-tag>\" }`. A `\"draft\"` value means the run consumed a dependency's mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions.",
             "additionalProperties": {
               "type": "string"
             }
@@ -19694,13 +20004,13 @@
             "description": "Log severity level. Non-admin users only receive info, warn, and error logs."
           },
           "event": {
-            "type": "string"
+            "type": ["string", "null"]
           },
           "message": {
-            "type": "string"
+            "type": ["string", "null"]
           },
           "data": {
-            "type": "object"
+            "type": ["object", "null"]
           },
           "createdAt": {
             "type": "string",
@@ -19727,6 +20037,7 @@
           "proxy_id_override",
           "version_override",
           "connection_overrides",
+          "dependency_overrides",
           "last_run_at",
           "next_run_at",
           "createdAt",
@@ -19788,6 +20099,13 @@
           "connection_overrides": {
             "type": ["object", "null"],
             "description": "Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }`. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4).",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "dependency_overrides": {
+            "type": ["object", "null"],
+            "description": "Per-dependency version overrides frozen on the schedule row (#666/#686). Flat map: `{ \"@scope/dep\": \"draft\" | \"<semver|dist-tag>\" }`; keys may name a declared skill OR integration. Forwarded to each fired run's `dependency_overrides` so a scheduled run resolves its dependencies exactly as the schedule froze them.",
             "additionalProperties": {
               "type": "string"
             }
@@ -20081,6 +20399,13 @@
           "needs_reconnection": {
             "type": "boolean"
           },
+          "available_model_ids": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "string"
+            },
+            "description": "Model ids empirically verified against this credential by the discovery probe (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. Null = never probed. Per-credential because availability depends on the account's plan."
+          },
           "created_by": {
             "type": ["string", "null"]
           },
@@ -20204,6 +20529,10 @@
           "message": {
             "type": "string",
             "description": "Human-readable error message"
+          },
+          "status": {
+            "type": "integer",
+            "description": "Upstream HTTP status when the provider answered at all — distinguishes 429 (retry later) from 404 (model not served)."
           }
         }
       },
@@ -20517,10 +20846,6 @@
             }
           }
         ]
-      },
-      "SkillManifest": {
-        "description": "AFPS Skill manifest. See https://schemas.afps.dev for field reference.",
-        "$ref": "https://schemas.afps.dev/v0/skill.schema.json"
       },
       "FileConstraintsMap": {
         "type": "object",

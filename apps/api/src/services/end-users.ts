@@ -8,7 +8,7 @@
 
 import { eq, and, desc, lt, gt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { endUsers, applications } from "@appstrate/db/schema";
+import { endUsers, applications, notifications } from "@appstrate/db/schema";
 import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
@@ -255,16 +255,37 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
   // Verify end-user exists and belongs to app
   await getEndUser(scope, endUserId);
 
-  // Delete end-user — cascades handle connections, runs
-  await db
-    .delete(endUsers)
-    .where(
-      and(
-        eq(endUsers.id, endUserId),
-        eq(endUsers.orgId, scope.orgId),
-        eq(endUsers.applicationId, scope.applicationId),
-      ),
-    );
+  // Notifications carry the recipient as a polymorphic (recipientType,
+  // recipientId) tuple with NO foreign key, so deleting the end-user does not
+  // cascade them. Run-linked notifications are dropped transitively when the
+  // end-user's runs cascade, but a future run-less end-user notification would
+  // orphan — so delete the recipient's notifications explicitly. Scoped to the
+  // app for tenant safety. Both deletes run in one transaction so a failure
+  // mid-way can't leave the end-user gone but their notifications stranded
+  // (or vice-versa).
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(notifications)
+      .where(
+        and(
+          eq(notifications.recipientType, "end_user"),
+          eq(notifications.recipientId, endUserId),
+          eq(notifications.orgId, scope.orgId),
+          eq(notifications.applicationId, scope.applicationId),
+        ),
+      );
+
+    // Delete end-user — cascades handle connections, runs
+    await tx
+      .delete(endUsers)
+      .where(
+        and(
+          eq(endUsers.id, endUserId),
+          eq(endUsers.orgId, scope.orgId),
+          eq(endUsers.applicationId, scope.applicationId),
+        ),
+      );
+  });
 
   logger.info("End-user deleted via API", {
     endUserId,

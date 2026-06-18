@@ -57,6 +57,7 @@ function resetFsStorage(): void {
  */
 const CORE_TABLES = [
   // Leaf tables (no dependents)
+  "notifications",
   "audit_events",
   "llm_usage",
   "credential_proxy_usage",

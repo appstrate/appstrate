@@ -22,7 +22,7 @@ import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
 import { RunRow } from "../components/run-row";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
-import { useMarkRead } from "../hooks/use-notifications";
+import { useMarkReadByRun } from "../hooks/use-notifications";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
 import { formatDateField } from "../lib/markdown";
@@ -61,14 +61,20 @@ export function RunDetailPage() {
 
   const qc = useQueryClient();
 
-  const markRead = useMarkRead();
+  const markRead = useMarkReadByRun();
 
-  // Auto-mark notification as read when viewing an run
+  // Auto-mark notification as read when viewing a terminal run. Keyed on
+  // `status`: the SSE run patch carries `status` (see `runUpdateToRunPatch`),
+  // so a run that finalizes while the page is open marks read the moment
+  // status flips terminal. Idempotent server-side (no-op for a non-recipient /
+  // already-read), and `status` is stable once terminal so the effect does not
+  // re-fire on subsequent renders.
   useEffect(() => {
-    if (run && runId && run.notifiedAt && !run.readAt) {
+    const terminal = !!status && !(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
+    if (run && runId && terminal) {
       markRead.mutate({ params: { path: { runId } } });
     }
-  }, [run?.notifiedAt, run?.readAt, runId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [status, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runAgent = useRunAgent(packageId);
   const cancelRun = useCancelRun();

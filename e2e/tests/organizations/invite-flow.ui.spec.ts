@@ -127,12 +127,24 @@ test.describe("Organization invitation flow", () => {
 
     const ctx = await contextWithCookie(browser, wrongUser.cookie);
     const page = await ctx.newPage();
-    // Abort the server-side logout navigation so the page stays put and we can
-    // inspect what `startOidcLogout` stashed for the post-re-login callback.
-    await page.route("**/api/oauth/logout*", (route) => route.abort());
+    // `startOidcLogout` stashes the redirect synchronously, then navigates to
+    // the same-origin /api/oauth/logout. Aborting that top-level navigation
+    // leaves the renderer on a chrome-error document where sessionStorage reads
+    // throw a SecurityError (flaky). Instead, fulfill it with a blank same-origin
+    // page: the navigation settles deterministically and sessionStorage (scoped
+    // to the origin) survives, so the stashed redirect stays readable.
+    await page.route("**/api/oauth/logout*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: "<!doctype html><title>logout</title>",
+      }),
+    );
     await page.goto(`/invite/${token}`);
 
     await page.getByRole("button", { name: /Se déconnecter et réessayer/i }).click();
+    // Let the fulfilled same-origin logout navigation finish before reading storage.
+    await page.waitForURL(/\/api\/oauth\/logout/);
 
     // The invite path is stashed in the same key handleOidcCallback consumes,
     // so after re-login the user returns to the invitation (not onboarding).

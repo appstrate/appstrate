@@ -78,8 +78,6 @@ export interface RunWireDto {
   completed_at: string | null;
   duration: number | null;
   cost: number | null;
-  notifiedAt: string | null;
-  readAt: string | null;
   runNumber: number | null;
   token_usage: unknown;
   version_label: string | null;
@@ -136,6 +134,13 @@ export type EnrichedRun = RunWireDto & {
   schedule_name: string | null;
   /** Connections resolved for this run, for the "connexions utilisées" panel. Null when the agent declares no integrations. */
   connections_used: RunConnectionUsed[] | null;
+  /**
+   * True when the requesting recipient has an unread notification for this run
+   * (issue #667). Per-recipient: derived from the `notifications` table for the
+   * current actor, so a dashboard user and an end-user see independent state.
+   * Drives the unread dot on run rows and the per-schedule unread count.
+   */
+  unread: boolean;
   /** True if the run's source package is an inline/ephemeral shadow (POST /api/runs/inline). */
   package_ephemeral?: boolean;
   /** For inline runs only — snapshot of the manifest submitted at run time. Null after compaction. */

@@ -267,6 +267,7 @@ export function createSchedulesRouter() {
     const result = await listScheduleRuns(scope, scheduleId, {
       limit,
       offset,
+      actor: getActor(c),
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);

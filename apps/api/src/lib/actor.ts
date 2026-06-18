@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Context } from "hono";
-import { eq } from "drizzle-orm";
-import type { Column } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import type { Column, SQL } from "drizzle-orm";
 import type { Actor } from "@appstrate/connect";
 
 export type { Actor };
@@ -43,4 +43,28 @@ export function actorFromIds(userId: string | null, endUserId: string | null): A
  */
 export function actorFilter(actor: Actor, cols: { userId: Column; endUserId: Column }) {
   return actor.type === "end_user" ? eq(cols.endUserId, actor.id) : eq(cols.userId, actor.id);
+}
+
+/**
+ * Produces the `{recipientType, recipientId}` column pair for a polymorphic
+ * recipient INSERT — the undistorted `Actor` shape. Used by the
+ * `notifications` table, which stores the recipient as a single (type, id)
+ * tuple rather than the nullable `{userId, endUserId}` pair.
+ */
+export function actorRecipient(actor: Actor): {
+  recipientType: Actor["type"];
+  recipientId: string;
+} {
+  return { recipientType: actor.type, recipientId: actor.id };
+}
+
+/**
+ * WHERE clause matching a polymorphic actor against a `{typeCol, idCol}`
+ * pair — the generic counterpart to {@link actorFilter} for tables that
+ * store the recipient as `(type, id)` (e.g. `notifications`). Both columns
+ * are matched, so correctness does not rest on the assumption that user ids
+ * and end-user ids never collide.
+ */
+export function actorMatch(actor: Actor, cols: { typeCol: Column; idCol: Column }): SQL {
+  return and(eq(cols.typeCol, actor.type), eq(cols.idCol, actor.id))!;
 }

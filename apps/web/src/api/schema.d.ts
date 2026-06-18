@@ -2007,6 +2007,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List notifications
+         * @description Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only.
+         */
+        get: operations["listNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/notifications/read-all": {
         parameters: {
             query?: never;
@@ -2036,8 +2056,8 @@ export interface paths {
         };
         get?: never;
         /**
-         * Mark a notification as read
-         * @description Marks the notification for a specific run as read.
+         * Mark a run's notification as read
+         * @description Mark the caller's notification for a run read, keyed by run id — complements `PUT /api/notifications/{id}/read` for callers that hold a run id but not the notification id. Idempotent: a missing run or non-recipient is a no-op, always 204.
          */
         put: operations["markNotificationRead"];
         post?: never;
@@ -2080,6 +2100,26 @@ export interface paths {
          */
         get: operations["getUnreadCountsByAgent"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/{id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Mark a notification as read
+         * @description Marks a single notification read for the current recipient. Idempotent (204 even if already read); returns 404 when the notification does not belong to the caller.
+         */
+        put: operations["markNotificationReadById"];
         post?: never;
         delete?: never;
         options?: never;
@@ -4782,16 +4822,8 @@ export interface components {
             } | null;
             /** @description Inline runs only. Snapshot of the prompt submitted at run time. Null once the shadow has been compacted. */
             inline_prompt?: string | null;
-            /**
-             * Format: date-time
-             * @description When the user was notified of run completion (in-app notification). Null until notification fires.
-             */
-            notifiedAt: string | null;
-            /**
-             * Format: date-time
-             * @description When the user marked the run notification as read. Null until acknowledged.
-             */
-            readAt: string | null;
+            /** @description True when the requesting recipient has an unread notification for this run (issue #667). Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count. */
+            unread: boolean;
             /** @description Per-(app, package) monotonic counter assigned at run creation. Stable identifier for UI display. */
             runNumber: number | null;
             /**
@@ -6225,8 +6257,7 @@ export interface operations {
                      *       "completed_at": null,
                      *       "duration": null,
                      *       "cost": null,
-                     *       "notifiedAt": null,
-                     *       "readAt": null,
+                     *       "unread": false,
                      *       "runNumber": 17,
                      *       "token_usage": null,
                      *       "version_label": "1.2.0",
@@ -11804,6 +11835,86 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    listNotifications: {
+        parameters: {
+            query?: {
+                /** @description When true, only unread notifications are returned */
+                unread?: boolean;
+                limit?: number;
+                /** @description Keyset cursor — return notifications after this id (newest-first order). Supplied by the `Link: rel="next"` header. */
+                startingAfter?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notification list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    Link: components["headers"]["Link"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "550e8400-e29b-41d4-a716-446655440000",
+                     *           "type": "run_completed",
+                     *           "run_id": "exec_cm4jkl012",
+                     *           "payload": {
+                     *             "agent_id": "@acme/email-sorter",
+                     *             "status": "success"
+                     *           },
+                     *           "read_at": null,
+                     *           "created_at": "2026-01-15T10:31:12Z"
+                     *         }
+                     *       ],
+                     *       "has_more": false
+                     *     }
+                     */
+                    "application/json": {
+                        data: {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @description Notification kind, e.g. run_completed */
+                            type: string;
+                            /** @description Originating run id, when the notification references one */
+                            run_id: string | null;
+                            /** @description Render-without-join data (agent_id, status) */
+                            payload: {
+                                [key: string]: unknown;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            created_at: string;
+                        }[];
+                        /** @description True when another page follows — page via the Link header cursor */
+                        has_more: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     markAllNotificationsRead: {
         parameters: {
             query?: never;
@@ -11945,6 +12056,38 @@ export interface operations {
                         };
                     };
                 };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    markNotificationReadById: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Notification id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notification marked as read (idempotent — 204 even if it was already read) */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
@@ -16065,8 +16208,7 @@ export interface operations {
                      *       "completed_at": null,
                      *       "duration": null,
                      *       "cost": null,
-                     *       "notifiedAt": null,
-                     *       "readAt": null,
+                     *       "unread": false,
                      *       "runNumber": 1,
                      *       "token_usage": null,
                      *       "version_label": null,
@@ -16391,8 +16533,7 @@ export interface operations {
                      *       "completed_at": "2026-01-15T10:31:12Z",
                      *       "duration": 72000,
                      *       "cost": 0.0034,
-                     *       "notifiedAt": "2026-01-15T10:31:12Z",
-                     *       "readAt": null,
+                     *       "unread": true,
                      *       "runNumber": 17,
                      *       "token_usage": {
                      *         "input_tokens": 8200,
@@ -16498,8 +16639,7 @@ export interface operations {
                      *       "completed_at": "2026-01-15T10:30:45Z",
                      *       "duration": 45000,
                      *       "cost": 0.0012,
-                     *       "notifiedAt": null,
-                     *       "readAt": null,
+                     *       "unread": false,
                      *       "runNumber": 18,
                      *       "token_usage": null,
                      *       "version_label": "1.2.0",

@@ -10,25 +10,42 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
-import { useUnreadCount, useMarkRead, useMarkAllRead } from "../hooks/use-notifications";
-import { usePaginatedRuns } from "../hooks/use-paginated-runs";
+import {
+  useUnreadCount,
+  useMarkRead,
+  useMarkAllRead,
+  useNotifications,
+} from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
 import { useIsMobile } from "../hooks/use-mobile";
-import type { EnrichedRun } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
+
+/** One notification as returned by `GET /api/notifications`. */
+type NotificationItem = {
+  id: string;
+  run_id: string | null;
+  payload: Record<string, unknown> | null;
+  created_at: string;
+};
+
+/** Narrow a jsonb payload field to a string. */
+function payloadString(payload: Record<string, unknown> | null, key: string): string | null {
+  const v = payload?.[key];
+  return typeof v === "string" ? v : null;
+}
 
 function NotificationContent({
   unread,
-  unreadRuns,
+  notifications,
   agentNameMap,
   onItemClick,
   onClose,
   markAllRead,
 }: {
   unread: number;
-  unreadRuns: Pick<EnrichedRun, "id" | "packageId" | "agent_name" | "status" | "started_at">[];
+  notifications: NotificationItem[];
   agentNameMap: Map<string, string>;
-  onItemClick: (runId: string) => void;
+  onItemClick: (notificationId: string) => void;
   onClose: () => void;
   markAllRead: () => void;
 }) {
@@ -61,38 +78,42 @@ function NotificationContent({
       <Separator />
 
       {/* Notification list */}
-      {unreadRuns.length === 0 ? (
+      {notifications.length === 0 ? (
         <div className="flex flex-col items-center justify-center px-4 py-10">
           <Bell size={32} className="text-muted-foreground/30 mb-3" />
           <p className="text-muted-foreground text-sm">{t("notifications.empty")}</p>
         </div>
       ) : (
         <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
-          {unreadRuns.map((run) => {
-            const displayName = run.packageId
-              ? (agentNameMap.get(run.packageId) ?? run.agent_name ?? run.packageId)
-              : (run.agent_name ?? t("runs.deletedAgent", { ns: "agents" }));
-            // Source agent gone → no link target. Render as a non-interactive
-            // row so users still see the notification but can't click into a
-            // 404. Marking it read still flows through `onItemClick`.
-            const linkTarget = run.packageId
-              ? `/agents/${run.packageId}/runs/${run.id}`
-              : `/runs/${run.id}`;
+          {notifications.map((notification) => {
+            const agentId = payloadString(notification.payload, "agent_id");
+            const status = payloadString(notification.payload, "status");
+            const displayName = agentId
+              ? (agentNameMap.get(agentId) ?? agentId)
+              : t("runs.deletedAgent", { ns: "agents" });
+            // Source agent gone → fall back to the run-scoped route. Marking
+            // it read still flows through `onItemClick`.
+            const linkTarget =
+              agentId && notification.run_id
+                ? `/agents/${agentId}/runs/${notification.run_id}`
+                : notification.run_id
+                  ? `/runs/${notification.run_id}`
+                  : "/runs";
             return (
               <Link
-                key={run.id}
+                key={notification.id}
                 to={linkTarget}
-                onClick={() => onItemClick(run.id)}
+                onClick={() => onItemClick(notification.id)}
                 className="hover:bg-muted/50 group flex gap-3 px-4 py-3 transition-colors"
               >
                 <Circle size={8} className="fill-destructive text-destructive mt-1.5 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <div className="mb-0.5 flex items-center justify-between gap-2">
                     <span className="truncate text-sm font-medium">{displayName}</span>
-                    <Badge status={run.status} />
+                    {status && <Badge status={status} />}
                   </div>
                   <p className="text-muted-foreground text-xs">
-                    {run.started_at ? formatDateField(run.started_at) : ""}
+                    {formatDateField(notification.created_at)}
                   </p>
                 </div>
               </Link>
@@ -120,7 +141,7 @@ export function NotificationBell() {
   const { t } = useTranslation(["common", "agents"]);
   const { data: count } = useUnreadCount();
   const { data: agents } = useAgents();
-  const { data: runsData } = usePaginatedRuns({ limit: 50, offset: 0 });
+  const { data: notifications } = useNotifications({ unread: true, limit: 50 });
   const markRead = useMarkRead();
   const markAllRead = useMarkAllRead();
   const [open, setOpen] = useState(false);
@@ -133,12 +154,10 @@ export function NotificationBell() {
     for (const f of agents) agentNameMap.set(f.id, f.display_name ?? f.id);
   }
 
-  // EnrichedRun[] is structurally assignable to the child's Pick<…>[] prop, so
-  // no cast is needed — the filtered list flows through spec-typed.
-  const unreadRuns = runsData?.data.filter((e) => e.notifiedAt != null && e.readAt == null) ?? [];
+  const notificationItems = notifications ?? [];
 
-  const handleClick = (runId: string) => {
-    markRead.mutate({ params: { path: { runId } } });
+  const handleClick = (notificationId: string) => {
+    markRead.mutate({ params: { path: { id: notificationId } } });
     setOpen(false);
   };
 
@@ -162,7 +181,7 @@ export function NotificationBell() {
 
   const contentProps = {
     unread,
-    unreadRuns,
+    notifications: notificationItems,
     agentNameMap,
     onItemClick: handleClick,
     onClose: () => setOpen(false),

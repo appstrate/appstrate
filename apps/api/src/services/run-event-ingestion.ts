@@ -36,6 +36,7 @@ import { getEnv } from "@appstrate/env";
 import { runWithSpan, recordRunDuration, recordRunTerminal } from "../observability/index.ts";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
 import { updateRun, appendRunLog, computeRunCost } from "./state/runs.ts";
+import { createRunNotifications } from "./state/notifications.ts";
 import {
   addMemories as addUnifiedMemories,
   upsertPinned,
@@ -470,7 +471,6 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
       duration: resolvedDurationMs,
       cost: cost > 0 ? cost : null,
       sinkClosedAt: now,
-      notifiedAt: now,
       // Per-run checkpoint snapshot — read by `getRecentRuns` to feed the
       // sidecar `run_history` tool. The unified `package_persistence`
       // store only keeps the latest checkpoint per actor (last-write-wins
@@ -652,13 +652,34 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   }
 
   // 8. Status-change broadcast with the enriched params (including
-  //    validation-failure errors and any afterRun metadata).
+  //    validation-failure errors and any afterRun metadata). Fired BEFORE the
+  //    notification fan-out so the multi-row INSERT can never sit between the
+  //    CAS close and the broadcast — the broadcast is what updates the UI and
+  //    fires webhooks, so it must not wait on bell bookkeeping.
   const broadcastParams: RunStatusChangeParams = {
     ...hookParams,
     ...(errorMessage ? { extra: { error: errorMessage } } : {}),
     ...(resultToPersist && status === "success" ? { extra: { result: resultToPersist } } : {}),
   };
   void emitEvent("onRunStatusChange", broadcastParams);
+
+  // Fan out in-app notifications — one row per recipient (issue #667). Only
+  // the CAS winner reaches here, so this runs exactly once per run. Awaited
+  // (after the broadcast) rather than detached: the run is already terminal
+  // and the broadcast has already fired, so the small INSERT adds negligible
+  // latency, and awaiting it keeps the write from outliving the request — a
+  // detached promise would otherwise race a concurrent run-delete / test
+  // teardown. Best-effort by contract: a transient INSERT failure is logged
+  // and swallowed, never failing the runner finalize. The `notifications`
+  // table is the sole source of notification read-state; a dropped fan-out
+  // means a missing bell entry, not a stuck run-list badge (the badge derives
+  // from the same table).
+  await createRunNotifications(scope, run.id).catch((err) => {
+    logger.error("finalize: notification fan-out failed (run already terminal)", {
+      runId: run.id,
+      err: getErrorMessage(err),
+    });
+  });
 }
 
 /**

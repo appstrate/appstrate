@@ -100,8 +100,6 @@ export const runs = pgTable(
     }),
     versionLabel: text("version_label"),
     versionDirty: boolean("version_dirty").default(false).notNull(),
-    notifiedAt: timestamp("notified_at", { withTimezone: true }),
-    readAt: timestamp("read_at", { withTimezone: true }),
     proxyLabel: text("proxy_label"),
     modelLabel: text("model_label"),
     modelSource: text("model_source"),
@@ -265,13 +263,6 @@ export const runs = pgTable(
       .on(table.modelCredentialId)
       .where(sql`${table.modelCredentialId} IS NOT NULL`),
     index("idx_runs_org_id").on(table.orgId),
-    index("idx_runs_notification").on(table.userId, table.orgId, table.notifiedAt, table.readAt),
-    // Unread-notification badge (services/state/notifications.ts):
-    // notified but not yet read. Partial index covers exactly that
-    // predicate so the badge count never scans read/never-notified rows.
-    index("idx_runs_unread")
-      .on(table.applicationId, table.userId)
-      .where(sql`${table.notifiedAt} IS NOT NULL AND ${table.readAt} IS NULL`),
     // Reaper scans only active sinks — cheap partial index.
     index("idx_runs_sink_expires_at")
       .on(table.sinkExpiresAt)
