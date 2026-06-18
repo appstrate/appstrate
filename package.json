@@ -19,7 +19,7 @@
   "license": "Apache-2.0",
   "devDependencies": {
     "@commitlint/cli": "^20.5.2",
-    "@commitlint/config-conventional": "^20.5.0",
+    "@commitlint/config-conventional": "^21.0.2",
     "@eslint/js": "^10.0.1",
     "@mariozechner/pi-ai": "0.73.1",
     "@readme/openapi-parser": "^6.1.3",
