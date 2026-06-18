@@ -2,6 +2,7 @@ import js from "@eslint/js";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
+import react from "eslint-plugin-react";
 import tseslint from "typescript-eslint";
 import eslintConfigPrettier from "eslint-config-prettier";
 
@@ -198,7 +199,12 @@ export default tseslint.config(
     plugins: {
       "react-hooks": reactHooks,
       "react-refresh": reactRefresh,
+      react,
     },
+    // Explicit version, NOT "detect": eslint-plugin-react 7.x's version
+    // auto-detection crashes under ESLint 10's flat-config context API
+    // (resolveBasedir → getFilename is not a function).
+    settings: { react: { version: "19.2" } },
     rules: {
       // recommended-latest layers the React Compiler static rules (purity,
       // set-state-in-render/effect, immutability, refs, static-components,
@@ -208,6 +214,20 @@ export default tseslint.config(
       // runs in `bun run check` (local + CI), no runtime harness needed.
       ...reactHooks.configs["recommended-latest"].rules,
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      // Re-render robustness: the React Compiler rules above check Rules-of-React
+      // correctness but NOT re-render efficiency. These three catch the structural
+      // causes of avoidable re-renders / remounts that a runtime tool (react-scan)
+      // would only surface in the browser — caught statically here instead.
+      //  - constructed context values: new ref every render → all consumers re-render
+      //  - unstable nested components: component defined in render → full remount each render
+      //  - object/array literal as default prop: new ref every render
+      // (react/no-array-index-key deliberately omitted: in this codebase its hits
+      // are all controlled-input lists or append-only logs where an index key is
+      // correct — it's a reconciliation lint, not a re-render one, and produced
+      // only false positives here.)
+      "react/jsx-no-constructed-context-values": "error",
+      "react/no-unstable-nested-components": ["error", { allowAsProps: true }],
+      "react/no-object-type-as-default-prop": "error",
     },
   },
   {
