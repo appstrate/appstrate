@@ -10,7 +10,7 @@ import {
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
 import { db } from "@appstrate/db/client";
-import { orgModels } from "@appstrate/db/schema";
+import { orgModels, organizations } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 
@@ -327,7 +327,14 @@ describe("Models API", () => {
         .where(and(eq(orgModels.orgId, ctx.orgId), eq(orgModels.credentialId, credentialId)));
       expect(inserted).toHaveLength(1);
       expect(inserted[0]!.modelId).toBe("test-model");
-      expect(inserted[0]!.isDefault).toBe(true);
+      // The default is the org-level pointer, not a per-row flag: the first
+      // seeded model is now `organizations.default_model_id`.
+      const [org] = await db
+        .select({ defaultModelId: organizations.defaultModelId })
+        .from(organizations)
+        .where(eq(organizations.id, ctx.orgId))
+        .limit(1);
+      expect(org!.defaultModelId).toBe(inserted[0]!.id);
     });
 
     it("is idempotent — returns created=0 when models already exist for the credential", async () => {
@@ -382,13 +389,17 @@ describe("Models API", () => {
         apiShape: "openai",
         baseUrl: "https://api.openai.com",
       });
-      await seedOrgModel({
+      const existing = await seedOrgModel({
         orgId: ctx.orgId,
         credentialId: existingKey.id,
         modelId: "gpt-4o",
         label: "Existing default",
-        isDefault: true,
       });
+      // The org default is the pointer — point it at the existing model.
+      await db
+        .update(organizations)
+        .set({ defaultModelId: existing.id })
+        .where(eq(organizations.id, ctx.orgId));
 
       const credentialId = await seedTestOAuthCredential();
       const res = await app.request("/api/models/seed", {

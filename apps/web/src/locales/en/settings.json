@@ -450,7 +450,6 @@
   "models.enabled": "Enabled",
   "models.disabled": "Disabled",
   "models.setDefault": "Set as default",
-  "models.removeDefault": "Remove default",
   "models.test": "Test",
   "models.testSuccess": "OK ({{latency}}ms)",
   "models.testFailed": "Failed: {{message}}",

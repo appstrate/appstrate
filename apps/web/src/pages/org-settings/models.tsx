@@ -56,7 +56,6 @@ function ModelsList({
   onEdit,
   onDelete,
   onSetDefault,
-  onRemoveDefault,
 }: {
   models: OrgModelInfo[] | undefined;
   isLoading: boolean;
@@ -65,7 +64,6 @@ function ModelsList({
   onEdit: (m: OrgModelInfo) => void;
   onDelete: (m: OrgModelInfo) => void;
   onSetDefault: (m: OrgModelInfo) => void;
-  onRemoveDefault: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModel();
@@ -127,7 +125,7 @@ function ModelsList({
                     <TableCell>
                       {m.isDefault ? (
                         <Badge variant="success">{t("models.default")}</Badge>
-                      ) : !isBuiltIn ? (
+                      ) : (
                         <Button
                           size="sm"
                           variant="ghost"
@@ -137,7 +135,7 @@ function ModelsList({
                         >
                           {t("models.setDefault")}
                         </Button>
-                      ) : null}
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
@@ -157,16 +155,6 @@ function ModelsList({
                         >
                           {testingId === m.id ? <Spinner /> : t("models.test")}
                         </Button>
-                        {m.isDefault && !isBuiltIn && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 text-xs"
-                            onClick={onRemoveDefault}
-                          >
-                            {t("models.removeDefault")}
-                          </Button>
-                        )}
                         {!isBuiltIn && (
                           <>
                             <Button
@@ -451,7 +439,6 @@ export function OrgSettingsModelsPage() {
           }}
           onDelete={(m) => setConfirmState({ type: "deleteModel", label: m.label, id: m.id })}
           onSetDefault={(m) => setDefaultModelMutation.mutate({ body: { modelId: m.id } })}
-          onRemoveDefault={() => setDefaultModelMutation.mutate({ body: { modelId: null } })}
         />
       )}
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { orgModels } from "@appstrate/db/schema";
+import { orgModels, organizations } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
 import { lookupCatalogModel } from "./pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
@@ -17,12 +17,7 @@ import {
   type DecryptedModelProviderCredentials,
 } from "./model-providers/credentials.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
-import {
-  mergeSystemAndDb,
-  buildUpdateSet,
-  scopedWhere,
-  setExactlyOneDefault,
-} from "../lib/db-helpers.ts";
+import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import type { InferenceProbeRequest } from "@appstrate/core/module";
@@ -55,12 +50,31 @@ export function resolveModelMetadata(
   };
 }
 
+// --- Default pointer (org-level) ---
+
+/**
+ * The org's default model id — a flat id naming a system model or an
+ * `org_models.id` (UUID), or `null` when no explicit default is set (the
+ * resolver then falls to the system-flagged model). Single read path for the
+ * pointer so list/resolve agree.
+ */
+async function getDefaultModelId(orgId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ defaultModelId: organizations.defaultModelId })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  return row?.defaultModelId ?? null;
+}
+
 // --- List (system + DB) ---
 
 export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   const system = getSystemModels();
   const rows = await db.select().from(orgModels).where(scopedWhere(orgModels, { orgId }));
-  const orgHasDefault = rows.some((r) => r.isDefault);
+  // The default is an org-level pointer: when set, exactly that id is the
+  // default (system or custom); when null, the system-flagged model wins.
+  const pointer = await getDefaultModelId(orgId);
   const now = toISORequired(new Date());
 
   // Resolve apiShape/baseUrl from the registry via the credential's providerId.
@@ -91,7 +105,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       baseUrl: def.baseUrl,
       modelId: def.modelId,
       enabled: def.enabled !== false,
-      isDefault: !orgHasDefault && def.isDefault === true,
+      isDefault: pointer !== null ? id === pointer : def.isDefault === true,
       source: "built-in",
       credentialId: def.credentialId,
       created_by: null,
@@ -111,7 +125,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         baseUrl: creds.baseUrl,
         modelId: row.modelId,
         enabled: row.enabled,
-        isDefault: row.isDefault,
+        isDefault: pointer !== null && row.id === pointer,
         source: row.source as "custom" | "built-in",
         credentialId: row.credentialId,
         created_by: row.createdBy,
@@ -177,7 +191,7 @@ export async function createOrgModel(
     cost?: ModelCost;
   },
 ): Promise<string> {
-  // If this is the first model for the org, set it as default
+  // If this is the first model for the org, point the org default at it.
   const existing = await db
     .select({ id: orgModels.id })
     .from(orgModels)
@@ -197,11 +211,17 @@ export async function createOrgModel(
       maxTokens: capabilities?.maxTokens ?? null,
       reasoning: capabilities?.reasoning ?? null,
       cost: capabilities?.cost ?? null,
-      isDefault: isFirst,
       source: "custom",
       createdBy: userId,
     })
     .returning({ id: orgModels.id });
+
+  if (isFirst) {
+    await db
+      .update(organizations)
+      .set({ defaultModelId: row!.id, updatedAt: new Date() })
+      .where(eq(organizations.id, orgId));
+  }
   return row!.id;
 }
 
@@ -239,6 +259,12 @@ export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<
   await db
     .delete(orgModels)
     .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
+  // If the deleted model was the org default, clear the now-dangling pointer so
+  // the resolver falls cleanly to the system cascade (no stale-id badge).
+  await db
+    .update(organizations)
+    .set({ defaultModelId: null, updatedAt: new Date() })
+    .where(and(eq(organizations.id, orgId), eq(organizations.defaultModelId, modelDbId)));
 }
 
 /**
@@ -283,12 +309,12 @@ export async function seedOrgModelsForCredential(
       return { created: 0, ids: [], promotedDefault: false };
     }
 
-    const orgHasDefault = await tx
-      .select({ id: orgModels.id })
-      .from(orgModels)
-      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.isDefault, true)] }))
+    const [org] = await tx
+      .select({ defaultModelId: organizations.defaultModelId })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
       .limit(1);
-    const needsDefault = orgHasDefault.length === 0;
+    const needsDefault = !org?.defaultModelId;
 
     // Store catalog-derivable columns as null — read path falls back to
     // the live catalog via `resolveCatalogDefaults`, so a weekly catalog
@@ -298,7 +324,7 @@ export async function seedOrgModelsForCredential(
     const inserted = await tx
       .insert(orgModels)
       .values(
-        input.models.map((m, idx) => ({
+        input.models.map((m) => ({
           orgId,
           label: m.label,
           modelId: m.id,
@@ -308,41 +334,52 @@ export async function seedOrgModelsForCredential(
           maxTokens: null,
           reasoning: null,
           cost: null,
-          isDefault: needsDefault && idx === 0,
           source: "custom",
           createdBy: userId,
         })),
       )
       .returning({ id: orgModels.id });
 
+    // Promote the first seeded model to the org default when none is set yet.
+    const promotedDefault = needsDefault && inserted.length > 0;
+    if (promotedDefault) {
+      await tx
+        .update(organizations)
+        .set({ defaultModelId: inserted[0]!.id, updatedAt: new Date() })
+        .where(eq(organizations.id, orgId));
+    }
+
     return {
       created: inserted.length,
       ids: inserted.map((r) => r.id),
-      promotedDefault: needsDefault && inserted.length > 0,
+      promotedDefault,
     };
   });
 }
 
+/**
+ * Set (or clear, with `null`) the org's default model. The id may name a system
+ * model OR one of the org's own rows — picking any row makes exactly that row
+ * the default (the integration `setDefaultIntegrationClient` analogue). An
+ * unknown custom id is rejected, never stored. A single pointer write — no
+ * per-row flag flip — so there is nothing to keep transactionally consistent.
+ */
 export async function setDefaultModel(orgId: string, modelDbId: string | null): Promise<void> {
-  const now = new Date();
-  await setExactlyOneDefault({
-    // Reset all defaults for this org.
-    clear: (tx) =>
-      tx
-        .update(orgModels)
-        .set({ isDefault: false, updatedAt: now })
-        .where(scopedWhere(orgModels, { orgId })),
-    // Only DB models can be flagged — system defaults are handled by the
-    // resolution cascade, so a system id (or null) clears only.
-    set:
-      modelDbId !== null && !isSystemModel(modelDbId)
-        ? (tx) =>
-            tx
-              .update(orgModels)
-              .set({ isDefault: true, updatedAt: now })
-              .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
-        : null,
-  });
+  // Validate the target before storing it (mirrors the integration set-default
+  // guard). A system id is trusted via the registry; a custom id must be a row
+  // the org owns.
+  if (modelDbId !== null && !isSystemModel(modelDbId)) {
+    const [row] = await db
+      .select({ id: orgModels.id })
+      .from(orgModels)
+      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
+      .limit(1);
+    if (!row) throw notFound(`Model '${modelDbId}' not found`);
+  }
+  await db
+    .update(organizations)
+    .set({ defaultModelId: modelDbId, updatedAt: new Date() })
+    .where(eq(organizations.id, orgId));
 }
 
 // --- Resolution ---
@@ -500,21 +537,13 @@ export async function resolveModel(
     });
   }
 
-  // 2. Org default
-  const [dbDefault] = await db
-    .select()
-    .from(orgModels)
-    .where(
-      scopedWhere(orgModels, {
-        orgId,
-        extra: [eq(orgModels.isDefault, true), eq(orgModels.enabled, true)],
-      }),
-    )
-    .limit(1);
-
-  if (dbDefault) {
-    const creds = await loadInferenceCredentials(orgId, dbDefault.credentialId);
-    if (creds) return buildDbResolvedModel(dbDefault, creds);
+  // 2. Org default — the pointer names a system model or a custom row; load it
+  //    directly. A stale pointer (deleted/disabled row) resolves to null and
+  //    falls through to the system cascade.
+  const pointer = await getDefaultModelId(orgId);
+  if (pointer) {
+    const resolved = await loadModel(orgId, pointer);
+    if (resolved) return resolved;
   }
 
   // 3. System default

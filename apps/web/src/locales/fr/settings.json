@@ -450,7 +450,6 @@
   "models.enabled": "Actif",
   "models.disabled": "Inactif",
   "models.setDefault": "Définir par défaut",
-  "models.removeDefault": "Retirer le défaut",
   "models.test": "Tester",
   "models.testSuccess": "OK ({{latency}}ms)",
   "models.testFailed": "Échec : {{message}}",
