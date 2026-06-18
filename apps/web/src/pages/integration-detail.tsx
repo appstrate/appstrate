@@ -56,6 +56,7 @@ import { VersionHistory } from "../components/version-history";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Modal } from "../components/modal";
+import { SourceBadge } from "../components/source-badge";
 import { usePermissions } from "../hooks/use-permissions";
 import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
 import {
@@ -332,13 +333,10 @@ function ClientsTable({
                     data-testid={`oauth-client-row-${client.client_ref}`}
                   >
                     <TableCell>
-                      <Badge variant={client.source === "built-in" ? "secondary" : "outline"}>
-                        {client.source === "built-in"
-                          ? t("integration.clients.sourceBuiltIn")
-                          : client.auto_provisioned
-                            ? t("integration.oauthClient.autoProvisioned")
-                            : t("integration.clients.sourceCustom")}
-                      </Badge>
+                      <SourceBadge
+                        source={client.source}
+                        autoProvisioned={client.auto_provisioned}
+                      />
                     </TableCell>
                     <TableCell className="font-mono text-xs">{client.client_id}</TableCell>
                     <TableCell>
