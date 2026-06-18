@@ -35,9 +35,17 @@ export function satisfiesRange(version: string, range: string): boolean {
   return semver.satisfies(version, range);
 }
 
+/** Auto-bump a release segment of `currentVersion`. Returns null if invalid semver. */
+export function bumpVersion(
+  currentVersion: string,
+  release: "major" | "minor" | "patch",
+): string | null {
+  return semver.inc(currentVersion, release);
+}
+
 /** Auto-bump the patch segment of `currentVersion`. Returns null if invalid semver. */
 export function bumpPatch(currentVersion: string): string | null {
-  return semver.inc(currentVersion, "patch");
+  return bumpVersion(currentVersion, "patch");
 }
 
 /**
