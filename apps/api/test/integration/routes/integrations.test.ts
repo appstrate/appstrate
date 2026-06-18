@@ -10,7 +10,7 @@
  * covered hermetically in `packages/connect/test/integration-oauth.test.ts`).
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import {
@@ -28,6 +28,10 @@ import {
   applicationPackages,
 } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  initSystemIntegrationClients,
+  __resetSystemIntegrationClientsForTest,
+} from "../../../src/services/integration-client-registry.ts";
 
 const app = getTestApp();
 
@@ -1041,6 +1045,125 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
       method: "PUT",
       headers: memberHeaders,
       body: JSON.stringify({ connection_id: connId }),
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("multi-client: list + system-client connect", () => {
+  let ctx: TestContext;
+  const SYSTEM_ID = "gmail-system";
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    __resetSystemIntegrationClientsForTest();
+  });
+
+  afterEach(() => __resetSystemIntegrationClientsForTest());
+
+  function seedSystem() {
+    initSystemIntegrationClients([
+      {
+        id: SYSTEM_ID,
+        integrationId: "@myorg/gmail",
+        authKey: "google",
+        clientId: "sys-client.apps.googleusercontent.com",
+        clientSecret: "sys-secret",
+      },
+    ]);
+  }
+
+  async function listClients() {
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/clients", {
+      headers: authHeaders(ctx),
+    });
+    return res;
+  }
+
+  it("GET clients returns an empty list when nothing is configured", async () => {
+    const res = await listClients();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { object: string; data: unknown[] };
+    expect(body.object).toBe("list");
+    expect(body.data).toEqual([]);
+  });
+
+  it("GET clients surfaces the system client as default, no secret", async () => {
+    seedSystem();
+    const res = await listClients();
+    const body = (await res.json()) as {
+      data: Array<{ client_ref: string; source: string; is_default: boolean; client_id: string }>;
+    };
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toMatchObject({
+      client_ref: "system:gmail-system",
+      source: "built-in",
+      is_default: true,
+    });
+    expect(JSON.stringify(body.data)).not.toContain("sys-secret");
+  });
+
+  it("GET clients lists custom (default) + system once an org registers its own app", async () => {
+    seedSystem();
+    const put = await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "org-client", client_secret: "org-secret" }),
+    });
+    expect(put.status).toBe(200);
+
+    const body = (await (await listClients()).json()) as {
+      data: Array<{ client_ref: string; source: string; is_default: boolean }>;
+    };
+    expect(body.data).toHaveLength(2);
+    expect(body.data.find((c) => c.source === "custom")).toMatchObject({
+      client_ref: "custom",
+      is_default: true,
+    });
+    expect(body.data.find((c) => c.source === "built-in")).toMatchObject({ is_default: false });
+  });
+
+  it("connects with the system client out of the box (no per-org client registered)", async () => {
+    seedSystem();
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { auth_url: string; state: string };
+    // The authorize URL carries the SYSTEM client_id — the shared app.
+    expect(body.auth_url).toContain("client_id=sys-client.apps.googleusercontent.com");
+    expect(body.state).toBeTruthy();
+  });
+
+  it("honours an explicit system client_ref", async () => {
+    seedSystem();
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_ref: "system:gmail-system" }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects an unknown system client_ref with 400", async () => {
+    seedSystem();
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_ref: "system:does-not-exist" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("still 403s when neither a custom nor a system client exists", async () => {
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: "{}",
     });
     expect(res.status).toBe(403);
   });

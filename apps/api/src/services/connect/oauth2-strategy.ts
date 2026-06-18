@@ -31,10 +31,12 @@ import {
   extractIdentity,
   getIntegrationConnectionCredentialFields,
   readIntegrationAuth,
+  resolveSystemConnectClient,
   saveIntegrationConnection,
   usesAutoProvisionedClient,
   type IntegrationConnectionSummary,
 } from "../integration-connections.ts";
+import { CUSTOM_CLIENT_REF, SYSTEM_CLIENT_REF_PREFIX } from "../integration-client-registry.ts";
 import type {
   BeginOptions,
   BeginResult,
@@ -85,28 +87,75 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       auth,
       redirectUri,
     );
-    const client = resolved.client;
-    if (!client) {
-      // Two families of "no client":
-      //   - auto-provisioning auth (public client on a remote MCP integration):
-      //     client acquisition failed. `resolved.provisioningFailure` carries
-      //     the complete reason + remedy, authored by whichever step failed (no
-      //     registration endpoint, blocked endpoint, AS rejection, network, …).
-      //     Render it verbatim — no per-cause branch.
-      //   - confidential/classic auth: an admin must pre-register a client.
-      if (usesAutoProvisionedClient(manifest, auth)) {
+    // Client selection (multi-client): an integration auth may be served by the
+    // org's own per-application client (BYO-app) AND/OR an env-provided system
+    // client (shared, out-of-the-box). Precedence:
+    //   1. Explicit `opts.clientRef = "system:<id>"` → that system client.
+    //   2. The org's custom client when registered (deliberate BYO-app).
+    //   3. Else the default system client for the auth (shared, zero-config).
+    // Auto-provisioned remote-MCP auths (DCR/CIMD) keep their own client and are
+    // never served by a system entry. Whichever is chosen is pinned on the
+    // connection via `clientRef` so token refresh resolves the same credentials.
+    const autoProvisioned = usesAutoProvisionedClient(manifest, auth);
+    const customClient = resolved.client;
+    const requestedRef = opts.clientRef;
+    const wantsSystem =
+      !autoProvisioned && !!requestedRef && requestedRef.startsWith(SYSTEM_CLIENT_REF_PREFIX);
+
+    let clientId: string;
+    let clientSecret: string;
+    let clientRedirectUri: string | null;
+    let clientRef: string;
+
+    if (wantsSystem) {
+      const sys = resolveSystemConnectClient(ctx.integrationId, ctx.authKey, requestedRef);
+      if (!sys) {
+        throw invalidRequest(
+          `Unknown system OAuth client '${requestedRef}' for '${ctx.integrationId}' auth '${ctx.authKey}'`,
+        );
+      }
+      clientId = sys.clientId;
+      clientSecret = sys.clientSecret;
+      clientRedirectUri = sys.redirectUri;
+      clientRef = sys.clientRef;
+    } else if (customClient) {
+      clientId = customClient.client_id;
+      clientSecret = customClient.clientSecret;
+      clientRedirectUri = customClient.redirect_uri;
+      clientRef = CUSTOM_CLIENT_REF;
+    } else {
+      // No custom client registered. For classic auths, fall back to the
+      // default system client — unless the caller explicitly asked for "custom"
+      // (then there is genuinely nothing to use → error below).
+      const sys =
+        !autoProvisioned && requestedRef !== CUSTOM_CLIENT_REF
+          ? resolveSystemConnectClient(ctx.integrationId, ctx.authKey)
+          : null;
+      if (sys) {
+        clientId = sys.clientId;
+        clientSecret = sys.clientSecret;
+        clientRedirectUri = sys.redirectUri;
+        clientRef = sys.clientRef;
+      } else if (autoProvisioned) {
+        // Auto-provisioning auth (public client on a remote MCP integration):
+        // client acquisition failed. `resolved.provisioningFailure` carries the
+        // complete reason + remedy, authored by whichever step failed. Render
+        // it verbatim — no per-cause branch.
         const failure = resolved.provisioningFailure;
         const detail = failure?.message ?? "discovery or client registration failed";
         const statusPart = failure?.status ? ` (HTTP ${failure.status})` : "";
         throw forbidden(
           `Could not automatically provision an OAuth client for '${ctx.integrationId}' auth '${ctx.authKey}'${statusPart}: ${detail}`,
         );
+      } else {
+        // Confidential/classic auth: an admin must pre-register a client, or the
+        // platform must provide a system client via SYSTEM_INTEGRATION_CLIENTS.
+        throw forbidden(
+          `Administrator must register OAuth client credentials for '${ctx.integrationId}' auth '${ctx.authKey}' before connection`,
+        );
       }
-      throw forbidden(
-        `Administrator must register OAuth client credentials for '${ctx.integrationId}' auth '${ctx.authKey}' before connection`,
-      );
     }
-    const effectiveRedirectUri = client.redirect_uri ?? redirectUri;
+    const effectiveRedirectUri = clientRedirectUri ?? redirectUri;
     // Threaded endpoints/resource: discovery result wins, manifest is the
     // fallback (classic integrations have no resolved.* fields).
     const issuer = resolved.issuer ?? auth.issuer;
@@ -120,8 +169,9 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       ...(issuer ? { issuer } : {}),
       ...(authorizationEndpoint ? { authorizationEndpoint } : {}),
       ...(tokenEndpoint ? { tokenEndpoint } : {}),
-      clientId: client.client_id,
-      clientSecret: client.clientSecret,
+      clientId,
+      clientSecret,
+      clientRef,
       ...(tokenAuthMethod ? { tokenEndpointAuthMethod: tokenAuthMethod } : {}),
       scopes: opts.scopes,
       ...(oauthMeta?.scope_separator ? { scopeSeparator: oauthMeta.scope_separator } : {}),
@@ -334,6 +384,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       expiresAt: result.expiresAt ? new Date(result.expiresAt) : null,
       actor: ctx.actor,
       ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+      ...(result.clientRef ? { clientRef: result.clientRef } : {}),
     });
   }
 }

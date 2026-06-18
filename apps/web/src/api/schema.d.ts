@@ -1245,6 +1245,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/{packageId}/auths/{authKey}/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List OAuth clients available to connect an integration auth
+         * @description Returns the org's custom (BYO-app) client plus any platform-provided system clients, with `source` and which is the default. Secrets are never returned. The `client_ref` values are accepted by the OAuth2 connect endpoint to pin a specific client.
+         */
+        get: operations["listIntegrationClients"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/{packageId}/auths/{authKey}/connect/fields": {
         parameters: {
             query?: never;
@@ -9367,6 +9387,50 @@ export interface operations {
             };
         };
     };
+    listIntegrationClients: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Auth key as declared in the manifest's `auths` map. */
+                authKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Available OAuth clients */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        hasMore: boolean;
+                        data: {
+                            client_ref: string;
+                            /** @enum {string} */
+                            source: "built-in" | "custom";
+                            client_id: string;
+                            is_default: boolean;
+                        }[];
+                    };
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
     connectIntegrationFields: {
         parameters: {
             query?: never;
@@ -9461,6 +9525,8 @@ export interface operations {
                     force_account_select?: boolean;
                     /** Format: uuid */
                     connection_id?: string;
+                    /** @description Which registered client to connect with — 'custom' or 'system:<id>'. Omitted → the default (org custom client when registered, else system client). */
+                    client_ref?: string;
                 };
             };
         };

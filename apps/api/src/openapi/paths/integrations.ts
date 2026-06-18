@@ -494,6 +494,56 @@ export const integrationsPaths = {
       },
     },
   },
+  "/api/integrations/{packageId}/auths/{authKey}/clients": {
+    get: {
+      operationId: "listIntegrationClients",
+      tags: ["Integrations"],
+      summary: "List OAuth clients available to connect an integration auth",
+      description:
+        "Returns the org's custom (BYO-app) client plus any platform-provided " +
+        "system clients, with `source` and which is the default. Secrets are " +
+        "never returned. The `client_ref` values are accepted by the OAuth2 " +
+        "connect endpoint to pin a specific client.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        packageIdParam,
+        authKeyParam,
+      ],
+      responses: {
+        "200": {
+          description: "Available OAuth clients",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  hasMore: { type: "boolean" },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["client_ref", "source", "client_id", "is_default"],
+                      properties: {
+                        client_ref: { type: "string" },
+                        source: { type: "string", enum: ["built-in", "custom"] },
+                        client_id: { type: "string" },
+                        is_default: { type: "boolean" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/integrations/{packageId}/auths/{authKey}/connect/fields": {
     post: {
       operationId: "connectIntegrationFields",
@@ -561,6 +611,13 @@ export const integrationsPaths = {
                 scopes: { type: "array", items: { type: "string" } },
                 force_account_select: { type: "boolean" },
                 connection_id: { type: "string", format: "uuid" },
+                client_ref: {
+                  type: "string",
+                  description:
+                    "Which registered client to connect with — 'custom' or 'system:<id>'. " +
+                    "Omitted → the default (org custom client when registered, else system client).",
+                  pattern: "^(custom|system:[\\w.-]+)$",
+                },
               },
             },
           },

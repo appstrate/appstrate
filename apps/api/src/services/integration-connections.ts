@@ -41,6 +41,15 @@ import {
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
+import {
+  SYSTEM_CLIENT_REF_PREFIX,
+  CUSTOM_CLIENT_REF,
+  systemClientRef,
+  parseClientRef,
+  getSystemIntegrationClientById,
+  getDefaultSystemIntegrationClient,
+  listSystemIntegrationClientsFor,
+} from "./integration-client-registry.ts";
 import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
@@ -138,6 +147,12 @@ interface ActorConnectionRow {
   credentialsEncrypted: string;
   expiresAt: Date | null;
   scopesGranted: string[];
+  /**
+   * Which registered client minted the connection — `"system:<id>"`,
+   * `"custom"`, or `null` (legacy). Threaded into the token-refresh client
+   * resolution so refresh uses the SAME credentials that minted the tokens.
+   */
+  clientRef: string | null;
 }
 
 /**
@@ -194,6 +209,7 @@ async function loadActorConnection(
       credentialsEncrypted: integrationConnections.credentialsEncrypted,
       expiresAt: integrationConnections.expiresAt,
       scopesGranted: integrationConnections.scopesGranted,
+      clientRef: integrationConnections.clientRef,
       userId: integrationConnections.userId,
       endUserId: integrationConnections.endUserId,
     })
@@ -221,6 +237,7 @@ async function loadActorConnection(
       credentialsEncrypted: picked.credentialsEncrypted,
       expiresAt: picked.expiresAt,
       scopesGranted: picked.scopesGranted,
+      clientRef: picked.clientRef,
     };
   }
 
@@ -237,6 +254,7 @@ async function loadActorConnection(
     credentialsEncrypted: picked.credentialsEncrypted,
     expiresAt: picked.expiresAt,
     scopesGranted: picked.scopesGranted,
+    clientRef: picked.clientRef,
   };
 }
 
@@ -259,6 +277,7 @@ async function loadAccessibleConnectionById(
       credentialsEncrypted: integrationConnections.credentialsEncrypted,
       expiresAt: integrationConnections.expiresAt,
       scopesGranted: integrationConnections.scopesGranted,
+      clientRef: integrationConnections.clientRef,
     })
     .from(integrationConnections)
     .where(
@@ -501,6 +520,113 @@ export async function getIntegrationOAuthClient(
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+/**
+ * A connect-time client resolved from a credential source — either an
+ * env-provided system client or the org's per-application custom client. The
+ * `clientRef` is what gets pinned on the connection so refresh resolves the
+ * same credentials.
+ */
+export interface ResolvedConnectClient {
+  clientId: string;
+  clientSecret: string;
+  /** Pre-registered redirect URI override, or null to use the platform default. */
+  redirectUri: string | null;
+  clientRef: string;
+}
+
+/**
+ * Resolve a SYSTEM integration client for connect.
+ *
+ *   - `requestedRef = "system:<id>"` → that exact system client, but only when
+ *     it serves this `(integrationId, authKey)` (defence against a caller
+ *     pinning an unrelated client).
+ *   - no/`"custom"` ref → the default system client for the auth (first
+ *     registered), or `null` when none is configured.
+ *
+ * Returns `null` when no matching system client exists — the caller then falls
+ * back to the org's custom client or errors.
+ */
+export function resolveSystemConnectClient(
+  integrationId: string,
+  authKey: string,
+  requestedRef?: string,
+): ResolvedConnectClient | null {
+  if (requestedRef && requestedRef.startsWith(SYSTEM_CLIENT_REF_PREFIX)) {
+    const parsed = parseClientRef(requestedRef);
+    if (parsed.kind !== "system") return null;
+    const def = getSystemIntegrationClientById(parsed.id);
+    if (!def || def.integrationId !== integrationId || def.authKey !== authKey) return null;
+    return {
+      clientId: def.clientId,
+      clientSecret: def.clientSecret,
+      redirectUri: null,
+      clientRef: systemClientRef(def.id),
+    };
+  }
+  const def = getDefaultSystemIntegrationClient(integrationId, authKey);
+  if (!def) return null;
+  return {
+    clientId: def.clientId,
+    clientSecret: def.clientSecret,
+    redirectUri: null,
+    clientRef: systemClientRef(def.id),
+  };
+}
+
+/**
+ * A client available to connect an integration auth — surfaced in the UI so a
+ * user can see the shared system client and/or the org's own (BYO) client and
+ * which one is the default. Secrets are never included.
+ */
+export interface IntegrationClientDescriptor {
+  /** `client_ref` to pass back at connect time. */
+  client_ref: string;
+  /** `"built-in"` (env system client) or `"custom"` (org per-app client). */
+  source: "built-in" | "custom";
+  client_id: string;
+  /** True for the client used when no explicit `client_ref` is given at connect. */
+  is_default: boolean;
+}
+
+/**
+ * List the OAuth clients available for `(packageId, authKey)`: the org's custom
+ * per-application client (when registered) plus any env-provided system
+ * clients. The default mirrors the connect resolution precedence — the org's
+ * custom client wins when present (it was registered on purpose), else the
+ * first system client.
+ */
+export async function listIntegrationClients(
+  scope: AppScope,
+  packageId: string,
+  authKey: string,
+): Promise<IntegrationClientDescriptor[]> {
+  await assertAppBelongsToOrg(scope);
+  const custom = await getIntegrationOAuthClient(scope, packageId, authKey);
+  const system = listSystemIntegrationClientsFor(packageId, authKey);
+  const hasCustom = custom !== null;
+
+  const out: IntegrationClientDescriptor[] = [];
+  if (custom) {
+    out.push({
+      client_ref: CUSTOM_CLIENT_REF,
+      source: "custom",
+      client_id: custom.client_id,
+      // Custom wins as default when present (org registered it deliberately).
+      is_default: true,
+    });
+  }
+  system.forEach((def, idx) => {
+    out.push({
+      client_ref: systemClientRef(def.id),
+      source: "built-in",
+      client_id: def.clientId,
+      // First system client is the default only when no custom client exists.
+      is_default: !hasCustom && idx === 0,
+    });
+  });
+  return out;
 }
 
 // ─────────────────────────────────────────────
@@ -987,6 +1113,13 @@ export interface StoreConnectionInput {
    * for a new connection and we let them own duplicates if they want.
    */
   connectionId?: string;
+  /**
+   * Which registered client minted this connection — `"system:<id>"` or
+   * `"custom"`. Pinned on the row so token refresh resolves the same
+   * credentials. Absent on legacy callers (persists NULL → refresh falls back
+   * to the org's per-app client).
+   */
+  clientRef?: string | null;
 }
 
 /**
@@ -1051,6 +1184,13 @@ export interface PersistCredentialInput {
   /** INSERT only — the `(packageId, authKey)` the new row belongs to. */
   packageId?: string;
   authKey?: string;
+  /**
+   * Which registered client minted this connection — `"system:<id>"` or
+   * `"custom"`. Stamped on INSERT and on the acquisition UPDATE (reconnect may
+   * switch clients) so token refresh resolves the same credentials. Omitted by
+   * the refresh write-back (`update-by-id`) → never clobbered on refresh.
+   */
+  clientRef?: string | null;
 }
 
 /**
@@ -1125,6 +1265,7 @@ export async function persistCredentialBundle(
         identityClaims: input.identityClaims ?? {},
         scopesGranted: input.scopesGranted ?? [],
         needsReconnection: input.needsReconnection ?? false,
+        clientRef: input.clientRef ?? null,
         expiresAt: input.expiresAt ?? null,
         label: labelValue,
         createdAt: now,
@@ -1155,6 +1296,9 @@ export async function persistCredentialBundle(
   if (input.accountId !== undefined) set.accountId = input.accountId;
   if (input.identityClaims !== undefined) set.identityClaims = input.identityClaims;
   if (input.scopesGranted !== undefined) set.scopesGranted = input.scopesGranted;
+  // Re-stamp the minting client on reconnect (acquisition UPDATE passes it);
+  // the refresh write-back omits it so the high-water client_ref is preserved.
+  if (input.clientRef !== undefined) set.clientRef = input.clientRef;
 
   if (target.kind === "update-owned") {
     await assertAppBelongsToOrg(target.scope);
@@ -1307,6 +1451,7 @@ export async function saveIntegrationConnection(
     scopesGranted: input.scopesGranted ?? [],
     needsReconnection: false,
     expiresAt: input.expiresAt ?? null,
+    ...(input.clientRef !== undefined ? { clientRef: input.clientRef } : {}),
   };
   const summary = input.connectionId
     ? await persistCredentialBundle(

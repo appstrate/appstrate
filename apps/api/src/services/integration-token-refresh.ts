@@ -38,6 +38,7 @@ import {
   recordIntegrationRefreshFailure,
 } from "./integration-connections.ts";
 import { getEnv } from "@appstrate/env";
+import { parseClientRef, getSystemIntegrationClientById } from "./integration-client-registry.ts";
 
 export type { IntegrationRefreshContext };
 
@@ -333,6 +334,14 @@ export async function buildIntegrationOAuthRefreshContext(
   authKey: string,
   authDef: AfpsManifestAuth,
   applicationId: string,
+  /**
+   * The minting client pinned on the connection (`integration_connections.client_ref`):
+   * `"system:<id>"`, `"custom"`, or `null` (legacy). Resolves WHICH client's
+   * credentials are used to refresh — the same one that minted the tokens.
+   * `null`/`"custom"` use the org's per-application `integration_oauth_clients`
+   * row (the pre-multi-client behaviour).
+   */
+  clientRef: string | null,
 ): Promise<IntegrationRefreshContext | null> {
   if (authDef.type !== "oauth2") return null;
   // AFPS §7.3: refresh POSTs to `token_endpoint`. When the manifest declares
@@ -367,48 +376,73 @@ export async function buildIntegrationOAuthRefreshContext(
     });
     return null;
   }
-  const [client] = await db
-    .select({
-      clientId: integrationOauthClients.clientId,
-      clientSecretEncrypted: integrationOauthClients.clientSecretEncrypted,
-    })
-    .from(integrationOauthClients)
-    .where(
-      and(
-        eq(integrationOauthClients.applicationId, applicationId),
-        eq(integrationOauthClients.integrationId, packageId),
-        eq(integrationOauthClients.authKey, authKey),
-      ),
-    )
-    .limit(1);
-  if (!client) {
-    // The application admin never registered an OAuth client for this auth —
-    // the connection was provisioned via DCR or a system-wide client. Cannot
-    // refresh without those credentials; skip.
-    logger.info("Integration auth refresh skipped — no per-app OAuth client", {
-      packageId,
-      authKey,
-    });
-    return null;
-  }
-  // Public clients (RFC 7591 §2, `token_endpoint_auth_method: "none"`) have
-  // no client_secret to decrypt — the client_secret_encrypted column may hold
-  // an empty/placeholder envelope. Skip decryption entirely for those.
+  // Public clients (RFC 7591 §2, `token_endpoint_auth_method: "none"`) have no
+  // client_secret — skip secret resolution entirely for those.
   const tokenEndpointAuthMethod = afpsAuth.token_endpoint_auth_method;
+
+  // Resolve the minting client's credentials by `client_ref`. A connection is
+  // refreshed with the SAME client that minted it — once a system + custom
+  // client coexist, a flat `(app, integration, authKey)` lookup is ambiguous.
+  const parsedRef = parseClientRef(clientRef);
+  let clientId: string;
   let clientSecret = "";
-  if (tokenEndpointAuthMethod !== "none") {
-    try {
-      const decrypted = decryptCredentials<{ client_secret?: string }>(
-        client.clientSecretEncrypted,
-      );
-      clientSecret = decrypted.client_secret ?? "";
-    } catch (err) {
-      logger.warn("Integration auth client_secret decrypt failed", {
+
+  if (parsedRef.kind === "system") {
+    const sys = getSystemIntegrationClientById(parsedRef.id);
+    if (!sys) {
+      // The connection was minted by a system client that is no longer present
+      // in SYSTEM_INTEGRATION_CLIENTS (env changed). Cannot refresh without its
+      // credentials; skip (surfaces needs_reconnection upstream at expiry).
+      logger.info("Integration auth refresh skipped — system client no longer configured", {
         packageId,
         authKey,
-        error: err instanceof Error ? err.message : String(err),
+        clientRef,
       });
       return null;
+    }
+    clientId = sys.clientId;
+    // System secrets are plaintext from env (no decryption).
+    clientSecret = tokenEndpointAuthMethod !== "none" ? sys.clientSecret : "";
+  } else {
+    const [client] = await db
+      .select({
+        clientId: integrationOauthClients.clientId,
+        clientSecretEncrypted: integrationOauthClients.clientSecretEncrypted,
+      })
+      .from(integrationOauthClients)
+      .where(
+        and(
+          eq(integrationOauthClients.applicationId, applicationId),
+          eq(integrationOauthClients.integrationId, packageId),
+          eq(integrationOauthClients.authKey, authKey),
+        ),
+      )
+      .limit(1);
+    if (!client) {
+      // The application admin never registered an OAuth client for this auth and
+      // no system client minted it — the connection was provisioned via DCR or a
+      // since-removed client. Cannot refresh without those credentials; skip.
+      logger.info("Integration auth refresh skipped — no per-app OAuth client", {
+        packageId,
+        authKey,
+      });
+      return null;
+    }
+    clientId = client.clientId;
+    if (tokenEndpointAuthMethod !== "none") {
+      try {
+        const decrypted = decryptCredentials<{ client_secret?: string }>(
+          client.clientSecretEncrypted,
+        );
+        clientSecret = decrypted.client_secret ?? "";
+      } catch (err) {
+        logger.warn("Integration auth client_secret decrypt failed", {
+          packageId,
+          authKey,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      }
     }
   }
   // AFPS: `scope_separator` moved under `_meta["dev.appstrate/oauth"]`.
@@ -417,7 +451,7 @@ export async function buildIntegrationOAuthRefreshContext(
     | undefined;
   return {
     tokenEndpoint,
-    clientId: client.clientId,
+    clientId,
     clientSecret,
     ...(tokenEndpointAuthMethod ? { tokenEndpointAuthMethod } : {}),
     ...(oauthMeta?.scope_separator ? { scopeSeparator: oauthMeta.scope_separator } : {}),

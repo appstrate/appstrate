@@ -57,6 +57,13 @@ export interface OAuthStateRecord {
     /** Optional explicit client_secret (omitted for `none`). */
     clientSecret?: string;
     /**
+     * Which registered client minted this connection — `"system:<id>"` for an
+     * env-provided system client, `"custom"` for the org's per-application
+     * client. Carried into the state so the callback stamps it on the
+     * connection row; token refresh later resolves the same credentials by it.
+     */
+    clientRef?: string;
+    /**
      * Reconnect / upgrade-scopes target. When set, the callback hands
      * this id to `saveIntegrationConnection` so the existing row is
      * UPDATED in place (token refreshed, scopes possibly broadened)

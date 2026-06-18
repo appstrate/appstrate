@@ -75,6 +75,14 @@ export const integrationConnections = pgTable(
       .notNull()
       .default(sql`'{}'::text[]`),
     needsReconnection: boolean("needs_reconnection").notNull().default(false),
+    // Which registered OAuth client minted this connection — `"system:<id>"`
+    // for an env-provided system client (SYSTEM_INTEGRATION_CLIENTS), `"custom"`
+    // for the org's own per-application `integration_oauth_clients` row. NULL on
+    // rows created before multi-client support; resolved identically to
+    // `"custom"` (the legacy single-client lookup). Pinned so token refresh
+    // resolves the SAME client credentials that minted the tokens — without it,
+    // refresh cannot disambiguate once a system + custom client coexist.
+    clientRef: text("client_ref"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     // Consecutive token-refresh failures classified as *transient* (network /
     // 5xx / parse — NOT `invalid_grant`, which flips `needsReconnection`

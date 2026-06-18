@@ -58,6 +58,7 @@ import {
   getIntegrationAuthStatuses,
   getIntegrationOAuthClient,
   type IntegrationOAuthClient,
+  listIntegrationClients,
   listIntegrationConnections,
   readIntegrationAuth,
   serializeIntegrationConnection,
@@ -111,6 +112,13 @@ export const connectOAuthSchema = z.object({
   scopes: z.array(z.string()).optional(),
   force_account_select: z.boolean().optional(),
   connection_id: z.uuid().optional(),
+  // Which registered client to connect with — `"system:<id>"` or `"custom"`.
+  // Omitted → the default (org's custom client when registered, else the system
+  // client). `GET .../auths/:authKey/clients` enumerates valid values.
+  client_ref: z
+    .string()
+    .regex(/^(custom|system:[\w.-]+)$/, "client_ref must be 'custom' or 'system:<id>'")
+    .optional(),
 });
 
 export const updateSettingsSchema = z.object({
@@ -386,6 +394,23 @@ export function createIntegrationsRouter() {
     },
   );
 
+  // List every OAuth client available to connect this auth: the org's custom
+  // (BYO-app) client plus any env-provided system clients, with `source` and
+  // which is the default. Secrets are never returned. Drives the connect UI's
+  // "connect with…" picker. The `client_ref` here is what `POST .../connect/oauth2`
+  // accepts to pin a specific client.
+  router.get(
+    "/:packageId{@[^/]+/[^/]+}/auths/:authKey/clients",
+    requirePermission("integrations", "read"),
+    async (c) => {
+      const packageId = c.req.param("packageId")!;
+      const authKey = c.req.param("authKey")!;
+      const scope = getAppScope(c);
+      const clients = await listIntegrationClients(scope, packageId, authKey);
+      return c.json(listResponse(clients));
+    },
+  );
+
   router.put(
     "/:packageId{@[^/]+/[^/]+}/oauth-clients/:authKey",
     requirePermission("integrations", "install"),
@@ -545,7 +570,11 @@ export function createIntegrationsRouter() {
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
         },
-        { scopes, forceAccountSelect: body.force_account_select ?? false },
+        {
+          scopes,
+          forceAccountSelect: body.force_account_select ?? false,
+          ...(body.client_ref ? { clientRef: body.client_ref } : {}),
+        },
       );
       return c.json({ auth_url: result.redirectUrl, state: result.state });
     },

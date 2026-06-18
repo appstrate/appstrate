@@ -195,6 +195,7 @@ export async function resolveLiveIntegrationCredentials(
         authKey,
         authDef,
         context.applicationId,
+        connection.clientRef,
       );
     } catch (err) {
       // Transient token-endpoint discovery failure on an issuer-only manifest —

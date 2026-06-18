@@ -116,6 +116,13 @@ export interface InitiateIntegrationOAuthInput {
   authorizationParams?: Record<string, string>;
   /** Platform redirect URI — same callback for all integration flows. */
   redirectUri: string;
+  /**
+   * Which registered client this flow uses — `"system:<id>"` or `"custom"`.
+   * Carried into the state so the callback can stamp it on the connection row;
+   * token refresh later resolves the same client credentials by it. Absent on
+   * legacy callers (treated as the org's custom client at refresh).
+   */
+  clientRef?: string;
   /** Org / app / actor context — propagated to the callback handler. */
   orgId: string;
   applicationId: string;
@@ -233,6 +240,7 @@ export async function initiateIntegrationOAuth(
       tokenEndpointAuthMethod: tokenAuthMethod,
       clientId: input.clientId,
       clientSecret: input.clientSecret,
+      ...(input.clientRef ? { clientRef: input.clientRef } : {}),
       ...(input.connectionId ? { connectionId: input.connectionId } : {}),
     },
   };
@@ -284,6 +292,12 @@ export interface IntegrationOAuthCallbackResult {
    * so the existing row is updated instead of a duplicate inserted.
    */
   connectionId?: string;
+  /**
+   * Pass-through of the minting client ref set at initiate time —
+   * `"system:<id>"` or `"custom"`. Stamped on the connection row so token
+   * refresh resolves the same client credentials.
+   */
+  clientRef?: string;
 }
 
 /**
@@ -357,5 +371,6 @@ export async function handleIntegrationOAuthCallback(
     scopeCreep: parsed.scopeCreep,
     tokenResponse: tokenData,
     ...(integration.connectionId ? { connectionId: integration.connectionId } : {}),
+    ...(integration.clientRef ? { clientRef: integration.clientRef } : {}),
   };
 }

@@ -170,6 +170,18 @@ const envSchema = z
       .string()
       .default("[]")
       .transform((s) => JSON.parse(s) as unknown[]),
+    // System-level integration OAuth clients — shared client_id/secret the
+    // platform provides for an integration auth (e.g. the Appstrate-verified
+    // Google app) so every org can connect out of the box without registering
+    // its own OAuth app. JSON array; validated + indexed by
+    // `integration-client-registry.ts` at boot. Mirrors SYSTEM_PROVIDER_KEYS.
+    // An org that registers its own per-app client (BYO-app) overrides the
+    // system client; the minting client is pinned per connection so refresh
+    // resolves the right credentials.
+    SYSTEM_INTEGRATION_CLIENTS: z
+      .string()
+      .default("[]")
+      .transform((s) => JSON.parse(s) as unknown[]),
 
     // OIDC instance clients — declarative provisioning of satellite OAuth
     // clients (admin dashboards, second-party web apps). Parsed loosely
