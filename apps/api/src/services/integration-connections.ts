@@ -93,6 +93,8 @@ interface IntegrationOAuthClientWithSecret extends IntegrationOAuthClient {
   /** Row PK — the connection's `client_ref` when this custom client mints it. */
   id: string;
   clientSecret: string;
+  /** Whether this custom client is the default for new connections (else system). */
+  isDefault: boolean;
 }
 
 // ─────────────────────────────────────────────
@@ -519,6 +521,7 @@ export async function getIntegrationOAuthClient(
     clientSecret: secret,
     has_client_secret: secret.length > 0,
     redirect_uri: row.redirectUri,
+    isDefault: row.isDefault,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -611,12 +614,18 @@ export function resolveConnectClient(
     );
   }
 
-  // No explicit ref — the org's custom (BYO-app) client wins, else default system.
-  if (customClient) return customConnectClient(customClient);
+  // No explicit ref — the default. The org's custom (BYO-app) client wins WHEN
+  // flagged default (`is_default`); an admin can un-flag it to prefer the system
+  // client. With the flag off (or no custom client), the default system client
+  // wins. Mirrors `org_models.is_default` + the model resolution cascade.
+  if (customClient && customClient.isDefault) return customConnectClient(customClient);
   if (!autoProvisioned) {
     const sys = getDefaultSystemIntegrationClient(integrationId, authKey);
     if (sys) return systemConnectClient(sys);
   }
+  // Custom client present but not flagged default, and no system client to fall
+  // to — still connectable via the custom client rather than failing.
+  if (customClient) return customConnectClient(customClient);
 
   if (autoProvisioned) {
     // Auto-provisioning auth (public client on a remote MCP integration): client
@@ -741,7 +750,11 @@ export async function listIntegrationClients(
 ): Promise<IntegrationClientDescriptor[]> {
   await assertAppBelongsToOrg(scope);
   const customRows = await db
-    .select({ id: integrationOauthClients.id, clientId: integrationOauthClients.clientId })
+    .select({
+      id: integrationOauthClients.id,
+      clientId: integrationOauthClients.clientId,
+      isDefault: integrationOauthClients.isDefault,
+    })
     .from(integrationOauthClients)
     .where(
       and(
@@ -777,13 +790,75 @@ export async function listIntegrationClients(
       is_default: false,
     }),
   });
-  // Default precedence mirrors connect: the org's custom client wins when
-  // present (registered on purpose), else the first system client.
+  // Default resolution mirrors connect (and the model-provider cascade): the
+  // org's custom client wins WHEN flagged default (`is_default`, the registered-
+  // on-purpose case); an admin can flip that flag off to prefer the platform's
+  // system client, in which case the first system client is the default. With no
+  // custom client at all, the first system client is the default.
+  const customRow = customRows[0];
   const defaultRef =
-    merged.find((c) => c.source === "custom")?.client_ref ??
-    merged.find((c) => c.source === "built-in")?.client_ref ??
-    null;
+    customRow && customRow.isDefault
+      ? customRow.id
+      : (merged.find((c) => c.source === "built-in")?.client_ref ??
+        merged.find((c) => c.source === "custom")?.client_ref ??
+        null);
   return merged.map((c) => ({ ...c, is_default: c.client_ref === defaultRef }));
+}
+
+/**
+ * Choose which OAuth client is the default for new connections on
+ * `(application, integration, auth)` — the model-provider `setDefaultModel`
+ * analogue. There is at most one custom (BYO-app) client per auth (UNIQUE), so
+ * the choice is binary and lives as a flag on that row:
+ *   - `clientRef` names the org's custom client  → flag it default (`true`).
+ *   - `clientRef` names a system client          → un-flag the custom client so
+ *     the resolution cascade falls to the system client (`false`).
+ * Selecting a system default requires a custom client to exist to un-flag; with
+ * no custom client the system client is already the default (no-op). An unknown
+ * or cross-scope `clientRef` is rejected, never silently stored.
+ */
+export async function setDefaultIntegrationClient(
+  scope: AppScope,
+  integrationId: string,
+  authKey: string,
+  clientRef: string,
+): Promise<void> {
+  await assertAppBelongsToOrg(scope);
+  const [customRow] = await db
+    .select({ id: integrationOauthClients.id })
+    .from(integrationOauthClients)
+    .where(
+      and(
+        eq(integrationOauthClients.applicationId, scope.applicationId),
+        eq(integrationOauthClients.integrationId, integrationId),
+        eq(integrationOauthClients.authKey, authKey),
+      ),
+    )
+    .limit(1);
+
+  // Custom client selected: flag it default.
+  if (customRow && customRow.id === clientRef) {
+    await db
+      .update(integrationOauthClients)
+      .set({ isDefault: true, updatedAt: new Date() })
+      .where(eq(integrationOauthClients.id, customRow.id));
+    return;
+  }
+
+  // Otherwise the ref must name a system client serving this auth.
+  if (!resolveSystemClientForAuth(clientRef, integrationId, authKey)) {
+    throw invalidRequest(
+      `Unknown OAuth client '${clientRef}' for '${integrationId}' auth '${authKey}'`,
+    );
+  }
+  // System default = the custom client (if any) must yield. With no custom
+  // client the system client is already the default — nothing to persist.
+  if (customRow) {
+    await db
+      .update(integrationOauthClients)
+      .set({ isDefault: false, updatedAt: new Date() })
+      .where(eq(integrationOauthClients.id, customRow.id));
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -1706,6 +1781,10 @@ export function serializeIntegrationConnection(
     owner_id: (row.userId ?? row.endUserId)!,
     label: row.label,
     shared_with_org: row.sharedWithOrg,
+    // Which registered client minted this connection (system env id or custom
+    // `integration_oauth_clients.id`); null for non-oauth2 auths. Surfaced so the
+    // UI can show, per connection, exactly which client is in use.
+    client_ref: row.clientRef,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -1836,6 +1915,10 @@ export async function getIntegrationAuthStatuses(
       resource,
       connections: allConnections.filter((c) => c.auth_key === key),
       has_oauth_client: oauthClientKeys.has(key),
+      // Shared platform client (SYSTEM_INTEGRATION_CLIENTS): when one serves this
+      // (integration, auth), connect falls back to it, so the UI is connectable
+      // even without an org-registered client. Registry is in-memory — no DB cost.
+      has_system_client: listSystemIntegrationClientsFor(packageId, key).length > 0,
       // MCP-spec onboarding: an oauth2 auth on a remote MCP integration provisions
       // its client at connect time (CIMD/DCR), so the UI enables Connect even
       // when no client is pre-registered. Derived from the manifest shape.

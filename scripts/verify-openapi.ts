@@ -121,6 +121,7 @@ const expectedEndpoints = [
   "PUT /api/integrations/{packageId}/oauth-clients/{authKey}",
   "DELETE /api/integrations/{packageId}/oauth-clients/{authKey}",
   "GET /api/integrations/{packageId}/auths/{authKey}/clients",
+  "PUT /api/integrations/{packageId}/auths/{authKey}/default-client",
   "POST /api/integrations/{packageId}/auths/{authKey}/connect/fields",
   "POST /api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
   "GET /api/integrations/{packageId}/connections",

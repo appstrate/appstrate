@@ -1299,6 +1299,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/{packageId}/auths/{authKey}/default-client": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set the default OAuth client for an integration auth
+         * @description Choose which client mints NEW connections when none is picked explicitly (the model-provider `setDefaultModel` analogue). Selecting the org's custom client flags it default; selecting a system client un-flags the custom one so the cascade falls to the system client. Existing connections are bound to the client that minted them and are unaffected. Returns the refreshed clients list. Admin only.
+         */
+        put: operations["setDefaultIntegrationClient"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/{packageId}/connections": {
         parameters: {
             query?: never;
@@ -9195,12 +9215,16 @@ export interface operations {
                                 owner_id: string;
                                 label?: string | null;
                                 shared_with_org?: boolean;
+                                /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                                client_ref: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
                             has_oauth_client: boolean;
+                            /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATION_CLIENTS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
+                            has_system_client: boolean;
                             /** @description True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
                         }[];
@@ -9293,12 +9317,16 @@ export interface operations {
                                 owner_id: string;
                                 label?: string | null;
                                 shared_with_org?: boolean;
+                                /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                                client_ref: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
                             has_oauth_client: boolean;
+                            /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATION_CLIENTS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
+                            has_system_client: boolean;
                             /** @description True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
                         }[];
@@ -9489,6 +9517,8 @@ export interface operations {
                         owner_id: string;
                         label?: string | null;
                         shared_with_org?: boolean;
+                        /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                        client_ref: string | null;
                         /** Format: date-time */
                         createdAt: string;
                         /** Format: date-time */
@@ -9551,6 +9581,58 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    setDefaultIntegrationClient: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Auth key as declared in the manifest's `auths` map. */
+                authKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Client to make default — a `client_ref` from GET .../clients. */
+                    client_ref: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Default set; available OAuth clients (re-badged) */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        hasMore: boolean;
+                        data: {
+                            client_ref: string;
+                            /** @enum {string} */
+                            source: "built-in" | "custom";
+                            client_id: string;
+                            is_default: boolean;
+                        }[];
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listIntegrationConnections: {
         parameters: {
             query?: never;
@@ -9597,6 +9679,8 @@ export interface operations {
                             owner_id: string;
                             label?: string | null;
                             shared_with_org?: boolean;
+                            /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                            client_ref: string | null;
                             /** Format: date-time */
                             createdAt: string;
                             /** Format: date-time */
@@ -9660,6 +9744,8 @@ export interface operations {
                         owner_id: string;
                         label?: string | null;
                         shared_with_org?: boolean;
+                        /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                        client_ref: string | null;
                         /** Format: date-time */
                         createdAt: string;
                         /** Format: date-time */
@@ -10191,12 +10277,16 @@ export interface operations {
                                 owner_id: string;
                                 label?: string | null;
                                 shared_with_org?: boolean;
+                                /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                                client_ref: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
                             has_oauth_client: boolean;
+                            /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATION_CLIENTS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
+                            has_system_client: boolean;
                             /** @description True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
                         }[];

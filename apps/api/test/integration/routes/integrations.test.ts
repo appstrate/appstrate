@@ -244,6 +244,41 @@ describe("GET /api/integrations/:packageId", () => {
     expect(Array.isArray(body.tool_catalog)).toBe(true);
   });
 
+  it("flags has_system_client when a shared platform client serves the oauth2 auth", async () => {
+    // A SYSTEM_INTEGRATION_CLIENTS entry for (integration, auth) makes the auth
+    // connectable out of the box — connect falls back to it without an
+    // org-registered client. The detail must surface that so the UI unlocks the
+    // connect button (the model-provider system-key fallback, mirrored).
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    initSystemIntegrationClients([
+      {
+        id: "gmail-system",
+        integrationId: "@myorg/gmail",
+        authKey: "google",
+        clientId: "sys-client.apps.googleusercontent.com",
+        clientSecret: "sys-secret",
+      },
+    ]);
+    try {
+      const res = await app.request("/api/integrations/@myorg/gmail", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        auths: Array<{ auth_key: string; has_oauth_client: boolean; has_system_client: boolean }>;
+      };
+      const google = body.auths.find((a) => a.auth_key === "google");
+      const api = body.auths.find((a) => a.auth_key === "api");
+      // oauth2 auth with a matching system client → connectable, no org client.
+      expect(google?.has_system_client).toBe(true);
+      expect(google?.has_oauth_client).toBe(false);
+      // The api_key auth carries no client; the system client targets `google` only.
+      expect(api?.has_system_client).toBe(false);
+    } finally {
+      __resetSystemIntegrationClientsForTest();
+    }
+  });
+
   it("returns 404 for non-existent integration", async () => {
     const res = await app.request("/api/integrations/@myorg/missing", {
       headers: authHeaders(ctx),

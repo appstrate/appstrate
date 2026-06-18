@@ -56,6 +56,14 @@ export interface IntegrationConnection {
   label?: string | null;
   /** Opt-in: makes this connection selectable by other members of the same app. */
   shared_with_org?: boolean;
+  /**
+   * The registered OAuth client that minted this connection — a flat client id
+   * (system env id or `integration_oauth_clients.id`). `null` for non-oauth2
+   * auths (no client). The UI resolves it against the clients list to show which
+   * client each connection uses; a connection is bound to it (token refresh uses
+   * the same client), so changing it requires reconnecting.
+   */
+  client_ref: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -75,6 +83,13 @@ export interface IntegrationAuthStatus {
   connections: IntegrationConnection[];
   /** True when this auth has an admin-registered OAuth2 client (oauth2 only). */
   has_oauth_client: boolean;
+  /**
+   * True when the platform provides a shared system OAuth client for this auth
+   * via `SYSTEM_INTEGRATION_CLIENTS` (oauth2 only). The connect flow falls back
+   * to it when the org has not registered its own client, so the UI treats the
+   * auth as connectable. Mirrors the model-provider system-key fallback.
+   */
+  has_system_client: boolean;
   /**
    * True for an oauth2 auth on a remote MCP integration (`source.kind:
    * "remote"`). Per the MCP Authorization spec the OAuth client is provisioned

@@ -1,0 +1,1 @@
+ALTER TABLE "integration_oauth_clients" ADD COLUMN "is_default" boolean DEFAULT true NOT NULL;

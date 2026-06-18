@@ -44,6 +44,14 @@ type RawIntegrationDetail =
 export type IntegrationDetailWire = Omit<RawIntegrationDetail, "manifest"> & {
   manifest: IntegrationManifestView;
 };
+/**
+ * One OAuth client offered for connecting an integration auth — the org's
+ * custom (BYO-app) client or a platform-provided system client. Spec-derived so
+ * a rename/removal of any wire field breaks compilation. Secrets never present.
+ */
+export type IntegrationClient = NonNullable<
+  paths["/api/integrations/{packageId}/auths/{authKey}/clients"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
+>[number];
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { useOrgScope } from "./use-org-scope";
@@ -260,7 +268,15 @@ export function useInitiateIntegrationOAuth() {
   return useMutation({
     mutationFn: async (vars: {
       params: { path: { packageId: string; authKey: string } };
-      body: { scopes?: string[]; force_account_select?: boolean; connection_id?: string };
+      body: {
+        scopes?: string[];
+        force_account_select?: boolean;
+        connection_id?: string;
+        // Pin which registered client mints the connection (a `client_ref` from
+        // GET .../clients). Omitted → the backend default (org custom client when
+        // registered, else the system client).
+        client_ref?: string;
+      };
     }) => {
       const { data } = await client.POST(
         "/api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
@@ -321,7 +337,66 @@ export function useUpsertIntegrationOAuthClient() {
       void qc.invalidateQueries({
         queryKey: ["get", "/api/integrations/{packageId}/oauth-clients/{authKey}"],
       });
+      // The available-clients list (system + custom) now includes the new
+      // custom client and its default precedence flips — refresh it too.
+      void qc.invalidateQueries({
+        queryKey: ["get", "/api/integrations/{packageId}/auths/{authKey}/clients"],
+      });
       void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
+    },
+  });
+}
+
+/**
+ * OAuth clients available to connect this auth: the org's custom (BYO-app)
+ * client plus any platform-provided system clients, each with `source` and
+ * which is the default. Secrets are never returned. Drives the detail page's
+ * client list and the connect "se connecter avec…" picker; `client_ref` is the
+ * value `POST .../connect/oauth2` accepts to pin a specific client.
+ */
+export function useIntegrationClients(packageId: string | undefined, authKey: string | undefined) {
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/integrations/{packageId}/auths/{authKey}/clients",
+    {
+      params: {
+        path: { packageId: packageId ?? "", authKey: authKey ?? "" },
+        header: scope.header,
+      },
+    },
+    {
+      enabled: scope.enabled && !!packageId && !!authKey,
+      select: (envelope): IntegrationClient[] => envelope.data,
+    },
+  );
+}
+
+/**
+ * Choose which OAuth client is the default for new connections on an auth — the
+ * model-provider `setDefaultModel` analogue. Existing connections keep the
+ * client that minted them; only future connects are affected. Refreshes the
+ * clients list so the "default" badge updates.
+ */
+export function useSetDefaultIntegrationClient() {
+  const { t } = useTranslation("settings");
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      params: { path: { packageId: string; authKey: string } };
+      body: { client_ref: string };
+    }) => {
+      const { data } = await client.PUT(
+        "/api/integrations/{packageId}/auths/{authKey}/default-client",
+        { ...vars },
+      );
+      return data;
+    },
+    onSuccess: () => {
+      toast.success(t("integration.clients.setDefault.success"));
+      void qc.invalidateQueries({
+        queryKey: ["get", "/api/integrations/{packageId}/auths/{authKey}/clients"],
+      });
     },
   });
 }
@@ -521,6 +596,9 @@ export function useDeleteIntegrationOAuthClient() {
       toast.success(t("integration.oauthClient.delete.success"));
       void qc.invalidateQueries({
         queryKey: ["get", "/api/integrations/{packageId}/oauth-clients/{authKey}"],
+      });
+      void qc.invalidateQueries({
+        queryKey: ["get", "/api/integrations/{packageId}/auths/{authKey}/clients"],
       });
       void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
     },

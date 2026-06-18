@@ -24,7 +24,11 @@ import {
   saveIntegrationConnection,
   listIntegrationClients,
   resolveIntegrationClientById,
+  resolveConnectClient,
+  setDefaultIntegrationClient,
+  type ResolvedOAuthConnect,
 } from "../../../src/services/integration-connections.ts";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 import { buildIntegrationOAuthRefreshContext } from "../../../src/services/integration-token-refresh.ts";
 import {
   initSystemIntegrationClients,
@@ -385,6 +389,111 @@ describe("integration multi-client", () => {
         expect(Object.keys(c)).not.toContain("client_secret");
         expect(Object.keys(c)).not.toContain("clientSecret");
       }
+    });
+  });
+
+  describe("setDefaultIntegrationClient (model-provider is_default analogue)", () => {
+    async function defaultRef(): Promise<string | undefined> {
+      const clients = await listIntegrationClients(scope, INTEGRATION, AUTH_KEY);
+      return clients.find((c) => c.is_default)?.client_ref;
+    }
+
+    it("makes the system client the default by un-flagging the custom one", async () => {
+      seedSystemClient();
+      await seedCustomClient("org-client", "org-secret");
+      // Custom wins by default (registered on purpose).
+      expect(await defaultRef()).not.toBe("gmail-system");
+      await setDefaultIntegrationClient(scope, INTEGRATION, AUTH_KEY, SYSTEM_ID);
+      expect(await defaultRef()).toBe("gmail-system");
+    });
+
+    it("flips back to the custom client", async () => {
+      seedSystemClient();
+      const customId = await seedCustomClient("org-client", "org-secret");
+      await setDefaultIntegrationClient(scope, INTEGRATION, AUTH_KEY, SYSTEM_ID);
+      expect(await defaultRef()).toBe("gmail-system");
+      await setDefaultIntegrationClient(scope, INTEGRATION, AUTH_KEY, customId);
+      expect(await defaultRef()).toBe(customId);
+    });
+
+    it("rejects an unknown client ref", async () => {
+      seedSystemClient();
+      await seedCustomClient("org-client", "org-secret");
+      await expect(
+        setDefaultIntegrationClient(scope, INTEGRATION, AUTH_KEY, "does-not-exist"),
+      ).rejects.toThrow();
+    });
+
+    it("is a no-op when selecting the system default with no custom client", async () => {
+      seedSystemClient();
+      // No custom client: the system client is already the default; selecting it
+      // must not throw (nothing to un-flag).
+      await setDefaultIntegrationClient(scope, INTEGRATION, AUTH_KEY, SYSTEM_ID);
+      expect(await defaultRef()).toBe("gmail-system");
+    });
+  });
+
+  describe("resolveConnectClient honours the default flag", () => {
+    const LOCAL_MANIFEST = {
+      source: { kind: "local", server: { name: INTEGRATION, version: "^0.1.0" } },
+    } as unknown as IntegrationManifest;
+
+    function customClient(isDefault: boolean): ResolvedOAuthConnect {
+      return {
+        client: {
+          id: "11111111-1111-4111-8111-111111111111",
+          applicationId: ctx.defaultAppId,
+          integration_package_id: INTEGRATION,
+          auth_key: AUTH_KEY,
+          client_id: "org-client-id",
+          clientSecret: "org-secret",
+          has_client_secret: true,
+          redirect_uri: null,
+          isDefault,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      };
+    }
+
+    it("uses the custom client when it is flagged default", () => {
+      seedSystemClient("sys-secret");
+      const out = resolveConnectClient(
+        INTEGRATION,
+        AUTH_KEY,
+        LOCAL_MANIFEST,
+        OAUTH2_AUTH,
+        customClient(true),
+        undefined,
+      );
+      expect(out.clientId).toBe("org-client-id");
+    });
+
+    it("falls to the system client when the custom one is un-flagged", () => {
+      seedSystemClient("sys-secret");
+      const out = resolveConnectClient(
+        INTEGRATION,
+        AUTH_KEY,
+        LOCAL_MANIFEST,
+        OAUTH2_AUTH,
+        customClient(false),
+        undefined,
+      );
+      expect(out.clientId).toBe("sys-client.apps.googleusercontent.com");
+    });
+
+    it("still uses the un-flagged custom client when no system client exists", () => {
+      // Registry empty (reset in beforeEach): with the flag off but nothing to
+      // fall to, the custom client is used rather than failing the connect.
+      const out = resolveConnectClient(
+        INTEGRATION,
+        AUTH_KEY,
+        LOCAL_MANIFEST,
+        OAUTH2_AUTH,
+        customClient(false),
+        undefined,
+      );
+      expect(out.clientId).toBe("org-client-id");
     });
   });
 });

@@ -62,6 +62,7 @@ import {
   listIntegrationConnections,
   readIntegrationAuth,
   serializeIntegrationConnection,
+  setDefaultIntegrationClient,
   upsertIntegrationOAuthClient,
   usesAutoProvisionedClient,
 } from "../services/integration-connections.ts";
@@ -120,6 +121,12 @@ export const connectOAuthSchema = z.object({
     .string()
     .regex(/^[\w.-]+$/, "client_ref must be a client id")
     .optional(),
+});
+
+export const setDefaultClientSchema = z.object({
+  // The client to make default — a flat client id (system env id or custom
+  // `integration_oauth_clients.id`) from `GET .../auths/:authKey/clients`.
+  client_ref: z.string().regex(/^[\w.-]+$/, "client_ref must be a client id"),
 });
 
 export const updateSettingsSchema = z.object({
@@ -407,6 +414,30 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
+      const clients = await listIntegrationClients(scope, packageId, authKey);
+      return c.json(listResponse(clients));
+    },
+  );
+
+  // Choose which OAuth client is the default for new connections on this auth
+  // (the model-provider `setDefaultModel` analogue). Selecting the org's custom
+  // client flags it default; selecting a system client un-flags the custom one
+  // so the resolution cascade falls to the system client. Returns the refreshed
+  // clients list so the UI re-badges the default without a second fetch.
+  router.put(
+    "/:packageId{@[^/]+/[^/]+}/auths/:authKey/default-client",
+    requirePermission("integrations", "install"),
+    async (c) => {
+      const packageId = c.req.param("packageId")!;
+      const authKey = c.req.param("authKey")!;
+      const scope = getAppScope(c);
+      const body = parseBody(setDefaultClientSchema, await c.req.json());
+      await setDefaultIntegrationClient(scope, packageId, authKey, body.client_ref);
+      await recordAuditFromContext(c, {
+        action: "integration.default_client.set",
+        resourceType: "integration",
+        resourceId: `${packageId}#${authKey}`,
+      });
       const clients = await listIntegrationClients(scope, packageId, authKey);
       return c.json(listResponse(clients));
     },

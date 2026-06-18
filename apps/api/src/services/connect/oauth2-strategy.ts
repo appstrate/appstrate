@@ -86,8 +86,11 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       redirectUri,
     );
     // Client selection (multi-client) — full precedence lives in
-    // `resolveConnectClient`. The chosen `clientRef` is pinned on the connection
-    // so token refresh resolves the same credentials.
+    // `resolveConnectClient`. An explicit `opts.clientRef` (the connect picker)
+    // wins; absent that, the default is the org's custom client when flagged
+    // `is_default`, else the system client (the model-provider cascade). The
+    // chosen `clientRef` is pinned on the connection so token refresh resolves
+    // the same credentials.
     const {
       clientId,
       clientSecret,

@@ -196,6 +196,12 @@ export const integrationOauthClients = pgTable(
     clientSecretEncrypted: text("client_secret_encrypted").notNull(),
     /** Optional pre-registered redirect URI; falls back to the platform default at connect time. */
     redirectUri: text("redirect_uri"),
+    // Whether this custom (BYO-app) client is the default for new connections.
+    // Mirrors `org_models.is_default`: a registered custom client defaults to
+    // `true` (registered on purpose → it wins), and an admin can flip it to
+    // `false` to make the platform's system client the default instead. The
+    // connect resolution cascade reads it (custom-when-default → else system).
+    isDefault: boolean("is_default").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

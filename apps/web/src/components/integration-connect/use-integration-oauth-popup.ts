@@ -37,6 +37,13 @@ export function useIntegrationOAuthPopup() {
       scopes?: string[];
       forceAccountSelect?: boolean;
       connectionId?: string;
+      /**
+       * Pin which registered client mints the connection (a `client_ref` from
+       * GET .../clients). Omitted → the backend default (org custom client when
+       * registered, else the system client). Used by the detail-page client
+       * picker when both a system and a custom client are available.
+       */
+      clientRef?: string;
     }) => {
       try {
         // Open the popup synchronously (some browsers block popups opened
@@ -58,6 +65,7 @@ export function useIntegrationOAuthPopup() {
               scopes: input.scopes ?? [],
               ...(input.forceAccountSelect ? { force_account_select: true } : {}),
               ...(input.connectionId ? { connection_id: input.connectionId } : {}),
+              ...(input.clientRef ? { client_ref: input.clientRef } : {}),
             },
           });
           popup.location.href = session.auth_url;

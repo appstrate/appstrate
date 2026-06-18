@@ -87,6 +87,7 @@ const integrationConnectionSchema = {
     "expiresAt",
     "owner_type",
     "owner_id",
+    "client_ref",
     "createdAt",
     "updatedAt",
   ],
@@ -103,8 +104,37 @@ const integrationConnectionSchema = {
     owner_id: { type: "string" },
     label: { type: ["string", "null"] },
     shared_with_org: { type: "boolean" },
+    client_ref: {
+      type: ["string", "null"],
+      description:
+        "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting.",
+    },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
+  },
+} as const;
+
+// Shared by GET .../clients and PUT .../default-client — both return the
+// available-clients list so the UI re-badges the default in one round-trip.
+const integrationClientsListSchema = {
+  type: "object",
+  required: ["object", "data", "hasMore"],
+  properties: {
+    object: { type: "string", enum: ["list"] },
+    hasMore: { type: "boolean" },
+    data: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["client_ref", "source", "client_id", "is_default"],
+        properties: {
+          client_ref: { type: "string" },
+          source: { type: "string", enum: ["built-in", "custom"] },
+          client_id: { type: "string" },
+          is_default: { type: "boolean" },
+        },
+      },
+    },
   },
 } as const;
 
@@ -142,6 +172,7 @@ const authStatusSchema = {
     "resource",
     "connections",
     "has_oauth_client",
+    "has_system_client",
     "client_auto_provisioned",
   ],
   properties: {
@@ -161,6 +192,11 @@ const authStatusSchema = {
     },
     connections: { type: "array", items: integrationConnectionSchema },
     has_oauth_client: { type: "boolean" },
+    has_system_client: {
+      type: "boolean",
+      description:
+        "True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATION_CLIENTS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client.",
+    },
     client_auto_provisioned: {
       type: "boolean",
       description:
@@ -514,32 +550,54 @@ export const integrationsPaths = {
         "200": {
           description: "Available OAuth clients",
           headers: baseResponseHeaders,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  hasMore: { type: "boolean" },
-                  data: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      required: ["client_ref", "source", "client_id", "is_default"],
-                      properties: {
-                        client_ref: { type: "string" },
-                        source: { type: "string", enum: ["built-in", "custom"] },
-                        client_id: { type: "string" },
-                        is_default: { type: "boolean" },
-                      },
-                    },
-                  },
+          content: { "application/json": { schema: integrationClientsListSchema } },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/auths/{authKey}/default-client": {
+    put: {
+      operationId: "setDefaultIntegrationClient",
+      tags: ["Integrations"],
+      summary: "Set the default OAuth client for an integration auth",
+      description:
+        "Choose which client mints NEW connections when none is picked explicitly " +
+        "(the model-provider `setDefaultModel` analogue). Selecting the org's custom " +
+        "client flags it default; selecting a system client un-flags the custom one " +
+        "so the cascade falls to the system client. Existing connections are bound " +
+        "to the client that minted them and are unaffected. Returns the refreshed " +
+        "clients list. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        packageIdParam,
+        authKeyParam,
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["client_ref"],
+              properties: {
+                client_ref: {
+                  type: "string",
+                  description: "Client to make default — a `client_ref` from GET .../clients.",
                 },
               },
             },
           },
         },
+      },
+      responses: {
+        "200": {
+          description: "Default set; available OAuth clients (re-badged)",
+          headers: baseResponseHeaders,
+          content: { "application/json": { schema: integrationClientsListSchema } },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
