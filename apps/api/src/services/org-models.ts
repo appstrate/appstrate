@@ -17,7 +17,12 @@ import {
   type DecryptedModelProviderCredentials,
 } from "./model-providers/credentials.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
-import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
+import {
+  mergeSystemAndDb,
+  buildUpdateSet,
+  scopedWhere,
+  setExactlyOneDefault,
+} from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import type { InferenceProbeRequest } from "@appstrate/core/module";
@@ -319,21 +324,25 @@ export async function seedOrgModelsForCredential(
 }
 
 export async function setDefaultModel(orgId: string, modelDbId: string | null): Promise<void> {
-  // Reset all defaults for this org
-  await db
-    .update(orgModels)
-    .set({ isDefault: false, updatedAt: new Date() })
-    .where(scopedWhere(orgModels, { orgId }));
-
-  if (modelDbId === null) return;
-
-  // Only DB models can be flagged — system defaults are handled by the resolution cascade
-  if (!isSystemModel(modelDbId)) {
-    await db
-      .update(orgModels)
-      .set({ isDefault: true, updatedAt: new Date() })
-      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
-  }
+  const now = new Date();
+  await setExactlyOneDefault({
+    // Reset all defaults for this org.
+    clear: (tx) =>
+      tx
+        .update(orgModels)
+        .set({ isDefault: false, updatedAt: now })
+        .where(scopedWhere(orgModels, { orgId })),
+    // Only DB models can be flagged — system defaults are handled by the
+    // resolution cascade, so a system id (or null) clears only.
+    set:
+      modelDbId !== null && !isSystemModel(modelDbId)
+        ? (tx) =>
+            tx
+              .update(orgModels)
+              .set({ isDefault: true, updatedAt: now })
+              .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
+        : null,
+  });
 }
 
 // --- Resolution ---

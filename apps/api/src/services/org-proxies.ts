@@ -9,7 +9,7 @@ import { getSystemProxies, isSystemProxy } from "./proxy-registry.ts";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
-import { mergeSystemAndDb, buildUpdateSet } from "../lib/db-helpers.ts";
+import { mergeSystemAndDb, buildUpdateSet, setExactlyOneDefault } from "../lib/db-helpers.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 
@@ -131,21 +131,25 @@ export async function deleteOrgProxy(orgId: string, proxyId: string): Promise<vo
 }
 
 export async function setDefaultProxy(orgId: string, proxyId: string | null): Promise<void> {
-  // Reset all defaults for this org
-  await db
-    .update(orgProxies)
-    .set({ isDefault: false, updatedAt: new Date() })
-    .where(eq(orgProxies.orgId, orgId));
-
-  if (proxyId === null) return;
-
-  // Only DB proxies can be flagged — system defaults are handled by the resolution cascade
-  if (!isSystemProxy(proxyId)) {
-    await db
-      .update(orgProxies)
-      .set({ isDefault: true, updatedAt: new Date() })
-      .where(and(eq(orgProxies.id, proxyId), eq(orgProxies.orgId, orgId)));
-  }
+  const now = new Date();
+  await setExactlyOneDefault({
+    // Reset all defaults for this org.
+    clear: (tx) =>
+      tx
+        .update(orgProxies)
+        .set({ isDefault: false, updatedAt: now })
+        .where(eq(orgProxies.orgId, orgId)),
+    // Only DB proxies can be flagged — system defaults are handled by the
+    // resolution cascade, so a system id (or null) clears only.
+    set:
+      proxyId !== null && !isSystemProxy(proxyId)
+        ? (tx) =>
+            tx
+              .update(orgProxies)
+              .set({ isDefault: true, updatedAt: now })
+              .where(and(eq(orgProxies.id, proxyId), eq(orgProxies.orgId, orgId)))
+        : null,
+  });
 }
 
 // --- Resolution ---

@@ -24,7 +24,7 @@
 
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
-import { logger } from "../lib/logger.ts";
+import { loadSystemRegistry } from "../lib/system-registry.ts";
 
 // `integration_connections.client_ref` is a flat client id — the env id of a
 // system client or the `integration_oauth_clients.id` (UUID) of a custom client.
@@ -78,48 +78,21 @@ function authIndexKey(integrationId: string, authKey: string): string {
  * at boot, before any connect/refresh path runs.
  */
 export function initSystemIntegrationClients(rawOverride?: unknown[]): void {
-  const byId = new Map<string, SystemIntegrationClientDefinition>();
-  // Production reads the parsed env; tests inject a raw array directly (the
-  // env is cached at first access, so an override seam is cleaner than mutating
-  // process.env after boot).
-  const raw = (rawOverride ??
-    (getEnv().SYSTEM_INTEGRATION_CLIENTS as unknown[])) as RawSystemIntegrationClient[];
-
-  for (const entry of raw) {
-    const parsed = rawSystemIntegrationClientSchema.safeParse(entry);
-    if (!parsed.success) {
-      logger.error(
-        "[integration-client-registry] SYSTEM_INTEGRATION_CLIENTS: skipping invalid entry",
-        {
-          error: parsed.error.issues[0]?.message,
-          // Never log the secret.
-          entry: { ...(entry as Record<string, unknown>), clientSecret: undefined },
-        },
-      );
-      continue;
-    }
-    const def = parsed.data;
-    if (byId.has(def.id)) {
-      logger.error(
-        "[integration-client-registry] SYSTEM_INTEGRATION_CLIENTS: skipping duplicate id",
-        {
-          id: def.id,
-        },
-      );
-      continue;
-    }
-    byId.set(def.id, {
-      id: def.id,
-      integrationId: def.integrationId,
-      authKey: def.authKey,
-      clientId: def.clientId,
-      clientSecret: def.clientSecret,
-    });
-  }
-
-  systemIntegrationClients = byId;
-  logger.info("[integration-client-registry] system integration clients loaded", {
-    count: byId.size,
+  systemIntegrationClients = loadSystemRegistry<
+    RawSystemIntegrationClient,
+    SystemIntegrationClientDefinition
+  >({
+    name: "integration-client-registry",
+    envVar: "SYSTEM_INTEGRATION_CLIENTS",
+    // Production reads the parsed env; tests inject a raw array directly (the
+    // env is cached at first access, so an override seam is cleaner than
+    // mutating process.env after boot).
+    entries: rawOverride ?? (getEnv().SYSTEM_INTEGRATION_CLIENTS as unknown[]),
+    schema: rawSystemIntegrationClientSchema,
+    // Validated shape is exactly SystemIntegrationClientDefinition.
+    toDefinition: (def) => def,
+    // Never log the secret.
+    redact: (entry) => ({ ...(entry as Record<string, unknown>), clientSecret: undefined }),
   });
 }
 

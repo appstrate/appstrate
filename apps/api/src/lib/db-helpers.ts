@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { and, eq, type AnyColumn, type SQL } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
 
 /**
  * Shared helpers for system+DB merge patterns and partial update building.
@@ -8,6 +9,9 @@ import { and, eq, type AnyColumn, type SQL } from "drizzle-orm";
  * Used by org-models, org-proxies, model-provider-credentials, and any
  * service that merges system-registry entries with database rows.
  */
+
+/** The transaction handle passed to a `db.transaction` callback. */
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 // --- Scoped WHERE builder ---
 
@@ -121,4 +125,33 @@ export function buildUpdateSet(data: Record<string, unknown>): Record<string, un
     if (value !== undefined) updates[key] = value;
   }
   return updates;
+}
+
+// --- One-default invariant ---
+
+export interface SetExactlyOneDefaultOptions {
+  /** Clear `is_default` across the whole scope. Runs first. */
+  clear: (tx: DbTransaction) => Promise<unknown>;
+  /**
+   * Flag the single chosen row as default. Runs after `clear`. Pass `null` to
+   * clear only — e.g. when promoting a system default, which carries no DB row
+   * and is handled by the resolution cascade.
+   */
+  set: ((tx: DbTransaction) => Promise<unknown>) | null;
+}
+
+/**
+ * Atomically enforce the "exactly one default" invariant shared by every
+ * system+DB surface (model providers, proxies, integration OAuth clients):
+ * clear every default in the scope, then optionally flag one target — both in a
+ * SINGLE transaction. The transaction matters: a partial-unique
+ * `idx_*_one_default` index must never transiently see two defaults, and a crash
+ * mid-flip must never leave the scope in a half-written state. `clear` always
+ * runs before `set`.
+ */
+export async function setExactlyOneDefault(opts: SetExactlyOneDefaultOptions): Promise<void> {
+  await db.transaction(async (tx) => {
+    await opts.clear(tx);
+    if (opts.set) await opts.set(tx);
+  });
 }

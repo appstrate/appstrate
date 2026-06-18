@@ -47,7 +47,7 @@ import {
   listSystemIntegrationClientsFor,
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
-import { mergeSystemAndDb } from "../lib/db-helpers.ts";
+import { mergeSystemAndDb, setExactlyOneDefault } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
@@ -945,19 +945,21 @@ export async function setDefaultIntegrationClient(
     eq(integrationOauthClients.authKey, authKey),
   );
   const now = new Date();
-  await db.transaction(async (tx) => {
+  await setExactlyOneDefault({
     // Clear every custom default first so the partial unique never sees two.
-    await tx
-      .update(integrationOauthClients)
-      .set({ isDefault: false, updatedAt: now })
-      .where(and(authScope, eq(integrationOauthClients.isDefault, true)));
-    // Then flag the chosen custom client (system selection leaves all cleared).
-    if (target) {
-      await tx
+    clear: (tx) =>
+      tx
         .update(integrationOauthClients)
-        .set({ isDefault: true, updatedAt: now })
-        .where(eq(integrationOauthClients.id, target.id));
-    }
+        .set({ isDefault: false, updatedAt: now })
+        .where(and(authScope, eq(integrationOauthClients.isDefault, true))),
+    // Then flag the chosen custom client (system selection leaves all cleared).
+    set: target
+      ? (tx) =>
+          tx
+            .update(integrationOauthClients)
+            .set({ isDefault: true, updatedAt: now })
+            .where(eq(integrationOauthClients.id, target.id))
+      : null,
   });
 }
 

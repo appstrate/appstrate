@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
+import { loadSystemRegistry } from "../lib/system-registry.ts";
 import { modelCostSchema } from "@appstrate/core/module";
 import type { ModelMetadata } from "@appstrate/shared-types";
 import { getModelProvider } from "./model-providers/registry.ts";
@@ -119,97 +120,99 @@ type RawModelProviderKey = z.infer<typeof rawModelProviderKeySchema>;
  * add `"baseUrlOverride": "https://my-endpoint/v1"`.
  */
 export function initSystemModelProviderKeys(): void {
-  const pkMap = new Map<string, SystemModelProviderKeyDefinition>();
   const mdlMap = new Map<string, ModelDefinition>();
 
-  const raw = getEnv().SYSTEM_PROVIDER_KEYS as RawModelProviderKey[];
-
-  for (const pk of raw) {
-    const pkResult = rawModelProviderKeySchema.safeParse(pk);
-    if (!pkResult.success) {
-      logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping invalid entry", {
-        error: pkResult.error.issues[0]?.message,
-        modelProviderKey: { ...pk, apiKey: pk.apiKey ? "***" : undefined },
-      });
-      continue;
-    }
-    const validPk = pkResult.data;
-
-    const provider = getModelProvider(validPk.providerId);
-    if (!provider) {
-      logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping entry — unknown providerId", {
-        modelProviderKeyId: validPk.id,
-        providerId: validPk.providerId,
-      });
-      continue;
-    }
-
-    if (validPk.baseUrlOverride && !provider.baseUrlOverridable) {
-      logger.error(
-        "[model-registry] SYSTEM_PROVIDER_KEYS: skipping entry — baseUrlOverride supplied " +
-          "but provider does not allow it",
-        {
+  // The provider-key map uses the shared registry skeleton (parse → validate →
+  // dedupe → log). The nested models are built as a side effect of mapping each
+  // key (they inherit the key's resolved apiShape/baseUrl/apiKey), so they live
+  // inside `toDefinition` rather than a second pass.
+  systemModelProviderKeys = loadSystemRegistry<
+    RawModelProviderKey,
+    SystemModelProviderKeyDefinition
+  >({
+    name: "model-registry",
+    envVar: "SYSTEM_PROVIDER_KEYS",
+    entries: getEnv().SYSTEM_PROVIDER_KEYS as unknown[],
+    schema: rawModelProviderKeySchema,
+    redact: (entry) => {
+      const e = entry as Record<string, unknown>;
+      return { ...e, apiKey: e.apiKey ? "***" : undefined };
+    },
+    toDefinition: (validPk) => {
+      const provider = getModelProvider(validPk.providerId);
+      if (!provider) {
+        logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping entry — unknown providerId", {
           modelProviderKeyId: validPk.id,
           providerId: validPk.providerId,
-        },
-      );
-      continue;
-    }
-
-    const apiShape = provider.apiShape;
-    const baseUrl = validPk.baseUrlOverride ?? provider.defaultBaseUrl;
-
-    pkMap.set(validPk.id, {
-      id: validPk.id,
-      // Pass through the env-supplied label as-is. The read path
-      // (`org-models.ts` resolved-model builders) falls back to
-      // `getModelProvider(providerId).displayName` when unset.
-      ...(validPk.label ? { label: validPk.label } : {}),
-      providerId: validPk.providerId,
-      apiShape,
-      baseUrl,
-      apiKey: validPk.apiKey,
-    });
-
-    // Parse models under this model provider key
-    if (Array.isArray(validPk.models)) {
-      for (const m of validPk.models) {
-        const mResult = rawModelSchema.safeParse(m);
-        if (!mResult.success) {
-          logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping invalid model", {
-            modelProviderKeyId: validPk.id,
-            error: mResult.error.issues[0]?.message,
-            model: m,
-          });
-          continue;
-        }
-        const validM = mResult.data;
-
-        const modelId = validM.id ?? `${validPk.id}:${validM.modelId}`;
-        mdlMap.set(modelId, {
-          id: modelId,
-          // Pass through env-supplied label; read path falls back to the
-          // vendored catalog (`<catalogProviderId ?? providerId>.label`).
-          ...(validM.label ? { label: validM.label } : {}),
-          providerId: validPk.providerId,
-          apiShape,
-          baseUrl,
-          modelId: validM.modelId,
-          apiKey: validPk.apiKey,
-          credentialId: validPk.id,
-          input: validM.input ?? null,
-          contextWindow: validM.contextWindow ?? null,
-          maxTokens: validM.maxTokens ?? null,
-          reasoning: validM.reasoning ?? null,
-          cost: validM.cost ?? null,
-          isDefault: validM.isDefault,
-          enabled: validM.enabled,
         });
+        return null;
       }
-    }
-  }
 
-  systemModelProviderKeys = pkMap;
+      if (validPk.baseUrlOverride && !provider.baseUrlOverridable) {
+        logger.error(
+          "[model-registry] SYSTEM_PROVIDER_KEYS: skipping entry — baseUrlOverride supplied " +
+            "but provider does not allow it",
+          {
+            modelProviderKeyId: validPk.id,
+            providerId: validPk.providerId,
+          },
+        );
+        return null;
+      }
+
+      const apiShape = provider.apiShape;
+      const baseUrl = validPk.baseUrlOverride ?? provider.defaultBaseUrl;
+
+      // Parse models under this model provider key (side effect → mdlMap).
+      if (Array.isArray(validPk.models)) {
+        for (const m of validPk.models) {
+          const mResult = rawModelSchema.safeParse(m);
+          if (!mResult.success) {
+            logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping invalid model", {
+              modelProviderKeyId: validPk.id,
+              error: mResult.error.issues[0]?.message,
+              model: m,
+            });
+            continue;
+          }
+          const validM = mResult.data;
+
+          const modelId = validM.id ?? `${validPk.id}:${validM.modelId}`;
+          mdlMap.set(modelId, {
+            id: modelId,
+            // Pass through env-supplied label; read path falls back to the
+            // vendored catalog (`<catalogProviderId ?? providerId>.label`).
+            ...(validM.label ? { label: validM.label } : {}),
+            providerId: validPk.providerId,
+            apiShape,
+            baseUrl,
+            modelId: validM.modelId,
+            apiKey: validPk.apiKey,
+            credentialId: validPk.id,
+            input: validM.input ?? null,
+            contextWindow: validM.contextWindow ?? null,
+            maxTokens: validM.maxTokens ?? null,
+            reasoning: validM.reasoning ?? null,
+            cost: validM.cost ?? null,
+            isDefault: validM.isDefault,
+            enabled: validM.enabled,
+          });
+        }
+      }
+
+      return {
+        id: validPk.id,
+        // Pass through the env-supplied label as-is. The read path
+        // (`org-models.ts` resolved-model builders) falls back to
+        // `getModelProvider(providerId).displayName` when unset.
+        ...(validPk.label ? { label: validPk.label } : {}),
+        providerId: validPk.providerId,
+        apiShape,
+        baseUrl,
+        apiKey: validPk.apiKey,
+      };
+    },
+  });
   systemModels = mdlMap;
 }
 
