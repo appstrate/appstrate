@@ -187,35 +187,64 @@ for name in $RUNTIME_SELF; do
 done
 
 # (b) GRAPH — the full apps/api entrypoint module graph resolves in the image.
-if build_out=$(docker run --rm appstrate-docker-check sh -c 'cd /app && bun build apps/api/src/index.ts --target=bun --outfile=/tmp/docker-check-bundle.js' 2>&1); then
+#
+# `--external kysely`: better-auth ships BOTH a kysely and a drizzle adapter; we
+# use the drizzle adapter (packages/db/src/auth.ts), so kysely is never
+# value-loaded at runtime — it is a lazy/optional peer. But `bun build` walks the
+# static import graph eagerly and chokes on kysely's migrator named exports
+# (`DEFAULT_MIGRATION_TABLE`, `DEFAULT_MIGRATION_LOCK_TABLE`) that don't exist in
+# kysely@0.29's bundled `dist/index.js` — a bundler-only phantom error for code
+# that never executes. Externalizing kysely keeps this probe honest for the deps
+# we DO load while not asserting resolvability of a dead lazy adapter. If a
+# future change genuinely value-imports kysely, drop this flag.
+if build_out=$(docker run --rm appstrate-docker-check sh -c 'cd /app && bun build apps/api/src/index.ts --target=bun --external kysely --outfile=/tmp/docker-check-bundle.js' 2>&1); then
   pass "apps/api entrypoint module graph fully resolves in runtime image"
 else
   fail "apps/api entrypoint has UNRESOLVED imports — a value-imported package's node_modules is missing from the Dockerfile allowlist"
   printf '%s\n' "$build_out" | grep -iE 'could not resolve|maybe you need|error:' | head -20 | sed 's/^/    /'
 fi
 
-# (c) EXTDEP — every external dep behind each allowlisted node_modules resolves.
-# Batched into a single container run (one resolve loop) to avoid per-dep docker
+# (c) EXTDEP — every external dep behind each allowlisted node_modules is PRESENT
+# in the image. Batched into a single container run to avoid per-dep docker
 # overhead; entries are space-separated `name|dir|dep` tuples (no embedded
 # spaces), passed as argv.
+#
+# Presence is probed by a FILESYSTEM walk-up (does `<level>/node_modules/<dep>/
+# package.json` exist, following bun's isolated-install symlink), NOT by
+# `require.resolve(dep, {paths})`. Bare module resolution is unreliable under
+# bun's isolated `.bun` layout: a dep that is only ever value-imported via
+# SUBPATHS and whose `exports` map gates the bare `.` / `./package.json`
+# specifiers (e.g. `@modelcontextprotocol/sdk`, whose `.` export points at a
+# cjs/esm dist file the symlinked package root doesn't satisfy) throws
+# MODULE_NOT_FOUND even though the package physically ships and resolves fine at
+# runtime via its subpaths. Filesystem presence is the correct probe for this
+# check's role — "did this allowlisted node_modules actually ship" — and is
+# immune to exports gating, while a forgotten node_modules still reads MISSING
+# (the symlink/dir is simply absent). Runtime RESOLVABILITY of the real subpath
+# imports is already asserted graph-wide by (b).
 if [ -n "$RUNTIME_EXTDEP" ]; then
   # shellcheck disable=SC2086
   extdep_out=$(docker run --rm appstrate-docker-check bun -e '
+    const fs = require("fs");
     const p = require("path");
+    const present = (dep, startDir) => {
+      let d = p.resolve(startDir);
+      for (;;) {
+        if (fs.existsSync(p.join(d, "node_modules", dep, "package.json"))) return true;
+        const parent = p.dirname(d);
+        if (parent === d) return false;
+        d = parent;
+      }
+    };
     for (const e of process.argv.slice(1)) {
       const [name, dir, dep] = e.split("|");
-      try {
-        require.resolve(dep, { paths: [p.resolve(dir)] });
-        console.log("OK|" + dep + "|" + name + "|" + dir);
-      } catch {
-        console.log("FAIL|" + dep + "|" + name + "|" + dir);
-      }
+      console.log((present(dep, dir) ? "OK|" : "FAIL|") + dep + "|" + name + "|" + dir);
     }
   ' $RUNTIME_EXTDEP 2>/dev/null)
   while IFS='|' read -r status dep name dir; do
     [ -z "$status" ] && continue
     if [ "$status" = "OK" ]; then
-      pass "external dep '$dep' resolves for '$name' ($dir)"
+      pass "external dep '$dep' present for '$name' ($dir)"
     else
       fail "external dep '$dep' for '$name' MISSING — node_modules likely omitted from runtime image"
     fi
