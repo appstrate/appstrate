@@ -200,7 +200,13 @@ export default tseslint.config(
       "react-refresh": reactRefresh,
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
+      // recommended-latest layers the React Compiler static rules (purity,
+      // set-state-in-render/effect, immutability, refs, static-components,
+      // preserve-manual-memoization, …) on top of the core hooks rules. These
+      // catch the Rules-of-React violations that cause unnecessary re-renders
+      // and fragile components — a static cleanliness/robustness gate that
+      // runs in `bun run check` (local + CI), no runtime harness needed.
+      ...reactHooks.configs["recommended-latest"].rules,
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
     },
   },
