@@ -38,7 +38,7 @@ interface HostedAuthRedirectOptions {
 }
 
 /** Whether this instance runs the OIDC IdP (the hosted login flow). */
-function isHostedAuthEnabled(): boolean {
+export function isHostedAuthEnabled(): boolean {
   return !!(window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
 }
 

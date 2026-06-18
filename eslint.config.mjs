@@ -5,6 +5,27 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 import eslintConfigPrettier from "eslint-config-prettier";
 
+// Shared web import-ban patterns (single source of truth). The general web
+// block bans both; the seam exemption (hooks/use-auth.ts) re-uses
+// API_BARREL_BAN alone. Defined here so the api.ts regex can never drift
+// between the two blocks — ESLint flat config replaces (not merges) a rule
+// across blocks, so the exemption must re-declare it.
+const API_BARREL_BAN = {
+  // Matches "./api", "../api" (any depth) and "@/api" — but not the
+  // typed-client modules ("./api/client", "@/api/errors", …). gitignore-style
+  // `group` can't re-include children of an excluded directory, so use a regex.
+  regex: "^(?:(?:\\.{1,2}/)+|@/)api$",
+  message:
+    "Use the typed OpenAPI client from src/api/client.ts ($api / client) — the legacy fetch helpers are gone.",
+};
+const AUTH_CLIENT_BAN = {
+  // Matches "../lib/auth-client", "../../lib/auth-client" and
+  // "@/lib/auth-client". Only hooks/use-auth.ts (the seam) may import it.
+  regex: "(?:^|/)lib/auth-client$",
+  message:
+    "Auth flows must go through useAuth() (hooks/use-auth.ts) — the single seam that routes login/recovery/account actions through the OIDC hosted-login redirect when configured. Never import auth-client directly.",
+};
+
 export default tseslint.config(
   {
     ignores: [
@@ -156,30 +177,7 @@ export default tseslint.config(
     //      Exempted for the seam file itself in the next block.
     files: ["apps/web/src/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              // Matches "./api", "../api" (any depth) and "@/api" — but not
-              // the typed-client modules ("./api/client", "@/api/errors", …).
-              // gitignore-style `group` can't re-include children of an
-              // excluded directory, so use a regex on the specifier instead.
-              regex: "^(?:(?:\\.{1,2}/)+|@/)api$",
-              message:
-                "Use the typed OpenAPI client from src/api/client.ts ($api / client) — the legacy fetch helpers are gone.",
-            },
-            {
-              // Matches "../lib/auth-client", "../../lib/auth-client" and
-              // "@/lib/auth-client". Only hooks/use-auth.ts (the seam) may
-              // import it — see the override block below.
-              regex: "(?:^|/)lib/auth-client$",
-              message:
-                "Auth flows must go through useAuth() (hooks/use-auth.ts) — the single seam that routes login/recovery/account actions through the OIDC hosted-login redirect when configured. Never import auth-client directly.",
-            },
-          ],
-        },
-      ],
+      "no-restricted-imports": ["error", { patterns: [API_BARREL_BAN, AUTH_CLIENT_BAN] }],
     },
   },
   {
@@ -189,18 +187,7 @@ export default tseslint.config(
     // block fully replaces the rule for this file.
     files: ["apps/web/src/hooks/use-auth.ts"],
     rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              regex: "^(?:(?:\\.{1,2}/)+|@/)api$",
-              message:
-                "Use the typed OpenAPI client from src/api/client.ts ($api / client) — the legacy fetch helpers are gone.",
-            },
-          ],
-        },
-      ],
+      "no-restricted-imports": ["error", { patterns: [API_BARREL_BAN] }],
     },
   },
   {

@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ApiError, client, type paths } from "../api/client";
 import { refreshAuth, useAuth } from "../hooks/use-auth";
-import { useHostedAuthRedirect } from "../hooks/use-hosted-auth-redirect";
+import { useHostedAuthRedirect, isHostedAuthEnabled } from "../hooks/use-hosted-auth-redirect";
 import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
 import { AuthLayout } from "../components/auth-layout";
@@ -19,11 +19,6 @@ import { orgKeys } from "../lib/query-keys";
 /** Spec response of GET /invite/{token}/info (all fields required, role is an org-role enum). */
 type InviteInfo =
   paths["/invite/{token}/info"]["get"]["responses"]["200"]["content"]["application/json"];
-
-/** Whether the instance is running an OIDC IdP (the platform's own login flow). */
-function hasOidc(): boolean {
-  return !!(window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
-}
 
 /** Map an invitation ApiError code to a translation key, falling back to `fallback`. */
 function inviteErrorKey(code: string | null, fallback: string): string {
@@ -68,7 +63,7 @@ export function InviteAcceptPage() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [mode, setMode] = useState<"register" | "login">("register");
 
-  const oidc = hasOidc();
+  const oidc = isHostedAuthEnabled();
 
   useEffect(() => {
     if (!token) return;
