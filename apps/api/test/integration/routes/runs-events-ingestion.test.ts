@@ -1656,6 +1656,27 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
       .where(and(eq(runLogs.runId, runId), eq(runLogs.event, "output_validation")));
     expect(validationLogs).toHaveLength(1);
   });
+
+  it("output tool never called fails with a tool-not-called message, not a bare validation error", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/schema-agent");
+
+    // Agent reported but never emitted structured output (`result.output`
+    // stays null). The empty `{}` only fails because `answer` is required —
+    // the error must say the tool was never called, not imply a malformed
+    // payload.
+    const res = await postFinalize(runId, {
+      status: "success",
+      report: "Done, but I forgot to call output.",
+      durationMs: 100,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toMatch(/without calling the required `output` tool/);
+    expect(row?.error).not.toMatch(/^Output validation failed/);
+  });
 });
 
 // ---------------------------------------------------------------------------
