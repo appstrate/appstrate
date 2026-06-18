@@ -93,18 +93,3 @@ export function getCredentialProxyLimits(): CredentialProxyLimits {
   }
   return credentialLimits;
 }
-
-/** Test-only: reset the cache so successive tests can install their own limits. */
-export function _resetProxyLimitsForTesting(): void {
-  llmLimits = null;
-  credentialLimits = null;
-}
-
-/** Test-only: override with concrete values without going through env. */
-export function _setProxyLimitsForTesting(
-  llm?: Partial<LlmProxyLimits>,
-  credential?: Partial<CredentialProxyLimits>,
-): void {
-  llmLimits = llmProxyLimitsSchema.parse({ ...llm });
-  credentialLimits = credentialProxyLimitsSchema.parse({ ...credential });
-}
