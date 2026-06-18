@@ -182,7 +182,11 @@ export function InviteAcceptPage() {
                 inviteEmail: info.email,
               })}
             </p>
-            <Button variant="outline" className="w-full" onClick={logout}>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => void logout(token ? `/invite/${token}` : undefined)}
+            >
               {t("invite.logoutAndRetry")}
             </Button>
           </div>

@@ -303,6 +303,16 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   let outputValidationErrors: string[] | null = null;
 
   if (status === "success" && agent?.manifest.output?.schema) {
+    // Distinguish two failure shapes that both surface as a schema mismatch:
+    //   1. the agent never called `output` (`result.output` is null) — the
+    //      empty `{}` only fails because required fields are absent, so a bare
+    //      "validation failed" message misleads (it reads as a malformed
+    //      payload when the tool was simply never invoked);
+    //   2. the agent called `output` with a payload that violates the schema.
+    // A schema with no required fields still validates an empty `{}` as valid,
+    // so a side-effect-only run (output schema, nothing required) stays success
+    // in both branches — only the error string differs.
+    const outputEmitted = isPlainRecord(result.output);
     const outputRecord = isPlainRecord(result.output) ? result.output : {};
     const validation = validateOutput(
       outputRecord,
@@ -310,7 +320,11 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     );
     if (!validation.valid) {
       status = "failed";
-      errorMessage = `Output validation failed: ${validation.errors.join("; ")}`;
+      errorMessage = outputEmitted
+        ? `Output validation failed: ${validation.errors.join("; ")}`
+        : "Agent finished without calling the required `output` tool. This agent " +
+          "declares an output schema, so it must call `output` exactly once before " +
+          `finishing with all required fields (missing: ${validation.errors.join("; ")}).`;
       outputValidationErrors = validation.errors;
     }
   }

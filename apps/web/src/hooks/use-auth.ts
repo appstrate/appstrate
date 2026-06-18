@@ -184,7 +184,15 @@ export function useAuth() {
     [],
   );
 
-  const logout = useCallback(async () => {
+  /**
+   * Log out. `redirectTo`, when given, is where the user should land after
+   * they sign in again — used by the invite "log out and retry" flow so a
+   * wrong-account user returns to the invitation. In OIDC mode it is stashed
+   * for the post-re-login callback (see `startOidcLogout`); in OSS mode the
+   * page that called logout stays mounted (e.g. /invite re-renders into its
+   * login form), so no explicit navigation is needed.
+   */
+  const logout = useCallback(async (redirectTo?: string) => {
     const oidcConfig = (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
     if (oidcConfig) {
       // Navigate to the server-side logout endpoint FIRST — it clears the
@@ -194,7 +202,7 @@ export function useAuth() {
       // which starts a new OIDC login flow before the browser can follow
       // the logout redirect — effectively re-logging the user in.
       const { startOidcLogout } = await import("../modules/oidc/lib/oidc");
-      startOidcLogout();
+      startOidcLogout(redirectTo);
     } else {
       await authClient.signOut();
       clearAuth();

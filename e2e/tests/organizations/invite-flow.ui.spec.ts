@@ -104,6 +104,45 @@ test.describe("Organization invitation flow", () => {
     await ctx.close();
   });
 
+  test("logging out from a wrong-account invite preserves the return path (OIDC)", async ({
+    request,
+    browser,
+    browserCtx,
+    orgOnlyClient,
+  }) => {
+    // OIDC-only: the OSS logout keeps the /invite page mounted (it re-renders
+    // into its own login form), so there is no post-logout redirect to
+    // preserve. In OIDC mode logout leaves the SPA for the IdP and only lands
+    // back on /login, so the return path must be stashed for the callback.
+    const html = await (await request.get("/")).text();
+    test.skip(!/"oidc"\s*:\s*\{/.test(html), "OSS instance — logout keeps /invite mounted");
+
+    const wrongUser = await registerUser(request);
+    const inviteRes = await orgOnlyClient.post(`/orgs/${browserCtx.org.orgId}/members`, {
+      email: `e2e-target-${uid()}@test.com`,
+      role: "member",
+    });
+    expect(inviteRes.status()).toBe(201);
+    const { token } = (await inviteRes.json()) as { token: string };
+
+    const ctx = await contextWithCookie(browser, wrongUser.cookie);
+    const page = await ctx.newPage();
+    // Abort the server-side logout navigation so the page stays put and we can
+    // inspect what `startOidcLogout` stashed for the post-re-login callback.
+    await page.route("**/api/oauth/logout*", (route) => route.abort());
+    await page.goto(`/invite/${token}`);
+
+    await page.getByRole("button", { name: /Se déconnecter et réessayer/i }).click();
+
+    // The invite path is stashed in the same key handleOidcCallback consumes,
+    // so after re-login the user returns to the invitation (not onboarding).
+    await expect
+      .poll(() => page.evaluate(() => sessionStorage.getItem("appstrate_oidc_redirect")))
+      .toBe(`/invite/${token}`);
+
+    await ctx.close();
+  });
+
   test("a new invitee signs up inline and joins (OSS mode)", async ({
     browser,
     browserCtx,
