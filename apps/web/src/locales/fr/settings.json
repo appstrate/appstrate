@@ -422,7 +422,6 @@
   "proxies.delete": "Supprimer",
   "proxies.deleteConfirm": "Supprimer le proxy \"{{label}}\" ?",
   "proxies.setDefault": "Définir par défaut",
-  "proxies.removeDefault": "Retirer le défaut",
   "proxies.default": "Par défaut",
   "proxies.builtIn": "Intégré",
   "proxies.enabled": "Actif",

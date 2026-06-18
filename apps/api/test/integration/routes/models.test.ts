@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -12,6 +12,7 @@ import {
 import { db } from "@appstrate/db/client";
 import { orgModels, organizations } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
+import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 
 const app = getTestApp();
@@ -164,6 +165,38 @@ describe("Models API", () => {
 
       expect(res.status).toBe(204);
     });
+
+    it("clears the org default pointer when the default model is deleted", async () => {
+      const credentialId = await createProviderKey();
+      // First model for the org auto-promotes to the default (pointer set).
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ label: "Default", modelId: "gpt-4o", credentialId }),
+      });
+      const { id } = (await createRes.json()) as any;
+
+      const [before] = await db
+        .select({ defaultModelId: organizations.defaultModelId })
+        .from(organizations)
+        .where(eq(organizations.id, ctx.orgId))
+        .limit(1);
+      expect(before!.defaultModelId).toBe(id);
+
+      // Deleting the default clears the now-dangling pointer (no stale badge).
+      const del = await app.request(`/api/models/${id}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del.status).toBe(204);
+
+      const [after] = await db
+        .select({ defaultModelId: organizations.defaultModelId })
+        .from(organizations)
+        .where(eq(organizations.id, ctx.orgId))
+        .limit(1);
+      expect(after!.defaultModelId).toBeNull();
+    });
   });
 
   describe("PUT /api/models/:id", () => {
@@ -278,6 +311,81 @@ describe("Models API", () => {
 
       expect(res.status).toBe(204);
       expect(await res.text()).toBe("");
+    });
+  });
+
+  // The org default is an org-level pointer that may name a SYSTEM model id (not
+  // just a custom row) — picking any entry, system or custom, makes exactly that
+  // one the default ("set default takes over"). Inject a system model into the
+  // shared module-static registry for these tests and restore the empty test
+  // baseline afterwards so it never leaks into other suites.
+  describe("PUT /api/models/default — system model (pointer takes over)", () => {
+    const SYSTEM_MODEL_ID = "sys-model-default-test";
+
+    beforeEach(() => {
+      initSystemModelProviderKeys([
+        {
+          id: "sys-key-default-test",
+          providerId: "openai",
+          apiKey: "sk-system-test",
+          models: [{ id: SYSTEM_MODEL_ID, modelId: "gpt-4o" }],
+        },
+      ]);
+    });
+    afterEach(() => {
+      initSystemModelProviderKeys(); // restore empty baseline (env is empty in test)
+    });
+
+    it("sets a system model as the org default and persists the pointer", async () => {
+      const res = await app.request("/api/models/default", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ modelId: SYSTEM_MODEL_ID }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.id).toBe(SYSTEM_MODEL_ID);
+      expect(body.isDefault).toBe(true);
+      expect(body.source).toBe("built-in");
+
+      const [org] = await db
+        .select({ defaultModelId: organizations.defaultModelId })
+        .from(organizations)
+        .where(eq(organizations.id, ctx.orgId))
+        .limit(1);
+      expect(org!.defaultModelId).toBe(SYSTEM_MODEL_ID);
+
+      // Exactly one default in the list, and it's the system model.
+      const list = await app.request("/api/models", { headers: authHeaders(ctx) });
+      const models = ((await list.json()) as any).data as any[];
+      const defaults = models.filter((m) => m.isDefault);
+      expect(defaults).toHaveLength(1);
+      expect(defaults[0]!.id).toBe(SYSTEM_MODEL_ID);
+    });
+
+    it("a system default takes over from an existing custom default", async () => {
+      // First custom model auto-promotes to default.
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ label: "Custom", modelId: "gpt-4o-mini", credentialId }),
+      });
+      const { id: customId } = (await createRes.json()) as any;
+
+      // Switch the default to the system model — it takes over.
+      const res = await app.request("/api/models/default", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ modelId: SYSTEM_MODEL_ID }),
+      });
+      expect(res.status).toBe(200);
+
+      const list = await app.request("/api/models", { headers: authHeaders(ctx) });
+      const models = ((await list.json()) as any).data as any[];
+      expect(models.find((m) => m.id === SYSTEM_MODEL_ID)?.isDefault).toBe(true);
+      expect(models.find((m) => m.id === customId)?.isDefault).toBe(false);
     });
   });
 

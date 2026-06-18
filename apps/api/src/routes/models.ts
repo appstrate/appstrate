@@ -291,6 +291,9 @@ export function createModelsRouter() {
       const def = all.find((m) => m.isDefault);
       return def ? c.json(def) : c.body(null, 204);
     } catch (err) {
+      // A deliberate client error (e.g. unknown model ref → 404) must surface as
+      // itself, not be masked as a 500 by the catch-all.
+      if (err instanceof ApiError) throw err;
       logger.error("Set default model failed", {
         error: getErrorMessage(err),
       });

@@ -17,7 +17,7 @@ import {
   type DecryptedModelProviderCredentials,
 } from "./model-providers/credentials.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
-import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
+import { mergeSystemAndDb, buildUpdateSet, scopedWhere, isUuid } from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import type { InferenceProbeRequest } from "@appstrate/core/module";
@@ -191,38 +191,40 @@ export async function createOrgModel(
     cost?: ModelCost;
   },
 ): Promise<string> {
-  // If this is the first model for the org, point the org default at it.
-  const existing = await db
-    .select({ id: orgModels.id })
-    .from(orgModels)
-    .where(scopedWhere(orgModels, { orgId }))
-    .limit(1);
-  const isFirst = existing.length === 0;
+  return db.transaction(async (tx) => {
+    // If this is the first model for the org, point the org default at it.
+    const existing = await tx
+      .select({ id: orgModels.id })
+      .from(orgModels)
+      .where(scopedWhere(orgModels, { orgId }))
+      .limit(1);
+    const isFirst = existing.length === 0;
 
-  const [row] = await db
-    .insert(orgModels)
-    .values({
-      orgId,
-      label,
-      modelId,
-      credentialId,
-      input: capabilities?.input ?? null,
-      contextWindow: capabilities?.contextWindow ?? null,
-      maxTokens: capabilities?.maxTokens ?? null,
-      reasoning: capabilities?.reasoning ?? null,
-      cost: capabilities?.cost ?? null,
-      source: "custom",
-      createdBy: userId,
-    })
-    .returning({ id: orgModels.id });
+    const [row] = await tx
+      .insert(orgModels)
+      .values({
+        orgId,
+        label,
+        modelId,
+        credentialId,
+        input: capabilities?.input ?? null,
+        contextWindow: capabilities?.contextWindow ?? null,
+        maxTokens: capabilities?.maxTokens ?? null,
+        reasoning: capabilities?.reasoning ?? null,
+        cost: capabilities?.cost ?? null,
+        source: "custom",
+        createdBy: userId,
+      })
+      .returning({ id: orgModels.id });
 
-  if (isFirst) {
-    await db
-      .update(organizations)
-      .set({ defaultModelId: row!.id, updatedAt: new Date() })
-      .where(eq(organizations.id, orgId));
-  }
-  return row!.id;
+    if (isFirst) {
+      await tx
+        .update(organizations)
+        .set({ defaultModelId: row!.id, updatedAt: new Date() })
+        .where(eq(organizations.id, orgId));
+    }
+    return row!.id;
+  });
 }
 
 export async function updateOrgModel(
@@ -369,11 +371,15 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
   // guard). A system id is trusted via the registry; a custom id must be a row
   // the org owns.
   if (modelDbId !== null && !isSystemModel(modelDbId)) {
-    const [row] = await db
-      .select({ id: orgModels.id })
-      .from(orgModels)
-      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
-      .limit(1);
+    // A non-UUID id can't be a custom row PK — reject without hitting the
+    // `uuid` column (which would raise 22P02 → 500 instead of a clean 404).
+    const [row] = isUuid(modelDbId)
+      ? await db
+          .select({ id: orgModels.id })
+          .from(orgModels)
+          .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
+          .limit(1)
+      : [];
     if (!row) throw notFound(`Model '${modelDbId}' not found`);
   }
   await db

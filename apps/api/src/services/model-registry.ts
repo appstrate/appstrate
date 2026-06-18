@@ -119,7 +119,7 @@ type RawModelProviderKey = z.infer<typeof rawModelProviderKeySchema>;
  * For `openai-compatible` (the only `baseUrlOverridable: true` provider),
  * add `"baseUrlOverride": "https://my-endpoint/v1"`.
  */
-export function initSystemModelProviderKeys(): void {
+export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
   const mdlMap = new Map<string, ModelDefinition>();
 
   // The provider-key map uses the shared registry skeleton (parse → validate →
@@ -132,7 +132,10 @@ export function initSystemModelProviderKeys(): void {
   >({
     name: "model-registry",
     envVar: "SYSTEM_PROVIDER_KEYS",
-    entries: getEnv().SYSTEM_PROVIDER_KEYS as unknown[],
+    // Production reads the parsed env; tests inject a raw array directly (the
+    // env is cached at first access, so an override seam is cleaner than
+    // mutating process.env after boot) — mirrors initSystemIntegrationClients.
+    entries: rawOverride ?? (getEnv().SYSTEM_PROVIDER_KEYS as unknown[]),
     schema: rawModelProviderKeySchema,
     redact: (entry) => {
       const e = entry as Record<string, unknown>;

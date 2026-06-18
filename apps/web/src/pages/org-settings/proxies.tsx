@@ -73,7 +73,6 @@ export function OrgSettingsProxiesPage() {
   };
   const onDelete = (p: OrgProxyInfo) => setConfirmState({ label: p.label, id: p.id });
   const onSetDefault = (p: OrgProxyInfo) => setDefaultMutation.mutate({ body: { proxyId: p.id } });
-  const onRemoveDefault = () => setDefaultMutation.mutate({ body: { proxyId: null } });
 
   return (
     <>
@@ -122,12 +121,7 @@ export function OrgSettingsProxiesPage() {
                       failedKey="proxies.testFailed"
                     />
                   )}
-                  {p.isDefault && !isBuiltIn && (
-                    <Button variant="outline" size="sm" onClick={onRemoveDefault}>
-                      {t("proxies.removeDefault")}
-                    </Button>
-                  )}
-                  {!p.isDefault && !isBuiltIn && (
+                  {!p.isDefault && (
                     <Button variant="outline" size="sm" onClick={() => onSetDefault(p)}>
                       {t("proxies.setDefault")}
                     </Button>

@@ -26,11 +26,13 @@ const proxyDefinitionSchema = z.object({
  * Initialize system proxies from the SYSTEM_PROXIES env var.
  * Call once at boot before any proxy lookups.
  */
-export function initSystemProxies(): void {
+export function initSystemProxies(rawOverride?: unknown[]): void {
   systemProxies = loadSystemRegistry({
     name: "proxy-registry",
     envVar: "SYSTEM_PROXIES",
-    entries: getEnv().SYSTEM_PROXIES as unknown[],
+    // Production reads the parsed env; tests inject a raw array directly —
+    // mirrors initSystemIntegrationClients / initSystemModelProviderKeys.
+    entries: rawOverride ?? (getEnv().SYSTEM_PROXIES as unknown[]),
     schema: proxyDefinitionSchema,
     toDefinition: (p) => p,
   });

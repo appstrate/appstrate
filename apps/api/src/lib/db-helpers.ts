@@ -73,6 +73,21 @@ export function scopedWhere(table: OrgScopedTable, opts: ScopedWhereOptions): SQ
   return and(...conditions);
 }
 
+// --- UUID shape guard ---
+
+/** RFC 4122 shape. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * True when `value` is UUID-shaped. Use before comparing a caller-supplied id
+ * against a `uuid` column: Postgres raises `22P02 invalid_text_representation`
+ * on a non-UUID literal, which would otherwise surface as a 500 instead of a
+ * clean "not found". A non-UUID id can never be a row PK, so it's a miss.
+ */
+export function isUuid(value: string): boolean {
+  return UUID_RE.test(value);
+}
+
 // --- System + DB merge ---
 
 export interface MergeSystemAndDbOptions<SystemDef, DbRow extends { id: string }, Out> {
