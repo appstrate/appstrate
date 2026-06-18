@@ -5,6 +5,10 @@ updates:
     schedule:
       interval: "weekly"
     groups:
+      better-auth:
+        patterns:
+          - "better-auth"
+          - "@better-auth/*"
       production-dependencies:
         update-types:
           - "minor"
