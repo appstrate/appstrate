@@ -1316,20 +1316,42 @@ export async function ensureIntegrationOAuthClient(
 export async function deleteIntegrationOAuthClient(
   scope: AppScope,
   clientId: string,
-): Promise<void> {
+): Promise<{ deletedConnections: number }> {
   await assertAppBelongsToOrg(scope);
-  const deleted = await db
-    .delete(integrationOauthClients)
-    .where(
-      and(
-        eq(integrationOauthClients.id, clientId),
-        eq(integrationOauthClients.applicationId, scope.applicationId),
-      ),
-    )
-    .returning({ id: integrationOauthClients.id });
-  if (deleted.length === 0) {
-    throw notFound(`OAuth client '${clientId}' not found`);
-  }
+  return db.transaction(async (tx) => {
+    const deleted = await tx
+      .delete(integrationOauthClients)
+      .where(
+        and(
+          eq(integrationOauthClients.id, clientId),
+          eq(integrationOauthClients.applicationId, scope.applicationId),
+        ),
+      )
+      .returning({ id: integrationOauthClients.id });
+    if (deleted.length === 0) {
+      throw notFound(`OAuth client '${clientId}' not found`);
+    }
+    // Cascade: every connection pinned to this client is now dead — the
+    // client_id/secret that minted its tokens is gone, so it can never refresh
+    // again (resolveIntegrationClientById → null → needs_reconnection forever).
+    // Industry standard mirrors this: deleting an OAuth app at the IdP
+    // (GitHub/Google) revokes all tokens it issued. We delete the orphaned
+    // connections in the SAME transaction rather than leave un-refreshable
+    // zombies. `client_ref` holds this client's UUID PK — globally unique and
+    // never collides with a non-UUID system id — so the applicationId-scoped
+    // match is exact. The pg_notify DELETE trigger fires `connection_update`
+    // so live UI badges clear without a manual publish.
+    const deletedConns = await tx
+      .delete(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.clientRef, clientId),
+          eq(integrationConnections.applicationId, scope.applicationId),
+        ),
+      )
+      .returning({ id: integrationConnections.id });
+    return { deletedConnections: deletedConns.length };
+  });
 }
 
 // ─────────────────────────────────────────────

@@ -497,7 +497,10 @@ export function createIntegrationsRouter() {
   );
 
   // Delete one custom client by its id. If it was the default, the resolution
-  // cascade falls to the system client (no auto-promotion).
+  // cascade falls to the system client (no auto-promotion). Connections pinned
+  // to this client are deleted with it (they can never refresh once its
+  // credentials are gone) — the audit `after.deletedConnections` records how
+  // many.
   router.delete(
     "/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId",
     requirePermission("integrations", "install"),
@@ -508,11 +511,12 @@ export function createIntegrationsRouter() {
         throw notFound(`OAuth client '${clientId}' not found`);
       }
       const scope = getAppScope(c);
-      await deleteIntegrationOAuthClient(scope, clientId);
+      const { deletedConnections } = await deleteIntegrationOAuthClient(scope, clientId);
       await recordAuditFromContext(c, {
         action: "integration.oauth_client.deleted",
         resourceType: "integration",
         resourceId: `${packageId}#${clientId}`,
+        after: { deletedConnections },
       });
       return c.body(null, 204);
     },

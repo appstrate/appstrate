@@ -771,6 +771,57 @@ describe("OAuth client CRUD", () => {
     expect(after).toHaveLength(0);
   });
 
+  it("deleting a client cascades: connections pinned to it are deleted, others survive", async () => {
+    const target = await createClient("target", "s1");
+    const other = await createClient("other", "s2");
+
+    // Two connections pinned to `target` + one pinned to `other`. The `other`
+    // one is the control: it must survive the `target` delete.
+    await db.insert(integrationConnections).values([
+      {
+        integrationId: "@myorg/gmail",
+        authKey: "google",
+        accountId: "a@x.test",
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        credentialsEncrypted: "enc",
+        clientRef: target.id,
+      },
+      {
+        integrationId: "@myorg/gmail",
+        authKey: "google",
+        accountId: "b@x.test",
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        credentialsEncrypted: "enc",
+        clientRef: target.id,
+      },
+      {
+        integrationId: "@myorg/gmail",
+        authKey: "google",
+        accountId: "c@x.test",
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        credentialsEncrypted: "enc",
+        clientRef: other.id,
+      },
+    ]);
+
+    const del = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${target.id}`, {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    expect(del.status).toBe(204);
+
+    const conns = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, "@myorg/gmail"));
+    // The two `target` connections are gone; the `other` one remains.
+    expect(conns).toHaveLength(1);
+    expect(conns[0]?.clientRef).toBe(other.id);
+  });
+
   it("registers N custom clients; only the first is default; set-default flips", async () => {
     const a = await createClient("client-a", "sa");
     const b = await createClient("client-b", "sb");
