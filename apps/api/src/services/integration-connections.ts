@@ -46,12 +46,12 @@ import {
   CUSTOM_CLIENT_REF,
   systemClientRef,
   parseClientRef,
-  getSystemIntegrationClientById,
+  resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
   listSystemIntegrationClientsFor,
 } from "./integration-client-registry.ts";
 import { logger } from "../lib/logger.ts";
-import { notFound, conflict, invalidRequest } from "../lib/errors.ts";
+import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { actorInsert, actorFilter } from "../lib/actor.ts";
 import type { Actor } from "@appstrate/connect";
@@ -557,23 +557,108 @@ export function resolveSystemConnectClient(
   if (requestedRef && requestedRef.startsWith(SYSTEM_CLIENT_REF_PREFIX)) {
     const parsed = parseClientRef(requestedRef);
     if (parsed.kind !== "system") return null;
-    const def = getSystemIntegrationClientById(parsed.id);
-    if (!def || def.integrationId !== integrationId || def.authKey !== authKey) return null;
-    return {
-      clientId: def.clientId,
-      clientSecret: def.clientSecret,
-      redirectUri: null,
-      clientRef: systemClientRef(def.id),
-    };
+    const def = resolveSystemClientForAuth(parsed.id, integrationId, authKey);
+    if (!def) return null;
+    return systemConnectClient(def);
   }
   const def = getDefaultSystemIntegrationClient(integrationId, authKey);
   if (!def) return null;
+  return systemConnectClient(def);
+}
+
+/** Project a registered system client into the connect-time resolved shape. */
+function systemConnectClient(def: {
+  id: string;
+  clientId: string;
+  clientSecret: string;
+}): ResolvedConnectClient {
   return {
     clientId: def.clientId,
     clientSecret: def.clientSecret,
+    // System clients use the platform default redirect URI (no per-client override).
     redirectUri: null,
     clientRef: systemClientRef(def.id),
   };
+}
+
+/**
+ * Resolve WHICH OAuth client a connect flow uses, and its credentials — the
+ * single home for the client-selection precedence (previously inlined in
+ * `OAuth2Strategy.begin`). An integration auth may be served by the org's own
+ * per-application client (BYO-app, already loaded into `resolved.client`)
+ * AND/OR an env-provided system client. Precedence:
+ *   1. Explicit `requestedRef = "system:<id>"` → that system client.
+ *   2. The org's custom client when registered (deliberate BYO-app).
+ *   3. Else the default system client for the auth (shared, zero-config).
+ * Auto-provisioned remote-MCP auths (DCR/CIMD) keep their own client and are
+ * never served by a system entry. Throws the operator-facing error when no
+ * client can be resolved. The returned `clientRef` is pinned on the connection
+ * so token refresh resolves the same credentials.
+ */
+export function resolveConnectClient(
+  integrationId: string,
+  authKey: string,
+  manifest: IntegrationManifest,
+  auth: AfpsManifestAuth,
+  resolved: ResolvedOAuthConnect,
+  requestedRef: string | undefined,
+): ResolvedConnectClient {
+  const autoProvisioned = usesAutoProvisionedClient(manifest, auth);
+  // An auto-provisioned (DCR/CIMD) auth provisions its own client and is never
+  // served by a system entry — an explicit `system:` selection cannot be
+  // honoured, so reject it loudly rather than silently using the DCR client.
+  if (autoProvisioned && requestedRef?.startsWith(SYSTEM_CLIENT_REF_PREFIX)) {
+    throw invalidRequest(
+      `Integration '${integrationId}' auth '${authKey}' provisions its OAuth client automatically; a system client cannot be selected.`,
+    );
+  }
+
+  // 1. Explicit system selection.
+  if (!autoProvisioned && requestedRef?.startsWith(SYSTEM_CLIENT_REF_PREFIX)) {
+    const sys = resolveSystemConnectClient(integrationId, authKey, requestedRef);
+    if (!sys) {
+      throw invalidRequest(
+        `Unknown system OAuth client '${requestedRef}' for '${integrationId}' auth '${authKey}'`,
+      );
+    }
+    return sys;
+  }
+
+  // 2. The org's custom (BYO-app) client.
+  const customClient = resolved.client;
+  if (customClient) {
+    return {
+      clientId: customClient.client_id,
+      clientSecret: customClient.clientSecret,
+      redirectUri: customClient.redirect_uri ?? null,
+      clientRef: CUSTOM_CLIENT_REF,
+    };
+  }
+
+  // 3. Default system client — unless the caller explicitly asked for "custom"
+  // (then there is genuinely nothing to use → error below).
+  const sys =
+    !autoProvisioned && requestedRef !== CUSTOM_CLIENT_REF
+      ? resolveSystemConnectClient(integrationId, authKey)
+      : null;
+  if (sys) return sys;
+
+  if (autoProvisioned) {
+    // Auto-provisioning auth (public client on a remote MCP integration): client
+    // acquisition failed. `resolved.provisioningFailure` carries the complete
+    // reason + remedy, authored by whichever step failed. Render it verbatim.
+    const failure = resolved.provisioningFailure;
+    const detail = failure?.message ?? "discovery or client registration failed";
+    const statusPart = failure?.status ? ` (HTTP ${failure.status})` : "";
+    throw forbidden(
+      `Could not automatically provision an OAuth client for '${integrationId}' auth '${authKey}'${statusPart}: ${detail}`,
+    );
+  }
+  // Confidential/classic auth: an admin must pre-register a client, or the
+  // platform must provide a system client via SYSTEM_INTEGRATION_CLIENTS.
+  throw forbidden(
+    `Administrator must register OAuth client credentials for '${integrationId}' auth '${authKey}' before connection`,
+  );
 }
 
 /**

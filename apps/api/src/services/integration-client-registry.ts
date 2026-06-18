@@ -207,6 +207,25 @@ export function getDefaultSystemIntegrationClient(
 }
 
 /**
+ * Resolve a system client by id AND re-validate it still serves this exact
+ * `(integrationId, authKey)`. Single source of truth for that security-critical
+ * guard — shared by the connect resolver (`resolveSystemConnectClient`) and the
+ * token-refresh path (`buildIntegrationOAuthRefreshContext`). Returns `null`
+ * when the id is unknown OR was remapped to a different integration/auth: an
+ * operator reshuffling `SYSTEM_INTEGRATION_CLIENTS` must never let one
+ * integration's connection resolve another's credentials.
+ */
+export function resolveSystemClientForAuth(
+  id: string,
+  integrationId: string,
+  authKey: string,
+): SystemIntegrationClientDefinition | null {
+  const def = getSystemIntegrationClientById(id);
+  if (!def || def.integrationId !== integrationId || def.authKey !== authKey) return null;
+  return def;
+}
+
+/**
  * Test-only reset hook. Resets to an empty *initialized* registry (not null) so
  * tests that touch the accessors after a reset without re-seeding observe an
  * empty set rather than tripping the access-before-init guard in

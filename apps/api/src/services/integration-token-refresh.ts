@@ -38,7 +38,7 @@ import {
   recordIntegrationRefreshFailure,
 } from "./integration-connections.ts";
 import { getEnv } from "@appstrate/env";
-import { parseClientRef, getSystemIntegrationClientById } from "./integration-client-registry.ts";
+import { parseClientRef, resolveSystemClientForAuth } from "./integration-client-registry.ts";
 
 export type { IntegrationRefreshContext };
 
@@ -400,13 +400,13 @@ export async function buildIntegrationOAuthRefreshContext(
   let clientSecret = "";
 
   if (parsedRef.kind === "system") {
-    const sys = getSystemIntegrationClientById(parsedRef.id);
     // Re-validate the pinned client still serves THIS (integration, authKey) —
-    // mirrors the connect-side guard in `resolveSystemConnectClient`. Guards an
-    // operator reshuffling `SYSTEM_INTEGRATION_CLIENTS` (reusing an id for a
-    // different integration): refresh must never silently use another
+    // same guard the connect side applies (shared `resolveSystemClientForAuth`).
+    // Guards an operator reshuffling `SYSTEM_INTEGRATION_CLIENTS` (reusing an id
+    // for a different integration): refresh must never silently use another
     // integration's credentials. Mismatch → skip (needs_reconnection at expiry).
-    if (!sys || sys.integrationId !== packageId || sys.authKey !== authKey) {
+    const sys = resolveSystemClientForAuth(parsedRef.id, packageId, authKey);
+    if (!sys) {
       logger.info("Integration auth refresh skipped — pinned system client missing or remapped", {
         packageId,
         authKey,
