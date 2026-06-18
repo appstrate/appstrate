@@ -64,17 +64,7 @@
  */
 
 import { readPositiveIntEnv } from "./helpers.ts";
-
-/**
- * Floor on the derived response reserve when only `contextWindowTokens`
- * is supplied (no explicit `maxTokens` from the resolved model). 16384
- * covers the common "no thinking" Claude / GPT response shape; larger
- * budgets (Sonnet thinking @ 64 k) come through `reserveTokens` directly.
- * Keep in sync with `packages/runner-pi/src/pi-runner.ts` —
- * `derivePiCompactionSettings` uses the same default so the spill guard
- * and Pi SDK's compaction threshold agree for the same model.
- */
-const DEFAULT_RESERVE_FLOOR_TOKENS = 16_384;
+import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
 
 /**
  * Anthropic-recommended chars-per-token ratio for offline estimation.
@@ -232,23 +222,6 @@ export interface TokenBudgetOptions {
 }
 
 /**
- * Fraction of the context window to reserve for the model's response
- * when no explicit `reserveTokens` (or `maxTokens` on the upstream
- * model) is supplied. 20 % covers Sonnet thinking @ 64 k on a 200 k
- * window without overshooting; smaller windows scale down naturally.
- * Floored by {@link DEFAULT_RESERVE_FLOOR_TOKENS}.
- */
-const DEFAULT_RESERVE_FRACTION = 0.2;
-
-function deriveReserveTokens(contextWindowTokens: number, explicit: number | undefined): number {
-  if (explicit !== undefined) return explicit;
-  return Math.max(
-    DEFAULT_RESERVE_FLOOR_TOKENS,
-    Math.floor(contextWindowTokens * DEFAULT_RESERVE_FRACTION),
-  );
-}
-
-/**
  * Read a positive-integer token cap from an env var, falling back to
  * `defaultValue` when unset/empty. Delegates to {@link readPositiveIntEnv}
  * from `helpers.ts` with `unit: "tokens"` so misconfiguration fails loud
@@ -313,12 +286,11 @@ export class TokenBudget {
           `TokenBudget: contextWindowTokens must be a positive integer when set, got ${ctx}`,
         );
       }
-      const reserve = deriveReserveTokens(ctx, options.reserveTokens);
-      if (reserve >= ctx) {
-        throw new Error(
-          `TokenBudget: reserveTokens (${reserve}) must be strictly less than contextWindowTokens (${ctx}).`,
-        );
-      }
+      // `deriveResponseReserveTokens` guarantees `reserve < ctx`: it treats
+      // an impossible `maxTokens >= ctx` (corrupt catalog/override data) as
+      // unusable and falls back to a derived default rather than throwing —
+      // a bad datum must degrade gracefully, never crash the sidecar at boot.
+      const reserve = deriveResponseReserveTokens(ctx, options.reserveTokens);
       this.contextWindowTokens = ctx;
       this.reserveTokens = reserve;
     } else {

@@ -3,7 +3,10 @@
     "label": "Gpt Oss 120b",
     "contextWindow": 131072,
     "maxTokens": 32768,
-    "capabilities": ["text", "reasoning"],
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.35,
       "output": 0.75
@@ -12,8 +15,10 @@
   "llama-3.3-70b": {
     "label": "Llama 3.3 70b",
     "contextWindow": 128000,
-    "maxTokens": 128000,
-    "capabilities": ["text"],
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.85,
       "output": 1.2
@@ -22,8 +27,10 @@
   "llama3.1-70b": {
     "label": "Llama3.1 70b",
     "contextWindow": 128000,
-    "maxTokens": 128000,
-    "capabilities": ["text"],
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.6,
       "output": 0.6
@@ -32,8 +39,10 @@
   "llama3.1-8b": {
     "label": "Llama3.1 8b",
     "contextWindow": 128000,
-    "maxTokens": 128000,
-    "capabilities": ["text"],
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.1,
       "output": 0.1
@@ -42,8 +51,11 @@
   "qwen-3-32b": {
     "label": "Qwen 3 32b",
     "contextWindow": 128000,
-    "maxTokens": 128000,
-    "capabilities": ["text", "reasoning"],
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.4,
       "output": 0.8
@@ -52,8 +64,11 @@
   "zai-glm-4.6": {
     "label": "Zai Glm 4.6",
     "contextWindow": 128000,
-    "maxTokens": 128000,
-    "capabilities": ["text", "reasoning"],
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
     "cost": {
       "input": 2.25,
       "output": 2.75
@@ -62,8 +77,11 @@
   "zai-glm-4.7": {
     "label": "Zai Glm 4.7",
     "contextWindow": 128000,
-    "maxTokens": 128000,
-    "capabilities": ["text", "reasoning"],
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
     "cost": {
       "input": 2.25,
       "output": 2.75

@@ -105,6 +105,26 @@ describe("Models API", () => {
       expect(body.detail).toContain("UUID");
     });
 
+    it("rejects maxTokens >= contextWindow with 400 (canonical model invariant)", async () => {
+      // `input + output <= context`, so a response cap can never reach the
+      // full window. The edge guard rejects the impossible override before it
+      // reaches the runtime (where it would crash the sidecar / pin the
+      // compaction threshold at zero).
+      const credentialId = await createProviderKey();
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Bogus",
+          modelId: "bogus-model",
+          credentialId,
+          contextWindow: 256_000,
+          maxTokens: 256_000,
+        }),
+      });
+      expect(res.status).toBe(400);
+    });
+
     it("rejects a needs-reconnection credential with 400 before inserting (explicit label path)", async () => {
       // Regression for the hoisted reachability gate: with an explicit label,
       // the old code skipped `loadInferenceCredentials` entirely, inserted the
