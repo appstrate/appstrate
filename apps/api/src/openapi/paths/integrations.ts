@@ -31,6 +31,14 @@ const connectionIdParam = {
   schema: { type: "string", format: "uuid" },
 } as const;
 
+const clientIdParam = {
+  name: "clientId",
+  in: "path",
+  required: true,
+  description: "Custom OAuth client id (`integration_oauth_clients.id`, UUID).",
+  schema: { type: "string", format: "uuid" },
+} as const;
+
 const agentPackageIdParam = {
   name: "agentPackageId",
   in: "path",
@@ -126,12 +134,23 @@ const integrationClientsListSchema = {
       type: "array",
       items: {
         type: "object",
-        required: ["client_ref", "source", "client_id", "is_default"],
+        required: [
+          "client_ref",
+          "source",
+          "client_id",
+          "is_default",
+          "auto_provisioned",
+          "has_client_secret",
+          "redirect_uri",
+        ],
         properties: {
           client_ref: { type: "string" },
           source: { type: "string", enum: ["built-in", "custom"] },
           client_id: { type: "string" },
           is_default: { type: "boolean" },
+          auto_provisioned: { type: "boolean" },
+          has_client_secret: { type: "boolean" },
+          redirect_uri: { type: ["string", "null"] },
         },
       },
     },
@@ -455,30 +474,17 @@ export const integrationsPaths = {
       },
     },
   },
-  "/api/integrations/{packageId}/oauth-clients/{authKey}": {
-    get: {
-      operationId: "getIntegrationOAuthClient",
+  "/api/integrations/{packageId}/auths/{authKey}/oauth-clients": {
+    post: {
+      operationId: "createIntegrationOAuthClient",
       tags: ["Integrations"],
-      summary: "Read the registered OAuth client for an integration auth",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        packageIdParam,
-        authKeyParam,
-      ],
-      responses: {
-        "200": {
-          description: "OAuth client",
-          headers: baseResponseHeaders,
-          content: { "application/json": { schema: oauthClientSchema } },
-        },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    put: {
-      operationId: "upsertIntegrationOAuthClient",
-      tags: ["Integrations"],
-      summary: "Register or rotate the OAuth client for an integration auth",
+      summary: "Register a custom OAuth client for an integration auth",
+      description:
+        "Registers a NEW custom (BYO-app) client for this auth. Repeatable — an " +
+        "org may hold N clients per auth (model-provider pattern). The first " +
+        "registered client becomes the default; later ones are non-default until " +
+        "promoted via PUT .../default-client. Rejected for auto-provisioned " +
+        "(DCR/CIMD) auths. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -502,8 +508,49 @@ export const integrationsPaths = {
         },
       },
       responses: {
+        "201": {
+          description: "Created",
+          headers: baseResponseHeaders,
+          content: { "application/json": { schema: oauthClientSchema } },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/oauth-clients/{clientId}": {
+    put: {
+      operationId: "rotateIntegrationOAuthClient",
+      tags: ["Integrations"],
+      summary: "Rotate a custom OAuth client's credentials",
+      description:
+        "Rotates one custom client in place, by its id. Auto-provisioned " +
+        "(DCR/CIMD) clients are machine-managed and rejected. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        packageIdParam,
+        clientIdParam,
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["client_id", "client_secret"],
+              properties: {
+                client_id: { type: "string", minLength: 1 },
+                client_secret: { type: "string", default: "" },
+                redirect_uri: { type: "string", format: "uri" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
         "200": {
-          description: "Upserted",
+          description: "Rotated",
           headers: baseResponseHeaders,
           content: { "application/json": { schema: oauthClientSchema } },
         },
@@ -514,12 +561,15 @@ export const integrationsPaths = {
     delete: {
       operationId: "deleteIntegrationOAuthClient",
       tags: ["Integrations"],
-      summary: "Delete the OAuth client for an integration auth",
+      summary: "Delete a custom OAuth client",
+      description:
+        "Deletes one custom client by id. If it was the default, the cascade " +
+        "falls to the system client (no auto-promotion). Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
         packageIdParam,
-        authKeyParam,
+        clientIdParam,
       ],
       responses: {
         "204": {

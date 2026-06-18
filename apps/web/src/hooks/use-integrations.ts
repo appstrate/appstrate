@@ -17,11 +17,10 @@ import type {
   ConsumingAgentSummary,
   IntegrationConnection,
   IntegrationManifestView,
-  IntegrationOAuthClient,
   IntegrationOrgDefault,
   IntegrationPin,
 } from "@appstrate/shared-types";
-import { $api, client, ApiError, type paths } from "../api/client";
+import { $api, client, type paths } from "../api/client";
 
 // Spec-pinned narrowings for the two integration read endpoints. They take the
 // generated OpenAPI response shape verbatim (so a rename/removal of any
@@ -289,60 +288,60 @@ export function useInitiateIntegrationOAuth() {
   });
 }
 
-export function useIntegrationOAuthClient(
-  packageId: string | undefined,
-  authKey: string | undefined,
-) {
-  const scope = useOrgScope();
-  return useQuery({
-    // Same [method, path, init] shape as the $api hooks so the path-string
-    // invalidations below hit this query too.
-    queryKey: [
-      "get",
-      "/api/integrations/{packageId}/oauth-clients/{authKey}",
-      { params: { path: { packageId, authKey }, header: scope.header } },
-    ] as const,
-    enabled: scope.enabled && !!packageId && !!authKey,
-    queryFn: async (): Promise<IntegrationOAuthClient | null> => {
-      try {
-        const { data } = await client.GET("/api/integrations/{packageId}/oauth-clients/{authKey}", {
-          params: { path: { packageId: packageId!, authKey: authKey! }, header: scope.header },
-        });
-        return data ?? null;
-      } catch (err: unknown) {
-        // 404 = not configured yet; treat as null so the UI can render
-        // the registration form.
-        if (err instanceof ApiError && err.status === 404) return null;
-        throw err;
-      }
-    },
-  });
+/** Invalidate the clients list + detail after a client mutation. */
+function useInvalidateIntegrationClients() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({
+      queryKey: ["get", "/api/integrations/{packageId}/auths/{authKey}/clients"],
+    });
+    void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
+  };
 }
 
-export function useUpsertIntegrationOAuthClient() {
+/**
+ * Register a NEW custom (BYO-app) OAuth client for an auth — repeatable, so an
+ * org can hold N clients. The first becomes the default; later ones stay
+ * non-default until promoted via {@link useSetDefaultIntegrationClient}.
+ */
+export function useCreateIntegrationOAuthClient() {
   const { t } = useTranslation("settings");
-  const qc = useQueryClient();
+  const invalidate = useInvalidateIntegrationClients();
   return useMutation({
     mutationFn: async (vars: {
       params: { path: { packageId: string; authKey: string } };
       body: { client_id: string; client_secret: string; redirect_uri?: string };
     }) => {
-      const { data } = await client.PUT("/api/integrations/{packageId}/oauth-clients/{authKey}", {
+      const { data } = await client.POST(
+        "/api/integrations/{packageId}/auths/{authKey}/oauth-clients",
+        { ...vars },
+      );
+      return data;
+    },
+    onSuccess: () => {
+      toast.success(t("integration.oauthClient.save.success"));
+      invalidate();
+    },
+  });
+}
+
+/** Rotate one custom client's credentials in place, by its id. */
+export function useRotateIntegrationOAuthClient() {
+  const { t } = useTranslation("settings");
+  const invalidate = useInvalidateIntegrationClients();
+  return useMutation({
+    mutationFn: async (vars: {
+      params: { path: { packageId: string; clientId: string } };
+      body: { client_id: string; client_secret: string; redirect_uri?: string };
+    }) => {
+      const { data } = await client.PUT("/api/integrations/{packageId}/oauth-clients/{clientId}", {
         ...vars,
       });
       return data;
     },
     onSuccess: () => {
       toast.success(t("integration.oauthClient.save.success"));
-      void qc.invalidateQueries({
-        queryKey: ["get", "/api/integrations/{packageId}/oauth-clients/{authKey}"],
-      });
-      // The available-clients list (system + custom) now includes the new
-      // custom client and its default precedence flips — refresh it too.
-      void qc.invalidateQueries({
-        queryKey: ["get", "/api/integrations/{packageId}/auths/{authKey}/clients"],
-      });
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
+      invalidate();
     },
   });
 }
@@ -583,24 +582,19 @@ export function useUpdateIntegrationConnection() {
   });
 }
 
+/** Delete one custom client by its id. */
 export function useDeleteIntegrationOAuthClient() {
   const { t } = useTranslation("settings");
-  const qc = useQueryClient();
+  const invalidate = useInvalidateIntegrationClients();
   return useMutation({
-    mutationFn: async (vars: { params: { path: { packageId: string; authKey: string } } }) => {
-      await client.DELETE("/api/integrations/{packageId}/oauth-clients/{authKey}", {
+    mutationFn: async (vars: { params: { path: { packageId: string; clientId: string } } }) => {
+      await client.DELETE("/api/integrations/{packageId}/oauth-clients/{clientId}", {
         ...vars,
       });
     },
     onSuccess: () => {
       toast.success(t("integration.oauthClient.delete.success"));
-      void qc.invalidateQueries({
-        queryKey: ["get", "/api/integrations/{packageId}/oauth-clients/{authKey}"],
-      });
-      void qc.invalidateQueries({
-        queryKey: ["get", "/api/integrations/{packageId}/auths/{authKey}/clients"],
-      });
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
+      invalidate();
     },
   });
 }

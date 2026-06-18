@@ -437,8 +437,8 @@ describe("connect/oauth2 reconnect scope-union (incremental consent)", () => {
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
     await activate(ctx.defaultAppId, "@myorg/gmail");
     // Register the OAuth client so the kickoff can build an authorize URL.
-    await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
-      method: "PUT",
+    await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
+      method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
     });

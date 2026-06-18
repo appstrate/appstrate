@@ -69,8 +69,17 @@ describe("integration multi-client", () => {
 
   afterEach(() => __resetSystemIntegrationClientsForTest());
 
-  /** Insert a custom per-application OAuth client row directly; return its id. */
-  async function seedCustomClient(clientId: string, secret: string): Promise<string> {
+  /**
+   * Insert a custom per-application OAuth client row directly; return its id.
+   * `isDefault` defaults to true (the first registered custom wins, mirroring
+   * `createIntegrationOAuthClient`); pass false to seed an additional non-default
+   * client without tripping the one-default partial unique.
+   */
+  async function seedCustomClient(
+    clientId: string,
+    secret: string,
+    isDefault = true,
+  ): Promise<string> {
     const [row] = await db
       .insert(integrationOauthClients)
       .values({
@@ -79,6 +88,7 @@ describe("integration multi-client", () => {
         authKey: AUTH_KEY,
         clientId,
         clientSecretEncrypted: encryptCredentials({ client_secret: secret }),
+        isDefault,
       })
       .returning({ id: integrationOauthClients.id });
     return row!.id;
@@ -440,19 +450,22 @@ describe("integration multi-client", () => {
 
     function customClient(isDefault: boolean): ResolvedOAuthConnect {
       return {
-        client: {
-          id: "11111111-1111-4111-8111-111111111111",
-          applicationId: ctx.defaultAppId,
-          integration_package_id: INTEGRATION,
-          auth_key: AUTH_KEY,
-          client_id: "org-client-id",
-          clientSecret: "org-secret",
-          has_client_secret: true,
-          redirect_uri: null,
-          isDefault,
-          createdAt: "2026-01-01T00:00:00.000Z",
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        },
+        customClients: [
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            applicationId: ctx.defaultAppId,
+            integration_package_id: INTEGRATION,
+            auth_key: AUTH_KEY,
+            client_id: "org-client-id",
+            clientSecret: "org-secret",
+            has_client_secret: true,
+            redirect_uri: null,
+            isDefault,
+            autoProvisioned: false,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
       };
     }
 
@@ -494,6 +507,96 @@ describe("integration multi-client", () => {
         undefined,
       );
       expect(out.clientId).toBe("org-client-id");
+    });
+
+    /** Build a ResolvedOAuthConnect carrying N custom clients. */
+    function customClients(
+      specs: Array<{ id: string; clientId: string; isDefault: boolean }>,
+    ): ResolvedOAuthConnect {
+      return {
+        customClients: specs.map((s) => ({
+          id: s.id,
+          applicationId: ctx.defaultAppId,
+          integration_package_id: INTEGRATION,
+          auth_key: AUTH_KEY,
+          client_id: s.clientId,
+          clientSecret: "secret",
+          has_client_secret: true,
+          redirect_uri: null,
+          isDefault: s.isDefault,
+          autoProvisioned: false,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        })),
+      };
+    }
+
+    it("picks the flagged-default custom among N", () => {
+      const out = resolveConnectClient(
+        INTEGRATION,
+        AUTH_KEY,
+        LOCAL_MANIFEST,
+        OAUTH2_AUTH,
+        customClients([
+          { id: "11111111-1111-4111-8111-111111111111", clientId: "a", isDefault: false },
+          { id: "22222222-2222-4222-8222-222222222222", clientId: "b", isDefault: true },
+        ]),
+        undefined,
+      );
+      expect(out.clientId).toBe("b");
+    });
+
+    it("honours an explicit requestedRef targeting a specific custom among N", () => {
+      const out = resolveConnectClient(
+        INTEGRATION,
+        AUTH_KEY,
+        LOCAL_MANIFEST,
+        OAUTH2_AUTH,
+        customClients([
+          { id: "11111111-1111-4111-8111-111111111111", clientId: "a", isDefault: true },
+          { id: "22222222-2222-4222-8222-222222222222", clientId: "b", isDefault: false },
+        ]),
+        "22222222-2222-4222-8222-222222222222",
+      );
+      expect(out.clientId).toBe("b");
+      expect(out.clientRef).toBe("22222222-2222-4222-8222-222222222222");
+    });
+  });
+
+  describe("DB partial-unique invariants", () => {
+    it("rejects a second default custom client for the same auth (one-default)", async () => {
+      await seedCustomClient("a", "sa", true);
+      await expect(seedCustomClient("b", "sb", true)).rejects.toThrow();
+    });
+
+    it("allows N custom clients when only one is flagged default", async () => {
+      await seedCustomClient("a", "sa", true);
+      await seedCustomClient("b", "sb", false);
+      await seedCustomClient("c", "sc", false);
+      const rows = await db
+        .select()
+        .from(integrationOauthClients)
+        .where(eq(integrationOauthClients.integrationId, INTEGRATION));
+      expect(rows).toHaveLength(3);
+      expect(rows.filter((r) => r.isDefault)).toHaveLength(1);
+    });
+
+    it("rejects a second auto-provisioned client for the same auth (one-auto)", async () => {
+      async function seedAuto(clientId: string): Promise<void> {
+        await db.insert(integrationOauthClients).values({
+          applicationId: ctx.defaultAppId,
+          integrationId: INTEGRATION,
+          authKey: AUTH_KEY,
+          clientId,
+          clientSecretEncrypted: encryptCredentials({ client_secret: "s" }),
+          isDefault: false,
+          autoProvisioned: true,
+        });
+      }
+      await seedAuto("auto-1");
+      // The partial unique idx_ioc_one_auto guarantees DCR find-or-create stays
+      // idempotent without the old global UNIQUE.
+      await expect(seedAuto("auto-2")).rejects.toThrow();
     });
   });
 });

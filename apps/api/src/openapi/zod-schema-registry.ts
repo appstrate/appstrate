@@ -324,10 +324,16 @@ const coreSchemas: OpenApiSchemaEntry[] = [
 
   // ─── Integrations ───────────────────────────────────────────────────────
   {
-    method: "PUT",
-    path: "/api/integrations/{packageId}/oauth-clients/{authKey}",
+    method: "POST",
+    path: "/api/integrations/{packageId}/auths/{authKey}/oauth-clients",
     jsonSchema: toJsonSchema(oauthClientSchema),
-    description: "Register/rotate integration OAuth client",
+    description: "Register a custom integration OAuth client",
+  },
+  {
+    method: "PUT",
+    path: "/api/integrations/{packageId}/oauth-clients/{clientId}",
+    jsonSchema: toJsonSchema(oauthClientSchema),
+    description: "Rotate a custom integration OAuth client",
   },
   {
     method: "POST",

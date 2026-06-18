@@ -33,7 +33,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Trash2, ShieldCheck, Settings2, Pencil, Check, X, ChevronRight } from "lucide-react";
+import { Trash2, ShieldCheck, Plus, Pencil, Check, X, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -62,16 +62,17 @@ import { PackageActionsDropdown } from "../components/package-detail/package-act
 import { VersionHistory } from "../components/version-history";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
+import { Modal } from "../components/modal";
 import { usePermissions } from "../hooks/use-permissions";
 import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
 import {
   useIntegrationDetail,
   useActivateIntegration,
   useDeactivateIntegration,
-  useIntegrationOAuthClient,
   useIntegrationClients,
   useSetDefaultIntegrationClient,
-  useUpsertIntegrationOAuthClient,
+  useCreateIntegrationOAuthClient,
+  useRotateIntegrationOAuthClient,
   useDeleteIntegrationOAuthClient,
   useUpdateIntegrationConnection,
   useUpdateIntegrationSettings,
@@ -100,337 +101,351 @@ import { isOauthAuthConnectable } from "../components/integration-connect/connec
 import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
 
 // ─────────────────────────────────────────────
-// OAuth client (admin) form
+// OAuth client (admin) — create / rotate modal
 // ─────────────────────────────────────────────
 
-function OAuthClientForm({
+/**
+ * Register a new custom OAuth client (`mode: "create"`) or rotate an existing
+ * one in place (`mode: "rotate"`, preloaded from its descriptor). The parent
+ * mounts this only while open, keyed by mode+clientRef, so field state resets
+ * cleanly between invocations. The client secret is write-only — never echoed
+ * back, shown as a placeholder when one is already set.
+ */
+function OAuthClientModal({
   packageId,
   authKey,
   authDecl,
-  autoProvisioned = false,
+  mode,
+  existing,
+  onClose,
 }: {
   packageId: string;
   authKey: string;
   authDecl?: IntegrationManifestAuth;
-  // Remote MCP auths register their client at connect time (CIMD/DCR), so a
-  // pre-registered client is optional. Surface that instead of a "to configure"
-  // warning, and keep the form collapsed by default.
-  autoProvisioned?: boolean;
+  mode: "create" | "rotate";
+  existing?: IntegrationClient;
+  onClose: () => void;
 }) {
   const { t } = useTranslation("settings");
-  const { data: client, isLoading } = useIntegrationOAuthClient(packageId, authKey);
-  const upsert = useUpsertIntegrationOAuthClient();
-  const del = useDeleteIntegrationOAuthClient();
-  const [clientId, setClientId] = useState("");
+  const create = useCreateIntegrationOAuthClient();
+  const rotate = useRotateIntegrationOAuthClient();
+  const pending = mode === "create" ? create.isPending : rotate.isPending;
+  const [clientId, setClientId] = useState(existing?.client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
-  const [redirectUri, setRedirectUri] = useState("");
-  const [publicClient, setPublicClient] = useState(false);
-  // Accordion: collapsed once a client is registered, open while it still
-  // needs configuring. `null` = follow that default; a boolean = user toggled.
-  const [open, setOpen] = useState<boolean | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  // Auto-provisioned (remote MCP) auths hide the manual client form by default.
-  // Their token endpoint only accepts a DCR/CIMD-acquired public client, so a
-  // hand-entered client_id almost always points at the wrong OAuth server and
-  // silently disables auto-registration (the stored client makes the backend
-  // skip DCR). Keep an opt-in escape hatch for the rare server that needs a
-  // pre-registered public client.
-  const [showManualForm, setShowManualForm] = useState(false);
-
-  if (isLoading) return <LoadingState />;
+  const [redirectUri, setRedirectUri] = useState(existing?.redirect_uri ?? "");
+  const [publicClient, setPublicClient] = useState(existing ? !existing.has_client_secret : false);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    upsert.mutate(
-      {
-        params: { path: { packageId, authKey } },
-        body: {
-          client_id: clientId,
-          client_secret: publicClient ? "" : clientSecret,
-          ...(redirectUri ? { redirect_uri: redirectUri } : {}),
-        },
-      },
-      {
-        onSuccess: () => {
-          setClientSecret("");
-        },
-      },
-    );
+    const body = {
+      client_id: clientId,
+      client_secret: publicClient ? "" : clientSecret,
+      ...(redirectUri ? { redirect_uri: redirectUri } : {}),
+    };
+    if (mode === "create") {
+      create.mutate({ params: { path: { packageId, authKey } }, body }, { onSuccess: onClose });
+    } else {
+      rotate.mutate(
+        { params: { path: { packageId, clientId: existing!.client_ref } }, body },
+        { onSuccess: onClose },
+      );
+    }
   };
 
-  const configured = !!client;
-  // Default collapsed when configured OR when the client is auto-provisioned
-  // (manual registration is optional in that case); open otherwise so an admin
-  // who must register a client sees the form straight away.
-  const isOpen = open === null ? !configured && !autoProvisioned : open;
-  // For auto-provisioned auths the manual form is opt-in (advanced); for classic
-  // confidential clients it is always shown — registering one is mandatory.
-  const showManualClientForm = !autoProvisioned || showManualForm;
-
   return (
-    <>
-      <Collapsible
-        open={isOpen}
-        onOpenChange={setOpen}
-        className="bg-muted/40 rounded-md border"
-        data-testid={`oauth-client-${authKey}`}
+    <Modal
+      open
+      onClose={onClose}
+      title={
+        mode === "create"
+          ? t("integration.oauthClient.modalCreateTitle")
+          : t("integration.oauthClient.modalRotateTitle")
+      }
+    >
+      <form
+        className="grid gap-3 sm:grid-cols-2"
+        onSubmit={submit}
+        data-testid={`oauth-client-form-${authKey}`}
       >
-        <CollapsibleTrigger className="flex w-full items-center gap-2 p-4 text-left">
-          <ChevronRight
-            size={14}
-            className={`text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}
+        <div className="space-y-1">
+          <Label htmlFor={`cid-${authKey}`} className="text-xs">
+            {t("integration.oauthClient.clientId")}
+          </Label>
+          <Input
+            id={`cid-${authKey}`}
+            value={clientId}
+            onChange={(e) => setClientId(e.target.value)}
+            data-testid={`oauth-clientid-${authKey}`}
           />
-          <Settings2 size={14} className="text-muted-foreground" />
-          <h4 className="text-sm font-semibold">{t("integration.section.oauthClient")}</h4>
-          <span
-            className={
-              configured
-                ? "ml-auto rounded bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] font-medium text-emerald-500"
-                : autoProvisioned
-                  ? "text-muted-foreground bg-muted ml-auto rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
-                  : "bg-warning/10 text-warning ml-auto rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
-            }
-          >
-            {configured
-              ? t("integration.oauthClient.configured")
-              : autoProvisioned
-                ? t("integration.oauthClient.autoProvisioned")
-                : t("integration.oauthClient.notConfigured")}
-          </span>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="px-4 pb-4">
-          {autoProvisioned && !client && (
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`csecret-${authKey}`} className="text-xs">
+            {t("integration.oauthClient.clientSecret")}
+          </Label>
+          <Input
+            id={`csecret-${authKey}`}
+            type="password"
+            value={clientSecret}
+            onChange={(e) => setClientSecret(e.target.value)}
+            disabled={publicClient}
+            placeholder={existing?.has_client_secret ? "••••••••" : ""}
+            data-testid={`oauth-clientsecret-${authKey}`}
+          />
+        </div>
+        <div className="space-y-1 sm:col-span-2">
+          <Label htmlFor={`redir-${authKey}`} className="text-xs">
+            {t("integration.oauthClient.redirectUri")}
+          </Label>
+          <Input
+            id={`redir-${authKey}`}
+            type="url"
+            value={redirectUri}
+            onChange={(e) => setRedirectUri(e.target.value)}
+          />
+          {/* AFPS §7.10 — surface `auths.<key>.callback_url_hint`. Read-only
+              display; the actual redirectUri value lives in the input above. */}
+          {authDecl?.callback_url_hint && (
             <p
-              className="text-muted-foreground mb-3 text-xs"
-              data-testid={`oauth-client-auto-hint-${authKey}`}
+              className="text-muted-foreground text-[0.7rem]"
+              data-testid={`callback-url-hint-${authKey}`}
             >
-              {t("integration.oauthClient.autoProvisionedHint")}
+              <span className="font-semibold">{t("integration.oauthClient.callbackUrlHint")}:</span>{" "}
+              <span className="font-mono">{authDecl.callback_url_hint}</span>
             </p>
           )}
-          {autoProvisioned && client && (
-            <div
-              className="bg-warning/10 mb-3 space-y-2 rounded-md p-3"
-              data-testid={`oauth-client-auto-warning-${authKey}`}
-            >
-              <p className="text-warning text-xs">
-                {t("integration.oauthClient.autoProvisionedManualWarning")}
-              </p>
-              <p className="text-muted-foreground text-xs">
-                {t("integration.oauthClient.registered", { clientId: client.client_id })}
-              </p>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setConfirmDelete(true)}
-                disabled={del.isPending}
-                data-testid={`oauth-client-auto-delete-${authKey}`}
-              >
-                <Trash2 size={14} className="text-destructive" />
-                {t("integration.oauthClient.btnDelete")}
-              </Button>
-            </div>
-          )}
-          {!autoProvisioned && client && (
-            <p className="text-muted-foreground mb-3 text-xs">
-              {t("integration.oauthClient.registered", { clientId: client.client_id })}
-            </p>
-          )}
-          {autoProvisioned && !showManualForm && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="mb-2"
-              onClick={() => setShowManualForm(true)}
-              data-testid={`oauth-client-manual-toggle-${authKey}`}
-            >
-              {t("integration.oauthClient.registerManually")}
-            </Button>
-          )}
-          {showManualClientForm && (
-            <form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}>
-              <div className="space-y-1">
-                <Label htmlFor={`cid-${authKey}`} className="text-xs">
-                  {t("integration.oauthClient.clientId")}
-                </Label>
-                <Input
-                  id={`cid-${authKey}`}
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                  placeholder={client?.client_id ?? ""}
-                  data-testid={`oauth-clientid-${authKey}`}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor={`csecret-${authKey}`} className="text-xs">
-                  {t("integration.oauthClient.clientSecret")}
-                </Label>
-                <Input
-                  id={`csecret-${authKey}`}
-                  type="password"
-                  value={clientSecret}
-                  onChange={(e) => setClientSecret(e.target.value)}
-                  disabled={publicClient}
-                  placeholder={client?.has_client_secret ? "••••••••" : ""}
-                  data-testid={`oauth-clientsecret-${authKey}`}
-                />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <Label htmlFor={`redir-${authKey}`} className="text-xs">
-                  {t("integration.oauthClient.redirectUri")}
-                </Label>
-                <Input
-                  id={`redir-${authKey}`}
-                  type="url"
-                  value={redirectUri}
-                  onChange={(e) => setRedirectUri(e.target.value)}
-                  placeholder={client?.redirect_uri ?? ""}
-                />
-                {/* AFPS §7.10 — surface `auths.<key>.callback_url_hint`.
-                  Read-only display; the actual redirectUri value lives in
-                  the input above. */}
-                {authDecl?.callback_url_hint && (
-                  <p
-                    className="text-muted-foreground text-[0.7rem]"
-                    data-testid={`callback-url-hint-${authKey}`}
-                  >
-                    <span className="font-semibold">
-                      {t("integration.oauthClient.callbackUrlHint")}:
-                    </span>{" "}
-                    <span className="font-mono">{authDecl.callback_url_hint}</span>
-                  </p>
-                )}
-              </div>
-              <label className="flex items-center gap-2 text-sm sm:col-span-2">
-                <Checkbox
-                  checked={publicClient}
-                  onCheckedChange={(c) => setPublicClient(Boolean(c))}
-                />
-                {t("integration.oauthClient.publicClient")}
-              </label>
-              <div className="flex items-center gap-2 sm:col-span-2">
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={upsert.isPending || clientId.trim() === ""}
-                  data-testid={`oauth-client-save-${authKey}`}
-                >
-                  {client
-                    ? t("integration.oauthClient.btnRotate")
-                    : t("integration.oauthClient.btnRegister")}
-                </Button>
-                {client && !autoProvisioned && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setConfirmDelete(true)}
-                    disabled={del.isPending}
-                  >
-                    <Trash2 size={14} className="text-destructive" />
-                    {t("integration.oauthClient.btnDelete")}
-                  </Button>
-                )}
-              </div>
-            </form>
-          )}
-        </CollapsibleContent>
-      </Collapsible>
-      <ConfirmModal
-        open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        title={t("btn.confirm", { ns: "common" })}
-        description={t("integration.oauthClient.delete.confirm")}
-        isPending={del.isPending}
-        onConfirm={() =>
-          del.mutate(
-            { params: { path: { packageId, authKey } } },
-            { onSuccess: () => setConfirmDelete(false) },
-          )
-        }
-      />
-    </>
+        </div>
+        <label className="flex items-center gap-2 text-sm sm:col-span-2">
+          <Checkbox checked={publicClient} onCheckedChange={(c) => setPublicClient(Boolean(c))} />
+          {t("integration.oauthClient.publicClient")}
+        </label>
+        <div className="flex items-center justify-end gap-2 sm:col-span-2">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={pending}>
+            {t("integration.connect.btn.cancel")}
+          </Button>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={pending || clientId.trim() === ""}
+            data-testid={`oauth-client-save-${authKey}`}
+          >
+            {mode === "create"
+              ? t("integration.oauthClient.btnRegister")
+              : t("integration.oauthClient.btnRotate")}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
 // ─────────────────────────────────────────────
-// Available OAuth clients (system + custom)
+// OAuth clients (system + custom) — CRUD hub
 // ─────────────────────────────────────────────
 
 /**
- * Read-only list of every OAuth client that can mint a connection for this
- * auth: the org's custom (BYO-app) client plus any platform-provided system
- * clients (`SYSTEM_INTEGRATION_CLIENTS`). Surfaces WHY connecting is possible
- * even when the org has not registered its own client — the platform ships a
- * shared one. The default (the one connect uses absent an explicit pick) is
- * badged. Secrets are never returned by the endpoint. Renders nothing when no
- * client exists (the registration form below carries the "configure" CTA).
+ * The admin hub for an auth's OAuth clients: every client that can mint a
+ * connection — the platform's system client(s) (`SYSTEM_INTEGRATION_CLIENTS`,
+ * read-only) plus the org's N custom (BYO-app) clients — with which is the
+ * default. Multi-client: an admin registers as many custom clients as needed,
+ * rotates or deletes each by id, and picks the default (the model-provider
+ * pattern). Auto-provisioned (remote MCP DCR/CIMD) auths keep ONE machine
+ * client, shown read-only with a delete action that re-triggers registration;
+ * a manual escape hatch (opt-in) covers the rare server needing a pre-registered
+ * public client. Secrets are never returned by the endpoint.
  */
-function ClientsTable({ packageId, authKey }: { packageId: string; authKey: string }) {
+function ClientsTable({
+  packageId,
+  authKey,
+  authDecl,
+  autoProvisioned,
+}: {
+  packageId: string;
+  authKey: string;
+  authDecl?: IntegrationManifestAuth;
+  autoProvisioned: boolean;
+}) {
   const { t } = useTranslation("settings");
   const { data: clients } = useIntegrationClients(packageId, authKey);
   const setDefault = useSetDefaultIntegrationClient();
-  if (!clients || clients.length === 0) return null;
+  const del = useDeleteIntegrationOAuthClient();
+  const [modal, setModal] = useState<
+    { mode: "create" } | { mode: "rotate"; client: IntegrationClient } | null
+  >(null);
+  const [confirmDelete, setConfirmDelete] = useState<IntegrationClient | null>(null);
+  // Auto-provisioned auths hide the manual register button by default — their
+  // token endpoint only accepts a DCR/CIMD-acquired client, so a hand-entered
+  // one usually points at the wrong server and disables auto-registration. Keep
+  // an opt-in escape hatch for the rare server needing a pre-registered client.
+  const [showManual, setShowManual] = useState(false);
+
+  const rows = clients ?? [];
   // Choosing a default only matters when more than one client can mint connections.
-  const canChooseDefault = clients.length > 1;
+  const canChooseDefault = rows.length > 1;
+  const hasAutoClient = rows.some((c) => c.auto_provisioned);
+  // Classic auths always allow registering more custom clients; auto-provisioned
+  // auths only via the opt-in escape hatch (and only when none is registered yet).
+  const canRegister = !autoProvisioned || (showManual && !hasAutoClient);
 
   return (
     <div className="mb-3" data-testid={`oauth-clients-list-${authKey}`}>
-      <h4 className="text-muted-foreground mb-2 text-xs font-semibold">
-        {t("integration.clients.title")}
-      </h4>
-      <div className="overflow-hidden rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="text-xs">{t("integration.clients.col.source")}</TableHead>
-              <TableHead className="text-xs">{t("integration.clients.col.clientId")}</TableHead>
-              <TableHead className="w-px text-right text-xs">
-                {t("integration.clients.col.default")}
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {clients.map((client) => (
-              <TableRow
-                key={client.client_ref}
-                data-testid={`oauth-client-row-${client.client_ref}`}
-              >
-                <TableCell>
-                  <Badge variant={client.source === "built-in" ? "secondary" : "outline"}>
-                    {client.source === "built-in"
-                      ? t("integration.clients.sourceBuiltIn")
-                      : t("integration.clients.sourceCustom")}
-                  </Badge>
-                </TableCell>
-                <TableCell className="font-mono text-xs">{client.client_id}</TableCell>
-                <TableCell className="text-right">
-                  {client.is_default ? (
-                    <Badge variant="default">{t("integration.clients.default")}</Badge>
-                  ) : canChooseDefault ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 text-xs"
-                      disabled={setDefault.isPending}
-                      onClick={() =>
-                        setDefault.mutate({
-                          params: { path: { packageId, authKey } },
-                          body: { client_ref: client.client_ref },
-                        })
-                      }
-                      data-testid={`set-default-client-${client.client_ref}`}
-                    >
-                      {t("integration.clients.setDefault.action")}
-                    </Button>
-                  ) : null}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h4 className="text-muted-foreground text-xs font-semibold">
+          {t("integration.clients.title")}
+        </h4>
+        {canRegister && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={() => setModal({ mode: "create" })}
+            data-testid={`oauth-client-register-${authKey}`}
+          >
+            <Plus size={14} />
+            {t("integration.clients.register")}
+          </Button>
+        )}
       </div>
+
+      {autoProvisioned && !hasAutoClient && (
+        <p
+          className="text-muted-foreground mb-2 text-xs"
+          data-testid={`oauth-client-auto-hint-${authKey}`}
+        >
+          {t("integration.oauthClient.autoProvisionedHint")}
+        </p>
+      )}
+
+      {rows.length > 0 && (
+        <div className="overflow-hidden rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs">{t("integration.clients.col.source")}</TableHead>
+                <TableHead className="text-xs">{t("integration.clients.col.clientId")}</TableHead>
+                <TableHead className="text-xs">{t("integration.clients.col.default")}</TableHead>
+                <TableHead className="w-px text-right text-xs">
+                  {t("integration.clients.col.actions")}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((client) => {
+                const editable = client.source === "custom" && !client.auto_provisioned;
+                const deletable = client.source === "custom";
+                return (
+                  <TableRow
+                    key={client.client_ref}
+                    data-testid={`oauth-client-row-${client.client_ref}`}
+                  >
+                    <TableCell>
+                      <Badge variant={client.source === "built-in" ? "secondary" : "outline"}>
+                        {client.source === "built-in"
+                          ? t("integration.clients.sourceBuiltIn")
+                          : client.auto_provisioned
+                            ? t("integration.oauthClient.autoProvisioned")
+                            : t("integration.clients.sourceCustom")}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{client.client_id}</TableCell>
+                    <TableCell>
+                      {client.is_default ? (
+                        <Badge variant="default">{t("integration.clients.default")}</Badge>
+                      ) : canChooseDefault ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 text-xs"
+                          disabled={setDefault.isPending}
+                          onClick={() =>
+                            setDefault.mutate({
+                              params: { path: { packageId, authKey } },
+                              body: { client_ref: client.client_ref },
+                            })
+                          }
+                          data-testid={`set-default-client-${client.client_ref}`}
+                        >
+                          {t("integration.clients.setDefault.action")}
+                        </Button>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        {editable && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0"
+                            onClick={() => setModal({ mode: "rotate", client })}
+                            data-testid={`oauth-client-rotate-${client.client_ref}`}
+                            aria-label={t("integration.oauthClient.btnRotate")}
+                          >
+                            <Pencil size={14} />
+                          </Button>
+                        )}
+                        {deletable && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0"
+                            onClick={() => setConfirmDelete(client)}
+                            disabled={del.isPending}
+                            data-testid={`oauth-client-delete-${client.client_ref}`}
+                            aria-label={t("integration.oauthClient.btnDelete")}
+                          >
+                            <Trash2 size={14} className="text-destructive" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {autoProvisioned && !showManual && !hasAutoClient && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="mt-2"
+          onClick={() => setShowManual(true)}
+          data-testid={`oauth-client-manual-toggle-${authKey}`}
+        >
+          {t("integration.oauthClient.registerManually")}
+        </Button>
+      )}
+
+      {modal && (
+        <OAuthClientModal
+          key={modal.mode === "rotate" ? modal.client.client_ref : "create"}
+          packageId={packageId}
+          authKey={authKey}
+          authDecl={authDecl}
+          mode={modal.mode}
+          existing={modal.mode === "rotate" ? modal.client : undefined}
+          onClose={() => setModal(null)}
+        />
+      )}
+      <ConfirmModal
+        open={confirmDelete !== null}
+        onClose={() => setConfirmDelete(null)}
+        title={t("btn.confirm", { ns: "common" })}
+        description={t("integration.oauthClient.delete.confirm")}
+        isPending={del.isPending}
+        onConfirm={() => {
+          if (!confirmDelete) return;
+          del.mutate(
+            { params: { path: { packageId, clientId: confirmDelete.client_ref } } },
+            { onSuccess: () => setConfirmDelete(null) },
+          );
+        }}
+      />
     </div>
   );
 }
@@ -620,17 +635,14 @@ function ConfigAuthBlock({
         </div>
       )}
 
-      {/* OAuth clients (system + custom) + the BYO-app registration form. */}
+      {/* OAuth clients (system + custom) — list, register, rotate, delete, default. */}
       {isOAuth && (
-        <div>
-          <ClientsTable packageId={packageId} authKey={status.auth_key} />
-          <OAuthClientForm
-            packageId={packageId}
-            authKey={status.auth_key}
-            authDecl={authDecl}
-            autoProvisioned={status.client_auto_provisioned}
-          />
-        </div>
+        <ClientsTable
+          packageId={packageId}
+          authKey={status.auth_key}
+          authDecl={authDecl}
+          autoProvisioned={status.client_auto_provisioned}
+        />
       )}
       {!isOAuth && (
         <p className="text-muted-foreground text-xs">{t("integration.config.noOAuthClient")}</p>

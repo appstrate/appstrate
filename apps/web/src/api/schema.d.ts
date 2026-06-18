@@ -1319,6 +1319,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/{packageId}/auths/{authKey}/oauth-clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register a custom OAuth client for an integration auth
+         * @description Registers a NEW custom (BYO-app) client for this auth. Repeatable — an org may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR/CIMD) auths. Admin only.
+         */
+        post: operations["createIntegrationOAuthClient"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/{packageId}/connections": {
         parameters: {
             query?: never;
@@ -1412,19 +1432,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/integrations/{packageId}/oauth-clients/{authKey}": {
+    "/api/integrations/{packageId}/oauth-clients/{clientId}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Read the registered OAuth client for an integration auth */
-        get: operations["getIntegrationOAuthClient"];
-        /** Register or rotate the OAuth client for an integration auth */
-        put: operations["upsertIntegrationOAuthClient"];
+        get?: never;
+        /**
+         * Rotate a custom OAuth client's credentials
+         * @description Rotates one custom client in place, by its id. Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Admin only.
+         */
+        put: operations["rotateIntegrationOAuthClient"];
         post?: never;
-        /** Delete the OAuth client for an integration auth */
+        /**
+         * Delete a custom OAuth client
+         * @description Deletes one custom client by id. If it was the default, the cascade falls to the system client (no auto-promotion). Admin only.
+         */
         delete: operations["deleteIntegrationOAuthClient"];
         options?: never;
         head?: never;
@@ -9452,6 +9477,9 @@ export interface operations {
                             source: "built-in" | "custom";
                             client_id: string;
                             is_default: boolean;
+                            auto_provisioned: boolean;
+                            has_client_secret: boolean;
+                            redirect_uri: string | null;
                         }[];
                     };
                 };
@@ -9625,7 +9653,65 @@ export interface operations {
                             source: "built-in" | "custom";
                             client_id: string;
                             is_default: boolean;
+                            auto_provisioned: boolean;
+                            has_client_secret: boolean;
+                            redirect_uri: string | null;
                         }[];
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createIntegrationOAuthClient: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Auth key as declared in the manifest's `auths` map. */
+                authKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    client_id: string;
+                    /** @default  */
+                    client_secret: string;
+                    /** Format: uri */
+                    redirect_uri?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        applicationId: string;
+                        integration_package_id: string;
+                        auth_key: string;
+                        client_id: string;
+                        has_client_secret: boolean;
+                        redirect_uri: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                        /** Format: date-time */
+                        updatedAt: string;
                     };
                 };
             };
@@ -9975,7 +10061,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    getIntegrationOAuthClient: {
+    rotateIntegrationOAuthClient: {
         parameters: {
             query?: never;
             header?: {
@@ -9987,52 +10073,8 @@ export interface operations {
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
                 packageId: string;
-                /** @description Auth key as declared in the manifest's `auths` map. */
-                authKey: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OAuth client */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        applicationId: string;
-                        integration_package_id: string;
-                        auth_key: string;
-                        client_id: string;
-                        has_client_secret: boolean;
-                        redirect_uri: string | null;
-                        /** Format: date-time */
-                        createdAt: string;
-                        /** Format: date-time */
-                        updatedAt: string;
-                    };
-                };
-            };
-            404: components["responses"]["NotFound"];
-        };
-    };
-    upsertIntegrationOAuthClient: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Integration package id (e.g. `@official/gmail`). */
-                packageId: string;
-                /** @description Auth key as declared in the manifest's `auths` map. */
-                authKey: string;
+                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
+                clientId: string;
             };
             cookie?: never;
         };
@@ -10048,7 +10090,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upserted */
+            /** @description Rotated */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -10086,8 +10128,8 @@ export interface operations {
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
                 packageId: string;
-                /** @description Auth key as declared in the manifest's `auths` map. */
-                authKey: string;
+                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
+                clientId: string;
             };
             cookie?: never;
         };
