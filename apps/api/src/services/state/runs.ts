@@ -1000,34 +1000,6 @@ export async function getRunFull(scope: AppScope, id: string, actor: Actor | nul
 }
 
 /**
- * Org-scoped run snapshot read. Intentionally narrower than
- * `getRun(scope, id)`: cross-app consumers span applications within a
- * single org, so the read scopes on `orgId` alone. Returns the public
- * `Run` DTO shape — schema internals (scheduler ids, actor fields, etc.)
- * stay inside apps/api.
- *
- * The `{ runId, orgId }` object-args shape is the module-facing public
- * contract (registered on `PlatformServices.runs.get`) — keep it stable.
- * App-scoped internal callers prefer `getRun(scope, runId)`.
- */
-export async function getRunByOrg(args: { runId: string; orgId: string }) {
-  const [row] = await db
-    .select({
-      id: runs.id,
-      status: runs.status,
-      orgId: runs.orgId,
-      applicationId: runs.applicationId,
-      packageId: runs.packageId,
-      result: runs.result,
-      error: runs.error,
-    })
-    .from(runs)
-    .where(and(eq(runs.id, args.runId), eq(runs.orgId, args.orgId)))
-    .limit(1);
-  return row ?? null;
-}
-
-/**
  * Org-scoped run log read. `order: "asc"` (default) returns entries in
  * insertion order (`id ASC`); `"desc"` selects the most recent `limit`
  * entries and is cheaper when only a tail is needed. The returned batch

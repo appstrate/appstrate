@@ -49,9 +49,9 @@ export function RunDegradedBanner({ metadata }: { metadata: unknown }) {
     <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm">
       <div className="flex items-center gap-2 font-medium text-amber-600 dark:text-amber-500">
         <AlertTriangle className="size-4" />
-        {t("exec.degradedIntegrations.title")}
+        {t("run.degradedIntegrations.title")}
       </div>
-      <p className="text-muted-foreground mt-1">{t("exec.degradedIntegrations.message")}</p>
+      <p className="text-muted-foreground mt-1">{t("run.degradedIntegrations.message")}</p>
       <ul className="mt-2 space-y-1.5">
         {ids.map((id) => (
           <DegradedIntegrationRow key={id} integrationId={id} />

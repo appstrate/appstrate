@@ -57,7 +57,7 @@ export function MemoryPanel({ packageId, runId }: MemoryPanelProps) {
   if (!hasAnything) {
     return (
       <EmptyState
-        message={isRunView ? t("exec.memoryEmpty") : t("detail.memoryEmptyAll")}
+        message={isRunView ? t("run.memoryEmpty") : t("detail.memoryEmptyAll")}
         hint={isRunView ? undefined : t("detail.memoryEmptyAllHint")}
         icon={BrainCircuit}
         compact

@@ -52,18 +52,6 @@ export async function createDefaultApplication(orgId: string, createdBy?: string
   return createApplication(orgId, { name: "Default", isDefault: true }, createdBy);
 }
 
-/** Get the default application for an organization. Throws 404 if not found. */
-export async function getDefaultApplication(orgId: string) {
-  const [app] = await db
-    .select()
-    .from(applications)
-    .where(scopedWhere(applications, { orgId, extra: [eq(applications.isDefault, true)] }))
-    .limit(1);
-
-  if (!app) throw notFound("Default application not found");
-  return app;
-}
-
 /** List all applications for an organization, ordered by creation date (newest first). */
 export async function listApplications(orgId: string) {
   return db

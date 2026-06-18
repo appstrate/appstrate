@@ -353,20 +353,6 @@ export async function dedupeCredentialLabel(orgId: string, base: string): Promis
 }
 
 /**
- * Derive a credential label when the caller doesn't supply one. Picks the
- * provider's `displayName` (registry) and dedupes against existing labels in
- * the same org, resolved server-side so automation doesn't have to invent a
- * name.
- *
- * Unknown providerIds fall back to the literal id — defensive only;
- * upstream callers reject unknown ids before we get here.
- */
-export async function deriveCredentialLabel(orgId: string, providerId: string): Promise<string> {
-  const provider = getModelProvider(providerId);
-  return dedupeCredentialLabel(orgId, provider?.displayName ?? providerId);
-}
-
-/**
  * Persist refreshed OAuth tokens. Called by the refresh worker / on-demand
  * resolver after a successful upstream refresh. Preserves blob fields the
  * upstream didn't return (e.g. `email`, `accountId` when not rotated).

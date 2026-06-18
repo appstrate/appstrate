@@ -46,19 +46,6 @@ export function actorFilter(actor: Actor, cols: { userId: Column; endUserId: Col
 }
 
 /**
- * Produces the `{recipientType, recipientId}` column pair for a polymorphic
- * recipient INSERT — the undistorted `Actor` shape. Used by the
- * `notifications` table, which stores the recipient as a single (type, id)
- * tuple rather than the nullable `{userId, endUserId}` pair.
- */
-export function actorRecipient(actor: Actor): {
-  recipientType: Actor["type"];
-  recipientId: string;
-} {
-  return { recipientType: actor.type, recipientId: actor.id };
-}
-
-/**
  * WHERE clause matching a polymorphic actor against a `{typeCol, idCol}`
  * pair — the generic counterpart to {@link actorFilter} for tables that
  * store the recipient as `(type, id)` (e.g. `notifications`). Both columns

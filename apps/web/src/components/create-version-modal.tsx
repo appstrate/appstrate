@@ -3,6 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
 import type { PackageType } from "@appstrate/core/validation";
+import { compareVersionsDesc, bumpVersion } from "@appstrate/core/semver";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -10,36 +11,11 @@ import { Spinner } from "./spinner";
 import { useCreateVersion, useVersionInfo } from "../hooks/use-packages";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-/** Simple semver comparison: returns true if a > b (major.minor.patch only). */
-function semverGt(a: string, b: string): boolean {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    if ((pa[i] ?? 0) > (pb[i] ?? 0)) return true;
-    if ((pa[i] ?? 0) < (pb[i] ?? 0)) return false;
-  }
-  return false;
-}
-
-function semverEq(a: string, b: string): boolean {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  return pa[0] === pb[0] && pa[1] === pb[1] && pa[2] === pb[2];
-}
-
 type BumpType = "patch" | "minor" | "major";
 
-function bumpVersion(version: string, type: BumpType): string {
-  const [major, minor, patch] = version.split(".").map(Number);
-  switch (type) {
-    case "patch":
-      return `${major}.${minor}.${patch! + 1}`;
-    case "minor":
-      return `${major}.${minor! + 1}.0`;
-    case "major":
-      return `${major! + 1}.0.0`;
-  }
-}
+/** a > b — full semver precedence (prerelease/build aware), matching the publish gate. */
+const semverGt = (a: string, b: string): boolean => compareVersionsDesc(a, b) < 0;
+const semverEq = (a: string, b: string): boolean => compareVersionsDesc(a, b) === 0;
 
 interface CreateVersionModalProps {
   open: boolean;
@@ -84,7 +60,9 @@ export function CreateVersionModal({
   // Mode C: active < latest (but not equal) -> blocked
   const isBlocked = !!activeVersion && !!latestVersion && !needsBump && !canCreateDirect;
 
-  const targetVersion = needsBump ? bumpVersion(latestVersion, selectedBump) : activeVersion;
+  const targetVersion = needsBump
+    ? (bumpVersion(latestVersion, selectedBump) ?? activeVersion)
+    : activeVersion;
 
   const canCreate = (needsBump || canCreateDirect) && hasUnarchivedChanges;
 
@@ -141,7 +119,7 @@ export function CreateVersionModal({
             <Label className="block text-sm font-medium">{t("version.bumpLabel")}</Label>
             <div className="flex gap-2">
               {bumpOptions.map((opt) => {
-                const bumped = bumpVersion(latestVersion, opt.type);
+                const bumped = bumpVersion(latestVersion, opt.type) ?? latestVersion;
                 const isSelected = selectedBump === opt.type;
                 return (
                   <button
