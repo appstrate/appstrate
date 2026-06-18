@@ -21,6 +21,7 @@ import { ForgotPasswordPage } from "./pages/forgot-password";
 import { ResetPasswordPage } from "./pages/reset-password";
 import { MagicLinkPage } from "./pages/magic-link";
 import { ErrorBoundary } from "./components/error-boundary";
+import { HostedAuthGate } from "./components/hosted-auth-gate";
 import { AppSidebar } from "./components/app-sidebar";
 import { NotificationBell } from "./components/notification-bell";
 import { LoadingState } from "./components/page-states";
@@ -345,7 +346,22 @@ export function App() {
     return (
       <ErrorBoundary>
         <Routes>
-          <Route path="/login" element={<LoginPage />} />
+          {/*
+           * The auth-entry routes are wrapped in `HostedAuthGate`: in OIDC
+           * mode it redirects to the hosted login/register page before the
+           * native form mounts (one mechanism, no per-page `useEffect`
+           * check to forget); in OSS mode it renders the form below. The
+           * ESLint `auth-client` ban (eslint.config.mjs) backs this up by
+           * stopping any of these pages from calling Better Auth directly.
+           */}
+          <Route
+            path="/login"
+            element={
+              <HostedAuthGate starter="login">
+                <LoginPage />
+              </HostedAuthGate>
+            }
+          />
           {/*
            * `/register` stays mounted even when `signupDisabled` is true so
            * the closed-mode bootstrap owner (and any
@@ -356,7 +372,14 @@ export function App() {
            * `RegisterPage` surfaces. The signup link is still hidden from
            * `/login` to avoid public discoverability.
            */}
-          <Route path="/register" element={<RegisterPage />} />
+          <Route
+            path="/register"
+            element={
+              <HostedAuthGate starter="signup">
+                <RegisterPage />
+              </HostedAuthGate>
+            }
+          />
           {/*
            * Server-rendered flows outside the SPA (e.g. the device-flow
            * `/activate` page) redirect unauthenticated visitors here with
@@ -383,10 +406,45 @@ export function App() {
               }
             />
           )}
+          {/*
+           * `/verify-email` is deliberately NOT gated: it is a post-signup
+           * interstitial (and verification-error display), not a login entry
+           * point. In OIDC + SMTP mode the server-rendered register flow can
+           * route an unauthenticated visitor here with `?email=` / `?error=`
+           * (see verify-email.tsx) — redirecting it to the hosted login would
+           * break that flow. It renders natively in both modes.
+           */}
           <Route path="/verify-email" element={<VerifyEmailPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
-          <Route path="/magic-link" element={<MagicLinkPage />} />
+          <Route
+            path="/forgot-password"
+            element={
+              <HostedAuthGate starter="login">
+                <ForgotPasswordPage />
+              </HostedAuthGate>
+            }
+          />
+          <Route
+            path="/reset-password"
+            element={
+              <HostedAuthGate starter="login">
+                <ResetPasswordPage />
+              </HostedAuthGate>
+            }
+          />
+          <Route
+            path="/magic-link"
+            element={
+              <HostedAuthGate starter="login">
+                <MagicLinkPage />
+              </HostedAuthGate>
+            }
+          />
+          {/*
+           * `/invite/:token` is NOT wrapped: it loads invite data first, then
+           * drives `useHostedAuthRedirect` directly with a starter (login vs
+           * signup) and login-hint derived from that data. Same seam, dynamic
+           * inputs — see invite-accept.tsx.
+           */}
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>

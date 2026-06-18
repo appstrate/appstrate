@@ -7,6 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ApiError, client, type paths } from "../api/client";
 import { refreshAuth, useAuth } from "../hooks/use-auth";
+import { useHostedAuthRedirect, isHostedAuthEnabled } from "../hooks/use-hosted-auth-redirect";
 import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
 import { AuthLayout } from "../components/auth-layout";
@@ -18,11 +19,6 @@ import { orgKeys } from "../lib/query-keys";
 /** Spec response of GET /invite/{token}/info (all fields required, role is an org-role enum). */
 type InviteInfo =
   paths["/invite/{token}/info"]["get"]["responses"]["200"]["content"]["application/json"];
-
-/** Whether the instance is running an OIDC IdP (the platform's own login flow). */
-function hasOidc(): boolean {
-  return !!(window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
-}
 
 /** Map an invitation ApiError code to a translation key, falling back to `fallback`. */
 function inviteErrorKey(code: string | null, fallback: string): string {
@@ -67,7 +63,7 @@ export function InviteAcceptPage() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [mode, setMode] = useState<"register" | "login">("register");
 
-  const oidc = hasOidc();
+  const oidc = isHostedAuthEnabled();
 
   useEffect(() => {
     if (!token) return;
@@ -87,23 +83,20 @@ export function InviteAcceptPage() {
   }, [token, t]);
 
   // OIDC delegation: once the invite is loaded and the visitor is not yet
-  // authenticated, redirect into the standard OIDC flow. The invite token
-  // rides as `redirectTo` (the browser returns to this page authenticated);
-  // the invited email rides as `login_hint` so the server-rendered login /
-  // register page pins it. Acceptance happens on return, in the authed branch.
-  useEffect(() => {
-    if (!info || user || !oidc || !token) return;
-    const redirectTo = `/invite/${token}`;
-    void import("../modules/oidc/lib/oidc")
-      .then(({ startOidcLogin, startOidcSignup }) =>
-        info.is_new_user
-          ? startOidcSignup(redirectTo, info.email)
-          : startOidcLogin(redirectTo, info.email),
-      )
-      // If the dynamic import or the redirect fails, surface an error instead
-      // of leaving the OIDC branch stuck on an indefinite spinner.
-      .catch(() => setServerError(t("invite.error")));
-  }, [info, user, oidc, token, t]);
+  // authenticated, redirect into the standard OIDC flow through the same
+  // `useHostedAuthRedirect` seam every other auth route uses. Unlike the
+  // simple routes (wrapped by `HostedAuthGate`), the invite chooses its
+  // starter and login-hint from data loaded asynchronously, so it drives the
+  // hook directly: the token rides as `redirectTo` (the browser returns here
+  // authenticated) and the invited email as `login_hint` (pinned on the hosted
+  // page). Acceptance happens on return, in the authed branch.
+  useHostedAuthRedirect({
+    enabled: !!info && !user && !!token,
+    starter: info?.is_new_user ? "signup" : "login",
+    redirectTo: token ? `/invite/${token}` : undefined,
+    loginHint: info?.email,
+    onError: () => setServerError(t("invite.error")),
+  });
 
   /** POST accept (session-bound, no body) + handle success. */
   const postAccept = useCallback(async () => {
