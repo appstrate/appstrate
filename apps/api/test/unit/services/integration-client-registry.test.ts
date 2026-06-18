@@ -99,10 +99,11 @@ describe("integration-client-registry", () => {
     });
   });
 
-  describe("accessors before explicit init", () => {
-    it("lazy-load from env (empty by default) instead of throwing", () => {
+  describe("reset yields an empty initialized registry", () => {
+    it("accessors return empties after a reset without throwing", () => {
       __resetSystemIntegrationClientsForTest();
-      // SYSTEM_INTEGRATION_CLIENTS defaults to "[]" → empty registry, no throw.
+      // Reset leaves an empty (initialized) registry — accessors degrade to
+      // empty/null, they do not trip the access-before-init guard.
       expect(getSystemIntegrationClients().size).toBe(0);
       expect(getSystemIntegrationClientById("x")).toBeNull();
       expect(getDefaultSystemIntegrationClient("@x/y", "google")).toBeNull();

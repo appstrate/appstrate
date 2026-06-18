@@ -29,6 +29,7 @@ import { requireAppContext } from "../../src/middleware/app-context.ts";
 import { getOrgSettings } from "../../src/services/organizations.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../../src/services/model-registry.ts";
+import { initSystemIntegrationClients } from "../../src/services/integration-client-registry.ts";
 import { initRunLimits } from "../../src/services/run-limits.ts";
 import { initProxyLimits } from "../../src/services/proxy-limits.ts";
 import { seedTestModelProviders } from "./model-providers.ts";
@@ -90,6 +91,7 @@ let cachedApp: Hono<AppEnv> | null = null;
 
 // Initialize boot-time singletons that core routes depend on.
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
+initSystemIntegrationClients(); // SYSTEM_INTEGRATION_CLIENTS — empty array in test; tests seed via initSystemIntegrationClients([...])
 initRunLimits(); // PLATFORM_RUN_LIMITS / INLINE_RUN_LIMITS — defaults when unset
 initProxyLimits(); // LLM_PROXY_LIMITS / CREDENTIAL_PROXY_LIMITS — defaults when unset
 // Seed the runtime model-provider registry to the canonical test

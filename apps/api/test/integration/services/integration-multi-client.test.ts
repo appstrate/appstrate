@@ -118,7 +118,7 @@ describe("integration multi-client", () => {
       expect(await readClientRef(created.id)).toBe("custom");
     });
 
-    it("leaves client_ref NULL when omitted (legacy callers)", async () => {
+    it("leaves client_ref NULL when omitted (non-oauth2 callers)", async () => {
       const created = await connect();
       expect(await readClientRef(created.id)).toBeNull();
     });

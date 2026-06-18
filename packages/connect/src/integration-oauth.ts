@@ -119,8 +119,9 @@ export interface InitiateIntegrationOAuthInput {
   /**
    * Which registered client this flow uses — `"system:<id>"` or `"custom"`.
    * Carried into the state so the callback can stamp it on the connection row;
-   * token refresh later resolves the same client credentials by it. Absent on
-   * legacy callers (treated as the org's custom client at refresh).
+   * token refresh later resolves the same client credentials by it. Set on every
+   * oauth2 connect; only absent for non-oauth2 auths, which have no OAuth client
+   * and never reach token refresh.
    */
   clientRef?: string;
   /** Org / app / actor context — propagated to the callback handler. */
