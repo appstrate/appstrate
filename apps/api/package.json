@@ -26,7 +26,7 @@
     "@appstrate/module-codex": "workspace:*",
     "@appstrate/runner-pi": "workspace:*",
     "@appstrate/shared-types": "workspace:*",
-    "@better-auth/cimd": "1.7.0-beta.4",
+    "@better-auth/cimd": "1.7.0-beta.7",
     "@better-auth/oauth-provider": "1.7.0-beta.4",
     "@hono/swagger-ui": "^0.6.1",
     "@modelcontextprotocol/sdk": "^1.29.0",

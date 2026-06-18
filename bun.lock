@@ -55,7 +55,7 @@
         "@appstrate/module-codex": "workspace:*",
         "@appstrate/runner-pi": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
-        "@better-auth/cimd": "1.7.0-beta.4",
+        "@better-auth/cimd": "1.7.0-beta.7",
         "@better-auth/oauth-provider": "1.7.0-beta.4",
         "@hono/swagger-ui": "^0.6.1",
         "@modelcontextprotocol/sdk": "^1.29.0",
@@ -602,7 +602,7 @@
 
     "@babel/types": ["@babel/types@7.29.0", "", { "dependencies": { "@babel/helper-string-parser": "^7.27.1", "@babel/helper-validator-identifier": "^7.28.5" } }, "sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A=="],
 
-    "@better-auth/cimd": ["@better-auth/cimd@1.7.0-beta.4", "", { "peerDependencies": { "@better-auth/core": "^1.7.0-beta.4", "@better-auth/oauth-provider": "^1.7.0-beta.4", "better-auth": "^1.7.0-beta.4", "better-call": "1.3.5" } }, "sha512-4UXliqFP8OTdGQUYbl+ewrJ9k1hmOoM2CJajuHwuv1d+jWMn7mG7xCPr3QgrOkQErjsqGra+Y11vZl82QwBidA=="],
+    "@better-auth/cimd": ["@better-auth/cimd@1.7.0-beta.7", "", { "peerDependencies": { "@better-auth/core": "^1.7.0-beta.7", "@better-auth/oauth-provider": "^1.7.0-beta.7", "better-auth": "^1.7.0-beta.7", "better-call": "1.3.6" } }, "sha512-FcM3UjHz98VdiGB8roS3gKue0KP1WXp2E7GTg1qN6lLPI77L8QQ6kVWTbx+acuvK/hXiJe6pEATHWpgihjbfpg=="],
 
     "@better-auth/core": ["@better-auth/core@1.7.0-beta.4", "", { "dependencies": { "@opentelemetry/semantic-conventions": "^1.39.0", "@standard-schema/spec": "^1.1.0", "zod": "^4.3.6" }, "peerDependencies": { "@better-auth/utils": "0.4.1", "@better-fetch/fetch": "1.1.21", "@cloudflare/workers-types": ">=4", "@opentelemetry/api": "^1.9.0", "better-call": "1.3.5", "jose": "^6.1.0", "kysely": "^0.28.5 || ^0.29.0", "nanostores": "^1.0.1" }, "optionalPeers": ["@cloudflare/workers-types", "@opentelemetry/api"] }, "sha512-A1dVAFheBj3APVCEdhDnGDScpqxDiVMkkkOJU4Y+GOxYpZQ879g3xz0i332mUzZaetUkJBavnYhBsfp//h9gbA=="],
 
