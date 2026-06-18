@@ -57,10 +57,10 @@ export interface OAuthStateRecord {
     /** Optional explicit client_secret (omitted for `none`). */
     clientSecret?: string;
     /**
-     * Which registered client minted this connection — `"system:<id>"` for an
-     * env-provided system client, `"custom"` for the org's per-application
-     * client. Carried into the state so the callback stamps it on the
-     * connection row; token refresh later resolves the same credentials by it.
+     * Which registered client minted this connection — a flat client id (system
+     * env id or custom `integration_oauth_clients.id`). Carried into the state so
+     * the callback stamps it on the connection row; token refresh later resolves
+     * the same credentials by it.
      */
     clientRef?: string;
     /**

@@ -117,11 +117,11 @@ export interface InitiateIntegrationOAuthInput {
   /** Platform redirect URI — same callback for all integration flows. */
   redirectUri: string;
   /**
-   * Which registered client this flow uses — `"system:<id>"` or `"custom"`.
-   * Carried into the state so the callback can stamp it on the connection row;
-   * token refresh later resolves the same client credentials by it. Set on every
-   * oauth2 connect; only absent for non-oauth2 auths, which have no OAuth client
-   * and never reach token refresh.
+   * Which registered client this flow uses — a flat client id (system env id or
+   * custom `integration_oauth_clients.id`). Carried into the state so the
+   * callback can stamp it on the connection row; token refresh later resolves
+   * the same client credentials by it. Set on every oauth2 connect; only absent
+   * for non-oauth2 auths, which have no OAuth client and never reach token refresh.
    */
   clientRef?: string;
   /** Org / app / actor context — propagated to the callback handler. */
@@ -294,9 +294,9 @@ export interface IntegrationOAuthCallbackResult {
    */
   connectionId?: string;
   /**
-   * Pass-through of the minting client ref set at initiate time —
-   * `"system:<id>"` or `"custom"`. Stamped on the connection row so token
-   * refresh resolves the same client credentials.
+   * Pass-through of the minting client id set at initiate time (system env id or
+   * custom `integration_oauth_clients.id`). Stamped on the connection row so
+   * token refresh resolves the same client credentials.
    */
   clientRef?: string;
 }

@@ -1098,7 +1098,7 @@ describe("multi-client: list + system-client connect", () => {
     };
     expect(body.data).toHaveLength(1);
     expect(body.data[0]).toMatchObject({
-      client_ref: "system:gmail-system",
+      client_ref: "gmail-system",
       source: "built-in",
       is_default: true,
     });
@@ -1118,11 +1118,15 @@ describe("multi-client: list + system-client connect", () => {
       data: Array<{ client_ref: string; source: string; is_default: boolean }>;
     };
     expect(body.data).toHaveLength(2);
-    expect(body.data.find((c) => c.source === "custom")).toMatchObject({
-      client_ref: "custom",
-      is_default: true,
+    const custom = body.data.find((c) => c.source === "custom")!;
+    // The custom client_ref is the per-application row id (a UUID), not a sentinel.
+    expect(custom.is_default).toBe(true);
+    expect(custom.client_ref).not.toBe("gmail-system");
+    expect(custom.client_ref.length).toBeGreaterThan(0);
+    expect(body.data.find((c) => c.source === "built-in")).toMatchObject({
+      client_ref: "gmail-system",
+      is_default: false,
     });
-    expect(body.data.find((c) => c.source === "built-in")).toMatchObject({ is_default: false });
   });
 
   it("connects with the system client out of the box (no per-org client registered)", async () => {
@@ -1139,22 +1143,22 @@ describe("multi-client: list + system-client connect", () => {
     expect(body.state).toBeTruthy();
   });
 
-  it("honours an explicit system client_ref", async () => {
+  it("honours an explicit system client id", async () => {
     seedSystem();
     const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_ref: "system:gmail-system" }),
+      body: JSON.stringify({ client_ref: "gmail-system" }),
     });
     expect(res.status).toBe(200);
   });
 
-  it("rejects an unknown system client_ref with 400", async () => {
+  it("rejects an unknown client id with 400 even when a system client exists (no silent fallback)", async () => {
     seedSystem();
     const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_ref: "system:does-not-exist" }),
+      body: JSON.stringify({ client_ref: "does-not-exist" }),
     });
     expect(res.status).toBe(400);
   });
@@ -1168,17 +1172,22 @@ describe("multi-client: list + system-client connect", () => {
     expect(res.status).toBe(403);
   });
 
-  it("connects with the org's custom client (client_ref=custom) using its client_id", async () => {
+  it("connects with the org's custom client by its id, using its client_id", async () => {
     seedSystem();
     await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ client_id: "org-client", client_secret: "org-secret" }),
     });
+    // Discover the custom client's id from the list endpoint, then pin it.
+    const list = (await (await listClients()).json()) as {
+      data: Array<{ client_ref: string; source: string }>;
+    };
+    const customRef = list.data.find((c) => c.source === "custom")!.client_ref;
     const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_ref: "custom" }),
+      body: JSON.stringify({ client_ref: customRef }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { auth_url: string };
@@ -1187,19 +1196,7 @@ describe("multi-client: list + system-client connect", () => {
     expect(body.auth_url).not.toContain("sys-client");
   });
 
-  it("does NOT silently downgrade an explicit client_ref=custom to the system client", async () => {
-    // System client present, but the org asked explicitly for its own (absent)
-    // client. Must 403 — never fall back to the shared app behind the user's back.
-    seedSystem();
-    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
-      method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_ref: "custom" }),
-    });
-    expect(res.status).toBe(403);
-  });
-
-  it("rejects a system client_ref belonging to a different integration (400)", async () => {
+  it("rejects a system client id registered for a different integration (400)", async () => {
     // A system client exists, but registered for another integration. Pinning it
     // on @myorg/gmail must be rejected, not honoured.
     initSystemIntegrationClients([
@@ -1214,7 +1211,7 @@ describe("multi-client: list + system-client connect", () => {
     const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_ref: "system:foreign-system" }),
+      body: JSON.stringify({ client_ref: "foreign-system" }),
     });
     expect(res.status).toBe(400);
   });

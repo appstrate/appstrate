@@ -78,6 +78,18 @@ async function setup(
     packageId,
     config: {},
   });
+  // Register the org's custom per-application client first so its id can pin the
+  // connection (client_ref is a flat client id).
+  const [customClient] = await db
+    .insert(integrationOauthClients)
+    .values({
+      applicationId: ctx.defaultAppId,
+      integrationId: packageId,
+      authKey: "google",
+      clientId: "client_abc",
+      clientSecretEncrypted: encryptCredentials({ client_secret: "secret_xyz" }),
+    })
+    .returning({ id: integrationOauthClients.id });
   await db.insert(integrationConnections).values({
     integrationId: packageId,
     authKey: "google",
@@ -87,17 +99,10 @@ async function setup(
     credentialsEncrypted: encryptCredentials(fields),
     scopesGranted: ["openid", "email"],
     sharedWithOrg: false,
-    // oauth2 connections always pin their minting client; this fixture uses the
-    // org's custom per-application client registered just below.
-    clientRef: "custom",
+    // oauth2 connections always pin their minting client by id; here the org's
+    // custom per-application client registered just above.
+    clientRef: customClient!.id,
     expiresAt: new Date(Date.now() - 60_000),
-  });
-  await db.insert(integrationOauthClients).values({
-    applicationId: ctx.defaultAppId,
-    integrationId: packageId,
-    authKey: "google",
-    clientId: "client_abc",
-    clientSecretEncrypted: encryptCredentials({ client_secret: "secret_xyz" }),
   });
 }
 
@@ -134,7 +139,7 @@ async function setupSystemPinned(
     credentialsEncrypted: encryptCredentials(fields),
     scopesGranted: ["openid", "email"],
     sharedWithOrg: false,
-    clientRef: `system:${systemId}`,
+    clientRef: systemId,
     expiresAt: new Date(Date.now() - 60_000),
   });
   initSystemIntegrationClients([
@@ -314,7 +319,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
 
   it("refreshes a SYSTEM-pinned connection using the env system client (end-to-end)", async () => {
     // No custom per-app client row exists — refresh can ONLY succeed by resolving
-    // the system client via the connection's `client_ref="system:<id>"`. Proves
+    // the system client via the connection's `client_ref` (the system id). Proves
     // the pin threads from the connection SELECT through selectAccessibleConnection
     // into buildIntegrationOAuthRefreshContext.
     const packageId = "@cprefreshorg/gmail-system";

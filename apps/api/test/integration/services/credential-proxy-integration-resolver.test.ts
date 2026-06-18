@@ -104,6 +104,7 @@ function gmailManifest(tokenUrl: string): Record<string, unknown> {
 describe("credential-proxy integration-resolver", () => {
   let ctx: TestContext;
   let token: TokenServer;
+  let customClientId: string;
 
   beforeEach(async () => {
     await truncateAll();
@@ -117,13 +118,17 @@ describe("credential-proxy integration-resolver", () => {
       draftManifest: gmailManifest(token.url),
     });
     await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION_ID);
-    await db.insert(integrationOauthClients).values({
-      applicationId: ctx.defaultAppId,
-      integrationId: INTEGRATION_ID,
-      authKey: "primary",
-      clientId: "cid",
-      clientSecretEncrypted: encryptCredentials({ client_secret: "csec" }),
-    });
+    const [oauthClient] = await db
+      .insert(integrationOauthClients)
+      .values({
+        applicationId: ctx.defaultAppId,
+        integrationId: INTEGRATION_ID,
+        authKey: "primary",
+        clientId: "cid",
+        clientSecretEncrypted: encryptCredentials({ client_secret: "csec" }),
+      })
+      .returning({ id: integrationOauthClients.id });
+    customClientId = oauthClient!.id;
   });
 
   afterEach(() => {
@@ -148,8 +153,8 @@ describe("credential-proxy integration-resolver", () => {
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
         scopesGranted: ["read"],
-        // oauth2 connection → pins the org's custom per-app client (seeded above).
-        clientRef: "custom",
+        // oauth2 connection → pins the org's custom per-app client by id (seeded above).
+        clientRef: customClientId,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;

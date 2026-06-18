@@ -75,12 +75,12 @@ export const integrationConnections = pgTable(
       .notNull()
       .default(sql`'{}'::text[]`),
     needsReconnection: boolean("needs_reconnection").notNull().default(false),
-    // Which registered OAuth client minted this connection — `"system:<id>"`
-    // for an env-provided system client (SYSTEM_INTEGRATION_CLIENTS) or
-    // `"custom"` for the org's own per-application `integration_oauth_clients`
-    // row. Pinned so token refresh resolves the SAME client credentials that
-    // minted the tokens — without it, refresh cannot disambiguate once a system
-    // and custom client coexist.
+    // Which registered OAuth client minted this connection — a flat client id:
+    // the env id of a system client (SYSTEM_INTEGRATION_CLIENTS) or the
+    // `integration_oauth_clients.id` of the org's own per-application client.
+    // Pinned so token refresh resolves the SAME client credentials that minted
+    // the tokens. Resolved system-first then DB-by-id (mirrors the model-provider
+    // credential pattern), so a system id MUST NOT be UUID-shaped.
     //
     // INVARIANT: NULL ⟺ a non-oauth2 auth (api_key / login_secret), which has no
     // OAuth client. Every oauth2 connection carries a non-null client_ref (set

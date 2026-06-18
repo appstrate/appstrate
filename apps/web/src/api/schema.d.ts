@@ -9525,7 +9525,7 @@ export interface operations {
                     force_account_select?: boolean;
                     /** Format: uuid */
                     connection_id?: string;
-                    /** @description Which registered client to connect with — 'custom' or 'system:<id>'. Omitted → the default (org custom client when registered, else system client). */
+                    /** @description Which registered client to connect with — a flat client id (a value from GET .../auths/{authKey}/clients). Omitted → the default (org custom client when registered, else system client). */
                     client_ref?: string;
                 };
             };

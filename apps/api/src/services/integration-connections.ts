@@ -42,14 +42,12 @@ import {
 import { getEnv } from "@appstrate/env";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import {
-  SYSTEM_CLIENT_REF_PREFIX,
-  CUSTOM_CLIENT_REF,
-  systemClientRef,
-  parseClientRef,
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
   listSystemIntegrationClientsFor,
+  type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
+import { mergeSystemAndDb } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
@@ -92,6 +90,8 @@ import type {
  * {@link IntegrationOAuthClient} (omit `clientSecret`) before responding.
  */
 interface IntegrationOAuthClientWithSecret extends IntegrationOAuthClient {
+  /** Row PK — the connection's `client_ref` when this custom client mints it. */
+  id: string;
   clientSecret: string;
 }
 
@@ -148,10 +148,10 @@ interface ActorConnectionRow {
   expiresAt: Date | null;
   scopesGranted: string[];
   /**
-   * Which registered client minted the connection — `"system:<id>"` or
-   * `"custom"` for oauth2; `null` only for non-oauth2 auths (no OAuth client).
-   * Threaded into the token-refresh client resolution so refresh uses the SAME
-   * credentials that minted the tokens.
+   * Which registered client minted the connection — a flat client id (system
+   * env id or custom `integration_oauth_clients.id`) for oauth2; `null` only for
+   * non-oauth2 auths (no OAuth client). Threaded into the token-refresh client
+   * resolution so refresh uses the SAME credentials that minted the tokens.
    */
   clientRef: string | null;
 }
@@ -511,6 +511,7 @@ export async function getIntegrationOAuthClient(
     });
   }
   return {
+    id: row.id,
     applicationId: row.applicationId,
     integration_package_id: row.integrationId,
     auth_key: row.authKey,
@@ -537,47 +538,24 @@ export interface ResolvedConnectClient {
   clientRef: string;
 }
 
-/**
- * Resolve a SYSTEM integration client for connect.
- *
- *   - `requestedRef = "system:<id>"` → that exact system client, but only when
- *     it serves this `(integrationId, authKey)` (defence against a caller
- *     pinning an unrelated client).
- *   - no/`"custom"` ref → the default system client for the auth (first
- *     registered), or `null` when none is configured.
- *
- * Returns `null` when no matching system client exists — the caller then falls
- * back to the org's custom client or errors.
- */
-export function resolveSystemConnectClient(
-  integrationId: string,
-  authKey: string,
-  requestedRef?: string,
-): ResolvedConnectClient | null {
-  if (requestedRef && requestedRef.startsWith(SYSTEM_CLIENT_REF_PREFIX)) {
-    const parsed = parseClientRef(requestedRef);
-    if (parsed.kind !== "system") return null;
-    const def = resolveSystemClientForAuth(parsed.id, integrationId, authKey);
-    if (!def) return null;
-    return systemConnectClient(def);
-  }
-  const def = getDefaultSystemIntegrationClient(integrationId, authKey);
-  if (!def) return null;
-  return systemConnectClient(def);
-}
-
 /** Project a registered system client into the connect-time resolved shape. */
-function systemConnectClient(def: {
-  id: string;
-  clientId: string;
-  clientSecret: string;
-}): ResolvedConnectClient {
+function systemConnectClient(def: SystemIntegrationClientDefinition): ResolvedConnectClient {
   return {
     clientId: def.clientId,
     clientSecret: def.clientSecret,
     // System clients use the platform default redirect URI (no per-client override).
     redirectUri: null,
-    clientRef: systemClientRef(def.id),
+    clientRef: def.id,
+  };
+}
+
+/** Project the org's per-application custom client into the resolved shape. */
+function customConnectClient(client: IntegrationOAuthClientWithSecret): ResolvedConnectClient {
+  return {
+    clientId: client.client_id,
+    clientSecret: client.clientSecret,
+    redirectUri: client.redirect_uri ?? null,
+    clientRef: client.id,
   };
 }
 
@@ -586,14 +564,16 @@ function systemConnectClient(def: {
  * single home for the client-selection precedence (previously inlined in
  * `OAuth2Strategy.begin`). An integration auth may be served by the org's own
  * per-application client (BYO-app, already loaded into `resolved.client`)
- * AND/OR an env-provided system client. Precedence:
- *   1. Explicit `requestedRef = "system:<id>"` → that system client.
- *   2. The org's custom client when registered (deliberate BYO-app).
- *   3. Else the default system client for the auth (shared, zero-config).
- * Auto-provisioned remote-MCP auths (DCR/CIMD) keep their own client and are
- * never served by a system entry. Throws the operator-facing error when no
- * client can be resolved. The returned `clientRef` is pinned on the connection
- * so token refresh resolves the same credentials.
+ * AND/OR an env-provided system client. `client_ref` is a flat client id:
+ *   - Explicit `requestedRef` → that exact client (system id, validated against
+ *     this auth; or the org's loaded custom client by its id). Unknown → error,
+ *     never a silent fallback.
+ *   - No ref → the org's custom client when registered (deliberate BYO-app),
+ *     else the default system client (shared, zero-config).
+ * Auto-provisioned remote-MCP auths (DCR/CIMD) keep their own (custom) client
+ * and are never served by a system entry. Throws the operator-facing error when
+ * no client can be resolved. The returned `clientRef` is pinned on the
+ * connection so token refresh resolves the same credentials.
  */
 export function resolveConnectClient(
   integrationId: string,
@@ -604,44 +584,39 @@ export function resolveConnectClient(
   requestedRef: string | undefined,
 ): ResolvedConnectClient {
   const autoProvisioned = usesAutoProvisionedClient(manifest, auth);
-  // An auto-provisioned (DCR/CIMD) auth provisions its own client and is never
-  // served by a system entry — an explicit `system:` selection cannot be
-  // honoured, so reject it loudly rather than silently using the DCR client.
-  if (autoProvisioned && requestedRef?.startsWith(SYSTEM_CLIENT_REF_PREFIX)) {
+  const customClient = resolved.client;
+
+  // Explicit selection by client id.
+  if (requestedRef) {
+    const sys = resolveSystemClientForAuth(requestedRef, integrationId, authKey);
+    if (sys) {
+      // An auto-provisioned (DCR/CIMD) auth provisions its own client and is
+      // never served by a system entry — reject loudly rather than silently
+      // using the DCR client.
+      if (autoProvisioned) {
+        throw invalidRequest(
+          `Integration '${integrationId}' auth '${authKey}' provisions its OAuth client automatically; a system client cannot be selected.`,
+        );
+      }
+      return systemConnectClient(sys);
+    }
+    // Custom: must match the org's loaded (scope-resolved) client — a custom id
+    // from another app/integration/auth cannot match, so cross-app selection is
+    // structurally impossible here.
+    if (customClient && customClient.id === requestedRef) {
+      return customConnectClient(customClient);
+    }
     throw invalidRequest(
-      `Integration '${integrationId}' auth '${authKey}' provisions its OAuth client automatically; a system client cannot be selected.`,
+      `Unknown OAuth client '${requestedRef}' for '${integrationId}' auth '${authKey}'`,
     );
   }
 
-  // 1. Explicit system selection.
-  if (!autoProvisioned && requestedRef?.startsWith(SYSTEM_CLIENT_REF_PREFIX)) {
-    const sys = resolveSystemConnectClient(integrationId, authKey, requestedRef);
-    if (!sys) {
-      throw invalidRequest(
-        `Unknown system OAuth client '${requestedRef}' for '${integrationId}' auth '${authKey}'`,
-      );
-    }
-    return sys;
+  // No explicit ref — the org's custom (BYO-app) client wins, else default system.
+  if (customClient) return customConnectClient(customClient);
+  if (!autoProvisioned) {
+    const sys = getDefaultSystemIntegrationClient(integrationId, authKey);
+    if (sys) return systemConnectClient(sys);
   }
-
-  // 2. The org's custom (BYO-app) client.
-  const customClient = resolved.client;
-  if (customClient) {
-    return {
-      clientId: customClient.client_id,
-      clientSecret: customClient.clientSecret,
-      redirectUri: customClient.redirect_uri ?? null,
-      clientRef: CUSTOM_CLIENT_REF,
-    };
-  }
-
-  // 3. Default system client — unless the caller explicitly asked for "custom"
-  // (then there is genuinely nothing to use → error below).
-  const sys =
-    !autoProvisioned && requestedRef !== CUSTOM_CLIENT_REF
-      ? resolveSystemConnectClient(integrationId, authKey)
-      : null;
-  if (sys) return sys;
 
   if (autoProvisioned) {
     // Auto-provisioning auth (public client on a remote MCP integration): client
@@ -659,6 +634,82 @@ export function resolveConnectClient(
   throw forbidden(
     `Administrator must register OAuth client credentials for '${integrationId}' auth '${authKey}' before connection`,
   );
+}
+
+/** RFC 4122 shape — a custom client id is the `integration_oauth_clients.id` UUID. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Resolve a pinned `client_ref` (flat client id) to the OAuth client
+ * credentials that mint/refresh a connection's tokens. The token-refresh
+ * counterpart of `resolveConnectClient` — and the direct analogue of the
+ * model-provider `loadInferenceCredentials`: try the system registry by id
+ * first, then the per-application `integration_oauth_clients` table by id.
+ *
+ * SECURITY: the custom lookup is scoped to `(applicationId, integrationId,
+ * authKey)` so a custom id belonging to another app/integration/auth never
+ * resolves — the same re-validation the system branch applies. Returns `null`
+ * when the id resolves to neither (since-removed client, remapped system entry,
+ * cross-scope id) → the caller skips refresh (surfaces needs_reconnection).
+ *
+ * `tokenEndpointAuthMethod` gates secret resolution: a public client
+ * (`"none"`) carries no secret, so the system secret is dropped and the custom
+ * ciphertext is never decrypted.
+ */
+export async function resolveIntegrationClientById(
+  clientRef: string,
+  applicationId: string,
+  integrationId: string,
+  authKey: string,
+  tokenEndpointAuthMethod: string | undefined,
+): Promise<{ clientId: string; clientSecret: string } | null> {
+  const needsSecret = tokenEndpointAuthMethod !== "none";
+
+  // 1) System client (env), validated against this (integrationId, authKey).
+  const sys = resolveSystemClientForAuth(clientRef, integrationId, authKey);
+  if (sys) {
+    return { clientId: sys.clientId, clientSecret: needsSecret ? sys.clientSecret : "" };
+  }
+
+  // A custom client id is the row's UUID PK. Anything else — a since-removed
+  // system id, a remapped id, garbage — cannot be a custom row, so skip the
+  // typed lookup (and avoid a `uuid` cast error on a non-UUID literal).
+  if (!UUID_RE.test(clientRef)) return null;
+
+  // 2) Custom per-application client, by id AND fully scoped (escalation guard).
+  const [row] = await db
+    .select({
+      clientId: integrationOauthClients.clientId,
+      clientSecretEncrypted: integrationOauthClients.clientSecretEncrypted,
+    })
+    .from(integrationOauthClients)
+    .where(
+      and(
+        eq(integrationOauthClients.id, clientRef),
+        eq(integrationOauthClients.applicationId, applicationId),
+        eq(integrationOauthClients.integrationId, integrationId),
+        eq(integrationOauthClients.authKey, authKey),
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+
+  let clientSecret = "";
+  if (needsSecret) {
+    try {
+      clientSecret =
+        decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted).client_secret ??
+        "";
+    } catch (err) {
+      logger.warn("Integration custom client_secret decrypt failed", {
+        integrationId,
+        authKey,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+  return { clientId: row.clientId, clientSecret };
 }
 
 /**
@@ -689,30 +740,50 @@ export async function listIntegrationClients(
   authKey: string,
 ): Promise<IntegrationClientDescriptor[]> {
   await assertAppBelongsToOrg(scope);
-  const custom = await getIntegrationOAuthClient(scope, packageId, authKey);
-  const system = listSystemIntegrationClientsFor(packageId, authKey);
-  const hasCustom = custom !== null;
-
-  const out: IntegrationClientDescriptor[] = [];
-  if (custom) {
-    out.push({
-      client_ref: CUSTOM_CLIENT_REF,
-      source: "custom",
-      client_id: custom.client_id,
-      // Custom wins as default when present (org registered it deliberately).
-      is_default: true,
-    });
-  }
-  system.forEach((def, idx) => {
-    out.push({
-      client_ref: systemClientRef(def.id),
+  const customRows = await db
+    .select({ id: integrationOauthClients.id, clientId: integrationOauthClients.clientId })
+    .from(integrationOauthClients)
+    .where(
+      and(
+        eq(integrationOauthClients.applicationId, scope.applicationId),
+        eq(integrationOauthClients.integrationId, packageId),
+        eq(integrationOauthClients.authKey, authKey),
+      ),
+    );
+  // Same generic system+DB merge the model-provider / proxy lists use: system
+  // entries first, a DB row whose id collides with a system id is skipped
+  // (system wins) — matching the system-first resolution in
+  // `resolveIntegrationClientById`.
+  const system = new Map(
+    listSystemIntegrationClientsFor(packageId, authKey).map((def) => [def.id, def] as const),
+  );
+  const merged = mergeSystemAndDb<
+    SystemIntegrationClientDefinition,
+    (typeof customRows)[number],
+    IntegrationClientDescriptor
+  >({
+    system,
+    rows: customRows,
+    mapSystem: (id, def) => ({
+      client_ref: id,
       source: "built-in",
       client_id: def.clientId,
-      // First system client is the default only when no custom client exists.
-      is_default: !hasCustom && idx === 0,
-    });
+      is_default: false,
+    }),
+    mapRow: (row) => ({
+      client_ref: row.id,
+      source: "custom",
+      client_id: row.clientId,
+      is_default: false,
+    }),
   });
-  return out;
+  // Default precedence mirrors connect: the org's custom client wins when
+  // present (registered on purpose), else the first system client.
+  const defaultRef =
+    merged.find((c) => c.source === "custom")?.client_ref ??
+    merged.find((c) => c.source === "built-in")?.client_ref ??
+    null;
+  return merged.map((c) => ({ ...c, is_default: c.client_ref === defaultRef }));
 }
 
 // ─────────────────────────────────────────────
@@ -1200,10 +1271,10 @@ export interface StoreConnectionInput {
    */
   connectionId?: string;
   /**
-   * Which registered client minted this connection — `"system:<id>"` or
-   * `"custom"`. Pinned on the row so token refresh resolves the same
-   * credentials. Set by OAuth2Strategy on every oauth2 connect; absent for
-   * non-oauth2 auths (persists NULL — they have no OAuth client).
+   * Which registered client minted this connection — a flat client id (system
+   * env id or custom `integration_oauth_clients.id`). Pinned on the row so token
+   * refresh resolves the same credentials. Set by OAuth2Strategy on every oauth2
+   * connect; absent for non-oauth2 auths (persists NULL — no OAuth client).
    */
   clientRef?: string | null;
 }
@@ -1271,11 +1342,11 @@ export interface PersistCredentialInput {
   packageId?: string;
   authKey?: string;
   /**
-   * Which registered client minted this connection — `"system:<id>"` or
-   * `"custom"` (oauth2 only). Stamped on INSERT and on the acquisition UPDATE
-   * (reconnect may switch clients) so token refresh resolves the same
-   * credentials. Omitted by the refresh write-back (`update-by-id`) → never
-   * clobbered on refresh. Absent for non-oauth2 writes → persists NULL.
+   * Which registered client minted this connection — a flat client id (oauth2
+   * only). Stamped on INSERT and on the acquisition UPDATE (reconnect may switch
+   * clients) so token refresh resolves the same credentials. Omitted by the
+   * refresh write-back (`update-by-id`) → never clobbered on refresh. Absent for
+   * non-oauth2 writes → persists NULL.
    */
   clientRef?: string | null;
 }

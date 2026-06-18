@@ -112,12 +112,13 @@ export const connectOAuthSchema = z.object({
   scopes: z.array(z.string()).optional(),
   force_account_select: z.boolean().optional(),
   connection_id: z.uuid().optional(),
-  // Which registered client to connect with — `"system:<id>"` or `"custom"`.
-  // Omitted → the default (org's custom client when registered, else the system
-  // client). `GET .../auths/:authKey/clients` enumerates valid values.
+  // Which registered client to connect with — a flat client id (system env id or
+  // custom `integration_oauth_clients.id`). Omitted → the default (org's custom
+  // client when registered, else the system client). `GET .../auths/:authKey/clients`
+  // enumerates valid ids.
   client_ref: z
     .string()
-    .regex(/^(custom|system:[\w.-]+)$/, "client_ref must be 'custom' or 'system:<id>'")
+    .regex(/^[\w.-]+$/, "client_ref must be a client id")
     .optional(),
 });
 

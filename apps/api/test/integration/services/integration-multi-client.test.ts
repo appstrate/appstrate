@@ -3,10 +3,13 @@
 /**
  * Multiple OAuth clients per integration (issue #723): a system client
  * (SYSTEM_INTEGRATION_CLIENTS) and the org's custom per-application client
- * coexist. A connection pins WHICH client minted it via `client_ref`; token
- * refresh resolves the same client's credentials by that ref. Covers:
+ * coexist. A connection pins WHICH client minted it via `client_ref` — a flat
+ * client id (system env id or `integration_oauth_clients.id`); token refresh
+ * resolves the same client's credentials by that id (system-first then DB-by-id,
+ * mirroring the model-provider credential pattern). Covers:
  *   - persist stamps `client_ref` (round-trip insert/update)
- *   - refresh-context client resolution by `client_ref` (system / custom / legacy / public)
+ *   - `resolveIntegrationClientById` (system / custom-by-id / cross-scope / public)
+ *   - refresh-context resolution by `client_ref`
  *   - the client-listing merge + default precedence
  */
 
@@ -20,13 +23,12 @@ import { eq } from "drizzle-orm";
 import {
   saveIntegrationConnection,
   listIntegrationClients,
-  resolveSystemConnectClient,
+  resolveIntegrationClientById,
 } from "../../../src/services/integration-connections.ts";
 import { buildIntegrationOAuthRefreshContext } from "../../../src/services/integration-token-refresh.ts";
 import {
   initSystemIntegrationClients,
   __resetSystemIntegrationClientsForTest,
-  systemClientRef,
 } from "../../../src/services/integration-client-registry.ts";
 import type { AppScope } from "../../../src/lib/scope.ts";
 import type { Actor } from "@appstrate/connect";
@@ -63,15 +65,19 @@ describe("integration multi-client", () => {
 
   afterEach(() => __resetSystemIntegrationClientsForTest());
 
-  /** Insert a custom per-application OAuth client row directly. */
-  async function seedCustomClient(clientId: string, secret: string): Promise<void> {
-    await db.insert(integrationOauthClients).values({
-      applicationId: ctx.defaultAppId,
-      integrationId: INTEGRATION,
-      authKey: AUTH_KEY,
-      clientId,
-      clientSecretEncrypted: encryptCredentials({ client_secret: secret }),
-    });
+  /** Insert a custom per-application OAuth client row directly; return its id. */
+  async function seedCustomClient(clientId: string, secret: string): Promise<string> {
+    const [row] = await db
+      .insert(integrationOauthClients)
+      .values({
+        applicationId: ctx.defaultAppId,
+        integrationId: INTEGRATION,
+        authKey: AUTH_KEY,
+        clientId,
+        clientSecretEncrypted: encryptCredentials({ client_secret: secret }),
+      })
+      .returning({ id: integrationOauthClients.id });
+    return row!.id;
   }
 
   function seedSystemClient(clientSecret = "sys-secret"): void {
@@ -108,14 +114,15 @@ describe("integration multi-client", () => {
   }
 
   describe("persist stamps client_ref", () => {
-    it("stores the system client_ref on insert", async () => {
-      const created = await connect(systemClientRef(SYSTEM_ID));
-      expect(await readClientRef(created.id)).toBe("system:gmail-system");
+    it("stores the system client id on insert", async () => {
+      const created = await connect(SYSTEM_ID);
+      expect(await readClientRef(created.id)).toBe("gmail-system");
     });
 
-    it("stores 'custom' on insert", async () => {
-      const created = await connect("custom");
-      expect(await readClientRef(created.id)).toBe("custom");
+    it("stores the custom client id on insert", async () => {
+      const customId = await seedCustomClient("org-client", "org-secret");
+      const created = await connect(customId);
+      expect(await readClientRef(created.id)).toBe(customId);
     });
 
     it("leaves client_ref NULL when omitted (non-oauth2 callers)", async () => {
@@ -124,8 +131,9 @@ describe("integration multi-client", () => {
     });
 
     it("re-stamps the client_ref on reconnect (update-owned)", async () => {
-      const created = await connect("custom");
-      expect(await readClientRef(created.id)).toBe("custom");
+      const customId = await seedCustomClient("org-client", "org-secret");
+      const created = await connect(customId);
+      expect(await readClientRef(created.id)).toBe(customId);
       // Reconnect via the same row, now minted by the system client.
       await saveIntegrationConnection(scope, {
         packageId: INTEGRATION,
@@ -135,51 +143,161 @@ describe("integration multi-client", () => {
         identityClaims: { email: "alice@example.com" },
         actor,
         connectionId: created.id,
-        clientRef: systemClientRef(SYSTEM_ID),
+        clientRef: SYSTEM_ID,
       });
-      expect(await readClientRef(created.id)).toBe("system:gmail-system");
+      expect(await readClientRef(created.id)).toBe("gmail-system");
+    });
+  });
+
+  describe("resolveIntegrationClientById", () => {
+    it("resolves the SYSTEM client by id (no DB row needed)", async () => {
+      seedSystemClient("sys-secret");
+      const c = await resolveIntegrationClientById(
+        SYSTEM_ID,
+        ctx.defaultAppId,
+        INTEGRATION,
+        AUTH_KEY,
+        undefined,
+      );
+      expect(c).toEqual({
+        clientId: "sys-client.apps.googleusercontent.com",
+        clientSecret: "sys-secret",
+      });
+    });
+
+    it("resolves the org's CUSTOM client by id (scoped)", async () => {
+      const customId = await seedCustomClient("custom-client-id", "custom-secret");
+      const c = await resolveIntegrationClientById(
+        customId,
+        ctx.defaultAppId,
+        INTEGRATION,
+        AUTH_KEY,
+        undefined,
+      );
+      expect(c).toEqual({ clientId: "custom-client-id", clientSecret: "custom-secret" });
+    });
+
+    it("does NOT resolve a custom id belonging to another application (escalation guard)", async () => {
+      const customId = await seedCustomClient("custom-client-id", "custom-secret");
+      const c = await resolveIntegrationClientById(
+        customId,
+        "app_someone_else",
+        INTEGRATION,
+        AUTH_KEY,
+        undefined,
+      );
+      expect(c).toBeNull();
+    });
+
+    it("does NOT resolve a custom id for a different integration (escalation guard)", async () => {
+      const customId = await seedCustomClient("custom-client-id", "custom-secret");
+      const c = await resolveIntegrationClientById(
+        customId,
+        ctx.defaultAppId,
+        "@other/integration",
+        AUTH_KEY,
+        undefined,
+      );
+      expect(c).toBeNull();
+    });
+
+    it("returns null when the id resolves to neither a system nor a custom client", async () => {
+      const c = await resolveIntegrationClientById(
+        "unknown-id",
+        ctx.defaultAppId,
+        INTEGRATION,
+        AUTH_KEY,
+        undefined,
+      );
+      expect(c).toBeNull();
+    });
+
+    it("returns null when a pinned system id was remapped to another integration", async () => {
+      initSystemIntegrationClients([
+        {
+          id: SYSTEM_ID,
+          integrationId: "@other/integration",
+          authKey: AUTH_KEY,
+          clientId: "other-client",
+          clientSecret: "other-secret",
+        },
+      ]);
+      const c = await resolveIntegrationClientById(
+        SYSTEM_ID,
+        ctx.defaultAppId,
+        INTEGRATION,
+        AUTH_KEY,
+        undefined,
+      );
+      expect(c).toBeNull();
+    });
+
+    it("drops the secret for a public client (auth_method=none) — system", async () => {
+      seedSystemClient("should-be-ignored");
+      const c = await resolveIntegrationClientById(
+        SYSTEM_ID,
+        ctx.defaultAppId,
+        INTEGRATION,
+        AUTH_KEY,
+        "none",
+      );
+      expect(c).toEqual({
+        clientId: "sys-client.apps.googleusercontent.com",
+        clientSecret: "",
+      });
+    });
+
+    it("drops the secret for a public client (auth_method=none) — custom (no decrypt)", async () => {
+      const customId = await seedCustomClient("custom-client-id", "custom-secret");
+      const c = await resolveIntegrationClientById(
+        customId,
+        ctx.defaultAppId,
+        INTEGRATION,
+        AUTH_KEY,
+        "none",
+      );
+      expect(c).toEqual({ clientId: "custom-client-id", clientSecret: "" });
     });
   });
 
   describe("buildIntegrationOAuthRefreshContext resolves by client_ref", () => {
-    it("uses the SYSTEM client's credentials for a system ref (no DB row needed)", async () => {
+    it("uses the SYSTEM client's credentials for a system id", async () => {
       seedSystemClient("sys-secret");
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultAppId,
-        systemClientRef(SYSTEM_ID),
+        SYSTEM_ID,
       );
       expect(ctxOut).not.toBeNull();
       expect(ctxOut!.clientId).toBe("sys-client.apps.googleusercontent.com");
       expect(ctxOut!.clientSecret).toBe("sys-secret");
     });
 
-    it("returns null when the pinned system client is no longer configured", async () => {
-      // Registry has no such id (reset, not seeded).
+    it("uses the org's CUSTOM client for a custom id", async () => {
+      const customId = await seedCustomClient("custom-client-id", "custom-secret");
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultAppId,
-        systemClientRef("removed-id"),
-      );
-      expect(ctxOut).toBeNull();
-    });
-
-    it("uses the org's CUSTOM client row for a 'custom' ref", async () => {
-      await seedCustomClient("custom-client-id", "custom-secret");
-      const ctxOut = await buildIntegrationOAuthRefreshContext(
-        INTEGRATION,
-        AUTH_KEY,
-        OAUTH2_AUTH,
-        ctx.defaultAppId,
-        "custom",
+        customId,
       );
       expect(ctxOut).not.toBeNull();
       expect(ctxOut!.clientId).toBe("custom-client-id");
       expect(ctxOut!.clientSecret).toBe("custom-secret");
+    });
+
+    it("returns null when the pinned client id is no longer configured", async () => {
+      const ctxOut = await buildIntegrationOAuthRefreshContext(
+        INTEGRATION,
+        AUTH_KEY,
+        OAUTH2_AUTH,
+        ctx.defaultAppId,
+        "removed-id",
+      );
+      expect(ctxOut).toBeNull();
     });
 
     it("returns null for a NULL client_ref (oauth2 invariant — must never resolve a client)", async () => {
@@ -196,28 +314,6 @@ describe("integration multi-client", () => {
       expect(ctxOut).toBeNull();
     });
 
-    it("re-validates the pinned system client still serves this (integration, authKey)", async () => {
-      // Operator reshuffled SYSTEM_INTEGRATION_CLIENTS: same id now points at a
-      // DIFFERENT integration. Refresh must NOT use it (would be the wrong app).
-      initSystemIntegrationClients([
-        {
-          id: SYSTEM_ID,
-          integrationId: "@other/integration",
-          authKey: AUTH_KEY,
-          clientId: "other-client",
-          clientSecret: "other-secret",
-        },
-      ]);
-      const ctxOut = await buildIntegrationOAuthRefreshContext(
-        INTEGRATION,
-        AUTH_KEY,
-        OAUTH2_AUTH,
-        ctx.defaultAppId,
-        systemClientRef(SYSTEM_ID),
-      );
-      expect(ctxOut).toBeNull();
-    });
-
     it("never exposes a secret for a public system client (auth_method=none)", async () => {
       seedSystemClient("should-be-ignored");
       const ctxOut = await buildIntegrationOAuthRefreshContext(
@@ -225,30 +321,19 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         PUBLIC_AUTH,
         ctx.defaultAppId,
-        systemClientRef(SYSTEM_ID),
+        SYSTEM_ID,
       );
       expect(ctxOut).not.toBeNull();
       expect(ctxOut!.clientSecret).toBe("");
-    });
-
-    it("returns null for a custom ref with no registered client", async () => {
-      const ctxOut = await buildIntegrationOAuthRefreshContext(
-        INTEGRATION,
-        AUTH_KEY,
-        OAUTH2_AUTH,
-        ctx.defaultAppId,
-        "custom",
-      );
-      expect(ctxOut).toBeNull();
     });
   });
 
   describe("round-trip: connect with a system client → refresh resolves the same client", () => {
     it("pins on connect and resolves on refresh", async () => {
       seedSystemClient("rt-secret");
-      const created = await connect(systemClientRef(SYSTEM_ID));
+      const created = await connect(SYSTEM_ID);
       const pinned = await readClientRef(created.id);
-      expect(pinned).toBe("system:gmail-system");
+      expect(pinned).toBe("gmail-system");
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
@@ -260,47 +345,13 @@ describe("integration multi-client", () => {
     });
   });
 
-  describe("resolveSystemConnectClient", () => {
-    it("returns the default system client when no ref is given", () => {
-      seedSystemClient();
-      const resolved = resolveSystemConnectClient(INTEGRATION, AUTH_KEY);
-      expect(resolved).not.toBeNull();
-      expect(resolved!.clientRef).toBe("system:gmail-system");
-      expect(resolved!.clientId).toBe("sys-client.apps.googleusercontent.com");
-    });
-
-    it("returns the exact system client for a matching ref", () => {
-      seedSystemClient();
-      const resolved = resolveSystemConnectClient(
-        INTEGRATION,
-        AUTH_KEY,
-        systemClientRef(SYSTEM_ID),
-      );
-      expect(resolved!.clientRef).toBe("system:gmail-system");
-    });
-
-    it("rejects a system ref that does not serve this (integration, authKey)", () => {
-      seedSystemClient();
-      expect(
-        resolveSystemConnectClient("@other/x", AUTH_KEY, systemClientRef(SYSTEM_ID)),
-      ).toBeNull();
-      expect(
-        resolveSystemConnectClient(INTEGRATION, "other", systemClientRef(SYSTEM_ID)),
-      ).toBeNull();
-    });
-
-    it("returns null when no system client is configured", () => {
-      expect(resolveSystemConnectClient(INTEGRATION, AUTH_KEY)).toBeNull();
-    });
-  });
-
   describe("listIntegrationClients", () => {
     it("lists only the system client when no custom client is registered", async () => {
       seedSystemClient();
       const clients = await listIntegrationClients(scope, INTEGRATION, AUTH_KEY);
       expect(clients).toHaveLength(1);
       expect(clients[0]).toMatchObject({
-        client_ref: "system:gmail-system",
+        client_ref: "gmail-system",
         source: "built-in",
         is_default: true,
       });
@@ -308,17 +359,17 @@ describe("integration multi-client", () => {
 
     it("lists the custom client as default when both exist (BYO-app wins)", async () => {
       seedSystemClient();
-      await seedCustomClient("org-client", "org-secret");
+      const customId = await seedCustomClient("org-client", "org-secret");
       const clients = await listIntegrationClients(scope, INTEGRATION, AUTH_KEY);
       expect(clients).toHaveLength(2);
       const custom = clients.find((c) => c.source === "custom");
       const system = clients.find((c) => c.source === "built-in");
       expect(custom).toMatchObject({
-        client_ref: "custom",
+        client_ref: customId,
         is_default: true,
         client_id: "org-client",
       });
-      expect(system).toMatchObject({ client_ref: "system:gmail-system", is_default: false });
+      expect(system).toMatchObject({ client_ref: "gmail-system", is_default: false });
     });
 
     it("returns an empty list when neither system nor custom client exists", async () => {

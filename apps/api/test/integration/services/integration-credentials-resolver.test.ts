@@ -159,6 +159,7 @@ function agentManifest(name: string, tools: string[]): Record<string, unknown> {
 describe("resolveLiveIntegrationCredentials", () => {
   let ctx: TestContext;
   let token: TokenServer;
+  let customClientId: string;
 
   beforeEach(async () => {
     await truncateAll();
@@ -173,13 +174,17 @@ describe("resolveLiveIntegrationCredentials", () => {
     });
     await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION_ID);
     // Per-app OAuth client → makes the auth refreshable (buildIntegrationOAuthRefreshContext).
-    await db.insert(integrationOauthClients).values({
-      applicationId: ctx.defaultAppId,
-      integrationId: INTEGRATION_ID,
-      authKey: "primary",
-      clientId: "cid",
-      clientSecretEncrypted: encryptCredentials({ client_secret: "csec" }),
-    });
+    const [oauthClient] = await db
+      .insert(integrationOauthClients)
+      .values({
+        applicationId: ctx.defaultAppId,
+        integrationId: INTEGRATION_ID,
+        authKey: "primary",
+        clientId: "cid",
+        clientSecretEncrypted: encryptCredentials({ client_secret: "csec" }),
+      })
+      .returning({ id: integrationOauthClients.id });
+    customClientId = oauthClient!.id;
   });
 
   afterEach(() => {
@@ -211,8 +216,8 @@ describe("resolveLiveIntegrationCredentials", () => {
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
         scopesGranted: opts.scopes ?? ["read", "send"],
-        // oauth2 connection → pins the org's custom per-app client (seeded above).
-        clientRef: "custom",
+        // oauth2 connection → pins the org's custom per-app client by id (seeded above).
+        clientRef: customClientId,
         ...(opts.expiresAt ? { expiresAt: opts.expiresAt } : {}),
       })
       .returning({ id: integrationConnections.id });

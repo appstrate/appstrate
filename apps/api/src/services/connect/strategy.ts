@@ -41,9 +41,10 @@ export interface BeginOptions {
   /** Force the IdP account picker (explicit "add another connection"). */
   forceAccountSelect?: boolean;
   /**
-   * Explicit client selection — `"system:<id>"` or `"custom"`. When omitted,
-   * connect picks the default (the org's custom client when registered, else
-   * the system client). Lets an advanced user connect with a specific app.
+   * Explicit client selection — a flat client id (system env id or custom
+   * `integration_oauth_clients.id`). When omitted, connect picks the default
+   * (the org's custom client when registered, else the system client). Lets an
+   * advanced user connect with a specific app.
    */
   clientRef?: string;
 }

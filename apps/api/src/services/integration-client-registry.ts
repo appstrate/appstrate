@@ -26,38 +26,13 @@ import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 
-/** `client_ref` value pinning a connection to a system client by id. */
-export const SYSTEM_CLIENT_REF_PREFIX = "system:";
-/**
- * `client_ref` value pinning a connection to the org's own per-application
- * `integration_oauth_clients` row. Unqualified because at most one custom row
- * exists per `(applicationId, integrationId, authKey)` — it is resolved by that
- * tuple, never by an opaque id.
- */
-export const CUSTOM_CLIENT_REF = "custom";
-
-/** Build the `client_ref` for a system client id. */
-export function systemClientRef(id: string): string {
-  return `${SYSTEM_CLIENT_REF_PREFIX}${id}`;
-}
-
-/**
- * Parse a canonical `client_ref` into its discriminated kind. `client_ref` is a
- * closed set: `"system:<id>"` or `"custom"`. It is always server-derived (the
- * connect resolver canonicalizes it; the connect-body value is Zod-validated to
- * the same shape), so a value outside the set is corruption — we throw rather
- * than silently coerce.
- */
-export function parseClientRef(ref: string): { kind: "system"; id: string } | { kind: "custom" } {
-  if (ref.startsWith(SYSTEM_CLIENT_REF_PREFIX)) {
-    return { kind: "system", id: ref.slice(SYSTEM_CLIENT_REF_PREFIX.length) };
-  }
-  if (ref === CUSTOM_CLIENT_REF) return { kind: "custom" };
-  throw new Error(`Invalid client_ref: ${JSON.stringify(ref)}`);
-}
+// `integration_connections.client_ref` is a flat client id — the env id of a
+// system client or the `integration_oauth_clients.id` (UUID) of a custom client.
+// No prefix/sentinel scheme: resolution is system-first then DB-by-id, mirroring
+// the model-provider credential pattern (`loadInferenceCredentials`).
 
 export interface SystemIntegrationClientDefinition {
-  /** Stable id — referenced by `client_ref = "system:<id>"`. */
+  /** Stable id — the connection's `client_ref` when this client mints it. */
   id: string;
   /** Integration package id this client serves (e.g. `@appstrate/integration-gmail`). */
   integrationId: string;
@@ -70,9 +45,11 @@ export interface SystemIntegrationClientDefinition {
 }
 
 const rawSystemIntegrationClientSchema = z.object({
-  // Constrained to the same charset the wire `client_ref` regex addresses
-  // (`system:[\w.-]+`) so every configured client is also explicitly selectable
-  // at connect time — the registry-admissible id set == the API-addressable set.
+  // Constrained to the same charset the wire `client_ref` accepts (`^[\w.-]+$`)
+  // so every configured client is explicitly selectable at connect time — the
+  // registry-admissible id set == the API-addressable set. MUST NOT be
+  // UUID-shaped: ids are resolved system-first, so a system id colliding with a
+  // custom `integration_oauth_clients.id` (UUID) would shadow the custom row.
   id: z.string().regex(/^[\w.-]+$/, "id must match ^[\\w.-]+$"),
   integrationId: z.string().min(1),
   authKey: z
@@ -209,8 +186,8 @@ export function getDefaultSystemIntegrationClient(
 /**
  * Resolve a system client by id AND re-validate it still serves this exact
  * `(integrationId, authKey)`. Single source of truth for that security-critical
- * guard — shared by the connect resolver (`resolveSystemConnectClient`) and the
- * token-refresh path (`buildIntegrationOAuthRefreshContext`). Returns `null`
+ * guard — shared by the connect resolver (`resolveConnectClient`) and the
+ * refresh resolver (`resolveIntegrationClientById`). Returns `null`
  * when the id is unknown OR was remapped to a different integration/auth: an
  * operator reshuffling `SYSTEM_INTEGRATION_CLIENTS` must never let one
  * integration's connection resolve another's credentials.

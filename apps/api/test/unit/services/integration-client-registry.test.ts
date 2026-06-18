@@ -8,10 +8,7 @@ import {
   getSystemIntegrationClientById,
   listSystemIntegrationClientsFor,
   getDefaultSystemIntegrationClient,
-  parseClientRef,
-  systemClientRef,
-  SYSTEM_CLIENT_REF_PREFIX,
-  CUSTOM_CLIENT_REF,
+  resolveSystemClientForAuth,
 } from "../../../src/services/integration-client-registry.ts";
 
 const GMAIL = "@appstrate/integration-gmail";
@@ -110,31 +107,27 @@ describe("integration-client-registry", () => {
     });
   });
 
-  describe("client_ref helpers", () => {
+  describe("resolveSystemClientForAuth", () => {
     beforeEach(() => __resetSystemIntegrationClientsForTest());
 
-    it("systemClientRef prefixes the id", () => {
-      expect(systemClientRef("gmail-system")).toBe(`${SYSTEM_CLIENT_REF_PREFIX}gmail-system`);
-      expect(systemClientRef("gmail-system")).toBe("system:gmail-system");
+    it("resolves a system client by id when it serves this (integration, authKey)", () => {
+      initSystemIntegrationClients([
+        { id: "gmail-system", integrationId: GMAIL, authKey: "google", clientId: "c1" },
+      ]);
+      expect(resolveSystemClientForAuth("gmail-system", GMAIL, "google")?.clientId).toBe("c1");
     });
 
-    it("parseClientRef discriminates system vs custom", () => {
-      expect(parseClientRef("system:gmail-system")).toEqual({ kind: "system", id: "gmail-system" });
-      expect(parseClientRef(CUSTOM_CLIENT_REF)).toEqual({ kind: "custom" });
-      expect(parseClientRef("custom")).toEqual({ kind: "custom" });
+    it("returns null when the id is unknown", () => {
+      expect(resolveSystemClientForAuth("nope", GMAIL, "google")).toBeNull();
     });
 
-    it("parseClientRef throws on a malformed ref (closed set, no silent coercion)", () => {
-      // client_ref is always server-derived/validated; anything else is corruption.
-      expect(() => parseClientRef("garbage")).toThrow(/Invalid client_ref/);
-      expect(() => parseClientRef("")).toThrow(/Invalid client_ref/);
-      // "system" without a colon is not a system ref and not "custom".
-      expect(() => parseClientRef("system")).toThrow(/Invalid client_ref/);
-    });
-
-    it("round-trips a system id through systemClientRef → parseClientRef", () => {
-      const parsed = parseClientRef(systemClientRef("drive-system"));
-      expect(parsed).toEqual({ kind: "system", id: "drive-system" });
+    it("returns null when the id was remapped to a different integration/auth", () => {
+      // Escalation guard: an operator reused the id for another integration.
+      initSystemIntegrationClients([
+        { id: "gmail-system", integrationId: DRIVE, authKey: "google", clientId: "c1" },
+      ]);
+      expect(resolveSystemClientForAuth("gmail-system", GMAIL, "google")).toBeNull();
+      expect(resolveSystemClientForAuth("gmail-system", DRIVE, "other")).toBeNull();
     });
   });
 });

@@ -614,9 +614,10 @@ export const integrationsPaths = {
                 client_ref: {
                   type: "string",
                   description:
-                    "Which registered client to connect with — 'custom' or 'system:<id>'. " +
-                    "Omitted → the default (org custom client when registered, else system client).",
-                  pattern: "^(custom|system:[\\w.-]+)$",
+                    "Which registered client to connect with — a flat client id (a value " +
+                    "from GET .../auths/{authKey}/clients). Omitted → the default (org custom " +
+                    "client when registered, else system client).",
+                  pattern: "^[\\w.-]+$",
                 },
               },
             },
