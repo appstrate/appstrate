@@ -144,33 +144,12 @@ export function useAuth() {
   const state = useStore(authStore);
 
   /**
-   * Login — redirects to the OIDC authorize endpoint which shows the
-   * shared server-rendered login page. After authentication, the browser
-   * is redirected back to /auth/callback with an authorization code.
-   *
-   * The optional `redirectTo` is saved for after the callback completes.
-   *
-   * The single-argument shape (vs. the old `(email, password)`) is
-   * deliberate — any remaining inline email/password caller must use
-   * `loginDirect` explicitly and the compiler flags the miswire rather
-   * than silently coercing an email into `redirectTo`.
+   * Email/password login — used by the OSS login form and the invite
+   * acceptance flow, which authenticate inline without redirecting. In OIDC
+   * mode these forms never render (`HostedAuthGate` redirects first), so
+   * there is no redirect variant here — the gate owns that path.
    */
-  const login = useCallback((redirectTo?: string): Promise<void> => {
-    const oidcConfig = (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
-    if (oidcConfig) {
-      return import("../modules/oidc/lib/oidc").then(({ startOidcLogin }) =>
-        startOidcLogin(redirectTo),
-      );
-    }
-    window.location.assign("/login");
-    return Promise.resolve();
-  }, []);
-
-  /**
-   * Direct email/password login — used by invite acceptance flow
-   * where the user must authenticate inline without redirecting.
-   */
-  const loginDirect = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string) => {
     const result = await authClient.signIn.email({ email, password });
     if (result.error) throw new Error(result.error.message);
     const profile = await fetchProfile();
@@ -185,22 +164,9 @@ export function useAuth() {
       password: string,
       displayName?: string,
     ): Promise<{ emailVerificationRequired: boolean }> => {
-      // When OIDC is loaded, signup must traverse the same server-rendered
-      // flow as login so that (a) both events go through the centralized
-      // branded page and (b) the resulting BA session is established under
-      // the same cookie domain as the authorize callback. The server-side
-      // `/api/oauth/register` handler forwards to `/oauth2/authorize` on
-      // success, so the callback lands on `/auth/callback` like any login.
-      const oidcConfig = (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
-      if (oidcConfig) {
-        const { startOidcSignup } = await import("../modules/oidc/lib/oidc");
-        await startOidcSignup();
-        // Page is navigating away — return a never-resolving promise so
-        // callers (`onSuccess` handlers, route navigations) cannot fire
-        // mid-unload and trigger a no-op state update on a detached tree.
-        return new Promise<never>(() => {});
-      }
-
+      // Native email/password signup (OSS). In OIDC mode the register form
+      // never renders — `HostedAuthGate` redirects to the hosted register
+      // page first — so signup has no OIDC branch; the gate owns that path.
       const result = await authClient.signUp.email({
         email,
         password,
@@ -325,7 +291,6 @@ export function useAuth() {
     profile: state.profile,
     loading: state.loading,
     login,
-    loginDirect,
     signup,
     logout,
     updatePassword,

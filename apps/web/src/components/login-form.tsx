@@ -42,7 +42,7 @@ export function LoginForm({
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
   const { resolvedTheme } = useTheme();
-  const { loginDirect } = useAuth();
+  const { login } = useAuth();
   const { features } = useAppConfig();
 
   const {
@@ -58,7 +58,7 @@ export function LoginForm({
 
   const onSubmit = async (data: LoginFormData) => {
     try {
-      await loginDirect(fixedEmail ?? data.email, data.password);
+      await login(fixedEmail ?? data.email, data.password);
       if (onSuccess) {
         await onSuccess();
       }
