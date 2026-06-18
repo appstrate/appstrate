@@ -70,6 +70,8 @@ describe("integration-client-registry", () => {
         { id: "bad-no-client", integrationId: GMAIL, authKey: "google" },
         // illegal authKey (AFPS §7.2)
         { id: "bad-authkey", integrationId: GMAIL, authKey: "Google!", clientId: "c2" },
+        // id charset outside the wire-addressable set (space) — not selectable
+        { id: "bad id", integrationId: GMAIL, authKey: "google", clientId: "c4" },
         // missing id
         { integrationId: GMAIL, authKey: "google", clientId: "c3" },
       ]);
@@ -119,10 +121,14 @@ describe("integration-client-registry", () => {
       expect(parseClientRef("system:gmail-system")).toEqual({ kind: "system", id: "gmail-system" });
       expect(parseClientRef(CUSTOM_CLIENT_REF)).toEqual({ kind: "custom" });
       expect(parseClientRef("custom")).toEqual({ kind: "custom" });
-      // null / undefined / legacy values resolve to the custom (per-app) client.
-      expect(parseClientRef(null)).toEqual({ kind: "custom" });
-      expect(parseClientRef(undefined)).toEqual({ kind: "custom" });
-      expect(parseClientRef("legacy-garbage")).toEqual({ kind: "custom" });
+    });
+
+    it("parseClientRef throws on a malformed ref (closed set, no silent coercion)", () => {
+      // client_ref is always server-derived/validated; anything else is corruption.
+      expect(() => parseClientRef("garbage")).toThrow(/Invalid client_ref/);
+      expect(() => parseClientRef("")).toThrow(/Invalid client_ref/);
+      // "system" without a colon is not a system ref and not "custom".
+      expect(() => parseClientRef("system")).toThrow(/Invalid client_ref/);
     });
 
     it("round-trips a system id through systemClientRef → parseClientRef", () => {

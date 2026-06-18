@@ -76,12 +76,16 @@ export const integrationConnections = pgTable(
       .default(sql`'{}'::text[]`),
     needsReconnection: boolean("needs_reconnection").notNull().default(false),
     // Which registered OAuth client minted this connection — `"system:<id>"`
-    // for an env-provided system client (SYSTEM_INTEGRATION_CLIENTS), `"custom"`
-    // for the org's own per-application `integration_oauth_clients` row. NULL on
-    // rows created before multi-client support; resolved identically to
-    // `"custom"` (the legacy single-client lookup). Pinned so token refresh
-    // resolves the SAME client credentials that minted the tokens — without it,
-    // refresh cannot disambiguate once a system + custom client coexist.
+    // for an env-provided system client (SYSTEM_INTEGRATION_CLIENTS) or
+    // `"custom"` for the org's own per-application `integration_oauth_clients`
+    // row. Pinned so token refresh resolves the SAME client credentials that
+    // minted the tokens — without it, refresh cannot disambiguate once a system
+    // and custom client coexist.
+    //
+    // INVARIANT: NULL ⟺ a non-oauth2 auth (api_key / login_secret), which has no
+    // OAuth client. Every oauth2 connection carries a non-null client_ref (set
+    // by OAuth2Strategy on every connect/reconnect). Enforced at the service
+    // layer — a cross-table CHECK on the auth type is not expressible in SQL.
     clientRef: text("client_ref"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     // Consecutive token-refresh failures classified as *transient* (network /

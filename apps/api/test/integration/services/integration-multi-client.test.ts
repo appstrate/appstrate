@@ -182,8 +182,10 @@ describe("integration multi-client", () => {
       expect(ctxOut!.clientSecret).toBe("custom-secret");
     });
 
-    it("resolves a NULL (legacy) ref via the custom client row", async () => {
-      await seedCustomClient("legacy-client-id", "legacy-secret");
+    it("returns null for a NULL client_ref (oauth2 invariant — must never resolve a client)", async () => {
+      // A non-oauth2 row should never reach this path; if it does, refresh skips
+      // rather than guessing a client. A custom row present must NOT be picked up.
+      await seedCustomClient("should-not-be-used", "secret");
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
@@ -191,8 +193,29 @@ describe("integration multi-client", () => {
         ctx.defaultAppId,
         null,
       );
-      expect(ctxOut).not.toBeNull();
-      expect(ctxOut!.clientId).toBe("legacy-client-id");
+      expect(ctxOut).toBeNull();
+    });
+
+    it("re-validates the pinned system client still serves this (integration, authKey)", async () => {
+      // Operator reshuffled SYSTEM_INTEGRATION_CLIENTS: same id now points at a
+      // DIFFERENT integration. Refresh must NOT use it (would be the wrong app).
+      initSystemIntegrationClients([
+        {
+          id: SYSTEM_ID,
+          integrationId: "@other/integration",
+          authKey: AUTH_KEY,
+          clientId: "other-client",
+          clientSecret: "other-secret",
+        },
+      ]);
+      const ctxOut = await buildIntegrationOAuthRefreshContext(
+        INTEGRATION,
+        AUTH_KEY,
+        OAUTH2_AUTH,
+        ctx.defaultAppId,
+        systemClientRef(SYSTEM_ID),
+      );
+      expect(ctxOut).toBeNull();
     });
 
     it("never exposes a secret for a public system client (auth_method=none)", async () => {

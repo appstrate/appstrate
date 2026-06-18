@@ -148,9 +148,10 @@ interface ActorConnectionRow {
   expiresAt: Date | null;
   scopesGranted: string[];
   /**
-   * Which registered client minted the connection — `"system:<id>"`,
-   * `"custom"`, or `null` (legacy). Threaded into the token-refresh client
-   * resolution so refresh uses the SAME credentials that minted the tokens.
+   * Which registered client minted the connection — `"system:<id>"` or
+   * `"custom"` for oauth2; `null` only for non-oauth2 auths (no OAuth client).
+   * Threaded into the token-refresh client resolution so refresh uses the SAME
+   * credentials that minted the tokens.
    */
   clientRef: string | null;
 }
@@ -1116,8 +1117,8 @@ export interface StoreConnectionInput {
   /**
    * Which registered client minted this connection — `"system:<id>"` or
    * `"custom"`. Pinned on the row so token refresh resolves the same
-   * credentials. Absent on legacy callers (persists NULL → refresh falls back
-   * to the org's per-app client).
+   * credentials. Set by OAuth2Strategy on every oauth2 connect; absent for
+   * non-oauth2 auths (persists NULL — they have no OAuth client).
    */
   clientRef?: string | null;
 }
@@ -1186,9 +1187,10 @@ export interface PersistCredentialInput {
   authKey?: string;
   /**
    * Which registered client minted this connection — `"system:<id>"` or
-   * `"custom"`. Stamped on INSERT and on the acquisition UPDATE (reconnect may
-   * switch clients) so token refresh resolves the same credentials. Omitted by
-   * the refresh write-back (`update-by-id`) → never clobbered on refresh.
+   * `"custom"` (oauth2 only). Stamped on INSERT and on the acquisition UPDATE
+   * (reconnect may switch clients) so token refresh resolves the same
+   * credentials. Omitted by the refresh write-back (`update-by-id`) → never
+   * clobbered on refresh. Absent for non-oauth2 writes → persists NULL.
    */
   clientRef?: string | null;
 }

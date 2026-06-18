@@ -99,6 +99,14 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     const autoProvisioned = usesAutoProvisionedClient(manifest, auth);
     const customClient = resolved.client;
     const requestedRef = opts.clientRef;
+    // An auto-provisioned (DCR/CIMD) auth provisions its own client and is never
+    // served by a system entry — an explicit `system:` selection cannot be
+    // honoured, so reject it loudly rather than silently using the DCR client.
+    if (autoProvisioned && requestedRef?.startsWith(SYSTEM_CLIENT_REF_PREFIX)) {
+      throw invalidRequest(
+        `Integration '${ctx.integrationId}' auth '${ctx.authKey}' provisions its OAuth client automatically; a system client cannot be selected.`,
+      );
+    }
     const wantsSystem =
       !autoProvisioned && !!requestedRef && requestedRef.startsWith(SYSTEM_CLIENT_REF_PREFIX);
 

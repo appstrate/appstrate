@@ -211,6 +211,8 @@ describe("resolveLiveIntegrationCredentials", () => {
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
         scopesGranted: opts.scopes ?? ["read", "send"],
+        // oauth2 connection → pins the org's custom per-app client (seeded above).
+        clientRef: "custom",
         ...(opts.expiresAt ? { expiresAt: opts.expiresAt } : {}),
       })
       .returning({ id: integrationConnections.id });

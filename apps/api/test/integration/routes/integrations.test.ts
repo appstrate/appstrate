@@ -1167,4 +1167,55 @@ describe("multi-client: list + system-client connect", () => {
     });
     expect(res.status).toBe(403);
   });
+
+  it("connects with the org's custom client (client_ref=custom) using its client_id", async () => {
+    seedSystem();
+    await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "org-client", client_secret: "org-secret" }),
+    });
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_ref: "custom" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { auth_url: string };
+    // Uses the ORG client_id, NOT the system one.
+    expect(body.auth_url).toContain("client_id=org-client");
+    expect(body.auth_url).not.toContain("sys-client");
+  });
+
+  it("does NOT silently downgrade an explicit client_ref=custom to the system client", async () => {
+    // System client present, but the org asked explicitly for its own (absent)
+    // client. Must 403 — never fall back to the shared app behind the user's back.
+    seedSystem();
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_ref: "custom" }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects a system client_ref belonging to a different integration (400)", async () => {
+    // A system client exists, but registered for another integration. Pinning it
+    // on @myorg/gmail must be rejected, not honoured.
+    initSystemIntegrationClients([
+      {
+        id: "foreign-system",
+        integrationId: "@other/thing",
+        authKey: "google",
+        clientId: "foreign-client",
+        clientSecret: "x",
+      },
+    ]);
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_ref: "system:foreign-system" }),
+    });
+    expect(res.status).toBe(400);
+  });
 });

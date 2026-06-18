@@ -336,10 +336,10 @@ export async function buildIntegrationOAuthRefreshContext(
   applicationId: string,
   /**
    * The minting client pinned on the connection (`integration_connections.client_ref`):
-   * `"system:<id>"`, `"custom"`, or `null` (legacy). Resolves WHICH client's
-   * credentials are used to refresh — the same one that minted the tokens.
-   * `null`/`"custom"` use the org's per-application `integration_oauth_clients`
-   * row (the pre-multi-client behaviour).
+   * `"system:<id>"` (env system client) or `"custom"` (org per-application
+   * client). Resolves WHICH client's credentials refresh the tokens — the same
+   * one that minted them. `null` only for non-oauth2 connections, which never
+   * reach this function (guarded below).
    */
   clientRef: string | null,
 ): Promise<IntegrationRefreshContext | null> {
@@ -380,6 +380,18 @@ export async function buildIntegrationOAuthRefreshContext(
   // client_secret — skip secret resolution entirely for those.
   const tokenEndpointAuthMethod = afpsAuth.token_endpoint_auth_method;
 
+  // INVARIANT: an oauth2 connection always pins its minting client. A null here
+  // means a non-oauth2 row reached this oauth2-only path — a bug, not a state to
+  // tolerate. Skip safely (surfaces needs_reconnection at expiry) rather than
+  // guessing a client.
+  if (clientRef === null) {
+    logger.warn("Integration oauth2 connection has no client_ref — skipping refresh", {
+      packageId,
+      authKey,
+    });
+    return null;
+  }
+
   // Resolve the minting client's credentials by `client_ref`. A connection is
   // refreshed with the SAME client that minted it — once a system + custom
   // client coexist, a flat `(app, integration, authKey)` lookup is ambiguous.
@@ -389,11 +401,13 @@ export async function buildIntegrationOAuthRefreshContext(
 
   if (parsedRef.kind === "system") {
     const sys = getSystemIntegrationClientById(parsedRef.id);
-    if (!sys) {
-      // The connection was minted by a system client that is no longer present
-      // in SYSTEM_INTEGRATION_CLIENTS (env changed). Cannot refresh without its
-      // credentials; skip (surfaces needs_reconnection upstream at expiry).
-      logger.info("Integration auth refresh skipped — system client no longer configured", {
+    // Re-validate the pinned client still serves THIS (integration, authKey) —
+    // mirrors the connect-side guard in `resolveSystemConnectClient`. Guards an
+    // operator reshuffling `SYSTEM_INTEGRATION_CLIENTS` (reusing an id for a
+    // different integration): refresh must never silently use another
+    // integration's credentials. Mismatch → skip (needs_reconnection at expiry).
+    if (!sys || sys.integrationId !== packageId || sys.authKey !== authKey) {
+      logger.info("Integration auth refresh skipped — pinned system client missing or remapped", {
         packageId,
         authKey,
         clientRef,

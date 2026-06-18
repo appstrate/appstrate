@@ -148,6 +148,8 @@ describe("credential-proxy integration-resolver", () => {
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
         scopesGranted: ["read"],
+        // oauth2 connection → pins the org's custom per-app client (seeded above).
+        clientRef: "custom",
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
