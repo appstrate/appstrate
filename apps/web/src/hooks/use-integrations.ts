@@ -303,17 +303,7 @@ function useInvalidateIntegrationClients() {
 export function useCreateIntegrationOAuthClient() {
   const { t } = useTranslation("settings");
   const invalidate = useInvalidateIntegrationClients();
-  return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; authKey: string } };
-      body: { client_id: string; client_secret: string; redirect_uri?: string };
-    }) => {
-      const { data } = await client.POST(
-        "/api/integrations/{packageId}/auths/{authKey}/oauth-clients",
-        { ...vars },
-      );
-      return data;
-    },
+  return $api.useMutation("post", "/api/integrations/{packageId}/auths/{authKey}/oauth-clients", {
     onSuccess: () => {
       toast.success(t("integration.oauthClient.save.success"));
       invalidate();
@@ -325,16 +315,7 @@ export function useCreateIntegrationOAuthClient() {
 export function useRotateIntegrationOAuthClient() {
   const { t } = useTranslation("settings");
   const invalidate = useInvalidateIntegrationClients();
-  return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; clientId: string } };
-      body: { client_id: string; client_secret: string; redirect_uri?: string };
-    }) => {
-      const { data } = await client.PUT("/api/integrations/{packageId}/oauth-clients/{clientId}", {
-        ...vars,
-      });
-      return data;
-    },
+  return $api.useMutation("put", "/api/integrations/{packageId}/oauth-clients/{clientId}", {
     onSuccess: () => {
       toast.success(t("integration.oauthClient.save.success"));
       invalidate();
@@ -376,17 +357,7 @@ export function useIntegrationClients(packageId: string | undefined, authKey: st
 export function useSetDefaultIntegrationClient() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; authKey: string } };
-      body: { client_ref: string };
-    }) => {
-      const { data } = await client.PUT(
-        "/api/integrations/{packageId}/auths/{authKey}/default-client",
-        { ...vars },
-      );
-      return data;
-    },
+  return $api.useMutation("put", "/api/integrations/{packageId}/auths/{authKey}/default-client", {
     onSuccess: () => {
       toast.success(t("integration.clients.setDefault.success"));
       void qc.invalidateQueries({
@@ -582,12 +553,7 @@ export function useUpdateIntegrationConnection() {
 export function useDeleteIntegrationOAuthClient() {
   const { t } = useTranslation("settings");
   const invalidate = useInvalidateIntegrationClients();
-  return useMutation({
-    mutationFn: async (vars: { params: { path: { packageId: string; clientId: string } } }) => {
-      await client.DELETE("/api/integrations/{packageId}/oauth-clients/{clientId}", {
-        ...vars,
-      });
-    },
+  return $api.useMutation("delete", "/api/integrations/{packageId}/oauth-clients/{clientId}", {
     onSuccess: () => {
       toast.success(t("integration.oauthClient.delete.success"));
       invalidate();
