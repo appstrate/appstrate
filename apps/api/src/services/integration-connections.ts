@@ -45,6 +45,7 @@ import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
   listSystemIntegrationClientsFor,
+  hasSystemIntegrationClient,
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
 import { mergeSystemAndDb, setExactlyOneDefault, isUuid } from "../lib/db-helpers.ts";
@@ -344,42 +345,48 @@ export async function selectAccessibleConnection(
 }
 
 /**
- * `true` when the integration is active in the app — i.e. recorded in
- * `application_packages` (activation installs the row, deactivation removes
- * it) AND not switched off (`enabled = true`). A disabled install counts as
- * inactive. Use {@link assertIntegrationActive} when the caller needs a
- * structured 404 instead of a boolean.
+ * `true` when the integration is active in the app. Single precedence rule —
+ * the one source of truth every call site (spawn resolver, agent readiness,
+ * sidecar guards, UI list) consults:
+ *
+ *   1. An `application_packages` row EXISTS → its `enabled` flag wins. This is
+ *      the explicit, sticky operator decision: an installed-and-enabled row is
+ *      active; a disabled row (`enabled = false`) is inactive and STAYS inactive
+ *      across runs (never silently re-enabled).
+ *   2. NO row → auto-active iff the integration is a SYSTEM integration (ships a
+ *      `SYSTEM_INTEGRATION_CLIENTS` client, via {@link hasSystemIntegrationClient}).
+ *      System integrations work out of the box without an explicit install;
+ *      everything else stays inactive until installed.
+ *
+ * Disabling a never-installed system integration materializes a row with
+ * `enabled = false` (see the enable/disable upsert), which then wins via rule 1
+ * — that is what makes the opt-out sticky. Use {@link assertIntegrationActive}
+ * when the caller needs a structured 404 instead of a boolean.
  */
 export async function isIntegrationActive(
   packageId: string,
   applicationId: string,
 ): Promise<boolean> {
   const [row] = await db
-    .select({ packageId: applicationPackages.packageId })
+    .select({ enabled: applicationPackages.enabled })
     .from(applicationPackages)
     .where(
       and(
         eq(applicationPackages.applicationId, applicationId),
         eq(applicationPackages.packageId, packageId),
-        // "Active" = installed AND enabled. A disabled install (enabled=false)
-        // must be treated as inactive everywhere: the runtime spawn resolver
-        // skips it and run readiness rejects the run — otherwise a declared
-        // integration that an operator switched off would silently degrade
-        // the run (tools missing) instead of failing fast.
-        eq(applicationPackages.enabled, true),
       ),
     )
     .limit(1);
-  return row !== undefined;
+  // Rule 1: explicit row wins. Rule 2: no row → auto-active iff system.
+  return row !== undefined ? row.enabled : hasSystemIntegrationClient(packageId);
 }
 
 /**
  * Batched variant of {@link isIntegrationActive} — one SELECT over
- * `application_packages` for the whole set instead of N serial queries.
- * Returns the subset of `packageIds` that are installed AND enabled in
- * the application ("active" — same definition as the single-row helper).
- * Used on the run-kickoff hot path (agent readiness) where an agent may
- * declare several integrations.
+ * `application_packages` for the whole set instead of N serial queries. Applies
+ * the exact same precedence (explicit row wins, else auto-active iff system).
+ * Used on the run-kickoff hot path (agent readiness) where an agent may declare
+ * several integrations.
  */
 export async function listActiveIntegrationIds(
   packageIds: readonly string[],
@@ -387,16 +394,26 @@ export async function listActiveIntegrationIds(
 ): Promise<Set<string>> {
   if (packageIds.length === 0) return new Set();
   const rows = await db
-    .select({ packageId: applicationPackages.packageId })
+    .select({
+      packageId: applicationPackages.packageId,
+      enabled: applicationPackages.enabled,
+    })
     .from(applicationPackages)
     .where(
       and(
         eq(applicationPackages.applicationId, applicationId),
         inArray(applicationPackages.packageId, packageIds as string[]),
-        eq(applicationPackages.enabled, true),
       ),
     );
-  return new Set(rows.map((r) => r.packageId));
+  const enabledById = new Map(rows.map((r) => [r.packageId, r.enabled]));
+  const active = new Set<string>();
+  for (const id of packageIds) {
+    const explicit = enabledById.get(id);
+    if (explicit !== undefined ? explicit : hasSystemIntegrationClient(id)) {
+      active.add(id);
+    }
+  }
+  return active;
 }
 
 /** Throw `notFound` unless the integration is active in the application. */

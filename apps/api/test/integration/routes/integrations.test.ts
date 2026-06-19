@@ -151,6 +151,7 @@ describe("GET /api/integrations", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
   });
+  afterEach(() => __resetSystemIntegrationClientsForTest());
 
   it("returns the org's integrations with `active: false` by default", async () => {
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
@@ -175,6 +176,50 @@ describe("GET /api/integrations", () => {
     const body = (await res.json()) as { data: Array<{ id: string; active: boolean }> };
     const gmail = body.data.find((i) => i.id === "@myorg/gmail");
     expect(gmail?.active).toBe(true);
+  });
+
+  it("decorates `active: true` for a system integration with no install row", async () => {
+    // A SYSTEM_INTEGRATION_CLIENTS entry makes the integration auto-active out
+    // of the box — no application_packages row required.
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    initSystemIntegrationClients([
+      {
+        id: "gmail-system",
+        integrationId: "@myorg/gmail",
+        authKey: "google",
+        clientId: "sys-client.apps.googleusercontent.com",
+        clientSecret: "sys-secret",
+      },
+    ]);
+    const res = await app.request("/api/integrations", { headers: authHeaders(ctx) });
+    const body = (await res.json()) as { data: Array<{ id: string; active: boolean }> };
+    const gmail = body.data.find((i) => i.id === "@myorg/gmail");
+    expect(gmail?.active).toBe(true);
+  });
+
+  it("decorates `active: false` when a system integration is explicitly disabled", async () => {
+    // Sticky opt-out: a disabled install row wins over the system-client
+    // auto-active default, and never silently re-activates.
+    const pkg = await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    initSystemIntegrationClients([
+      {
+        id: "gmail-system",
+        integrationId: "@myorg/gmail",
+        authKey: "google",
+        clientId: "sys-client.apps.googleusercontent.com",
+        clientSecret: "sys-secret",
+      },
+    ]);
+    await db.insert(applicationPackages).values({
+      applicationId: ctx.defaultAppId,
+      packageId: pkg.id,
+      config: {},
+      enabled: false,
+    });
+    const res = await app.request("/api/integrations", { headers: authHeaders(ctx) });
+    const body = (await res.json()) as { data: Array<{ id: string; active: boolean }> };
+    const gmail = body.data.find((i) => i.id === "@myorg/gmail");
+    expect(gmail?.active).toBe(false);
   });
 
   it("projects only requested fields, dropping the heavy manifest", async () => {

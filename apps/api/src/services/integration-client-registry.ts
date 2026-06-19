@@ -145,6 +145,24 @@ export function listSystemIntegrationClientsFor(
 }
 
 /**
+ * `true` when the platform ships a system OAuth client for ANY auth of this
+ * integration (any `SYSTEM_INTEGRATION_CLIENTS` entry whose `integrationId`
+ * matches). This is the "auto-active" predicate: a system integration is on by
+ * default — usable out of the box — until an org explicitly opts out. Evaluated
+ * per package id, not per auth key, because activation lives on
+ * `application_packages` (per package); the one-click connect still resolves
+ * per auth via {@link listSystemIntegrationClientsFor}. Boot-loaded, so present
+ * without any prior user action (unlike DCR `auto_provisioned` clients, which
+ * only exist after a first connect).
+ */
+export function hasSystemIntegrationClient(integrationId: string): boolean {
+  for (const def of ensureInitialized().values()) {
+    if (def.integrationId === integrationId) return true;
+  }
+  return false;
+}
+
+/**
  * The default system client for `(integrationId, authKey)` — the first
  * registered — or `null` when none. Used as the connect fallback when an org
  * has not registered its own client.

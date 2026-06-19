@@ -47,6 +47,7 @@ import {
   type ConnectionResolutionSource,
 } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
+import { hasSystemIntegrationClient } from "./integration-client-registry.ts";
 import { conflict, notFound, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -68,10 +69,15 @@ export type { ConsumingAgentSummary };
 // ─────────────────────────── block_user_connections toggle ────────────────────
 
 /**
- * Toggle the per-(application, integration) lock. Refuses if the
- * application_packages row doesn't exist (integration not installed in
- * this app). Use after `assertIntegrationActive` to surface the
- * standard 404 instead.
+ * Toggle the per-(application, integration) lock.
+ *
+ * An existing `application_packages` row is updated in place. With NO row, a
+ * SYSTEM integration is auto-active without an explicit install (see
+ * `isIntegrationActive`) — materialize the row so the toggle persists, rather
+ * than 404ing the operator out of a setting they can legitimately reach.
+ * `enabled` defaults to true on insert, so recording the block flag never
+ * deactivates an auto-active integration. A genuinely-not-installed,
+ * non-system integration still 404s (unchanged).
  */
 export async function setBlockUserConnections(
   scope: AppScope,
@@ -88,10 +94,28 @@ export async function setBlockUserConnections(
       ),
     )
     .returning({ blockUserConnections: applicationPackages.blockUserConnections });
-  if (result.length === 0) {
+  if (result.length > 0) {
+    return { blocked: result[0]!.blockUserConnections };
+  }
+  // No row. Only a system integration is auto-active without one; anything else
+  // is genuinely not installed.
+  if (!hasSystemIntegrationClient(integrationId)) {
     throw notFound(`Integration '${integrationId}' is not installed in this application`);
   }
-  return { blocked: result[0]!.blockUserConnections };
+  const [inserted] = await db
+    .insert(applicationPackages)
+    .values({
+      applicationId: scope.applicationId,
+      packageId: integrationId,
+      config: {},
+      blockUserConnections: blocked,
+    })
+    .onConflictDoUpdate({
+      target: [applicationPackages.applicationId, applicationPackages.packageId],
+      set: { blockUserConnections: blocked, updatedAt: new Date() },
+    })
+    .returning({ blockUserConnections: applicationPackages.blockUserConnections });
+  return { blocked: inserted!.blockUserConnections };
 }
 
 // ─────────────────────────── Pin CRUD ─────────────────────────────────────────
