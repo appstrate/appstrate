@@ -164,6 +164,7 @@ const integrationClientsListSchema = {
 const oauthClientSchema = {
   type: "object",
   required: [
+    "id",
     "applicationId",
     "integration_package_id",
     "auth_key",
@@ -174,6 +175,12 @@ const oauthClientSchema = {
     "updatedAt",
   ],
   properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      description:
+        "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.",
+    },
     applicationId: { type: "string" },
     integration_package_id: { type: "string" },
     auth_key: { type: "string" },
@@ -522,6 +529,7 @@ export const integrationsPaths = {
           content: { "application/json": { schema: oauthClientSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -563,6 +571,7 @@ export const integrationsPaths = {
           content: { "application/json": { schema: oauthClientSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -584,6 +593,7 @@ export const integrationsPaths = {
           description: "OAuth client deleted",
           headers: baseResponseHeaders,
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -610,6 +620,7 @@ export const integrationsPaths = {
           headers: baseResponseHeaders,
           content: { "application/json": { schema: integrationClientsListSchema } },
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -656,6 +667,7 @@ export const integrationsPaths = {
           content: { "application/json": { schema: integrationClientsListSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },

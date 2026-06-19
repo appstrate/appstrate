@@ -9485,6 +9485,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -9661,6 +9662,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -9702,6 +9704,11 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
+                         */
+                        id: string;
                         applicationId: string;
                         integration_package_id: string;
                         auth_key: string;
@@ -9716,6 +9723,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -10099,6 +10107,11 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
+                         */
+                        id: string;
                         applicationId: string;
                         integration_package_id: string;
                         auth_key: string;
@@ -10113,6 +10126,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -10144,6 +10158,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -11719,8 +11734,10 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     searchOpenRouterModels: {
@@ -16052,8 +16069,10 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
         };
     };

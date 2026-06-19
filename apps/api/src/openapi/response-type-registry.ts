@@ -120,6 +120,32 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     sharedTypeName: "IntegrationPin",
     description: "IntegrationPin",
   },
+  // Inline oauth-client response (create 201 / rotate 200) — both return the
+  // secret-stripped public client via `toPublicClient`. Registered so the
+  // shared-type's `id` (+ the rest) can't drift back out of the spec.
+  {
+    path: "/api/integrations/{packageId}/auths/{authKey}/oauth-clients",
+    method: "post",
+    status: "201",
+    sharedTypeName: "IntegrationOAuthClient",
+    description: "POST .../oauth-clients 201 ↔ IntegrationOAuthClient",
+  },
+  {
+    path: "/api/integrations/{packageId}/oauth-clients/{clientId}",
+    method: "put",
+    status: "200",
+    sharedTypeName: "IntegrationOAuthClient",
+    description: "PUT .../oauth-clients/{clientId} 200 ↔ IntegrationOAuthClient",
+  },
+  // Inline connection response (connect/fields 200) — the PR added `client_ref`
+  // to both the schema and the type; register so they stay locked together.
+  {
+    path: "/api/integrations/{packageId}/auths/{authKey}/connect/fields",
+    method: "post",
+    status: "200",
+    sharedTypeName: "IntegrationConnection",
+    description: "POST .../connect/fields 200 ↔ IntegrationConnection",
+  },
   { specSchemaName: "TestResult", sharedTypeName: "TestResult", description: "TestResult" },
   // --- Organization ---
   {

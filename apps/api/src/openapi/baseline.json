@@ -5115,6 +5115,7 @@
                 "schema": {
                   "type": "object",
                   "required": [
+                    "id",
                     "applicationId",
                     "integration_package_id",
                     "auth_key",
@@ -5125,6 +5126,11 @@
                     "updatedAt"
                   ],
                   "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes."
+                    },
                     "applicationId": {
                       "type": "string"
                     },
@@ -5158,6 +5164,9 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -5240,6 +5249,7 @@
                 "schema": {
                   "type": "object",
                   "required": [
+                    "id",
                     "applicationId",
                     "integration_package_id",
                     "auth_key",
@@ -5250,6 +5260,11 @@
                     "updatedAt"
                   ],
                   "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes."
+                    },
                     "applicationId": {
                       "type": "string"
                     },
@@ -5283,6 +5298,9 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -5333,6 +5351,9 @@
                 "$ref": "#/components/headers/AppstrateVersion"
               }
             }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -5442,6 +5463,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -5571,6 +5595,9 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -7294,11 +7321,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -9033,11 +9066,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"

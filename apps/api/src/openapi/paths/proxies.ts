@@ -170,8 +170,12 @@ export const proxiesPaths = {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        // Unknown custom `proxyId` (not a system id and no org-owned row) →
+        // `setDefaultProxy` throws `notFound`.
+        "404": { $ref: "#/components/responses/NotFound" },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },

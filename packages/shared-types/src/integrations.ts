@@ -144,6 +144,8 @@ export interface IntegrationDetail {
 }
 
 export interface IntegrationOAuthClient {
+  /** Row UUID — the `client_ref` handle for rotate / delete / default-client. */
+  id: string;
   applicationId: string;
   integration_package_id: string;
   auth_key: string;
