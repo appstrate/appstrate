@@ -571,7 +571,7 @@ export interface OrgProxyInfo {
   label: string;
   urlPrefix: string;
   enabled: boolean;
-  isDefault: boolean;
+  is_default: boolean;
   source: "built-in" | "custom";
   created_by: string | null;
   createdAt: string;
@@ -611,7 +611,7 @@ export interface OrgModelInfo extends ModelMetadata {
   baseUrl: string;
   modelId: string;
   enabled: boolean;
-  isDefault: boolean;
+  is_default: boolean;
   source: "built-in" | "custom";
   credentialId: string;
   created_by: string | null;

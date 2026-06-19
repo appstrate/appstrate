@@ -26,7 +26,7 @@ export function useAgentReadiness(
       ),
       hasModel:
         orgModels !== undefined
-          ? !!agentModelId || orgModels.some((m) => m.isDefault && m.enabled)
+          ? !!agentModelId || orgModels.some((m) => m.is_default && m.enabled)
           : true,
       hasPrompt: detail ? !isPromptEmpty(detail.prompt ?? "") : false,
       hasRequiredSkills: detail

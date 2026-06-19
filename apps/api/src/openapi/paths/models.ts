@@ -41,7 +41,7 @@ export const modelsPaths = {
                     modelId: "gpt-4o",
                     source: "built-in",
                     enabled: true,
-                    isDefault: false,
+                    is_default: false,
                     credentialId: "pk_abc123",
                     contextWindow: 128000,
                     maxTokens: 16384,

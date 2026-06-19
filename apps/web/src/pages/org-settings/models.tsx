@@ -125,7 +125,7 @@ function ModelsList({
                     </TableCell>
                     <TableCell>
                       <DefaultCell
-                        isDefault={m.isDefault}
+                        isDefault={m.is_default}
                         defaultLabel={t("models.default")}
                         setLabel={t("models.setDefault")}
                         onSetDefault={() => onSetDefault(m)}

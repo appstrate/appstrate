@@ -296,13 +296,13 @@ export function createModelsRouter() {
         resourceType: "model",
         resourceId: data.modelId,
       });
-      // Return the bare *effective* default model resource — `isDefault` is
+      // Return the bare *effective* default model resource — `is_default` is
       // recomputed by listOrgModels (DB flag, or the system-default fallback
       // when no DB row is flagged) — so callers see the resulting state
       // without a follow-up GET (#657). When no default remains in effect
       // (cleared with no system fallback) there is no resource: 204.
       const all = await listOrgModels(orgId);
-      const def = all.find((m) => m.isDefault);
+      const def = all.find((m) => m.is_default);
       return def ? c.json(def) : c.body(null, 204);
     } catch (err) {
       // A deliberate client error (e.g. unknown model ref → 404) must surface as

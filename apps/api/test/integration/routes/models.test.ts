@@ -82,7 +82,7 @@ describe("Models API", () => {
       expect(body.credentialId).toBe(credentialId);
       expect(body.source).toBe("custom");
       expect(typeof body.enabled).toBe("boolean");
-      expect(typeof body.isDefault).toBe("boolean");
+      expect(typeof body.is_default).toBe("boolean");
       expect(body.createdAt).toBeDefined();
       expect(body.updatedAt).toBeDefined();
     });
@@ -317,7 +317,7 @@ describe("Models API", () => {
       // Bare effective default model resource — no `success` envelope (#657).
       expect(body.success).toBeUndefined();
       expect(body.id).toBe(id);
-      expect(body.isDefault).toBe(true);
+      expect(body.is_default).toBe(true);
       expect(body.label).toBe("Default Model");
       expect(body.modelId).toBe("gpt-4o");
     });
@@ -366,7 +366,7 @@ describe("Models API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.id).toBe(SYSTEM_MODEL_ID);
-      expect(body.isDefault).toBe(true);
+      expect(body.is_default).toBe(true);
       expect(body.source).toBe("built-in");
 
       const [org] = await db
@@ -379,7 +379,7 @@ describe("Models API", () => {
       // Exactly one default in the list, and it's the system model.
       const list = await app.request("/api/models", { headers: authHeaders(ctx) });
       const models = ((await list.json()) as any).data as any[];
-      const defaults = models.filter((m) => m.isDefault);
+      const defaults = models.filter((m) => m.is_default);
       expect(defaults).toHaveLength(1);
       expect(defaults[0]!.id).toBe(SYSTEM_MODEL_ID);
     });
@@ -404,8 +404,8 @@ describe("Models API", () => {
 
       const list = await app.request("/api/models", { headers: authHeaders(ctx) });
       const models = ((await list.json()) as any).data as any[];
-      expect(models.find((m) => m.id === SYSTEM_MODEL_ID)?.isDefault).toBe(true);
-      expect(models.find((m) => m.id === customId)?.isDefault).toBe(false);
+      expect(models.find((m) => m.id === SYSTEM_MODEL_ID)?.is_default).toBe(true);
+      expect(models.find((m) => m.id === customId)?.is_default).toBe(false);
     });
   });
 

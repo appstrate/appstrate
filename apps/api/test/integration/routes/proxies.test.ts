@@ -51,7 +51,7 @@ describe("Proxies API", () => {
       expect(body.enabled).toBe(true);
       // First proxy for the org auto-promotes to the default (org pointer set) —
       // mirrors the org-models first-model-wins behaviour.
-      expect(body.isDefault).toBe(true);
+      expect(body.is_default).toBe(true);
       expect(body.urlPrefix).toBeTruthy();
       expect(body.createdAt).toBeTruthy();
       expect(body.updatedAt).toBeTruthy();
@@ -110,7 +110,7 @@ describe("Proxies API", () => {
       // Bare effective default proxy resource — no `success` envelope (#657).
       expect(body.success).toBeUndefined();
       expect(body.id).toBe(id);
-      expect(body.isDefault).toBe(true);
+      expect(body.is_default).toBe(true);
       expect(body.label).toBe("Default Candidate");
     });
 
@@ -204,7 +204,7 @@ describe("Proxies API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.id).toBe(SYSTEM_PROXY_ID);
-      expect(body.isDefault).toBe(true);
+      expect(body.is_default).toBe(true);
       expect(body.source).toBe("built-in");
 
       const [org] = await db
@@ -216,7 +216,7 @@ describe("Proxies API", () => {
 
       const list = await app.request("/api/proxies", { headers: authHeaders(ctx) });
       const proxies = ((await list.json()) as any).data as any[];
-      const defaults = proxies.filter((p) => p.isDefault);
+      const defaults = proxies.filter((p) => p.is_default);
       expect(defaults).toHaveLength(1);
       expect(defaults[0]!.id).toBe(SYSTEM_PROXY_ID);
     });

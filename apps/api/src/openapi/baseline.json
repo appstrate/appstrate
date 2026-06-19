@@ -7183,7 +7183,7 @@
                       "modelId": "gpt-4o",
                       "source": "built-in",
                       "enabled": true,
-                      "isDefault": false,
+                      "is_default": false,
                       "credentialId": "pk_abc123",
                       "contextWindow": 128000,
                       "maxTokens": 16384,
@@ -8957,7 +8957,7 @@
                       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                       "source": "custom",
                       "enabled": true,
-                      "isDefault": false,
+                      "is_default": false,
                       "created_by": "usr_k7x9m2p4q1",
                       "createdAt": "2026-01-10T08:00:00Z",
                       "updatedAt": "2026-01-10T08:00:00Z"
@@ -9031,7 +9031,7 @@
                   "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                   "source": "custom",
                   "enabled": true,
-                  "isDefault": false,
+                  "is_default": false,
                   "created_by": "usr_k7x9m2p4q1",
                   "createdAt": "2026-01-10T08:00:00Z",
                   "updatedAt": "2026-01-10T08:00:00Z"
@@ -9047,9 +9047,6 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -9104,7 +9101,7 @@
                   "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                   "source": "custom",
                   "enabled": true,
-                  "isDefault": true,
+                  "is_default": true,
                   "created_by": "usr_k7x9m2p4q1",
                   "createdAt": "2026-01-10T08:00:00Z",
                   "updatedAt": "2026-01-10T08:00:00Z"
@@ -9131,9 +9128,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -9203,7 +9197,7 @@
                   "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                   "source": "custom",
                   "enabled": true,
-                  "isDefault": false,
+                  "is_default": false,
                   "created_by": "usr_k7x9m2p4q1",
                   "createdAt": "2026-01-10T08:00:00Z",
                   "updatedAt": "2026-01-12T09:00:00Z"
@@ -9222,9 +9216,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
           }
         }
       },
@@ -9260,9 +9251,6 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -20815,7 +20803,7 @@
           "baseUrl",
           "modelId",
           "enabled",
-          "isDefault",
+          "is_default",
           "source",
           "credentialId",
           "created_by",
@@ -20856,7 +20844,7 @@
           "enabled": {
             "type": "boolean"
           },
-          "isDefault": {
+          "is_default": {
             "type": "boolean"
           },
           "source": {
@@ -21057,7 +21045,7 @@
           "label",
           "urlPrefix",
           "enabled",
-          "isDefault",
+          "is_default",
           "source",
           "created_by",
           "createdAt",
@@ -21077,7 +21065,7 @@
           "enabled": {
             "type": "boolean"
           },
-          "isDefault": {
+          "is_default": {
             "type": "boolean"
           },
           "source": {

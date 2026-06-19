@@ -122,7 +122,7 @@ function ModelRequiredAlert() {
   const { t } = useTranslation(["settings", "agents"]);
   const { data: models } = useModels();
 
-  const hasAnyModel = models?.some((m) => m.isDefault && m.enabled);
+  const hasAnyModel = models?.some((m) => m.is_default && m.enabled);
   if (hasAnyModel || hasAnyModel === undefined) return null;
 
   return (

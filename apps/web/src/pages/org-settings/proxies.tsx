@@ -109,7 +109,7 @@ export function OrgSettingsProxiesPage() {
                     </TableCell>
                     <TableCell>
                       <DefaultCell
-                        isDefault={p.isDefault}
+                        isDefault={p.is_default}
                         defaultLabel={t("proxies.default")}
                         setLabel={t("proxies.setDefault")}
                         onSetDefault={() => onSetDefault(p)}

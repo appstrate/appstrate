@@ -4610,7 +4610,7 @@ export interface components {
             maxTokens?: number | null;
             reasoning?: boolean | null;
             enabled: boolean;
-            isDefault: boolean;
+            is_default: boolean;
             /** @enum {string} */
             source: "built-in" | "custom";
             /** @description ID of the backing `model_provider_credentials` row. */
@@ -4692,7 +4692,7 @@ export interface components {
             /** @description Masked proxy URL for display */
             urlPrefix: string;
             enabled: boolean;
-            isDefault: boolean;
+            is_default: boolean;
             /** @enum {string} */
             source: "built-in" | "custom";
             created_by: string | null;
@@ -11642,7 +11642,7 @@ export interface operations {
                      *           "modelId": "gpt-4o",
                      *           "source": "built-in",
                      *           "enabled": true,
-                     *           "isDefault": false,
+                     *           "is_default": false,
                      *           "credentialId": "pk_abc123",
                      *           "contextWindow": 128000,
                      *           "maxTokens": 16384,
@@ -15982,7 +15982,7 @@ export interface operations {
                      *           "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                      *           "source": "custom",
                      *           "enabled": true,
-                     *           "isDefault": false,
+                     *           "is_default": false,
                      *           "created_by": "usr_k7x9m2p4q1",
                      *           "createdAt": "2026-01-10T08:00:00Z",
                      *           "updatedAt": "2026-01-10T08:00:00Z"
@@ -16041,7 +16041,7 @@ export interface operations {
                      *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
-                     *       "isDefault": false,
+                     *       "is_default": false,
                      *       "created_by": "usr_k7x9m2p4q1",
                      *       "createdAt": "2026-01-10T08:00:00Z",
                      *       "updatedAt": "2026-01-10T08:00:00Z"
@@ -16053,7 +16053,6 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalServerError"];
         };
     };
     setDefaultProxy: {
@@ -16090,7 +16089,7 @@ export interface operations {
                      *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
-                     *       "isDefault": true,
+                     *       "is_default": true,
                      *       "created_by": "usr_k7x9m2p4q1",
                      *       "createdAt": "2026-01-10T08:00:00Z",
                      *       "updatedAt": "2026-01-10T08:00:00Z"
@@ -16111,7 +16110,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
         };
     };
     updateProxy: {
@@ -16152,7 +16150,7 @@ export interface operations {
                      *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
-                     *       "isDefault": false,
+                     *       "is_default": false,
                      *       "created_by": "usr_k7x9m2p4q1",
                      *       "createdAt": "2026-01-10T08:00:00Z",
                      *       "updatedAt": "2026-01-12T09:00:00Z"
@@ -16165,7 +16163,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
         };
     };
     deleteProxy: {
@@ -16192,7 +16189,6 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalServerError"];
         };
     };
     testProxy: {

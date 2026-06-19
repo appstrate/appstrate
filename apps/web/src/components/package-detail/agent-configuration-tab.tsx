@@ -79,7 +79,7 @@ function ModelSection({ packageId }: { packageId: string }) {
   if (!orgModels || orgModels.length === 0) return null;
 
   const agentModelId = agentModel?.modelId;
-  const orgDefaultModel = orgModels.find((m) => m.isDefault && m.enabled);
+  const orgDefaultModel = orgModels.find((m) => m.is_default && m.enabled);
 
   return (
     <div className="border-border bg-card space-y-3 rounded-lg border p-4">
@@ -126,7 +126,7 @@ function ProxySection({ packageId }: { packageId: string }) {
   if (!orgProxies || orgProxies.length === 0) return null;
 
   const agentProxyId = agentProxy?.proxyId;
-  const orgDefaultProxy = orgProxies.find((p) => p.isDefault && p.enabled);
+  const orgDefaultProxy = orgProxies.find((p) => p.is_default && p.enabled);
 
   return (
     <div className="border-border bg-card space-y-3 rounded-lg border p-4">
