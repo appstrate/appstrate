@@ -68,6 +68,7 @@ import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
 import { codexResponsesAdapter } from "../services/llm-proxy/codex.ts";
 import { claudeCodeMessagesAdapter } from "../services/llm-proxy/claude-code.ts";
+import { handleClaudeCodeSdkGateway } from "../services/llm-proxy/claude-code-sdk-gateway.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -146,6 +147,26 @@ export function createLlmProxyRouter() {
           assertFirstPartyOnly(c.get("authMethod"), "Subscription LLM proxy");
         return handleProxy(c, entry.adapter, entry.upstreamPath, limits);
       },
+    );
+  }
+
+  // Claude Code subscription SDK gateway — FIRST-PARTY ONLY. The chat module's
+  // official Claude Agent SDK points `ANTHROPIC_BASE_URL` here; the gateway
+  // injects the real subscription token without forging any client identity
+  // (the SDK's own binary signs the legit Claude Code fingerprint). A wildcard
+  // path forwards whatever upstream subpath the SDK appends
+  // (`/v1/messages`, …). The bare-preset route catches the SDK's connectivity
+  // probe. See services/llm-proxy/claude-code-sdk-gateway.ts.
+  const sdkGateway = async (c: Context<AppEnv>): Promise<Response> => {
+    assertFirstPartyOnly(c.get("authMethod"), "Claude Code SDK gateway");
+    return handleClaudeCodeSdkGateway(c, limits.max_request_bytes);
+  };
+  for (const path of ["/claude-code-sdk/:presetId/*", "/claude-code-sdk/:presetId"]) {
+    router.all(
+      path,
+      rateLimit(limits.rate_per_min),
+      requirePermission("llm-proxy", "call"),
+      sdkGateway,
     );
   }
 
