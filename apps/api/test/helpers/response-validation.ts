@@ -67,12 +67,27 @@ type Resolved =
   | { kind: "skip" } // declared, but intentionally opaque / no JSON body to check
   | { kind: "undeclared" }; // status not declared at all for this operation
 
+// Path params that carry a full `@scope/name` package id — a SINGLE template
+// param that spans TWO request segments (a literal `/` inside it, kept verbatim
+// by `encodePackageIdPath`; Hono matches it via `:packageId{@[^/]+/[^/]+}`).
+// Rendering these as the default single-segment `[^/]+` makes the matcher fail
+// to match every package-scoped path (e.g. `/api/integrations/@my/gmail/...`),
+// silently SKIPPING response-contract validation for that whole surface — the
+// exact hole that let an undeclared `id` field + undocumented 4xx statuses ship
+// unnoticed. Allow one optional extra segment so both `@scope/name` and a bare
+// id match. (The `{scope}`+`{name}` two-param shape already matches natively.)
+const SLASH_BEARING_PARAMS = new Set(["packageId", "agentPackageId"]);
+
 function buildPathMatchers(spec: SpecLike): PathMatcher[] {
   const matchers: PathMatcher[] = [];
   for (const [specPath, operations] of Object.entries(spec.paths)) {
     const segments = specPath.split("/");
     const pattern = segments
-      .map((seg) => (/^\{.+\}$/.test(seg) ? "[^/]+" : escapeRegex(seg)))
+      .map((seg) => {
+        const param = /^\{(.+)\}$/.exec(seg);
+        if (!param) return escapeRegex(seg);
+        return SLASH_BEARING_PARAMS.has(param[1]!) ? "[^/]+(?:/[^/]+)?" : "[^/]+";
+      })
       .join("/");
     const specificity = segments.filter((seg) => !/^\{.+\}$/.test(seg)).length;
     const methods = new Set(
