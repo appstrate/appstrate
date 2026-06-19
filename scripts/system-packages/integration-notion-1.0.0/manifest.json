@@ -7,7 +7,7 @@
   "description": "All-in-one workspace for notes and docs",
   "keywords": ["productivity", "documentation"],
   "license": "Apache-2.0",
-  "icon": "notion",
+  "icon": "logos:notion-icon",
   "source": {
     "kind": "none"
   },

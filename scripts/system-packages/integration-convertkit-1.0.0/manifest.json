@@ -7,7 +7,7 @@
   "description": "Email marketing platform for creators",
   "keywords": ["email-marketing", "marketing"],
   "license": "Apache-2.0",
-  "icon": "kit",
+  "icon": "simple-icons:kit",
   "source": {
     "kind": "none"
   },

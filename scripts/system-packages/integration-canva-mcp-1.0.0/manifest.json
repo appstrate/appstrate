@@ -7,7 +7,7 @@
   "description": "Canva integration backed by Canva's official remote MCP server (mcp.canva.com/mcp). The sidecar opens a Streamable HTTP MCP client and injects the actor's OAuth2 access token as `Authorization: Bearer …` on every request. Authorization uses standards-based onboarding: RFC 9728 protected-resource discovery, RFC 8414 authorization-server metadata, RFC 7591 Dynamic Client Registration (public client, `token_endpoint_auth_method: none`), and RFC 7636 PKCE (S256). Canva's authorization server issues rotating one-time-use refresh tokens; the platform's token-refresh service persists each rotated refresh token. Niveau-2 scope model applies: per-tool `required_scopes` drive incremental consent — an agent only requests the Canva scopes its selected tools need. Some tools are plan-gated upstream (resize = Pro+, autofill/brand templates/brand kits = Enterprise).",
   "keywords": ["design", "marketing"],
   "license": "Apache-2.0",
-  "icon": "canva",
+  "icon": "simple-icons:canva",
   "source": {
     "kind": "remote",
     "remote": {

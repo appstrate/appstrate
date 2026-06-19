@@ -7,7 +7,7 @@
   "description": "Visual discovery and bookmarking platform",
   "keywords": ["social-media", "marketing"],
   "license": "Apache-2.0",
-  "icon": "pinterest",
+  "icon": "logos:pinterest",
   "source": {
     "kind": "none"
   },

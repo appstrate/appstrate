@@ -7,7 +7,7 @@
   "description": "Online form builder and survey platform",
   "keywords": ["forms", "surveys"],
   "license": "Apache-2.0",
-  "icon": "typeform",
+  "icon": "logos:typeform-icon",
   "source": {
     "kind": "none"
   },

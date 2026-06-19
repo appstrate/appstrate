@@ -7,7 +7,7 @@
   "description": "Customer messaging and support platform",
   "keywords": ["customer-support", "messaging"],
   "license": "Apache-2.0",
-  "icon": "intercom",
+  "icon": "logos:intercom",
   "source": {
     "kind": "none"
   },

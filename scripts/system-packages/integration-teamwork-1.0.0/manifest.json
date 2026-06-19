@@ -7,7 +7,7 @@
   "description": "Project management and collaboration platform for client work",
   "keywords": ["project-management", "collaboration"],
   "license": "Apache-2.0",
-  "icon": "https://api.iconify.design/logos/teamwork.svg",
+  "icon": "logos:teamwork",
   "source": {
     "kind": "none"
   },

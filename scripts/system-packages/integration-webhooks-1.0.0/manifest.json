@@ -7,7 +7,7 @@
   "description": "Generic webhook provider — send HTTP requests to any URL with optional authentication",
   "keywords": ["integration", "automation"],
   "license": "Apache-2.0",
-  "icon": "webhook",
+  "icon": "logos:webhooks",
   "source": {
     "kind": "none"
   },

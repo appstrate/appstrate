@@ -7,7 +7,7 @@
   "description": "Online graphic design and visual content platform",
   "keywords": ["design", "marketing"],
   "license": "Apache-2.0",
-  "icon": "canva",
+  "icon": "simple-icons:canva",
   "source": {
     "kind": "none"
   },

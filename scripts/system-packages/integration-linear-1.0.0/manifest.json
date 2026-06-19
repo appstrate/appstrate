@@ -7,7 +7,7 @@
   "description": "Modern issue tracking and project management for software teams",
   "keywords": ["project-management", "issue-tracking", "development"],
   "license": "Apache-2.0",
-  "icon": "linear",
+  "icon": "logos:linear-icon",
   "source": {
     "kind": "none"
   },

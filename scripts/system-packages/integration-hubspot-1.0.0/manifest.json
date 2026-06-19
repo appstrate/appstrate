@@ -7,7 +7,7 @@
   "description": "CRM, marketing, and sales platform",
   "keywords": ["crm", "marketing"],
   "license": "Apache-2.0",
-  "icon": "hubspot",
+  "icon": "logos:hubspot",
   "source": {
     "kind": "none"
   },
