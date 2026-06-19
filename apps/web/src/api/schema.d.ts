@@ -4602,9 +4602,12 @@ export interface components {
         OrgModel: {
             id: string;
             label: string;
-            apiShape: string;
-            baseUrl: string;
-            modelId: string;
+            /** @description Protocol family. `null` for model aliases (`aliased: true`) — binding hidden. */
+            apiShape: string | null;
+            /** @description Provider endpoint. `null` for model aliases — binding hidden. */
+            baseUrl: string | null;
+            /** @description Upstream model id. `null` for model aliases — the real backing is hidden. */
+            modelId: string | null;
             input?: string[] | null;
             contextWindow?: number | null;
             maxTokens?: number | null;
@@ -4615,8 +4618,8 @@ export interface components {
             aliased: boolean;
             /** @enum {string} */
             source: "built-in" | "custom";
-            /** @description ID of the backing `model_provider_credentials` row. */
-            credentialId: string;
+            /** @description ID of the backing `model_provider_credentials` row. `null` for model aliases — binding hidden. */
+            credentialId: string | null;
             /** @description Cost per million tokens */
             cost?: {
                 input?: number;

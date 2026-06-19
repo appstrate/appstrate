@@ -20,6 +20,7 @@ import {
   testModelConfig,
   loadModel,
   deriveModelLabel,
+  projectAliasedModel,
 } from "../services/org-models.ts";
 import { getModelProvider } from "../services/model-providers/registry.ts";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
@@ -129,7 +130,9 @@ export function createModelsRouter() {
   router.get("/", requirePermission("models", "read"), async (c) => {
     const orgId = c.get("orgId");
     const models = await listOrgModels(orgId);
-    return c.json(listResponse(models));
+    // Strip the backing of any model alias before it reaches the dashboard user
+    // (Threat A) — see projectAliasedModel. Non-aliased models pass through.
+    return c.json(listResponse(models.map(projectAliasedModel)));
   });
 
   // POST /api/models — create a custom model
@@ -313,7 +316,8 @@ export function createModelsRouter() {
       // (cleared with no system fallback) there is no resource: 204.
       const all = await listOrgModels(orgId);
       const def = all.find((m) => m.is_default);
-      return def ? c.json(def) : c.body(null, 204);
+      // Project in case the effective default is a model alias (Threat A).
+      return def ? c.json(projectAliasedModel(def)) : c.body(null, 204);
     } catch (err) {
       // A deliberate client error (e.g. unknown model ref → 404) must surface as
       // itself, not be masked as a 500 by the catch-all.

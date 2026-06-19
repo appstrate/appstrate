@@ -75,6 +75,40 @@ const defaultModel = createDefaultPointer({
   entityName: "Model",
 });
 
+// --- Model-alias projection (Threat A: dashboard user) ---
+
+/**
+ * Strip the real binding from a model alias before it reaches a user-facing
+ * surface. For `aliased` entries the public `id`/`label` survive (the user
+ * selected the alias) but the backing — provider/protocol (`apiShape`),
+ * endpoint (`baseUrl`), upstream id (`modelId`), credential, and every
+ * capability/cost field — is nulled. Capability/cost are dropped too (not just
+ * the ids): the unstripped values are catalog-derived from the *real* model and
+ * would themselves identify it (a distinctive context window or price reveals
+ * the backing). Non-aliased models pass through untouched.
+ *
+ * Applied at the user-facing read boundary (`GET /api/models`, the effective-
+ * default response) — NOT inside {@link listOrgModels}, so the operator
+ * create/update handlers (which re-project via {@link getOrgModel}) still see
+ * the full resource they just configured. Resolution (`resolveModel` /
+ * `loadModel`) is unaffected — the run executor always gets the real binding.
+ */
+export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
+  if (!model.aliased) return model;
+  return {
+    ...model,
+    apiShape: null,
+    baseUrl: null,
+    modelId: null,
+    credentialId: null,
+    input: null,
+    contextWindow: null,
+    maxTokens: null,
+    reasoning: null,
+    cost: null,
+  };
+}
+
 // --- List (system + DB) ---
 
 export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {

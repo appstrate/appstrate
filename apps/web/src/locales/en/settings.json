@@ -450,6 +450,8 @@
   "models.builtIn": "Built-in",
   "models.enabled": "Enabled",
   "models.disabled": "Disabled",
+  "models.alias": "Alias",
+  "models.aliasHidden": "Backing model hidden",
   "models.setDefault": "Set as default",
   "models.test": "Test",
   "models.testSuccess": "OK ({{latency}}ms)",

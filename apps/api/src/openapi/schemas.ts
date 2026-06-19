@@ -1053,9 +1053,19 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       label: { type: "string" },
-      apiShape: { type: "string" },
-      baseUrl: { type: "string" },
-      modelId: { type: "string" },
+      apiShape: {
+        type: ["string", "null"],
+        description:
+          "Protocol family. `null` for model aliases (`aliased: true`) — binding hidden.",
+      },
+      baseUrl: {
+        type: ["string", "null"],
+        description: "Provider endpoint. `null` for model aliases — binding hidden.",
+      },
+      modelId: {
+        type: ["string", "null"],
+        description: "Upstream model id. `null` for model aliases — the real backing is hidden.",
+      },
       input: { type: ["array", "null"], items: { type: "string" } },
       contextWindow: { type: ["integer", "null"] },
       maxTokens: { type: ["integer", "null"] },
@@ -1069,8 +1079,9 @@ export const schemas = {
       },
       source: { type: "string", enum: ["built-in", "custom"] },
       credentialId: {
-        type: "string",
-        description: "ID of the backing `model_provider_credentials` row.",
+        type: ["string", "null"],
+        description:
+          "ID of the backing `model_provider_credentials` row. `null` for model aliases — binding hidden.",
       },
       cost: {
         type: ["object", "null"],

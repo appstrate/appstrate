@@ -607,9 +607,14 @@ export interface OrgModelInfo extends ModelMetadata {
   id: string;
   /** Always set — resolvers fall back to catalog label then modelId. */
   label: string;
-  apiShape: string;
-  baseUrl: string;
-  modelId: string;
+  /**
+   * Real binding fields. `null` for model aliases ({@link aliased} true) — the
+   * GET projection strips the backing so a dashboard user never learns the
+   * provider/endpoint/upstream id behind the alias. Always set otherwise.
+   */
+  apiShape: string | null;
+  baseUrl: string | null;
+  modelId: string | null;
   enabled: boolean;
   is_default: boolean;
   /**
@@ -620,7 +625,8 @@ export interface OrgModelInfo extends ModelMetadata {
    */
   aliased: boolean;
   source: "built-in" | "custom";
-  credentialId: string;
+  /** `null` for model aliases — see {@link apiShape}. */
+  credentialId: string | null;
   created_by: string | null;
   createdAt: string;
   updatedAt: string;
