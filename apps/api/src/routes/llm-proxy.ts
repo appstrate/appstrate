@@ -18,20 +18,21 @@
  * spec explicitly resists premature abstraction so each route keeps its
  * own adapter binding instead of sharing a single dispatch table.
  *
- * Subscription shapes (FIRST-PARTY-ONLY proxy routes):
- *   - `openai-codex-responses` (the `codex` ChatGPT subscription) and
- *     `claude-code` (the Claude Pro/Max/Team subscription, on a dedicated
- *     `/claude-code-messages/*` path so its OAuth wire format never reaches
- *     the API-key Anthropic route) each have a proxy route restricted to
- *     first-party interactive callers (`assertFirstPartyOnly`: dashboard
- *     OIDC JWT or the chat module's in-process loopback). The invariant is
- *     unchanged — an API key or external token can NEVER spend a personal
- *     subscription; the org's own members through the org's own surfaces
- *     can, the same trust boundary as the in-container sidecar already
- *     serving these credentials to runs. Both apply their module's
- *     declarative `oauthWireFormat` (identity headers + system prelude)
- *     from the registry via `@appstrate/core/oauth-wire-format` — the same
- *     single source of truth the sidecar reads.
+ * Subscription shapes (FIRST-PARTY-ONLY):
+ *   - `openai-codex-responses` (the `codex` ChatGPT subscription) has a proxy
+ *     route restricted to first-party interactive callers
+ *     (`assertFirstPartyOnly`: dashboard OIDC JWT or the chat module's
+ *     in-process loopback). The invariant — an API key or external token can
+ *     NEVER spend a personal subscription; the org's own members through the
+ *     org's own surfaces can — is the same trust boundary as the in-container
+ *     sidecar. It applies the codex module's declarative `oauthWireFormat`
+ *     from the registry via `@appstrate/core/oauth-wire-format`.
+ *   - The Claude Pro/Max/Team subscription (`claude-code`) is served instead by
+ *     the `/claude-code-sdk/:presetId/*` gateway, which injects the token
+ *     WITHOUT forging any client identity — the chat's official Claude Agent
+ *     SDK signs the legit Claude Code fingerprint itself. The old forging
+ *     `/claude-code-messages` adapter route is gone. See
+ *     services/llm-proxy/claude-code-sdk-gateway.ts.
  *
  * Security:
  *   - Bearer auth only — API keys with `llm-proxy:call` (headless) OR
@@ -67,7 +68,6 @@ import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
 import { codexResponsesAdapter } from "../services/llm-proxy/codex.ts";
-import { claudeCodeMessagesAdapter } from "../services/llm-proxy/claude-code.ts";
 import { handleClaudeCodeSdkGateway } from "../services/llm-proxy/claude-code-sdk-gateway.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
@@ -122,17 +122,6 @@ export function createLlmProxyRouter() {
       urlPath: "/openai-codex-responses/codex/responses",
       upstreamPath: "/codex/responses",
       adapter: codexResponsesAdapter,
-      firstPartyOnly: true,
-    },
-    // Claude Code (Claude Pro/Max/Team subscription) — FIRST-PARTY ONLY,
-    // same boundary as codex. Shares the `anthropic-messages` apiShape with
-    // the API-key Anthropic route, but on a distinct path so the OAuth
-    // subscription wire format (Bearer + oauth beta + CLI fingerprint +
-    // system prelude) never reaches a third-party API-key caller.
-    {
-      urlPath: "/claude-code-messages/v1/messages",
-      upstreamPath: "/v1/messages",
-      adapter: claudeCodeMessagesAdapter,
       firstPartyOnly: true,
     },
   ];

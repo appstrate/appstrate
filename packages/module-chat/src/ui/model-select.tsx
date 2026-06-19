@@ -31,20 +31,17 @@ export async function fetchModels(
     });
     if (!res.ok) return [];
     const body = (await res.json()) as { models?: OrgModelOption[]; data?: OrgModelOption[] };
-    // Same filter as the server (PROXYABLE_FAMILIES in llm.ts). claude-code
-    // shares the anthropic-messages apiShape but routes to its own
-    // subscription path — disambiguate by providerId.
-    const proxyable = new Set([
+    // Same filter as the server (CHAT_USABLE_FAMILIES in llm.ts). claude-code
+    // is selectable via its anthropic-messages apiShape; the server routes it
+    // to the Claude Agent SDK engine by providerId.
+    const usable = new Set([
       "openai-completions",
       "anthropic-messages",
       "mistral-conversations",
       "openai-codex-responses",
-      "claude-code-messages",
     ]);
-    const family = (m: OrgModelOption) =>
-      m.providerId === "claude-code" ? "claude-code-messages" : m.apiShape;
     return (body.models ?? body.data ?? []).filter(
-      (m) => m.enabled !== false && proxyable.has(family(m)),
+      (m) => m.enabled !== false && usable.has(m.apiShape),
     );
   } catch {
     return [];

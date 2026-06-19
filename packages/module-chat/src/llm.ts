@@ -63,32 +63,21 @@ export async function listModels(
 }
 
 /**
- * The effective proxy family for a model. claude-code rides the
- * `anthropic-messages` apiShape but routes to its own subscription path —
- * disambiguate by providerId so it isn't sent to the API-key Anthropic
- * route (which would reject its OAuth token).
+ * The apiShapes the chat can use. API-key families + the first-party codex
+ * subscription (served by the llm-proxy). `claude-code` is included via its
+ * `anthropic-messages` apiShape — it is *selectable* here, but routed to the
+ * Claude Agent SDK engine (by `providerId`, in chat-stream.ts), NOT the proxy.
  */
-export function effectiveFamily(model: Pick<OrgModel, "apiShape" | "providerId">): string {
-  if (model.providerId === "claude-code") return "claude-code-messages";
-  return model.apiShape;
-}
-
-/** Families the platform llm-proxy routes for the chat. API-key families
- * plus the first-party-only subscription routes (codex, claude-code) — our
- * loopback bearer qualifies for both. */
-export const PROXYABLE_FAMILIES = new Set([
+export const CHAT_USABLE_FAMILIES = new Set([
   "openai-completions",
   "anthropic-messages",
   "mistral-conversations",
   "openai-codex-responses",
-  "claude-code-messages",
 ]);
 
 export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
   // `enabled` is opt-out: a missing flag counts as enabled.
-  const pool = models.filter(
-    (m) => m.enabled !== false && PROXYABLE_FAMILIES.has(effectiveFamily(m)),
-  );
+  const pool = models.filter((m) => m.enabled !== false && CHAT_USABLE_FAMILIES.has(m.apiShape));
   if (pool.length === 0 && models.some((m) => m.enabled !== false)) {
     throw invalidRequest(
       "Aucun modèle utilisable par le chat n'est configuré. Connectez un modèle par clé API (Anthropic, OpenAI, Mistral) ou un abonnement (Codex, Claude Code) dans Settings → Models.",
@@ -122,11 +111,6 @@ export function proxyTarget(family: string): { kind: ProxyKind; suffix: string }
   switch (family) {
     case "anthropic-messages":
       return { kind: "anthropic", suffix: "/anthropic-messages/v1" };
-    case "claude-code-messages":
-      // Same Anthropic SDK wire (appends `/messages`) on the dedicated
-      // first-party subscription path; the proxy injects Bearer + oauth
-      // beta + the Claude Code system prelude.
-      return { kind: "anthropic", suffix: "/claude-code-messages/v1" };
     case "openai-completions":
       return { kind: "openai-compatible", suffix: "/openai-completions/v1" };
     case "mistral-conversations":
@@ -148,7 +132,7 @@ export function modelFromFamily(
   headers: Record<string, string>,
   mintAuth: () => string,
 ): LanguageModel | null {
-  const target = proxyTarget(effectiveFamily(model));
+  const target = proxyTarget(model.apiShape);
   if (!target) return null;
 
   const baseURL = `${origin}${LLM_PROXY_PATH}${target.suffix}`;
