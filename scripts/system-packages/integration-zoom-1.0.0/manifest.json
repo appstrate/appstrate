@@ -7,7 +7,7 @@
   "description": "Video conferencing and online meetings platform",
   "keywords": ["video", "meetings"],
   "license": "Apache-2.0",
-  "icon": "zoom",
+  "icon": "logos:zoom-icon",
   "source": {
     "kind": "none"
   },

@@ -7,7 +7,7 @@
   "description": "Cloud-based CRM platform for sales, service, and marketing",
   "keywords": ["crm", "sales", "marketing"],
   "license": "Apache-2.0",
-  "icon": "salesforce",
+  "icon": "logos:salesforce",
   "source": {
     "kind": "none"
   },

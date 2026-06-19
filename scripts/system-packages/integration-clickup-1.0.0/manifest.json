@@ -7,7 +7,7 @@
   "description": "Project management and productivity platform",
   "keywords": ["productivity", "project-management"],
   "license": "Apache-2.0",
-  "icon": "clickup",
+  "icon": "simple-icons:clickup",
   "source": {
     "kind": "none"
   },

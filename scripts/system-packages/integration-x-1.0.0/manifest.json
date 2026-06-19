@@ -7,7 +7,7 @@
   "description": "Social media platform for microblogging and real-time engagement",
   "keywords": ["social-media", "marketing"],
   "license": "Apache-2.0",
-  "icon": "x",
+  "icon": "logos:x",
   "source": {
     "kind": "none"
   },

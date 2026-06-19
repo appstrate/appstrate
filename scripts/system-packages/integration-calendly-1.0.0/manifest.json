@@ -7,7 +7,7 @@
   "description": "Scheduling and appointment booking platform",
   "keywords": ["calendar", "scheduling"],
   "license": "Apache-2.0",
-  "icon": "calendly",
+  "icon": "simple-icons:calendly",
   "source": {
     "kind": "none"
   },

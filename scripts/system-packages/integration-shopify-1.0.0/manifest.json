@@ -7,7 +7,7 @@
   "description": "E-commerce platform — manage products, orders, customers, and inventory",
   "keywords": ["e-commerce", "retail"],
   "license": "Apache-2.0",
-  "icon": "shopify",
+  "icon": "logos:shopify",
   "source": {
     "kind": "none"
   },

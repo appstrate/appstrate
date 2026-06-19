@@ -7,7 +7,7 @@
   "description": "Online spreadsheet editor",
   "keywords": ["productivity", "spreadsheets"],
   "license": "Apache-2.0",
-  "icon": "googlesheets",
+  "icon": "simple-icons:googlesheets",
   "source": {
     "kind": "none"
   },

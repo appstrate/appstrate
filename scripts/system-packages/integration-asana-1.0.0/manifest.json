@@ -7,7 +7,7 @@
   "description": "Work management platform for teams to organize and track projects",
   "keywords": ["project-management", "collaboration"],
   "license": "Apache-2.0",
-  "icon": "asana",
+  "icon": "logos:asana",
   "source": {
     "kind": "none"
   },

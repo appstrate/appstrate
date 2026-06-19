@@ -7,7 +7,7 @@
   "description": "Customer relationship management platform for sales and marketing",
   "keywords": ["crm", "sales", "marketing"],
   "license": "Apache-2.0",
-  "icon": "zoho",
+  "icon": "logos:zoho",
   "source": {
     "kind": "none"
   },

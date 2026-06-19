@@ -7,7 +7,7 @@
   "description": "Team messaging and workflow automation",
   "keywords": ["messaging", "productivity"],
   "license": "Apache-2.0",
-  "icon": "slack",
+  "icon": "logos:slack-icon",
   "source": {
     "kind": "none"
   },

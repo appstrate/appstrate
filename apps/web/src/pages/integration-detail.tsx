@@ -1424,6 +1424,7 @@ export function IntegrationDetailPage() {
           source,
           type: "integration",
           version,
+          icon: typeof m.icon === "string" ? m.icon : undefined,
         }}
         isHistoricalVersion={false}
         actionsLeft={

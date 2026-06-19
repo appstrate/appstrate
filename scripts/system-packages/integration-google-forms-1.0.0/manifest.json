@@ -7,7 +7,7 @@
   "description": "Form creation and response collection by Google",
   "keywords": ["forms", "productivity"],
   "license": "Apache-2.0",
-  "icon": "googleforms",
+  "icon": "simple-icons:googleforms",
   "source": {
     "kind": "none"
   },

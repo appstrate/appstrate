@@ -7,7 +7,7 @@
   "description": "AI meeting recorder with transcripts and summaries",
   "keywords": ["meetings", "productivity"],
   "license": "Apache-2.0",
-  "icon": "https://cdn.simpleicons.org/fathom",
+  "icon": "simple-icons:fathom",
   "source": {
     "kind": "none"
   },

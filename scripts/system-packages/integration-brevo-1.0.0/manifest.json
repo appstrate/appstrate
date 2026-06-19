@@ -7,7 +7,7 @@
   "description": "Email marketing and CRM platform",
   "keywords": ["email", "marketing", "crm"],
   "license": "Apache-2.0",
-  "icon": "brevo",
+  "icon": "simple-icons:brevo",
   "source": {
     "kind": "none"
   },
