@@ -119,6 +119,8 @@ function buildRunPlan(overrides: Partial<AppstrateRunPlan> = {}): AppstrateRunPl
       apiKey: "sk-test-secret",
       label: "Test Model",
       isSystemModel: false,
+      aliased: false,
+      aliasId: "claude-3-5-sonnet-latest",
     },
     timeout: 60,
     ...overrides,
@@ -241,6 +243,8 @@ describe("run-launcher — sidecar skip decision", () => {
           apiKey: "sk-real-secret-1234",
           label: "GPT-4o",
           isSystemModel: false,
+          aliased: false,
+          aliasId: "gpt-4o",
         },
       }),
       sinkCredentials: mintSinkCredentials({

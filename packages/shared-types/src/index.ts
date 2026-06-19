@@ -612,6 +612,13 @@ export interface OrgModelInfo extends ModelMetadata {
   modelId: string;
   enabled: boolean;
   is_default: boolean;
+  /**
+   * Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a
+   * public alias; user-facing surfaces strip the real binding (`modelId`,
+   * `apiShape`, `baseUrl`, `credentialId`, capabilities/cost). Clients render
+   * an alias badge and never learn the backing model.
+   */
+  aliased: boolean;
   source: "built-in" | "custom";
   credentialId: string;
   created_by: string | null;

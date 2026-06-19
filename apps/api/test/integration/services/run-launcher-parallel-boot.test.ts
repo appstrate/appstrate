@@ -150,6 +150,8 @@ function buildRunPlan(): AppstrateRunPlan {
       apiKey: "sk-test-secret",
       label: "Test Model",
       isSystemModel: false,
+      aliased: false,
+      aliasId: "claude-3-5-sonnet-latest",
     },
     // Declare at least one integration so the launcher's sidecar-skip
     // shortcut does not bypass createSidecar in this parallel-boot test.

@@ -1043,6 +1043,7 @@ export const schemas = {
       "modelId",
       "enabled",
       "is_default",
+      "aliased",
       "source",
       "credentialId",
       "created_by",
@@ -1061,6 +1062,11 @@ export const schemas = {
       reasoning: { type: ["boolean", "null"] },
       enabled: { type: "boolean" },
       is_default: { type: "boolean" },
+      aliased: {
+        type: "boolean",
+        description:
+          "Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a public alias and the real binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is stripped from this projection — render an alias badge; the backing model is hidden.",
+      },
       source: { type: "string", enum: ["built-in", "custom"] },
       credentialId: {
         type: "string",

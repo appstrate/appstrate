@@ -191,6 +191,8 @@ function buildRunPlan(): AppstrateRunPlan {
       apiKey: "sk-test-secret",
       label: "Test Model",
       isSystemModel: false,
+      aliased: false,
+      aliasId: "claude-3-5-sonnet-latest",
     },
     timeout: 60,
   };

@@ -68,6 +68,13 @@ export const createModelSchema = z
     maxTokens: z.number().int().positive().optional(),
     reasoning: z.boolean().optional(),
     cost: modelCostSchema.optional(),
+    /**
+     * Model-alias flag (LLM-gateway alias pattern). When true, this model's
+     * `id` becomes a public alias and its real binding (modelId, provider,
+     * baseUrl, capabilities/cost) is stripped from user-facing surfaces; the
+     * sidecar rewrites the `model` field on every inference call.
+     */
+    aliased: z.boolean().optional(),
   })
   .refine(
     // Canonical model invariant: `input + output <= context`, so a response
@@ -88,6 +95,7 @@ export const updateModelSchema = z
     maxTokens: z.number().int().positive().nullable().optional(),
     reasoning: z.boolean().nullable().optional(),
     cost: modelCostSchema.nullable().optional(),
+    aliased: z.boolean().optional(),
   })
   .refine(
     // See createModelSchema: `max_output_tokens < context_window` always holds.
@@ -132,7 +140,8 @@ export function createModelsRouter() {
     const data = parseBody(createModelSchema, body);
 
     try {
-      const { modelId, credentialId, input, contextWindow, maxTokens, reasoning, cost } = data;
+      const { modelId, credentialId, input, contextWindow, maxTokens, reasoning, cost, aliased } =
+        data;
       // Block built-in (env-driven) credentials at the route boundary.
       // `org_models.credential_id` is a UUID FK to `model_provider_credentials.id`;
       // system keys live in `SYSTEM_PROVIDER_KEYS` env and are never present in
@@ -175,6 +184,7 @@ export function createModelsRouter() {
         maxTokens,
         reasoning,
         cost,
+        aliased,
       });
       await recordAuditFromContext(c, {
         action: "model.created",

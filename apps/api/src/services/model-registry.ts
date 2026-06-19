@@ -48,6 +48,12 @@ export interface ModelDefinition extends ModelMetadata {
   credentialId: string;
   isDefault?: boolean;
   enabled?: boolean;
+  /**
+   * Model-alias flag. When true the `id` is a public alias and the binding
+   * (`modelId`, `apiShape`, `baseUrl`, `apiKey`, `providerId`) is hidden from
+   * user-facing surfaces — resolved server-side only. See {@link rawModelSchema}.
+   */
+  aliased?: boolean;
 }
 
 // --- State ---
@@ -70,6 +76,15 @@ const rawModelSchema = z.object({
   cost: modelCostSchema.optional(),
   isDefault: z.boolean().optional(),
   enabled: z.boolean().optional(),
+  /**
+   * Model-alias flag (LLM-gateway alias pattern). When true, the entry's `id`
+   * is a public alias and the real binding (`modelId`, `apiShape`, `baseUrl`,
+   * `apiKey`, `providerId`) is hidden from user-facing surfaces: the list
+   * projection strips it, the sidecar rewrites the `model` field in both
+   * directions, and the agent container only ever sees the alias. The real id
+   * stays server-side (resolution + private `llm_usage` ledger).
+   */
+  aliased: z.boolean().optional(),
 });
 
 const rawModelProviderCredentialSchema = z.object({
@@ -204,6 +219,7 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
             cost: validM.cost ?? null,
             isDefault: validM.isDefault,
             enabled: validM.enabled,
+            aliased: validM.aliased === true,
           });
         }
       }

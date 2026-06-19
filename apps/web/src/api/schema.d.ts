@@ -4611,6 +4611,8 @@ export interface components {
             reasoning?: boolean | null;
             enabled: boolean;
             is_default: boolean;
+            /** @description Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a public alias and the real binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is stripped from this projection — render an alias badge; the backing model is hidden. */
+            aliased: boolean;
             /** @enum {string} */
             source: "built-in" | "custom";
             /** @description ID of the backing `model_provider_credentials` row. */
@@ -11643,6 +11645,7 @@ export interface operations {
                      *           "source": "built-in",
                      *           "enabled": true,
                      *           "is_default": false,
+                     *           "aliased": false,
                      *           "credentialId": "pk_abc123",
                      *           "contextWindow": 128000,
                      *           "maxTokens": 16384,
@@ -11700,6 +11703,8 @@ export interface operations {
                         cacheRead?: number;
                         cacheWrite?: number;
                     };
+                    /** @description Model-alias flag. When true, this model's `id` becomes a public alias and its real binding (modelId, provider, baseUrl, capabilities/cost) is hidden from user-facing surfaces; the sidecar rewrites the `model` field on every inference call. */
+                    aliased?: boolean;
                 };
             };
         };
@@ -11997,6 +12002,8 @@ export interface operations {
                         cacheRead?: number;
                         cacheWrite?: number;
                     } | null;
+                    /** @description Model-alias flag. When true, this model's `id` becomes a public alias and its real binding is hidden from user-facing surfaces. */
+                    aliased?: boolean;
                 };
             };
         };

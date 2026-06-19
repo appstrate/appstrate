@@ -87,6 +87,39 @@ describe("Models API", () => {
       expect(body.updatedAt).toBeDefined();
     });
 
+    it("defaults aliased to false and accepts aliased=true on create (round-trips to GET)", async () => {
+      const credentialId = await createProviderKey();
+
+      // Default: omitted → false.
+      const plain = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ label: "Plain", modelId: "gpt-4o", credentialId }),
+      });
+      expect(plain.status).toBe(201);
+      expect(((await plain.json()) as any).aliased).toBe(false);
+
+      // Explicit alias.
+      const aliased = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Medium",
+          modelId: "gpt-4o",
+          credentialId,
+          aliased: true,
+        }),
+      });
+      expect(aliased.status).toBe(201);
+      const created = (await aliased.json()) as any;
+      expect(created.aliased).toBe(true);
+
+      // Round-trips through the list.
+      const list = await app.request("/api/models", { headers: authHeaders(ctx) });
+      const row = ((await list.json()) as any).data.find((m: any) => m.id === created.id);
+      expect(row.aliased).toBe(true);
+    });
+
     it("rejects non-UUID credentialId with 400 (built-in slugs like 'anthropic')", async () => {
       // System-key ids ("anthropic", "openai-prod", …) are slugs, not UUIDs —
       // they live in SYSTEM_PROVIDER_KEYS env and never appear in the
