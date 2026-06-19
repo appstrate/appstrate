@@ -94,6 +94,14 @@ describe("swapResponseModelJson (real→alias)", () => {
     expect(JSON.parse(out).model).toBe("appstrate-medium");
   });
 
+  it("also rewrites a nested response.model in a JSON body (defensive; live nesting is the SSE path)", () => {
+    const out = swapResponseModelJson(
+      JSON.stringify({ id: "resp_1", object: "response", response: { model: "deepseek-chat" } }),
+      swap,
+    );
+    expect(JSON.parse(out).response.model).toBe("appstrate-medium");
+  });
+
   it("does NOT clobber the real id when it appears inside content text", () => {
     const out = swapResponseModelJson(
       JSON.stringify({
@@ -132,6 +140,23 @@ describe("createSseModelSwapStream (real→alias, streaming)", () => {
     expect(out).toContain(`"model":"appstrate-medium"`);
     expect(out).toContain("event: message_start");
     expect(out).toContain("content_block_delta");
+  });
+
+  it("rewrites the nested response.model in OpenAI Responses streaming events", async () => {
+    // The Responses API (codex / openai-responses) streams snapshots where the
+    // model id sits at `response.model`, not top-level — must be swapped too.
+    const input =
+      `event: response.created\n` +
+      `data: {"type":"response.created","response":{"id":"resp_1","model":"deepseek-chat"}}\n\n` +
+      `event: response.output_text.delta\n` +
+      `data: {"type":"response.output_text.delta","delta":"hi"}\n\n` +
+      `event: response.completed\n` +
+      `data: {"type":"response.completed","response":{"id":"resp_1","model":"deepseek-chat"}}\n\n`;
+    const out = await pipeSse(input);
+    expect(out).not.toContain("deepseek-chat");
+    expect(out.match(/"model":"appstrate-medium"/g)?.length).toBe(2);
+    expect(out).toContain("event: response.created");
+    expect(out).toContain("response.output_text.delta");
   });
 
   it("rewrites correctly when a frame is split across chunk boundaries", async () => {

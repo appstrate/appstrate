@@ -18,9 +18,15 @@
  * Matching is by EXACT value at the known JSON locations, never a blind string
  * replace — so a model id that happens to appear inside generated content is
  * never clobbered. Known locations:
- *   - top-level `model` — OpenAI (request, chunk, completion) + Anthropic
- *     (request, non-stream Message),
- *   - `message.model` — Anthropic streaming `message_start` event.
+ *   - top-level `model` — OpenAI chat-completions (request, chunk, completion),
+ *     Anthropic (request, non-stream Message), and the OpenAI Responses API
+ *     non-stream body,
+ *   - `message.model` — Anthropic streaming `message_start` event,
+ *   - `response.model` — OpenAI Responses API streaming events
+ *     (`response.created` / `response.completed`, etc. carry a `response`
+ *     snapshot). Both `openai-responses` and `openai-codex-responses` (codex)
+ *     are aliasable, so this nesting MUST be covered or the real id leaks in
+ *     the stream.
  *
  * The exception is {@link scrubModelText}: error bodies are free-form prose
  * ("the model `deepseek-chat` does not exist"), so the real id can sit anywhere.
@@ -74,11 +80,18 @@ export function swapRequestModel(bodyText: string, swap: ModelSwap): string {
 function rewriteModelRealToAlias(obj: unknown, swap: ModelSwap): void {
   if (!obj || typeof obj !== "object") return;
   const o = obj as Record<string, unknown>;
+  // top-level `model` — OpenAI chat-completions chunk/completion, Anthropic
+  // non-stream Message, OpenAI Responses non-stream body.
   if (o["model"] === swap.real) o["model"] = swap.alias;
-  const msg = o["message"];
-  if (msg && typeof msg === "object") {
-    const m = msg as Record<string, unknown>;
-    if (m["model"] === swap.real) m["model"] = swap.alias;
+  // `message.model` — Anthropic streaming `message_start`.
+  // `response.model` — OpenAI Responses streaming `response.*` events carry a
+  // `response` snapshot. Both are one-level nestings holding the model id.
+  for (const key of ["message", "response"] as const) {
+    const nested = o[key];
+    if (nested && typeof nested === "object") {
+      const n = nested as Record<string, unknown>;
+      if (n["model"] === swap.real) n["model"] = swap.alias;
+    }
   }
 }
 
