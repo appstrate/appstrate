@@ -5,6 +5,7 @@ import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 import { loadSystemRegistry } from "../lib/system-registry.ts";
 import { modelCostSchema } from "@appstrate/core/module";
+import { isAliasableApiShape } from "@appstrate/core/model-swap";
 import type { ModelMetadata } from "@appstrate/shared-types";
 import { getModelProvider } from "./model-providers/registry.ts";
 
@@ -48,6 +49,12 @@ export interface ModelDefinition extends ModelMetadata {
   credentialId: string;
   isDefault?: boolean;
   enabled?: boolean;
+  /**
+   * Model-alias flag. When true the `id` is a public alias and the binding
+   * (`modelId`, `apiShape`, `baseUrl`, `apiKey`, `providerId`) is hidden from
+   * user-facing surfaces — resolved server-side only. See {@link rawModelSchema}.
+   */
+  aliased?: boolean;
 }
 
 // --- State ---
@@ -70,6 +77,15 @@ const rawModelSchema = z.object({
   cost: modelCostSchema.optional(),
   isDefault: z.boolean().optional(),
   enabled: z.boolean().optional(),
+  /**
+   * Model-alias flag (LLM-gateway alias pattern). When true, the entry's `id`
+   * is a public alias and the real binding (`modelId`, `apiShape`, `baseUrl`,
+   * `apiKey`, `providerId`) is hidden from user-facing surfaces: the list
+   * projection strips it, the sidecar rewrites the `model` field in both
+   * directions, and the agent container only ever sees the alias. The real id
+   * stays server-side (resolution + private `llm_usage` ledger).
+   */
+  aliased: z.boolean().optional(),
 });
 
 const rawModelProviderCredentialSchema = z.object({
@@ -185,6 +201,27 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
           }
           const validM = mResult.data;
 
+          // Model-alias guards (issue #727, Threat A) — same invariants the
+          // POST /api/models route enforces for DB models. A misconfigured
+          // alias would leak its backing rather than hide it, so skip it
+          // (loud) instead of registering a half-working alias.
+          if (validM.aliased === true) {
+            if (!validM.label) {
+              logger.error(
+                "[model-registry] SYSTEM_PROVIDER_KEYS: skipping aliased model without an explicit label (the derived label would name the backing)",
+                { modelProviderCredentialId: validCredential.id, model: m },
+              );
+              continue;
+            }
+            if (!isAliasableApiShape(apiShape)) {
+              logger.error(
+                "[model-registry] SYSTEM_PROVIDER_KEYS: skipping aliased model — protocol carries the model id in the URL, not the body, so the swap can't hide it",
+                { modelProviderCredentialId: validCredential.id, apiShape, model: m },
+              );
+              continue;
+            }
+          }
+
           const modelId = validM.id ?? `${validCredential.id}:${validM.modelId}`;
           mdlMap.set(modelId, {
             id: modelId,
@@ -204,6 +241,7 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
             cost: validM.cost ?? null,
             isDefault: validM.isDefault,
             enabled: validM.enabled,
+            aliased: validM.aliased === true,
           });
         }
       }

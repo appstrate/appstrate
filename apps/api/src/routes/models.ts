@@ -20,8 +20,10 @@ import {
   testModelConfig,
   loadModel,
   deriveModelLabel,
+  projectAliasedModel,
 } from "../services/org-models.ts";
 import { getModelProvider } from "../services/model-providers/registry.ts";
+import { isAliasableApiShape } from "@appstrate/core/model-swap";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
@@ -68,6 +70,13 @@ export const createModelSchema = z
     maxTokens: z.number().int().positive().optional(),
     reasoning: z.boolean().optional(),
     cost: modelCostSchema.optional(),
+    /**
+     * Model-alias flag (LLM-gateway alias pattern). When true, this model's
+     * `id` becomes a public alias and its real binding (modelId, provider,
+     * baseUrl, capabilities/cost) is stripped from user-facing surfaces; the
+     * sidecar rewrites the `model` field on every inference call.
+     */
+    aliased: z.boolean().optional(),
   })
   .refine(
     // Canonical model invariant: `input + output <= context`, so a response
@@ -88,6 +97,7 @@ export const updateModelSchema = z
     maxTokens: z.number().int().positive().nullable().optional(),
     reasoning: z.boolean().nullable().optional(),
     cost: modelCostSchema.nullable().optional(),
+    aliased: z.boolean().optional(),
   })
   .refine(
     // See createModelSchema: `max_output_tokens < context_window` always holds.
@@ -121,7 +131,9 @@ export function createModelsRouter() {
   router.get("/", requirePermission("models", "read"), async (c) => {
     const orgId = c.get("orgId");
     const models = await listOrgModels(orgId);
-    return c.json(listResponse(models));
+    // Strip the backing of any model alias before it reaches the dashboard user
+    // (Threat A) — see projectAliasedModel. Non-aliased models pass through.
+    return c.json(listResponse(models.map(projectAliasedModel)));
   });
 
   // POST /api/models — create a custom model
@@ -132,7 +144,8 @@ export function createModelsRouter() {
     const data = parseBody(createModelSchema, body);
 
     try {
-      const { modelId, credentialId, input, contextWindow, maxTokens, reasoning, cost } = data;
+      const { modelId, credentialId, input, contextWindow, maxTokens, reasoning, cost, aliased } =
+        data;
       // Block built-in (env-driven) credentials at the route boundary.
       // `org_models.credential_id` is a UUID FK to `model_provider_credentials.id`;
       // system keys live in `SYSTEM_PROVIDER_KEYS` env and are never present in
@@ -162,6 +175,29 @@ export function createModelsRouter() {
           "credentialId",
         );
       }
+      // Model-alias guards (issue #727, Threat A):
+      if (aliased) {
+        // 1. Require an explicit label. The derive-from-catalog fallback below
+        //    would name the alias after its REAL backing ("DeepSeek Chat"),
+        //    and `label` survives the projection — leaking the backing on
+        //    /api/models and run.model_label.
+        if (!data.label) {
+          throw invalidRequest(
+            "An aliased model requires an explicit label — the derived label would name the backing model.",
+            "label",
+          );
+        }
+        // 2. The swap only rewrites the body `model` field, which exists for
+        //    openai/anthropic/mistral shapes; google/azure/bedrock carry the
+        //    model id in the URL path, so an alias there forwards verbatim and
+        //    404s upstream (and never gets swapped). Reject up front.
+        if (!isAliasableApiShape(creds.apiShape)) {
+          throw invalidRequest(
+            `Model aliases are not supported for the "${creds.apiShape}" protocol (the model id is carried in the URL, not the request body).`,
+            "aliased",
+          );
+        }
+      }
       // Label is optional on the wire — derive from the catalog when the
       // caller omits it. Needs the credential's providerId to pick the
       // right catalog (handles `catalogProviderId` for OAuth wrappers).
@@ -175,6 +211,7 @@ export function createModelsRouter() {
         maxTokens,
         reasoning,
         cost,
+        aliased,
       });
       await recordAuditFromContext(c, {
         action: "model.created",
@@ -303,7 +340,8 @@ export function createModelsRouter() {
       // (cleared with no system fallback) there is no resource: 204.
       const all = await listOrgModels(orgId);
       const def = all.find((m) => m.is_default);
-      return def ? c.json(def) : c.body(null, 204);
+      // Project in case the effective default is a model alias (Threat A).
+      return def ? c.json(projectAliasedModel(def)) : c.body(null, 204);
     } catch (err) {
       // A deliberate client error (e.g. unknown model ref → 404) must surface as
       // itself, not be masked as a 500 by the catch-all.

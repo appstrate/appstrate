@@ -1,0 +1,1 @@
+ALTER TABLE "org_models" ADD COLUMN "aliased" boolean DEFAULT false NOT NULL;

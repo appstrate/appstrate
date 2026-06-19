@@ -1011,8 +1011,16 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       label: { type: "string" },
-      apiShape: { type: "string" },
-      baseUrl: { type: "string" },
+      apiShape: {
+        type: ["string", "null"],
+        description:
+          "Protocol family. `null` for a built-in credential whose every backing model is an alias (#727) — binding hidden so the endpoint doesn't reveal the provider.",
+      },
+      baseUrl: {
+        type: ["string", "null"],
+        description:
+          "Endpoint base URL. `null` for an alias-only built-in credential (see apiShape).",
+      },
       source: { type: "string", enum: ["built-in", "custom"] },
       authMode: { type: "string", enum: ["api_key", "oauth2"] },
       providerId: {
@@ -1043,6 +1051,7 @@ export const schemas = {
       "modelId",
       "enabled",
       "is_default",
+      "aliased",
       "source",
       "credentialId",
       "created_by",
@@ -1052,19 +1061,35 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       label: { type: "string" },
-      apiShape: { type: "string" },
-      baseUrl: { type: "string" },
-      modelId: { type: "string" },
+      apiShape: {
+        type: ["string", "null"],
+        description:
+          "Protocol family. `null` for model aliases (`aliased: true`) — binding hidden.",
+      },
+      baseUrl: {
+        type: ["string", "null"],
+        description: "Provider endpoint. `null` for model aliases — binding hidden.",
+      },
+      modelId: {
+        type: ["string", "null"],
+        description: "Upstream model id. `null` for model aliases — the real backing is hidden.",
+      },
       input: { type: ["array", "null"], items: { type: "string" } },
       contextWindow: { type: ["integer", "null"] },
       maxTokens: { type: ["integer", "null"] },
       reasoning: { type: ["boolean", "null"] },
       enabled: { type: "boolean" },
       is_default: { type: "boolean" },
+      aliased: {
+        type: "boolean",
+        description:
+          "Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a public alias and the real binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is stripped from this projection — render an alias badge; the backing model is hidden.",
+      },
       source: { type: "string", enum: ["built-in", "custom"] },
       credentialId: {
-        type: "string",
-        description: "ID of the backing `model_provider_credentials` row.",
+        type: ["string", "null"],
+        description:
+          "ID of the backing `model_provider_credentials` row. `null` for model aliases — binding hidden.",
       },
       cost: {
         type: ["object", "null"],

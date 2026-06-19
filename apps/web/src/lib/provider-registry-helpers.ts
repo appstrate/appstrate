@@ -42,11 +42,13 @@ export const PI_ADAPTER_TYPES = [
  * how the credential was created.
  */
 export function findProviderByApiShapeAndBaseUrl(
-  apiShape: string,
-  baseUrl: string | undefined,
+  apiShape: string | null,
+  baseUrl: string | null | undefined,
   registry: readonly ProviderRegistryEntry[],
 ): ProviderRegistryEntry | undefined {
-  if (!baseUrl) return undefined;
+  // Model aliases project `apiShape`/`baseUrl` to null (binding hidden) — no
+  // provider can be resolved, and the UI shows an alias badge instead.
+  if (!apiShape || !baseUrl) return undefined;
   const normalized = baseUrl.replace(/\/+$/, "");
   return registry.find(
     (p) => p.apiShape === apiShape && normalized.startsWith(p.defaultBaseUrl.replace(/\/+$/, "")),
@@ -68,10 +70,11 @@ export function getProviderById(
  * curated catalog.
  */
 export function findRegistryModel(
-  apiShape: string,
-  modelId: string,
+  apiShape: string | null,
+  modelId: string | null,
   registry: readonly ProviderRegistryEntry[],
 ): { provider: ProviderRegistryEntry; model: ProviderRegistryEntry["models"][number] } | null {
+  if (!apiShape || !modelId) return null;
   for (const provider of registry) {
     if (provider.apiShape !== apiShape) continue;
     const model = provider.models.find((m) => m.id === modelId);
@@ -89,7 +92,11 @@ export function findRegistryModel(
  * modals surface as the "Custom" picker entry.
  */
 export function resolveProviderId(
-  spec: { apiShape: string; baseUrl: string | undefined; modelId?: string | undefined },
+  spec: {
+    apiShape: string | null;
+    baseUrl: string | null | undefined;
+    modelId?: string | null | undefined;
+  },
   registry: readonly ProviderRegistryEntry[],
 ): string {
   if (spec.modelId) {
@@ -108,7 +115,7 @@ export function resolveProviderId(
  * "Custom" — operators set it via the dedicated combobox / inline input.
  */
 export function resolveModelEntryId(
-  spec: { apiShape: string; baseUrl: string; modelId: string } | null,
+  spec: { apiShape: string | null; baseUrl: string | null; modelId: string | null } | null,
   registry: readonly ProviderRegistryEntry[],
 ): string {
   if (!spec) return "";
@@ -116,7 +123,7 @@ export function resolveModelEntryId(
   if (match) return match.model.id;
   const byApiAndUrl = findProviderByApiShapeAndBaseUrl(spec.apiShape, spec.baseUrl, registry);
   if (byApiAndUrl) {
-    if (byApiAndUrl.models.length === 0) return spec.modelId;
+    if (byApiAndUrl.models.length === 0) return spec.modelId ?? CUSTOM_ID;
     return CUSTOM_ID;
   }
   return CUSTOM_ID;

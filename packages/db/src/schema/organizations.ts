@@ -324,6 +324,12 @@ export const orgModels = pgTable(
     reasoning: boolean("reasoning"), // true | null
     cost: jsonb("cost"), // { input, output, cacheRead, cacheWrite } in $/M tokens | null
     enabled: boolean("enabled").notNull().default(true),
+    // Model-alias flag (LLM-gateway alias pattern). When true, this row's `id`
+    // is a public alias and its real binding (`modelId` + the credential's
+    // provider/baseUrl) is stripped from user-facing surfaces; the sidecar
+    // rewrites the `model` field in both directions. The real id stays
+    // server-side (resolution + private `llm_usage` ledger).
+    aliased: boolean("aliased").notNull().default(false),
     // The default model is an org-level pointer (`organizations.default_model_id`),
     // not a per-row boolean — so it can point at a system model too. See the
     // column comment on `organizations`.

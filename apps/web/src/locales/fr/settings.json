@@ -450,6 +450,8 @@
   "models.builtIn": "Système",
   "models.enabled": "Actif",
   "models.disabled": "Inactif",
+  "models.alias": "Alias",
+  "models.aliasHidden": "Modèle sous-jacent masqué",
   "models.setDefault": "Définir par défaut",
   "models.test": "Tester",
   "models.testSuccess": "OK ({{latency}}ms)",

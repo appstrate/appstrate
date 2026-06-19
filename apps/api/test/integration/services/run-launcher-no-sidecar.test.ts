@@ -32,6 +32,7 @@ interface CallCounts {
   createSidecarCalls: number;
   createWorkloadCalls: number;
   capturedAgentEnv: Record<string, string> | null;
+  capturedSidecarSpec: SidecarLaunchSpec | null;
 }
 
 function createCountingFake(): {
@@ -42,6 +43,7 @@ function createCountingFake(): {
     createSidecarCalls: 0,
     createWorkloadCalls: 0,
     capturedAgentEnv: null,
+    capturedSidecarSpec: null,
   };
 
   const orchestrator: ContainerOrchestrator = {
@@ -62,9 +64,10 @@ function createCountingFake(): {
     async createSidecar(
       runId: string,
       _boundary: IsolationBoundary,
-      _spec: SidecarLaunchSpec,
+      spec: SidecarLaunchSpec,
     ): Promise<WorkloadHandle> {
       counts.createSidecarCalls++;
+      counts.capturedSidecarSpec = spec;
       return { id: `sidecar_${runId}`, runId, role: "sidecar" };
     },
     async createWorkload(spec: WorkloadSpec): Promise<WorkloadHandle> {
@@ -119,6 +122,8 @@ function buildRunPlan(overrides: Partial<AppstrateRunPlan> = {}): AppstrateRunPl
       apiKey: "sk-test-secret",
       label: "Test Model",
       isSystemModel: false,
+      aliased: false,
+      aliasId: "claude-3-5-sonnet-latest",
     },
     timeout: 60,
     ...overrides,
@@ -163,6 +168,52 @@ describe("run-launcher — sidecar skip decision", () => {
     // The real API key must reach the container — there's no sidecar to
     // substitute the placeholder back to the real value.
     expect(env.MODEL_API_KEY).toBe("sk-test-secret");
+  });
+
+  it("forces the sidecar for a model alias and wires the swap + alias MODEL_ID (api-key, no integrations)", async () => {
+    const { orchestrator, counts } = createCountingFake();
+
+    await runPlatformContainer({
+      runId: "run_alias",
+      context: buildContext("run_alias"),
+      // Would normally skip the sidecar (api-key, no integrations, no proxy) —
+      // but an alias MUST route through it for the model swap.
+      plan: buildRunPlan({
+        llmConfig: {
+          providerId: "deepseek",
+          apiShape: "openai-completions",
+          baseUrl: "https://api.deepseek.com/v1",
+          modelId: "deepseek-chat", // the hidden backing
+          apiKey: "sk-real-secret",
+          label: "Appstrate Medium",
+          isSystemModel: true,
+          aliased: true,
+          aliasId: "appstrate-medium",
+        },
+      }),
+      sinkCredentials: mintSinkCredentials({
+        runId: "run_alias",
+        appUrl: "http://platform:3000",
+        ttlSeconds: 60,
+      }),
+      orchestrator,
+    });
+
+    // Sidecar is NOT skipped despite api-key + no integrations + no proxy.
+    expect(counts.createSidecarCalls).toBe(1);
+
+    // The sidecar receives the alias→real swap descriptor.
+    const llm = counts.capturedSidecarSpec?.llm;
+    expect(llm?.authMode).toBe("api_key");
+    expect(llm?.modelSwap).toEqual({ alias: "appstrate-medium", real: "deepseek-chat" });
+
+    // The container is handed the ALIAS as MODEL_ID; the real backing id and
+    // the real endpoint never enter the agent env.
+    const env = counts.capturedAgentEnv ?? {};
+    expect(env.MODEL_ID).toBe("appstrate-medium");
+    expect(env.MODEL_BASE_URL).toBe("http://sidecar:8080/llm");
+    expect(JSON.stringify(env)).not.toContain("deepseek-chat");
+    expect(JSON.stringify(env)).not.toContain("api.deepseek.com");
   });
 
   it("creates the sidecar when the plan declares at least one integration", async () => {
@@ -241,6 +292,8 @@ describe("run-launcher — sidecar skip decision", () => {
           apiKey: "sk-real-secret-1234",
           label: "GPT-4o",
           isSystemModel: false,
+          aliased: false,
+          aliasId: "gpt-4o",
         },
       }),
       sinkCredentials: mintSinkCredentials({

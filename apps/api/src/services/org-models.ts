@@ -75,6 +75,58 @@ const defaultModel = createDefaultPointer({
   entityName: "Model",
 });
 
+// --- Model-alias projection (Threat A: dashboard user) ---
+
+/**
+ * Strip the real binding from a model alias before it reaches a user-facing
+ * surface. For `aliased` entries the public `id`/`label` survive (the user
+ * selected the alias) but the backing — provider/protocol (`apiShape`),
+ * endpoint (`baseUrl`), upstream id (`modelId`), credential, and every
+ * capability/cost field — is nulled. Capability/cost are dropped too (not just
+ * the ids): the unstripped values are catalog-derived from the *real* model and
+ * would themselves identify it (a distinctive context window or price reveals
+ * the backing). Non-aliased models pass through untouched.
+ *
+ * Applied at the user-facing read boundary (`GET /api/models`, the effective-
+ * default response) — NOT inside {@link listOrgModels}, so the operator
+ * create/update handlers (which re-project via {@link getOrgModel}) still see
+ * the full resource they just configured. Resolution (`resolveModel` /
+ * `loadModel`) is unaffected — the run executor always gets the real binding.
+ */
+export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
+  if (!model.aliased) return model;
+  // Allowlist, NOT a denylist (`{ ...model, field: null }`): build the public
+  // view from only the fields known safe to expose. A field added to
+  // OrgModelInfo later then fails to compile here (required) or is simply
+  // absent (optional) rather than silently riding along and leaking the
+  // backing. Binding ids + every catalog-derived capability/cost field (which
+  // would fingerprint the real model) are nulled.
+  return {
+    // Public — the user chose the alias by id/label.
+    id: model.id,
+    label: model.label,
+    enabled: model.enabled,
+    is_default: model.is_default,
+    aliased: model.aliased,
+    source: model.source,
+    created_by: model.created_by,
+    createdAt: model.createdAt,
+    updatedAt: model.updatedAt,
+    // Backing — always null for an alias.
+    apiShape: null,
+    baseUrl: null,
+    modelId: null,
+    credentialId: null,
+    // Capability/cost — catalog-derived from the REAL model, so they
+    // fingerprint it; drop them too.
+    contextWindow: null,
+    maxTokens: null,
+    input: null,
+    reasoning: null,
+    cost: null,
+  };
+}
+
 // --- List (system + DB) ---
 
 export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
@@ -114,6 +166,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       modelId: def.modelId,
       enabled: def.enabled !== false,
       is_default: pointer !== null ? id === pointer : def.isDefault === true,
+      aliased: def.aliased === true,
       source: "built-in",
       credentialId: def.credentialId,
       created_by: null,
@@ -134,6 +187,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         modelId: row.modelId,
         enabled: row.enabled,
         is_default: pointer !== null && row.id === pointer,
+        aliased: row.aliased,
         source: row.source as "custom" | "built-in",
         credentialId: row.credentialId,
         created_by: row.createdBy,
@@ -197,6 +251,7 @@ export async function createOrgModel(
     maxTokens?: number;
     reasoning?: boolean;
     cost?: ModelCost;
+    aliased?: boolean;
   },
 ): Promise<string> {
   return db.transaction(async (tx) => {
@@ -212,6 +267,7 @@ export async function createOrgModel(
         maxTokens: capabilities?.maxTokens ?? null,
         reasoning: capabilities?.reasoning ?? null,
         cost: capabilities?.cost ?? null,
+        aliased: capabilities?.aliased ?? false,
         source: "custom",
         createdBy: userId,
       })
@@ -236,6 +292,7 @@ export async function updateOrgModel(
     reasoning?: boolean | null;
     cost?: ModelCost | null;
     credentialId?: string;
+    aliased?: boolean;
   },
 ): Promise<void> {
   if (isSystemModel(modelDbId)) {
@@ -395,6 +452,20 @@ export interface ResolvedModel extends Pick<
   /** Whether the model comes from SYSTEM_PROVIDER_KEYS (platform-provided). */
   isSystemModel: boolean;
   /**
+   * Model-alias flag (LLM-gateway alias pattern). When true the run executor
+   * hands the sidecar the {@link aliasId} as the container's `MODEL_ID` and the
+   * sidecar swaps it for the real {@link modelId} on every inference call (and
+   * back on the response). The agent never sees the real backing model.
+   */
+  aliased: boolean;
+  /**
+   * Public alias id the user selected — `ModelDefinition.id` for system models,
+   * the `org_models.id` (UUID) for DB rows. Distinct from {@link modelId} (the
+   * real upstream id) only when {@link aliased} is true; otherwise equal in
+   * effect. Carried so the sidecar can rewrite real→alias in responses.
+   */
+  aliasId: string;
+  /**
    * Abstract account/tenant identifier surfaced by the credential's
    * `extractTokenIdentity` hook — passed to the provider's
    * `buildInferenceProbe` hook so it can be echoed as a routing header.
@@ -405,6 +476,7 @@ export interface ResolvedModel extends Pick<
 }
 
 interface DbOrgModelRow {
+  id: string;
   modelId: string;
   credentialId: string;
   label: string;
@@ -413,6 +485,7 @@ interface DbOrgModelRow {
   maxTokens: number | null;
   reasoning: boolean | null;
   cost: unknown;
+  aliased: boolean;
 }
 
 interface DbModelCredentials {
@@ -468,6 +541,8 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
     apiKey: def.apiKey,
     ...resolveModelMetadata(def, def.modelId, resolveCatalogDefaults(def.providerId, def.modelId)),
     isSystemModel: true,
+    aliased: def.aliased === true,
+    aliasId: def.id,
   };
 }
 
@@ -493,6 +568,8 @@ function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): Re
       resolveCatalogDefaults(creds.providerId, row.modelId),
     ),
     isSystemModel: false,
+    aliased: row.aliased,
+    aliasId: row.id,
     accountId: creds.accountId,
     credentialId: row.credentialId,
   };
@@ -553,6 +630,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   try {
     [row] = await db
       .select({
+        id: orgModels.id,
         modelId: orgModels.modelId,
         credentialId: orgModels.credentialId,
         enabled: orgModels.enabled,
@@ -562,6 +640,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
         maxTokens: orgModels.maxTokens,
         reasoning: orgModels.reasoning,
         cost: orgModels.cost,
+        aliased: orgModels.aliased,
       })
       .from(orgModels)
       .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))

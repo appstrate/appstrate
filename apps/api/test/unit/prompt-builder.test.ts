@@ -174,6 +174,8 @@ function baseContext(overrides?: Partial<PromptContext>): PromptContext {
       apiKey: "sk-test",
       label: "Test Model",
       isSystemModel: false,
+      aliased: false,
+      aliasId: "test-model",
     },
     ...overrides,
   };

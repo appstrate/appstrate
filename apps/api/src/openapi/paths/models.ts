@@ -42,6 +42,7 @@ export const modelsPaths = {
                     source: "built-in",
                     enabled: true,
                     is_default: false,
+                    aliased: false,
                     credentialId: "pk_abc123",
                     contextWindow: 128000,
                     maxTokens: 16384,
@@ -107,6 +108,11 @@ export const modelsPaths = {
                     cacheRead: { type: "number" },
                     cacheWrite: { type: "number" },
                   },
+                },
+                aliased: {
+                  type: "boolean",
+                  description:
+                    "Model-alias flag. When true, this model's `id` becomes a public alias and its real binding (modelId, provider, baseUrl, capabilities/cost) is hidden from user-facing surfaces; the sidecar rewrites the `model` field on every inference call.",
                 },
               },
             },
@@ -468,6 +474,11 @@ export const modelsPaths = {
                     cacheRead: { type: "number" },
                     cacheWrite: { type: "number" },
                   },
+                },
+                aliased: {
+                  type: "boolean",
+                  description:
+                    "Model-alias flag. When true, this model's `id` becomes a public alias and its real binding is hidden from user-facing surfaces.",
                 },
               },
             },

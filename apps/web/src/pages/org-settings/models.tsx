@@ -105,6 +105,7 @@ function ModelsList({
                     <TableCell>
                       <div className="flex flex-wrap items-center gap-1.5">
                         <SourceBadge source={m.source} />
+                        {m.aliased && <Badge variant="secondary">{t("models.alias")}</Badge>}
                         {!isBuiltIn && !m.enabled && (
                           <Badge variant="secondary" className="opacity-60">
                             {t("models.disabled")}
@@ -118,7 +119,7 @@ function ModelsList({
                         <div className="min-w-0">
                           <div className="truncate text-sm font-medium">{m.label}</div>
                           <div className="text-muted-foreground font-mono text-[0.65rem]">
-                            {m.apiShape} / {m.modelId}
+                            {m.aliased ? t("models.aliasHidden") : `${m.apiShape} / ${m.modelId}`}
                           </div>
                         </div>
                       </div>
@@ -152,15 +153,22 @@ function ModelsList({
                         </Button>
                         {!isBuiltIn && (
                           <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0"
-                              onClick={() => onEdit(m)}
-                              aria-label={t("models.edit")}
-                            >
-                              <Pencil size={14} />
-                            </Button>
+                            {/* Aliases hide their real binding (modelId etc.),
+                                so the edit form can't round-trip them — the
+                                projected modelId is null and would fail
+                                validation. Edit env/API-side; delete still
+                                works (by id). */}
+                            {!m.aliased && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                onClick={() => onEdit(m)}
+                                aria-label={t("models.edit")}
+                              >
+                                <Pencil size={14} />
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="sm"

@@ -56,6 +56,50 @@ describe("Models API", () => {
       const res = await app.request("/api/models");
       expect(res.status).toBe(401);
     });
+
+    it("strips the backing of a model alias from the list, but not from the create response (Threat A)", async () => {
+      const credentialId = await createProviderKey();
+      // A distinctive backing id so the security grep below is unambiguous.
+      const realModelId = "secret-backing-zxq9";
+
+      // Operator creates the alias — the create response is the full resource
+      // (getOrgModel is NOT projected; the operator just configured it).
+      const create = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Medium",
+          modelId: realModelId,
+          credentialId,
+          aliased: true,
+        }),
+      });
+      expect(create.status).toBe(201);
+      const created = (await create.json()) as any;
+      expect(created.aliased).toBe(true);
+      // Operator sees the real binding on the write response.
+      expect(created.modelId).toBe(realModelId);
+
+      // A dashboard user listing models gets the alias projected: the backing
+      // is gone.
+      const list = await app.request("/api/models", { headers: authHeaders(ctx) });
+      expect(list.status).toBe(200);
+      const listBody = (await list.json()) as any;
+      const row = listBody.data.find((m: any) => m.id === created.id);
+      expect(row).toBeDefined();
+      expect(row.aliased).toBe(true);
+      expect(row.label).toBe("Appstrate Medium");
+      expect(row.modelId).toBeNull();
+      expect(row.apiShape).toBeNull();
+      expect(row.baseUrl).toBeNull();
+      expect(row.credentialId).toBeNull();
+      expect(row.contextWindow).toBeNull();
+      expect(row.cost).toBeNull();
+
+      // Hard guarantee: the real upstream id never appears anywhere in the
+      // user-facing list payload (mirrors the integration client-masking test).
+      expect(JSON.stringify(listBody)).not.toContain(realModelId);
+    });
   });
 
   describe("POST /api/models", () => {
@@ -85,6 +129,73 @@ describe("Models API", () => {
       expect(typeof body.is_default).toBe("boolean");
       expect(body.createdAt).toBeDefined();
       expect(body.updatedAt).toBeDefined();
+    });
+
+    it("defaults aliased to false and accepts aliased=true on create (round-trips to GET)", async () => {
+      const credentialId = await createProviderKey();
+
+      // Default: omitted → false.
+      const plain = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ label: "Plain", modelId: "gpt-4o", credentialId }),
+      });
+      expect(plain.status).toBe(201);
+      expect(((await plain.json()) as any).aliased).toBe(false);
+
+      // Explicit alias.
+      const aliased = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Medium",
+          modelId: "gpt-4o",
+          credentialId,
+          aliased: true,
+        }),
+      });
+      expect(aliased.status).toBe(201);
+      const created = (await aliased.json()) as any;
+      expect(created.aliased).toBe(true);
+
+      // Round-trips through the list.
+      const list = await app.request("/api/models", { headers: authHeaders(ctx) });
+      const row = ((await list.json()) as any).data.find((m: any) => m.id === created.id);
+      expect(row.aliased).toBe(true);
+    });
+
+    it("rejects an aliased create with no explicit label (would leak the backing) — 400", async () => {
+      const credentialId = await createProviderKey();
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        // No `label` — the derive-from-catalog fallback would name the alias
+        // after its real backing, which survives the projection.
+        body: JSON.stringify({ modelId: "gpt-4o", credentialId, aliased: true }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects an alias on a url-model protocol (the swap can't hide it) — 400", async () => {
+      // google-generative-ai carries the model id in the URL path, not the
+      // request body, so the body-`model` swap would never fire.
+      const providerKey = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiShape: "google-generative-ai",
+        baseUrl: "https://generativelanguage.googleapis.test",
+        apiKey: "g-key",
+      });
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Large",
+          modelId: "gemini-2.0-flash",
+          credentialId: providerKey.id,
+          aliased: true,
+        }),
+      });
+      expect(res.status).toBe(400);
     });
 
     it("rejects non-UUID credentialId with 400 (built-in slugs like 'anthropic')", async () => {

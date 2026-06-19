@@ -4505,8 +4505,10 @@ export interface components {
         ModelProviderCredential: {
             id: string;
             label: string;
-            apiShape: string;
-            baseUrl: string;
+            /** @description Protocol family. `null` for a built-in credential whose every backing model is an alias (#727) — binding hidden so the endpoint doesn't reveal the provider. */
+            apiShape: string | null;
+            /** @description Endpoint base URL. `null` for an alias-only built-in credential (see apiShape). */
+            baseUrl: string | null;
             /** @enum {string} */
             source: "built-in" | "custom";
             /** @enum {string} */
@@ -4602,19 +4604,24 @@ export interface components {
         OrgModel: {
             id: string;
             label: string;
-            apiShape: string;
-            baseUrl: string;
-            modelId: string;
+            /** @description Protocol family. `null` for model aliases (`aliased: true`) — binding hidden. */
+            apiShape: string | null;
+            /** @description Provider endpoint. `null` for model aliases — binding hidden. */
+            baseUrl: string | null;
+            /** @description Upstream model id. `null` for model aliases — the real backing is hidden. */
+            modelId: string | null;
             input?: string[] | null;
             contextWindow?: number | null;
             maxTokens?: number | null;
             reasoning?: boolean | null;
             enabled: boolean;
             is_default: boolean;
+            /** @description Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a public alias and the real binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is stripped from this projection — render an alias badge; the backing model is hidden. */
+            aliased: boolean;
             /** @enum {string} */
             source: "built-in" | "custom";
-            /** @description ID of the backing `model_provider_credentials` row. */
-            credentialId: string;
+            /** @description ID of the backing `model_provider_credentials` row. `null` for model aliases — binding hidden. */
+            credentialId: string | null;
             /** @description Cost per million tokens */
             cost?: {
                 input?: number;
@@ -11643,6 +11650,7 @@ export interface operations {
                      *           "source": "built-in",
                      *           "enabled": true,
                      *           "is_default": false,
+                     *           "aliased": false,
                      *           "credentialId": "pk_abc123",
                      *           "contextWindow": 128000,
                      *           "maxTokens": 16384,
@@ -11700,6 +11708,8 @@ export interface operations {
                         cacheRead?: number;
                         cacheWrite?: number;
                     };
+                    /** @description Model-alias flag. When true, this model's `id` becomes a public alias and its real binding (modelId, provider, baseUrl, capabilities/cost) is hidden from user-facing surfaces; the sidecar rewrites the `model` field on every inference call. */
+                    aliased?: boolean;
                 };
             };
         };
@@ -11997,6 +12007,8 @@ export interface operations {
                         cacheRead?: number;
                         cacheWrite?: number;
                     } | null;
+                    /** @description Model-alias flag. When true, this model's `id` becomes a public alias and its real binding is hidden from user-facing surfaces. */
+                    aliased?: boolean;
                 };
             };
         };

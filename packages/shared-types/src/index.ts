@@ -607,13 +607,26 @@ export interface OrgModelInfo extends ModelMetadata {
   id: string;
   /** Always set — resolvers fall back to catalog label then modelId. */
   label: string;
-  apiShape: string;
-  baseUrl: string;
-  modelId: string;
+  /**
+   * Real binding fields. `null` for model aliases ({@link aliased} true) — the
+   * GET projection strips the backing so a dashboard user never learns the
+   * provider/endpoint/upstream id behind the alias. Always set otherwise.
+   */
+  apiShape: string | null;
+  baseUrl: string | null;
+  modelId: string | null;
   enabled: boolean;
   is_default: boolean;
+  /**
+   * Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a
+   * public alias; user-facing surfaces strip the real binding (`modelId`,
+   * `apiShape`, `baseUrl`, `credentialId`, capabilities/cost). Clients render
+   * an alias badge and never learn the backing model.
+   */
+  aliased: boolean;
   source: "built-in" | "custom";
-  credentialId: string;
+  /** `null` for model aliases — see {@link apiShape}. */
+  credentialId: string | null;
   created_by: string | null;
   createdAt: string;
   updatedAt: string;
@@ -629,8 +642,16 @@ export interface OrgModelInfo extends ModelMetadata {
 export interface ModelProviderCredentialInfo {
   id: string;
   label: string;
-  apiShape: string;
-  baseUrl: string;
+  /**
+   * Protocol family + endpoint. Both `null` for a **built-in** credential
+   * whose every backing model is a model alias (issue #727): exposing the
+   * endpoint host (e.g. `api.anthropic.com`) would reveal the hidden backing
+   * provider to an org admin who can read credentials but did not configure
+   * the env key. Custom credentials always carry them (the admin configured
+   * the binding themselves).
+   */
+  apiShape: string | null;
+  baseUrl: string | null;
   source: "built-in" | "custom";
   /** Auth mode of the underlying credential (matches the registry vocabulary). */
   authMode: "api_key" | "oauth2";

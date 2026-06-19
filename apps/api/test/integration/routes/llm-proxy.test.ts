@@ -57,6 +57,7 @@ async function buildHarness(overrides?: {
   modelId?: string;
   upstreamKey?: string;
   scopes?: string[];
+  aliased?: boolean;
 }): Promise<Harness> {
   const ctx = await createTestContext({ orgSlug: "llmproxyorg" });
   const providerKey = await seedOrgModelProviderKey({
@@ -72,6 +73,7 @@ async function buildHarness(overrides?: {
     label: "Preset",
     modelId: overrides?.modelId ?? "gpt-4o-2024-08-06",
     enabled: true,
+    aliased: overrides?.aliased ?? false,
     cost: { input: 5, output: 15, cacheRead: 0, cacheWrite: 0 },
   });
   const key = await seedApiKey({
@@ -685,5 +687,118 @@ describe("POST /api/llm-proxy/* — response cache", () => {
     });
     expect(second.headers.get("x-llm-proxy-cache-status")).toBeNull();
     expect(upstreamCalls).toBe(2);
+  });
+});
+
+// Model aliases (issue #727, Threat A): the gateway is a user-reachable
+// inference path. When the preset is an alias, the upstream echoes the REAL id
+// in its response `model` field (and may name it in error prose) — the gateway
+// must rewrite it back to the alias before the body (and the cache) leave the
+// server, so a caller never learns the backing.
+describe("POST /api/llm-proxy/* — model-alias swap", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+  });
+  afterEach(() => restoreFetch());
+
+  it("rewrites the echoed real id back to the alias in a non-stream JSON response", async () => {
+    const h = await buildHarness({ aliased: true, modelId: "deepseek-chat-SECRET" });
+    let forwardedModel = "";
+
+    mockUpstream(async (_input, init) => {
+      forwardedModel = JSON.parse(new TextDecoder().decode(init?.body as Uint8Array)).model;
+      // Upstream echoes the real id back, both as the field and in content.
+      return new Response(
+        JSON.stringify({
+          id: "chatcmpl_x",
+          model: "deepseek-chat-SECRET",
+          choices: [{ message: { role: "assistant", content: "I am deepseek-chat-SECRET" } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+    });
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    // The request was forwarded with the REAL id; the response carries the ALIAS.
+    expect(forwardedModel).toBe("deepseek-chat-SECRET");
+    const json = JSON.parse(text);
+    expect(json.model).toBe(h.presetId);
+    // Field swapped; content mention left intact (exact-value match, not blind replace).
+    expect(json.choices[0].message.content).toBe("I am deepseek-chat-SECRET");
+
+    // The ledger keeps the real backing privately (admin/cloud only).
+    const row = await waitForRow(() =>
+      db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId)).limit(1),
+    );
+    expect(row.model).toBe(h.presetId);
+    expect(row.realModel).toBe("deepseek-chat-SECRET");
+  });
+
+  it("rewrites the echoed real id back to the alias in every SSE frame", async () => {
+    const h = await buildHarness({
+      apiShape: "anthropic-messages",
+      baseUrl: "https://api.anthropic.test",
+      modelId: "deepseek-chat-SECRET",
+      upstreamKey: "sk-ant-42",
+      aliased: true,
+    });
+    const sseBody =
+      `event: message_start\n` +
+      `data: {"type":"message_start","message":{"id":"m","model":"deepseek-chat-SECRET","usage":{"input_tokens":10,"output_tokens":1}}}\n\n` +
+      `event: message_delta\n` +
+      `data: {"type":"message_delta","usage":{"output_tokens":5}}\n\n` +
+      `event: message_stop\n` +
+      `data: {"type":"message_stop"}\n\n`;
+    mockUpstream(
+      async () =>
+        new Response(sseBody, { status: 200, headers: { "content-type": "text/event-stream" } }),
+    );
+
+    const res = await app.request("/api/llm-proxy/anthropic-messages/v1/messages", {
+      method: "POST",
+      headers: authHeaders(h, { "anthropic-version": "2024-10-01" }),
+      body: JSON.stringify({
+        model: h.presetId,
+        max_tokens: 64,
+        messages: [{ role: "user", content: "hi" }],
+        stream: true,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const echoed = await res.text();
+    expect(echoed).not.toContain("deepseek-chat-SECRET");
+    expect(echoed).toContain(`"model":"${h.presetId}"`);
+  });
+
+  it("scrubs the real id out of an upstream error body", async () => {
+    const h = await buildHarness({ aliased: true, modelId: "deepseek-chat-SECRET" });
+    mockUpstream(
+      async () =>
+        new Response(
+          JSON.stringify({ error: { message: "The model `deepseek-chat-SECRET` is overloaded" } }),
+          { status: 429, headers: { "content-type": "application/json" } },
+        ),
+    );
+
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+    });
+
+    expect(res.status).toBe(429);
+    const text = await res.text();
+    expect(text).not.toContain("deepseek-chat-SECRET");
+    expect(text).toContain(h.presetId);
   });
 });
