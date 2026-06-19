@@ -147,7 +147,7 @@
   "moonshotai/Kimi-K2.5": {
     "label": "Moonshotai/Kimi K2.5",
     "contextWindow": 256000,
-    "maxTokens": 256000,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "image",
@@ -161,7 +161,7 @@
   "openai/gpt-oss-120b": {
     "label": "Openai/gpt Oss 120b",
     "contextWindow": 131072,
-    "maxTokens": 131072,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "reasoning"
@@ -198,7 +198,7 @@
   "zai-org/GLM-4.6": {
     "label": "Zai Org/GLM 4.6",
     "contextWindow": 200000,
-    "maxTokens": 200000,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "reasoning"
@@ -211,7 +211,7 @@
   "zai-org/GLM-4.7": {
     "label": "Zai Org/GLM 4.7",
     "contextWindow": 200000,
-    "maxTokens": 200000,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "reasoning"

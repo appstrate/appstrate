@@ -39,6 +39,7 @@ import {
   type Model,
 } from "./pi-sdk.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   emptyRunResult,
@@ -106,14 +107,6 @@ export interface PiRunnerOptions {
 }
 
 /**
- * Default response budget when the model carries no `maxTokens`.
- * 16384 covers the common "no thinking" Claude / GPT response shape;
- * larger budgets (Sonnet thinking @ 64 k) override via `model.maxTokens`.
- * Keep in sync with `runtime-pi/sidecar/token-budget.ts` — both surfaces
- * must agree so the spill guard and the compaction threshold do not drift.
- */
-const DEFAULT_RESERVE_TOKENS = 16_384;
-/**
  * Fallback context window when the model omits it. Matches the Claude
  * family's standard 200 k window — the most common runtime target.
  */
@@ -136,7 +129,7 @@ const KEEP_RECENT_FRACTION = 0.1;
  *
  * | Knob               | Mapping                                | Why                                                                                                                                                                              |
  * |--------------------|----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
- * | `reserveTokens`    | `model.maxTokens ?? 16384`             | Response budget. MUST be ≥ `max_tokens` or the first call post-compaction underflows and the upstream 400 ("prompt is too long") reappears. Critical for Claude Sonnet thinking mode (`maxTokens: 64000`). |
+ * | `reserveTokens`    | `deriveResponseReserveTokens(ctx, max)`| Response budget. Honours `max_tokens` so the first call post-compaction does not underflow into the upstream 400 ("prompt is too long") — critical for Claude Sonnet thinking mode (`maxTokens: 64000`). An impossible `max_tokens >= contextWindow` (corrupt catalog data) is clamped to a derived default instead of pinning the threshold at ≤0. |
  * | `keepRecentTokens` | `max(20000, 10% × contextWindow)`      | Preserves the ratio across model sizes: 20k on Claude 200k, ~100k on GPT-4.1 1M, ~200k on Gemini 2M. The floor stops small windows from over-compacting away recent context.    |
  *
  * Operators can disable compaction entirely with
@@ -150,7 +143,12 @@ export function derivePiCompactionSettings(
 ): { enabled: false } | { enabled: true; reserveTokens: number; keepRecentTokens: number } {
   if (env["MODEL_COMPACTION_ENABLED"] === "false") return { enabled: false };
   const contextWindow = model.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
-  const reserveTokens = model.maxTokens ?? DEFAULT_RESERVE_TOKENS;
+  // Shared clamp (see `@appstrate/core/token-budget`): honours a usable
+  // `maxTokens`, but treats an impossible `maxTokens >= contextWindow`
+  // (corrupt catalog/override data) as unset and derives a sane reserve —
+  // otherwise the compaction threshold `contextWindow - reserveTokens`
+  // collapses to ≤0 and the agent compacts on every turn.
+  const reserveTokens = deriveResponseReserveTokens(contextWindow, model.maxTokens);
   const keepRecentTokens = Math.max(
     MIN_KEEP_RECENT_TOKENS,
     Math.floor(contextWindow * KEEP_RECENT_FRACTION),

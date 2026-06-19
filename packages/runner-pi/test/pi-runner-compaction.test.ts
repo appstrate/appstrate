@@ -25,16 +25,28 @@ describe("derivePiCompactionSettings — reserveTokens", () => {
     expect(result.reserveTokens).toBe(64_000);
   });
 
-  it("falls back to 16384 when model.maxTokens is null", () => {
+  it("derives max(16384, 20% × window) when model.maxTokens is null", () => {
+    // Now routed through the shared `deriveResponseReserveTokens`, which
+    // matches the sidecar's spill guard: 200k × 0.2 = 40 000.
     const result = derivePiCompactionSettings({ contextWindow: 200_000, maxTokens: null }, {});
     if (result.enabled === false) throw new Error("compaction should be enabled");
-    expect(result.reserveTokens).toBe(16_384);
+    expect(result.reserveTokens).toBe(40_000);
   });
 
-  it("falls back to 16384 when model.maxTokens is undefined", () => {
+  it("derives max(16384, 20% × window) when model.maxTokens is undefined", () => {
     const result = derivePiCompactionSettings({ contextWindow: 200_000 }, {});
     if (result.enabled === false) throw new Error("compaction should be enabled");
-    expect(result.reserveTokens).toBe(16_384);
+    expect(result.reserveTokens).toBe(40_000);
+  });
+
+  it("clamps an impossible maxTokens == contextWindow (Devstral 2512 regression)", () => {
+    // Bogus catalog data (max_output_tokens == context_window) must not
+    // pin the threshold at contextWindow - reserveTokens <= 0, which made
+    // the agent compact on every turn. Falls back to the derived default.
+    const result = derivePiCompactionSettings({ contextWindow: 256_000, maxTokens: 256_000 }, {});
+    if (result.enabled === false) throw new Error("compaction should be enabled");
+    expect(result.reserveTokens).toBe(51_200);
+    expect(result.reserveTokens).toBeLessThan(256_000);
   });
 });
 

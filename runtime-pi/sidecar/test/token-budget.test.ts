@@ -458,15 +458,31 @@ describe("TokenBudget — context-window guard (#464)", () => {
     ).toThrow(/positive integer/);
   });
 
-  it("rejects reserveTokens ≥ contextWindowTokens (would leave zero room for tools)", () => {
-    expect(
-      () =>
-        new TokenBudget({
-          inlineCapTokens: 100,
-          runBudgetTokens: 1_000,
-          contextWindowTokens: 1_000,
-          reserveTokens: 1_000,
-        }),
-    ).toThrow(/strictly less than/);
+  it("clamps an impossible reserveTokens ≥ contextWindowTokens instead of throwing", () => {
+    // A corrupt catalog/override (max_output_tokens == context_window — a
+    // known LiteLLM data bug for devstral, kimi-k2.5, …) must degrade
+    // gracefully, never crash the sidecar at boot. The shared clamp drops
+    // the impossible cap and derives a reserve strictly below the window.
+    const b = new TokenBudget({
+      inlineCapTokens: 100,
+      runBudgetTokens: 1_000,
+      contextWindowTokens: 1_000,
+      reserveTokens: 1_000,
+    });
+    expect(b.contextWindowTokens).toBe(1_000);
+    expect(b.reserveTokens).toBeLessThan(1_000);
+    expect(b.reserveTokens).toBeGreaterThan(0);
+  });
+
+  it("clamps the real-world Devstral 2512 case (256k window, 256k bogus maxTokens)", () => {
+    const b = new TokenBudget({
+      inlineCapTokens: 10_000,
+      runBudgetTokens: 500_000,
+      contextWindowTokens: 256_000,
+      reserveTokens: 256_000, // bogus max_output_tokens == context_window
+    });
+    expect(b.contextWindowTokens).toBe(256_000);
+    // Falls back to the derived default: max(16384, 256000 × 0.2) = 51 200.
+    expect(b.reserveTokens).toBe(51_200);
   });
 });

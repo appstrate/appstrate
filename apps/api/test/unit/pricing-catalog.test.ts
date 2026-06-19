@@ -12,6 +12,8 @@
  *      provider (drives the picker's "All models" group).
  */
 
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { describe, it, expect } from "bun:test";
 import {
   _catalogSize,
@@ -100,4 +102,37 @@ describe("_catalogSize", () => {
   it("indexes at least 400 chat models across the 12 vendored providers", () => {
     expect(_catalogSize()).toBeGreaterThan(400);
   });
+});
+
+describe("vendored catalog invariant — maxTokens < contextWindow", () => {
+  // Canonical model invariant: a request spends `input + output` from the
+  // same window, so `max_output_tokens < context_window` always holds. The
+  // ingest path (`refresh-pricing-catalog.ts`) nulls impossible values from
+  // LiteLLM (devstral, kimi-k2.5, … — known upstream bug). This test pins
+  // the on-disk data so a future bad refresh can't reintroduce a cap that
+  // crashes the sidecar / pins the compaction threshold at zero.
+  const dataDir = join(dirname(dirname(import.meta.dir)), "src/data/pricing");
+  const files = readdirSync(dataDir).filter((f) => f.endsWith(".json"));
+
+  it("vendors at least the 12 known provider files", () => {
+    expect(files.length).toBeGreaterThanOrEqual(12);
+  });
+
+  for (const file of files) {
+    it(`${file}: every maxTokens is null or strictly below contextWindow`, () => {
+      const entries = JSON.parse(readFileSync(join(dataDir, file), "utf8")) as Record<
+        string,
+        { contextWindow?: number; maxTokens?: number | null }
+      >;
+      const violations = Object.entries(entries)
+        .filter(
+          ([, e]) =>
+            typeof e.maxTokens === "number" &&
+            typeof e.contextWindow === "number" &&
+            e.maxTokens >= e.contextWindow,
+        )
+        .map(([id]) => id);
+      expect(violations).toEqual([]);
+    });
+  }
 });

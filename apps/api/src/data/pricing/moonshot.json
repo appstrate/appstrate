@@ -2,7 +2,7 @@
   "kimi-k2-0711-preview": {
     "label": "Kimi K2 0711 Preview",
     "contextWindow": 131072,
-    "maxTokens": 131072,
+    "maxTokens": null,
     "capabilities": [
       "text"
     ],
@@ -15,7 +15,7 @@
   "kimi-k2-0905-preview": {
     "label": "Kimi K2 0905 Preview",
     "contextWindow": 262144,
-    "maxTokens": 262144,
+    "maxTokens": null,
     "capabilities": [
       "text"
     ],
@@ -28,7 +28,7 @@
   "kimi-k2-thinking": {
     "label": "Kimi K2 Thinking",
     "contextWindow": 262144,
-    "maxTokens": 262144,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "reasoning"
@@ -42,7 +42,7 @@
   "kimi-k2-thinking-turbo": {
     "label": "Kimi K2 Thinking Turbo",
     "contextWindow": 262144,
-    "maxTokens": 262144,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "reasoning"
@@ -56,7 +56,7 @@
   "kimi-k2-turbo-preview": {
     "label": "Kimi K2 Turbo Preview",
     "contextWindow": 262144,
-    "maxTokens": 262144,
+    "maxTokens": null,
     "capabilities": [
       "text"
     ],
@@ -69,7 +69,7 @@
   "kimi-k2.5": {
     "label": "Kimi K2.5",
     "contextWindow": 262144,
-    "maxTokens": 262144,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "image",
@@ -84,7 +84,7 @@
   "kimi-k2.6": {
     "label": "Kimi K2.6",
     "contextWindow": 262144,
-    "maxTokens": 262144,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "image",
@@ -99,7 +99,7 @@
   "kimi-latest": {
     "label": "Kimi Latest",
     "contextWindow": 131072,
-    "maxTokens": 131072,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "image"
@@ -113,7 +113,7 @@
   "kimi-latest-128k": {
     "label": "Kimi Latest 128k",
     "contextWindow": 131072,
-    "maxTokens": 131072,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "image"
@@ -127,7 +127,7 @@
   "kimi-latest-32k": {
     "label": "Kimi Latest 32k",
     "contextWindow": 32768,
-    "maxTokens": 32768,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "image"
@@ -141,7 +141,7 @@
   "kimi-latest-8k": {
     "label": "Kimi Latest 8k",
     "contextWindow": 8192,
-    "maxTokens": 8192,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "image"
@@ -155,7 +155,7 @@
   "kimi-thinking-preview": {
     "label": "Kimi Thinking Preview",
     "contextWindow": 131072,
-    "maxTokens": 131072,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "image"
@@ -169,7 +169,7 @@
   "moonshot-v1-128k": {
     "label": "Moonshot V1 128k",
     "contextWindow": 131072,
-    "maxTokens": 131072,
+    "maxTokens": null,
     "capabilities": [
       "text"
     ],
@@ -181,7 +181,7 @@
   "moonshot-v1-128k-0430": {
     "label": "Moonshot V1 128k 0430",
     "contextWindow": 131072,
-    "maxTokens": 131072,
+    "maxTokens": null,
     "capabilities": [
       "text"
     ],
@@ -193,7 +193,7 @@
   "moonshot-v1-128k-vision-preview": {
     "label": "Moonshot V1 128k Vision Preview",
     "contextWindow": 131072,
-    "maxTokens": 131072,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "image"
@@ -206,7 +206,7 @@
   "moonshot-v1-32k": {
     "label": "Moonshot V1 32k",
     "contextWindow": 32768,
-    "maxTokens": 32768,
+    "maxTokens": null,
     "capabilities": [
       "text"
     ],
@@ -218,7 +218,7 @@
   "moonshot-v1-32k-0430": {
     "label": "Moonshot V1 32k 0430",
     "contextWindow": 32768,
-    "maxTokens": 32768,
+    "maxTokens": null,
     "capabilities": [
       "text"
     ],
@@ -230,7 +230,7 @@
   "moonshot-v1-32k-vision-preview": {
     "label": "Moonshot V1 32k Vision Preview",
     "contextWindow": 32768,
-    "maxTokens": 32768,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "image"
@@ -243,7 +243,7 @@
   "moonshot-v1-8k": {
     "label": "Moonshot V1 8k",
     "contextWindow": 8192,
-    "maxTokens": 8192,
+    "maxTokens": null,
     "capabilities": [
       "text"
     ],
@@ -255,7 +255,7 @@
   "moonshot-v1-8k-0430": {
     "label": "Moonshot V1 8k 0430",
     "contextWindow": 8192,
-    "maxTokens": 8192,
+    "maxTokens": null,
     "capabilities": [
       "text"
     ],
@@ -267,7 +267,7 @@
   "moonshot-v1-8k-vision-preview": {
     "label": "Moonshot V1 8k Vision Preview",
     "contextWindow": 8192,
-    "maxTokens": 8192,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "image"
@@ -280,7 +280,7 @@
   "moonshot-v1-auto": {
     "label": "Moonshot V1 Auto",
     "contextWindow": 131072,
-    "maxTokens": 131072,
+    "maxTokens": null,
     "capabilities": [
       "text"
     ],
