@@ -16,7 +16,7 @@ import { llmUsage } from "@appstrate/db/schema";
 import { listLlmUsageForRun } from "../../../src/services/state/runs.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedRun } from "../../helpers/seed.ts";
+import { seedRun, seedAgent } from "../../helpers/seed.ts";
 
 describe("listLlmUsageForRun — private ledger never leaks the alias backing", () => {
   let ctx: TestContext;
@@ -27,7 +27,12 @@ describe("listLlmUsageForRun — private ledger never leaks the alias backing", 
   });
 
   it("returns only id/costUsd/source — never real_model / api / model", async () => {
-    const run = await seedRun({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    await seedAgent({ id: "@ledgerorg/agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+    const run = await seedRun({
+      packageId: "@ledgerorg/agent",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+    });
 
     // A proxy row carrying the public alias in `model` and the hidden backing
     // in `real_model` — exactly the shape the sidecar/proxy writes for an alias.

@@ -14,6 +14,8 @@ import {
   swapRequestModel,
   swapResponseModelJson,
   createSseModelSwapStream,
+  scrubModelText,
+  isAliasableApiShape,
 } from "../model-swap.ts";
 
 const swap = { alias: "appstrate-medium", real: "deepseek-chat" };
@@ -145,5 +147,95 @@ describe("createSseModelSwapStream (real→alias, streaming)", () => {
     const out = await pipeSse(input);
     // No model field here → the delta text is left exactly as-is.
     expect(out).toContain("deepseek-chat is great");
+  });
+
+  it("preserves a multi-byte UTF-8 char split across the chunk boundary", async () => {
+    // Content holds an emoji + accented text; split the byte stream mid-codepoint
+    // to prove the streaming TextDecoder reassembles it (claimed but unproven).
+    const input = `data: {"model":"deepseek-chat","choices":[{"delta":{"content":"héllo 🚀 wörld"}}]}\n\n`;
+    const bytes = new TextEncoder().encode(input);
+    // The emoji starts a few bytes in; split inside its 4-byte sequence.
+    const emojiByteIdx = bytes.indexOf(0xf0); // first byte of 🚀 (U+1F680)
+    expect(emojiByteIdx).toBeGreaterThan(0);
+    const out = await pipeSseSplit(input, emojiByteIdx + 2);
+    expect(out).not.toContain("deepseek-chat");
+    expect(out).toContain(`"model":"appstrate-medium"`);
+    expect(out).toContain("héllo 🚀 wörld");
+  });
+
+  it("rewrites a final frame that lacks a trailing newline (flush path)", async () => {
+    // No trailing "\n\n" — the frame only reaches the client via flush().
+    const input = `data: {"object":"chat.completion.chunk","model":"deepseek-chat","choices":[]}`;
+    const out = await pipeSse(input);
+    expect(out).not.toContain("deepseek-chat");
+    expect(out).toContain(`"model":"appstrate-medium"`);
+  });
+
+  it("matches the model by EXACT value, not substring (real=gpt-4 ≠ gpt-4o)", async () => {
+    const narrow = { alias: "appstrate-small", real: "gpt-4" };
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(`data: {"model":"gpt-4o","choices":[]}\n\n`));
+        controller.close();
+      },
+    }).pipeThrough(createSseModelSwapStream(narrow));
+    let out = "";
+    const reader = stream.getReader();
+    const dec = new TextDecoder();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      out += dec.decode(value, { stream: true });
+    }
+    out += dec.decode();
+    // gpt-4o is a different model — must NOT be rewritten to the alias.
+    expect(out).toContain(`"model":"gpt-4o"`);
+    expect(out).not.toContain("appstrate-small");
+  });
+});
+
+describe("scrubModelText (error-body blind scrub)", () => {
+  it("replaces every real-id mention in free-form error prose", () => {
+    const body = JSON.stringify({
+      error: { message: "The model `deepseek-chat` does not exist (deepseek-chat)" },
+    });
+    const out = scrubModelText(body, swap);
+    expect(out).not.toContain("deepseek-chat");
+    expect(out.match(/appstrate-medium/g)?.length).toBe(2);
+  });
+
+  it("is a no-op when the body never mentions the real id", () => {
+    const body = "upstream unavailable";
+    expect(scrubModelText(body, swap)).toBe(body);
+  });
+
+  it("no-ops cleanly when alias === real", () => {
+    const noop = { alias: "deepseek-chat", real: "deepseek-chat" };
+    expect(scrubModelText("model deepseek-chat down", noop)).toBe("model deepseek-chat down");
+  });
+});
+
+describe("isAliasableApiShape", () => {
+  it("accepts body-model protocols (openai/anthropic/mistral)", () => {
+    for (const s of [
+      "openai-completions",
+      "openai-responses",
+      "openai-codex-responses",
+      "anthropic-messages",
+      "mistral-conversations",
+    ] as const) {
+      expect(isAliasableApiShape(s)).toBe(true);
+    }
+  });
+
+  it("rejects url-model protocols (google/azure/bedrock)", () => {
+    for (const s of [
+      "google-generative-ai",
+      "google-vertex",
+      "azure-openai-responses",
+      "bedrock-converse-stream",
+    ] as const) {
+      expect(isAliasableApiShape(s)).toBe(false);
+    }
   });
 });

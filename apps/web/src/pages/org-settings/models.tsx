@@ -153,15 +153,22 @@ function ModelsList({
                         </Button>
                         {!isBuiltIn && (
                           <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0"
-                              onClick={() => onEdit(m)}
-                              aria-label={t("models.edit")}
-                            >
-                              <Pencil size={14} />
-                            </Button>
+                            {/* Aliases hide their real binding (modelId etc.),
+                                so the edit form can't round-trip them — the
+                                projected modelId is null and would fail
+                                validation. Edit env/API-side; delete still
+                                works (by id). */}
+                            {!m.aliased && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                onClick={() => onEdit(m)}
+                                aria-label={t("models.edit")}
+                              >
+                                <Pencil size={14} />
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="sm"

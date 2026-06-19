@@ -23,6 +23,7 @@ import {
   projectAliasedModel,
 } from "../services/org-models.ts";
 import { getModelProvider } from "../services/model-providers/registry.ts";
+import { isAliasableApiShape } from "@appstrate/core/model-swap";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
@@ -173,6 +174,29 @@ export function createModelsRouter() {
           "credentialId is unreachable — the credential needs reconnection or no longer exists",
           "credentialId",
         );
+      }
+      // Model-alias guards (issue #727, Threat A):
+      if (aliased) {
+        // 1. Require an explicit label. The derive-from-catalog fallback below
+        //    would name the alias after its REAL backing ("DeepSeek Chat"),
+        //    and `label` survives the projection — leaking the backing on
+        //    /api/models and run.model_label.
+        if (!data.label) {
+          throw invalidRequest(
+            "An aliased model requires an explicit label — the derived label would name the backing model.",
+            "label",
+          );
+        }
+        // 2. The swap only rewrites the body `model` field, which exists for
+        //    openai/anthropic/mistral shapes; google/azure/bedrock carry the
+        //    model id in the URL path, so an alias there forwards verbatim and
+        //    404s upstream (and never gets swapped). Reject up front.
+        if (!isAliasableApiShape(creds.apiShape)) {
+          throw invalidRequest(
+            `Model aliases are not supported for the "${creds.apiShape}" protocol (the model id is carried in the URL, not the request body).`,
+            "aliased",
+          );
+        }
       }
       // Label is optional on the wire — derive from the catalog when the
       // caller omits it. Needs the credential's providerId to pick the

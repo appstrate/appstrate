@@ -34,8 +34,15 @@ describe("initSystemModelProviderKeys — aliased flag", () => {
         providerId: "test-oauth",
         apiKey: "sk-secret",
         models: [
-          // Public alias — real backing hidden.
-          { id: "appstrate-medium", modelId: "deepseek-chat", aliased: true },
+          // Public alias — real backing hidden. An alias MUST carry an explicit
+          // label (a derived one would name the backing) and use a body-`model`
+          // protocol; the registry skips aliases that violate either invariant.
+          {
+            id: "appstrate-medium",
+            modelId: "deepseek-chat",
+            label: "Appstrate Medium",
+            aliased: true,
+          },
           // Sibling under the same key, explicitly not aliased.
           { id: "plain-model", modelId: "gpt-4o", aliased: false },
           // Flag omitted → defaults to false.
@@ -54,5 +61,27 @@ describe("initSystemModelProviderKeys — aliased flag", () => {
 
     expect(models.get("plain-model")?.aliased).toBe(false);
     expect(models.get("default-model")?.aliased).toBe(false);
+  });
+
+  it("skips an aliased entry that lacks an explicit label (would leak the backing)", () => {
+    seedTestModelProviders();
+    initSystemModelProviderKeys([
+      {
+        id: "vanity-key-2",
+        providerId: "test-oauth",
+        apiKey: "sk-secret",
+        models: [
+          // aliased but no label → the derived label would name the backing →
+          // the registry drops it (logged) rather than register a leaky alias.
+          { id: "leaky-alias", modelId: "deepseek-chat", aliased: true },
+          // a well-formed sibling under the same key still registers.
+          { id: "ok-alias", modelId: "gpt-4o", label: "OK", aliased: true },
+        ],
+      },
+    ]);
+
+    const models = getSystemModels();
+    expect(models.get("leaky-alias")).toBeUndefined();
+    expect(models.get("ok-alias")?.aliased).toBe(true);
   });
 });

@@ -5,6 +5,7 @@ import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 import { loadSystemRegistry } from "../lib/system-registry.ts";
 import { modelCostSchema } from "@appstrate/core/module";
+import { isAliasableApiShape } from "@appstrate/core/model-swap";
 import type { ModelMetadata } from "@appstrate/shared-types";
 import { getModelProvider } from "./model-providers/registry.ts";
 
@@ -199,6 +200,27 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
             continue;
           }
           const validM = mResult.data;
+
+          // Model-alias guards (issue #727, Threat A) — same invariants the
+          // POST /api/models route enforces for DB models. A misconfigured
+          // alias would leak its backing rather than hide it, so skip it
+          // (loud) instead of registering a half-working alias.
+          if (validM.aliased === true) {
+            if (!validM.label) {
+              logger.error(
+                "[model-registry] SYSTEM_PROVIDER_KEYS: skipping aliased model without an explicit label (the derived label would name the backing)",
+                { modelProviderCredentialId: validCredential.id, model: m },
+              );
+              continue;
+            }
+            if (!isAliasableApiShape(apiShape)) {
+              logger.error(
+                "[model-registry] SYSTEM_PROVIDER_KEYS: skipping aliased model — protocol carries the model id in the URL, not the body, so the swap can't hide it",
+                { modelProviderCredentialId: validCredential.id, apiShape, model: m },
+              );
+              continue;
+            }
+          }
 
           const modelId = validM.id ?? `${validCredential.id}:${validM.modelId}`;
           mdlMap.set(modelId, {

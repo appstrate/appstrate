@@ -95,15 +95,33 @@ const defaultModel = createDefaultPointer({
  */
 export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
   if (!model.aliased) return model;
+  // Allowlist, NOT a denylist (`{ ...model, field: null }`): build the public
+  // view from only the fields known safe to expose. A field added to
+  // OrgModelInfo later then fails to compile here (required) or is simply
+  // absent (optional) rather than silently riding along and leaking the
+  // backing. Binding ids + every catalog-derived capability/cost field (which
+  // would fingerprint the real model) are nulled.
   return {
-    ...model,
+    // Public — the user chose the alias by id/label.
+    id: model.id,
+    label: model.label,
+    enabled: model.enabled,
+    is_default: model.is_default,
+    aliased: model.aliased,
+    source: model.source,
+    created_by: model.created_by,
+    createdAt: model.createdAt,
+    updatedAt: model.updatedAt,
+    // Backing — always null for an alias.
     apiShape: null,
     baseUrl: null,
     modelId: null,
     credentialId: null,
-    input: null,
+    // Capability/cost — catalog-derived from the REAL model, so they
+    // fingerprint it; drop them too.
     contextWindow: null,
     maxTokens: null,
+    input: null,
     reasoning: null,
     cost: null,
   };
