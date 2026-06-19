@@ -17,15 +17,27 @@
 import type { Context } from "hono";
 import { streamText, convertToModelMessages, stepCountIs, tool, type UIMessage } from "ai";
 import { z } from "zod";
-import { parseBody } from "@appstrate/core/api-errors";
+import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
 import { logger } from "./logger.ts";
-import { resolveModel, resolveDefaultApplicationId } from "./llm.ts";
+import { listModels, pickModel, modelFromFamily, resolveDefaultApplicationId } from "./llm.ts";
 import { openPlatformMcp } from "./platform-mcp.ts";
 import { createWaitForRunTool } from "./wait-for-run.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
+import { runClaudeAgentChat } from "./claude-agent/engine.ts";
 
 const MAX_STEPS = 16;
+
+/** Credential provider id of the Claude subscription — routed to the Agent SDK engine. */
+const CLAUDE_CODE_PROVIDER_ID = "claude-code";
+
+/**
+ * TTL for the engine path's loopback bearer. The Agent SDK bakes it into the
+ * spawned binary's env once, so it must outlive the whole turn (up to
+ * MAX_STEPS turns, each able to block on a `wait_for_run` long-poll). 30 min
+ * is a generous ceiling for a single interactive turn.
+ */
+const ENGINE_LOOPBACK_TTL_MS = 30 * 60_000;
 
 const SYSTEM_PROMPT = `You are Appstrate's assistant. You help the user operate their Appstrate instance — discovering and running agents, inspecting runs, scheduling, searching their documents — through the available tools.
 
@@ -119,13 +131,16 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   };
 
   // Model chosen in the picker (X-Model-Id), else the request body, else the
-  // org default — resolveModel picks the org default when none is given.
+  // org default. We pick the org model row first (so we can read its
+  // providerId) and only then decide the engine — `claude-code` (Claude
+  // subscription) goes through the Agent SDK; everything else through ai-sdk.
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
-  const model = await resolveModel({
-    origin,
-    headers: inferenceHeaders,
-    modelId,
-    mintAuth: mintInferenceAuth,
+  const models = await listModels(origin, inferenceHeaders);
+  const chosen = pickModel(models, modelId);
+  logger.info("model resolved", {
+    model: chosen.id,
+    modelId: chosen.modelId,
+    providerId: chosen.providerId,
   });
   // App-scoped ops (agents, runs) need an application context; resolve the
   // org's default app unless the caller already pinned one.
@@ -156,6 +171,43 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
       : SYSTEM_PROMPT;
   if (body.context) {
     system += `\n\nThe user is currently looking at: ${body.context.type} "${body.context.label ?? body.context.id}" (id: ${body.context.id}). Prefer this context when the question is ambiguous.`;
+  }
+
+  // Platform MCP wiring shared by both engines: the meta-tools live at
+  // /api/mcp/o/:org and run with the caller's own credentials (RBAC fidelity).
+  const mcpHeaders: Record<string, string> = { ...headers };
+  if (applicationId) mcpHeaders["x-application-id"] = applicationId;
+
+  // Claude subscription → official Claude Agent SDK engine (clean/sanctioned),
+  // NOT the ai-sdk → forging proxy. The SDK opens its own MCP connection, so we
+  // close the probe client (used only for reachability + instructions) and hand
+  // the engine the MCP endpoint + a turn-scoped loopback bearer for the gateway.
+  if (chosen.providerId === CLAUDE_CODE_PROVIDER_ID) {
+    const platformMcp = mcp
+      ? { url: `${origin}/api/mcp/o/${encodeURIComponent(orgId)}`, headers: mcpHeaders }
+      : undefined;
+    await mcp?.close();
+    return runClaudeAgentChat({
+      messages,
+      system,
+      modelId: chosen.modelId,
+      gatewayBaseUrl: `${origin}/api/llm-proxy/claude-code-sdk/${encodeURIComponent(chosen.id)}`,
+      placeholderToken: mintLoopbackToken(
+        { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
+        { ttlMs: ENGINE_LOOPBACK_TTL_MS },
+      ),
+      platformMcp,
+      localTools: { origin, headers: mcpHeaders },
+      abortSignal: c.req.raw.signal,
+      onError: clientErrorMessage,
+    });
+  }
+
+  // ai-sdk path — API-key providers + codex-grey, bound to the llm-proxy.
+  const model = modelFromFamily(chosen, origin, inferenceHeaders, mintInferenceAuth);
+  if (!model) {
+    await mcp?.close();
+    throw invalidRequest(`Model family "${chosen.apiShape}" is not supported by the chat.`);
   }
 
   try {

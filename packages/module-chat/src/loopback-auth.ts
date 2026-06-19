@@ -47,9 +47,26 @@ function sign(payload: string): string {
   return createHmac("sha256", secret).update(payload).digest("base64url");
 }
 
-export function mintLoopbackToken(claims: Omit<LoopbackClaims, "exp">): string {
+/**
+ * Mint a loopback bearer.
+ *
+ * The default 60 s TTL fits the `ai-sdk` path, which re-mints on every proxy
+ * call. The Claude Agent SDK path can't — it bakes the bearer into the spawned
+ * binary's env once at turn start (`ANTHROPIC_AUTH_TOKEN`), and the turn can
+ * run for minutes (multi-step + a blocking `wait_for_run`). It passes a longer
+ * `ttlMs` so the token outlives the whole turn. The token stays least-privilege
+ * (`llm-proxy:call` + `models:read`), process-local, and only usable on the
+ * 127.0.0.1 first-party gateway.
+ */
+export function mintLoopbackToken(
+  claims: Omit<LoopbackClaims, "exp">,
+  opts?: { ttlMs?: number },
+): string {
   const payload = Buffer.from(
-    JSON.stringify({ ...claims, exp: Date.now() + TOKEN_TTL_MS } satisfies LoopbackClaims),
+    JSON.stringify({
+      ...claims,
+      exp: Date.now() + (opts?.ttlMs ?? TOKEN_TTL_MS),
+    } satisfies LoopbackClaims),
   ).toString("base64url");
   return `chatloop_${payload}.${sign(payload)}`;
 }
