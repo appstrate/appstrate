@@ -1,5 +1,5 @@
 {
-  "id": "91cd30eb-f322-49bf-a244-cb7f43a33d03",
+  "id": "555f9dc5-edf8-4e31-8339-6fa193c0c97a",
   "prevId": "2c08f174-672b-4fa4-972c-0e7f2cf36035",
   "version": "7",
   "dialect": "postgresql",
@@ -1112,13 +1112,6 @@
           "notNull": true,
           "default": true
         },
-        "is_default": {
-          "name": "is_default",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "source": {
           "name": "source",
           "type": "text",
@@ -1159,22 +1152,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_org_models_one_default": {
-          "name": "idx_org_models_one_default",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"org_models\".\"is_default\" = true",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1256,13 +1233,6 @@
           "notNull": true,
           "default": true
         },
-        "is_default": {
-          "name": "is_default",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "source": {
           "name": "source",
           "type": "text",
@@ -1303,22 +1273,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_org_proxies_one_default": {
-          "name": "idx_org_proxies_one_default",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"org_proxies\".\"is_default\" = true",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1463,6 +1417,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'::jsonb"
+        },
+        "default_model_id": {
+          "name": "default_model_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "default_proxy_id": {
+          "name": "default_proxy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_by": {
           "name": "created_by",
@@ -4824,6 +4790,20 @@
           "primaryKey": false,
           "notNull": false
         },
+        "is_default": {
+          "name": "is_default",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "auto_provisioned": {
+          "name": "auto_provisioned",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -4840,8 +4820,8 @@
         }
       },
       "indexes": {
-        "idx_integration_oauth_clients_unique": {
-          "name": "idx_integration_oauth_clients_unique",
+        "idx_ioc_one_default": {
+          "name": "idx_ioc_one_default",
           "columns": [
             {
               "expression": "application_id",
@@ -4863,6 +4843,35 @@
             }
           ],
           "isUnique": true,
+          "where": "\"integration_oauth_clients\".\"is_default\"",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_ioc_one_auto": {
+          "name": "idx_ioc_one_auto",
+          "columns": [
+            {
+              "expression": "application_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "integration_package_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "auth_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"integration_oauth_clients\".\"auto_provisioned\"",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -4887,6 +4896,33 @@
           "columns": [
             {
               "expression": "integration_package_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_integration_oauth_clients_lookup": {
+          "name": "idx_integration_oauth_clients_lookup",
+          "columns": [
+            {
+              "expression": "application_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "integration_package_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "auth_key",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

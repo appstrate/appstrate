@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { and, eq, ne, type AnyColumn, type SQL } from "drizzle-orm";
-import { type PgTable } from "drizzle-orm/pg-core";
+import { type PgColumn, type PgTable } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { organizations } from "@appstrate/db/schema";
 import { notFound } from "./errors.ts";
@@ -232,9 +232,9 @@ export interface DefaultPointer {
 
 export interface CreateDefaultPointerOptions {
   /** Domain table whose rows the pointer can name (needs a `uuid` `id` column). */
-  table: PgTable & { id: AnyColumn };
+  table: PgTable & { id: PgColumn };
   /** The `organizations` pointer column (e.g. `organizations.defaultModelId`). */
-  pointerColumn: AnyColumn;
+  pointerColumn: PgColumn;
   /** The Drizzle field name backing `pointerColumn` (e.g. `"defaultModelId"`). */
   pointerField: string;
   /** True when `id` names a SYSTEM entry (carries no DB row). */
@@ -258,7 +258,7 @@ export function createDefaultPointer(opts: CreateDefaultPointerOptions): Default
       .from(organizations)
       .where(eq(organizations.id, orgId))
       .limit(1);
-    return (row?.value as string | null) ?? null;
+    return row?.value ?? null;
   }
 
   async function promoteIfFirst(tx: DbTransaction, orgId: string, newRowId: string): Promise<void> {
