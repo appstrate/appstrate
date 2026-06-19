@@ -58,6 +58,7 @@ import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Modal } from "../components/modal";
 import { SourceBadge } from "../components/source-badge";
+import { DefaultCell } from "../components/default-cell";
 import { usePermissions } from "../hooks/use-permissions";
 import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
 import {
@@ -341,25 +342,20 @@ function ClientsTable({
                     </TableCell>
                     <TableCell className="font-mono text-xs">{client.client_id}</TableCell>
                     <TableCell>
-                      {client.is_default ? (
-                        <Badge variant="default">{t("integration.clients.default")}</Badge>
-                      ) : canChooseDefault ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 text-xs"
-                          disabled={setDefault.isPending}
-                          onClick={() =>
-                            setDefault.mutate({
-                              params: { path: { packageId, authKey } },
-                              body: { client_ref: client.client_ref },
-                            })
-                          }
-                          data-testid={`set-default-client-${client.client_ref}`}
-                        >
-                          {t("integration.clients.setDefault.action")}
-                        </Button>
-                      ) : null}
+                      <DefaultCell
+                        isDefault={client.is_default}
+                        defaultLabel={t("integration.clients.default")}
+                        setLabel={t("integration.clients.setDefault.action")}
+                        canSetDefault={canChooseDefault}
+                        disabled={setDefault.isPending}
+                        onSetDefault={() =>
+                          setDefault.mutate({
+                            params: { path: { packageId, authKey } },
+                            body: { client_ref: client.client_ref },
+                          })
+                        }
+                        testId={`set-default-client-${client.client_ref}`}
+                      />
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">

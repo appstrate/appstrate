@@ -47,6 +47,7 @@ import { Spinner } from "../../components/spinner";
 import { TestResultSpan } from "../../components/test-result-span";
 import { InlineEditableLabel } from "../../components/inline-editable-label";
 import { SourceBadge } from "../../components/source-badge";
+import { DefaultCell } from "../../components/default-cell";
 
 function ModelsList({
   models,
@@ -123,19 +124,13 @@ function ModelsList({
                       </div>
                     </TableCell>
                     <TableCell>
-                      {m.isDefault ? (
-                        <Badge variant="success">{t("models.default")}</Badge>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 text-xs"
-                          onClick={() => onSetDefault(m)}
-                          data-testid={`set-default-model-${m.id}`}
-                        >
-                          {t("models.setDefault")}
-                        </Button>
-                      )}
+                      <DefaultCell
+                        isDefault={m.isDefault}
+                        defaultLabel={t("models.default")}
+                        setLabel={t("models.setDefault")}
+                        onSetDefault={() => onSetDefault(m)}
+                        testId={`set-default-model-${m.id}`}
+                      />
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
