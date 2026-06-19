@@ -5684,6 +5684,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationError"];
             /** @description CSRF check failed. */
             403: {
                 headers: {
@@ -5949,6 +5950,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -6212,6 +6214,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -6370,6 +6373,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Concurrent request with the same Idempotency-Key still in flight, the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference) */
             409: {
@@ -7174,6 +7178,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApplicationPackage"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -7378,6 +7383,7 @@ export interface operations {
                     "application/json": components["schemas"]["SmtpConfigView"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7429,6 +7435,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7456,6 +7463,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7495,6 +7503,8 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7525,6 +7535,7 @@ export interface operations {
                     "application/json": components["schemas"]["SocialProviderView"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7570,6 +7581,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7598,6 +7610,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -9268,6 +9281,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Wrong package type */
             409: {
@@ -9370,6 +9384,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Wrong package type (not an integration) */
             409: {
@@ -9438,6 +9453,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     listIntegrationClients: {
@@ -9784,6 +9800,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     updateIntegrationConnectionMetadata: {
@@ -9899,6 +9916,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     deactivateIntegration: {
@@ -9927,6 +9945,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Wrong package type */
             409: {
@@ -9986,6 +10005,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     upsertIntegrationOrgDefault: {
@@ -10195,6 +10215,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     upsertIntegrationPin: {
@@ -10362,6 +10383,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
@@ -11555,6 +11577,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -11581,6 +11604,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
@@ -11988,6 +12012,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgModel"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -12340,6 +12365,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     createOAuthClient: {
@@ -12403,6 +12429,8 @@ export interface operations {
                     "application/json": components["schemas"]["OAuthClientWithSecret"];
                 };
             };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getOAuthClient: {
@@ -12432,6 +12460,7 @@ export interface operations {
                     "application/json": components["schemas"]["OAuthClientObject"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             /** @description Client not found. */
             404: {
                 headers: {
@@ -12462,6 +12491,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Client not found. */
             404: {
                 headers: {
@@ -12517,6 +12547,8 @@ export interface operations {
                     "application/json": components["schemas"]["OAuthClientObject"];
                 };
             };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
             /** @description Client not found. */
             404: {
                 headers: {
@@ -12553,6 +12585,7 @@ export interface operations {
                     "application/json": components["schemas"]["OAuthClientWithSecret"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             /** @description Client not found. */
             404: {
                 headers: {
@@ -12617,6 +12650,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     getOpenApiSpec: {
@@ -12995,6 +13029,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgInvitationInfo"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -13115,6 +13150,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgMember"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -15854,6 +15890,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserProfile"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -15910,6 +15947,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
         };
     };
@@ -16483,6 +16521,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["IdempotencyInProgress"];
             /** @description Missing integration connection (`missing_integration_connection`) */
             412: {
@@ -16561,6 +16600,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
         };
@@ -16886,6 +16926,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Run not cancellable (already completed/failed) */
             409: {
@@ -17958,6 +17999,7 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookObject"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -18108,6 +18150,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
