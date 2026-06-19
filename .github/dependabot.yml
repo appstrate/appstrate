@@ -2,6 +2,15 @@ version: 2
 updates:
   - package-ecosystem: "bun"
     directory: "/"
+    # Dependency bumps can break at runtime in ways the fast `unit` job misses
+    # (cross-package re-exports, container provisioning), so tag every bun PR
+    # with the `e2e` + `integration` gating labels — test.yml runs those heavy
+    # jobs on `contains(labels, …)`. `dependencies` is re-declared here because
+    # specifying `labels:` replaces dependabot's default label set.
+    labels:
+      - "dependencies"
+      - "e2e"
+      - "integration"
     schedule:
       interval: "weekly"
     groups:
