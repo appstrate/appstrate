@@ -115,7 +115,11 @@ async function runPlatformContainerImpl(
 
   const prompt = await buildPlatformSystemPrompt(context, plan);
   const { llmConfig } = plan;
-  const modelId = llmConfig.modelId;
+  // The container's MODEL_ID is the PUBLIC id: the alias for a model alias, the
+  // real id otherwise. The agent sends it verbatim as the request `model`; the
+  // sidecar swaps alias→real upstream. The real backing id never enters the
+  // container env for an alias.
+  const modelId = llmConfig.aliased ? llmConfig.aliasId : llmConfig.modelId;
 
   let boundary: IsolationBoundary | undefined;
   let sidecarHandle: WorkloadHandle | undefined;
@@ -158,7 +162,22 @@ async function runPlatformContainerImpl(
     // is the ONLY path that routes agent egress through it — skipping the
     // sidecar would silently drop the proxy and leak the host IP.
     const hasIntegrations = (plan.integrations?.length ?? 0) > 0;
-    skipSidecar = !hasIntegrations && !!llmConfig.apiKey && !isOauthCredential && !plan.proxyUrl;
+    // A model alias MUST route through the sidecar — that's the only place the
+    // `model` alias→real swap happens. Skipping it would hand the agent the
+    // real backing id (in its own request) and the provider's real endpoint.
+    skipSidecar =
+      !hasIntegrations &&
+      !!llmConfig.apiKey &&
+      !isOauthCredential &&
+      !plan.proxyUrl &&
+      !llmConfig.aliased;
+
+    // Model-alias swap descriptor (LLM-gateway alias pattern). The container is
+    // handed the public alias as MODEL_ID (below); the sidecar swaps it for the
+    // real upstream id on every call. The real id never enters the container.
+    const modelSwap = llmConfig.aliased
+      ? { alias: llmConfig.aliasId, real: llmConfig.modelId }
+      : undefined;
 
     let sidecarLlm: LlmProxyConfig | undefined;
     if (isOauthCredential) {
@@ -170,6 +189,7 @@ async function runPlatformContainerImpl(
         baseUrl: llmConfig.baseUrl,
         credentialId: llmConfig.credentialId!,
         ...(providerCfg?.oauthWireFormat ? { wireFormat: providerCfg.oauthWireFormat } : {}),
+        ...(modelSwap ? { modelSwap } : {}),
       };
       sidecarLlm = oauthCfg;
     } else if (llmApiKey) {
@@ -182,6 +202,7 @@ async function runPlatformContainerImpl(
         baseUrl: llmConfig.baseUrl,
         apiKey: llmApiKey,
         placeholder: llmPlaceholder,
+        ...(modelSwap ? { modelSwap } : {}),
       };
     }
 

@@ -502,12 +502,34 @@ export type ModelApiShape =
   | "azure-openai-responses"
   | "bedrock-converse-stream";
 
+/**
+ * Model-alias swap (LLM-gateway alias pattern). Present only for model aliases.
+ * The agent container is handed the public `alias` as its `MODEL_ID`, so every
+ * inference request arrives with `model: <alias>`. The sidecar rewrites it to
+ * `<real>` before forwarding upstream, and rewrites the upstream's echoed
+ * `model: <real>` back to `<alias>` on the way out — including each streaming
+ * chunk. The agent therefore only ever sees the alias; the real backing id
+ * stays inside the sidecar (and the platform's private usage ledger).
+ *
+ * Matching is by exact value at the known JSON locations (top-level `model`,
+ * and `message.model` for Anthropic `message_start`), never a blind string
+ * replace — so a model id mentioned inside generated content is never clobbered.
+ */
+export interface ModelSwap {
+  /** Public alias id the agent sends (its `MODEL_ID`). */
+  alias: string;
+  /** Real upstream model id forwarded to the provider. */
+  real: string;
+}
+
 export interface LlmProxyApiKeyConfig {
   authMode: "api_key";
   /** Upstream provider base URL the sidecar forwards to. */
   baseUrl: string;
   apiKey: string;
   placeholder: string;
+  /** Set for model aliases — rewrite `model` alias↔real in req/resp. See {@link ModelSwap}. */
+  modelSwap?: ModelSwap;
 }
 
 export interface LlmProxyOauthConfig {
@@ -516,6 +538,8 @@ export interface LlmProxyOauthConfig {
   baseUrl: string;
   /** ID of the `model_provider_credentials` row backing this OAuth connection. */
   credentialId: string;
+  /** Set for model aliases — rewrite `model` alias↔real in req/resp. See {@link ModelSwap}. */
+  modelSwap?: ModelSwap;
   /**
    * Declarative wire-format contract contributed by the provider module
    * (`ModelProviderDefinition.oauthWireFormat`). Drives identity-header
