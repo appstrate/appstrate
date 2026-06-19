@@ -48,6 +48,11 @@ export const jwks = pgTable("jwks", {
   privateKey: text("private_key").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   expiresAt: timestamp("expires_at"),
+  // better-auth 1.7.0-beta.7 added optional alg/crv to the jwks plugin schema
+  // (dist/plugins/jwt/schema.mjs) — without these columns every JWT-signing
+  // flow throws "field 'alg' does not exist in the 'jwks' Drizzle schema".
+  alg: text("alg"),
+  crv: text("crv"),
 });
 
 // ─── Better Auth: device-authorization plugin (RFC 8628) ──────────────────────
