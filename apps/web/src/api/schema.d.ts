@@ -9475,6 +9475,7 @@ export interface operations {
                             client_ref: string;
                             /** @enum {string} */
                             source: "built-in" | "custom";
+                            /** @description For `custom` clients, the org's OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
                             is_default: boolean;
                             auto_provisioned: boolean;
@@ -9649,6 +9650,7 @@ export interface operations {
                             client_ref: string;
                             /** @enum {string} */
                             source: "built-in" | "custom";
+                            /** @description For `custom` clients, the org's OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
                             is_default: boolean;
                             auto_provisioned: boolean;

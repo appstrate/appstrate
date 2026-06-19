@@ -146,7 +146,11 @@ const integrationClientsListSchema = {
         properties: {
           client_ref: { type: "string" },
           source: { type: "string", enum: ["built-in", "custom"] },
-          client_id: { type: "string" },
+          client_id: {
+            type: "string",
+            description:
+              "For `custom` clients, the org's OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`.",
+          },
           is_default: { type: "boolean" },
           auto_provisioned: { type: "boolean" },
           has_client_secret: { type: "boolean" },

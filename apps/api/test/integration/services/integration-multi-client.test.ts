@@ -377,6 +377,10 @@ describe("integration multi-client", () => {
         source: "built-in",
         is_default: true,
       });
+      // The real system client_id (a deployment secret) must NEVER leak — the
+      // descriptor carries an opaque `sys_` fingerprint instead.
+      expect(clients[0]!.client_id).not.toBe("sys-client.apps.googleusercontent.com");
+      expect(clients[0]!.client_id).toMatch(/^sys_[0-9a-f]{16}$/);
     });
 
     it("lists the custom client as default when both exist (BYO-app wins)", async () => {

@@ -1367,6 +1367,10 @@ describe("multi-client: list + system-client connect", () => {
       is_default: true,
     });
     expect(JSON.stringify(body.data)).not.toContain("sys-secret");
+    // Neither the secret NOR the real system client_id leaks — the descriptor
+    // returns an opaque `sys_` fingerprint for system clients.
+    expect(JSON.stringify(body.data)).not.toContain("sys-client.apps.googleusercontent.com");
+    expect(body.data[0]!.client_id).toMatch(/^sys_[0-9a-f]{16}$/);
   });
 
   it("GET clients lists custom (default) + system once an org registers its own app", async () => {

@@ -842,6 +842,13 @@ export interface IntegrationClientDescriptor {
   client_ref: string;
   /** `"built-in"` (env system client) or `"custom"` (org per-app client). */
   source: "built-in" | "custom";
+  /**
+   * For `"custom"` clients, the org's own OAuth `client_id` (they registered it).
+   * For `"built-in"` (system) clients, a stable opaque FINGERPRINT (truncated
+   * SHA-256) — never the real `SYSTEM_INTEGRATIONS` client_id, which is a
+   * deployment secret and must not leak to the front. It is display-only; the
+   * connect/refresh keyspace is `client_ref`, not this field.
+   */
   client_id: string;
   /** True for the client used when no explicit `client_ref` is given at connect. */
   is_default: boolean;
@@ -851,6 +858,18 @@ export interface IntegrationClientDescriptor {
   has_client_secret: boolean;
   /** Pre-registered redirect URI override, or null (custom only; system → null). */
   redirect_uri: string | null;
+}
+
+/**
+ * Stable, non-reversible fingerprint of a system client_id for display. The real
+ * `SYSTEM_INTEGRATIONS` client_id is a deployment secret that must not leak to
+ * the front; the UI only needs an opaque, stable identifier to render and diff,
+ * which a truncated SHA-256 provides. `sys_`-prefixed so it never reads as a
+ * real OAuth client_id.
+ */
+function fingerprintSystemClientId(clientId: string): string {
+  const hex = new Bun.CryptoHasher("sha256").update(clientId).digest("hex");
+  return `sys_${hex.slice(0, 16)}`;
 }
 
 /**
@@ -884,7 +903,9 @@ export async function listIntegrationClients(
     mapSystem: (id, def) => ({
       client_ref: id,
       source: "built-in",
-      client_id: def.clientId,
+      // Never expose the real system client_id (deployment secret) — only an
+      // opaque, stable fingerprint for the UI to show/diff.
+      client_id: fingerprintSystemClientId(def.clientId),
       is_default: false,
       auto_provisioned: false,
       has_client_secret: def.clientSecret.length > 0,
