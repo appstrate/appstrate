@@ -7,7 +7,7 @@
   "description": "Cloud file storage and synchronization",
   "keywords": ["storage", "productivity"],
   "license": "Apache-2.0",
-  "icon": "googledrive",
+  "icon": "logos:google-drive",
   "source": {
     "kind": "none"
   },

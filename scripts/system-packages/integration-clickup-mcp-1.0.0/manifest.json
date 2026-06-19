@@ -4,6 +4,7 @@
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "ClickUp",
+  "icon": "simple-icons:clickup",
   "description": "ClickUp integration backed by ClickUp's official remote MCP server (mcp.clickup.com/mcp). The sidecar opens a Streamable HTTP MCP client and injects the actor's OAuth2 access token as `Authorization: Bearer …` on every request — the user authorises Appstrate once, ClickUp's MCP handles tool execution. ClickUp does not use OAuth scopes (the access token authorises the full set of capabilities allowed by the workspace member's role), so the niveau 2 scope model is degenerate here: no `scope_catalog`, no per-tool `required_scopes`, no scope inference, and no missing-scope diff panel. Phase 1 install validation and Phase 3 `tools/list` allowlist still apply — agent authors pick which tools the LLM sees, even though OAuth grants are workspace-wide. Phase 4 (per-tool URL envelope) is N/A — every tool transits the same `/mcp` endpoint, ClickUp's RBAC is the only gate. Rate limits: 50 calls / 24h on Free plan, 300 calls / 24h on Unlimited+. Currently in public beta upstream.",
   "license": "Apache-2.0",
   "source": {

@@ -7,7 +7,7 @@
   "description": "Calendar and scheduling service by Google",
   "keywords": ["calendar", "productivity"],
   "license": "Apache-2.0",
-  "icon": "googlecalendar",
+  "icon": "logos:google-calendar",
   "source": {
     "kind": "none"
   },

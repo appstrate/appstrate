@@ -7,7 +7,7 @@
   "description": "Code hosting and collaboration platform",
   "keywords": ["development", "code"],
   "license": "Apache-2.0",
-  "icon": "github",
+  "icon": "logos:github-icon",
   "source": {
     "kind": "none"
   },

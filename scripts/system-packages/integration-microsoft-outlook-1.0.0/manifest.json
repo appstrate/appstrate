@@ -7,7 +7,7 @@
   "description": "Email and calendar service by Microsoft",
   "keywords": ["email", "productivity"],
   "license": "Apache-2.0",
-  "icon": "microsoftoutlook",
+  "icon": "simple-icons:microsoftoutlook",
   "source": {
     "kind": "none"
   },

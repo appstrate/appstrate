@@ -20,12 +20,21 @@ export interface BreadcrumbEntry {
 interface PageHeaderProps {
   title: string;
   emoji?: string;
+  /** Custom leading icon node; takes precedence over `emoji` when provided. */
+  icon?: ReactNode;
   breadcrumbs?: BreadcrumbEntry[];
   actions?: ReactNode;
   children?: ReactNode;
 }
 
-export function PageHeader({ title, emoji, breadcrumbs, actions, children }: PageHeaderProps) {
+export function PageHeader({
+  title,
+  emoji,
+  icon,
+  breadcrumbs,
+  actions,
+  children,
+}: PageHeaderProps) {
   return (
     <div className="mb-4">
       {breadcrumbs && breadcrumbs.length > 0 && (
@@ -49,8 +58,8 @@ export function PageHeader({ title, emoji, breadcrumbs, actions, children }: Pag
         </Breadcrumb>
       )}
       <div className="flex min-h-9 items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold">
-          {emoji && <span className="mr-2">{emoji}</span>}
+        <h2 className="flex items-center gap-2 text-lg font-semibold">
+          {icon ?? (emoji && <span>{emoji}</span>)}
           {title}
         </h2>
         {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}

@@ -7,7 +7,7 @@
   "description": "Email marketing and automation platform",
   "keywords": ["email-marketing", "marketing"],
   "license": "Apache-2.0",
-  "icon": "mailchimp",
+  "icon": "logos:mailchimp",
   "source": {
     "kind": "none"
   },

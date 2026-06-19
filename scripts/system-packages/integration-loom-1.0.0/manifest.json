@@ -7,7 +7,7 @@
   "description": "Video messaging platform — access video metadata, transcripts, and embed information",
   "keywords": ["video", "communication"],
   "license": "Apache-2.0",
-  "icon": "loom",
+  "icon": "logos:loom",
   "source": {
     "kind": "none"
   },

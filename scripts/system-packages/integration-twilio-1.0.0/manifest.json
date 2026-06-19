@@ -7,7 +7,7 @@
   "description": "Cloud communications platform for SMS, voice, and messaging",
   "keywords": ["messaging", "communications"],
   "license": "Apache-2.0",
-  "icon": "twilio",
+  "icon": "logos:twilio-icon",
   "source": {
     "kind": "none"
   },

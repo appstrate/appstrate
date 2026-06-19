@@ -4,6 +4,7 @@
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Gmail",
+  "icon": "logos:google-gmail",
   "description": "Gmail integration backed by Google's official remote MCP server (gmailmcp.googleapis.com/mcp/v1). The sidecar opens a Streamable HTTP MCP client and injects the actor's OAuth2 access token as `Authorization: Bearer …` on every request — the user authorises Appstrate once, Google handles tool execution. Niveau 2 enforcement: install-time scope validation (Phase 1), OAuth scope union (Phase 2), agent-author tool/scope allowlist (Phase 3/5b), refresh-time scope-shrink awareness (Phase 6). Phase 4 (per-tool URL envelope) is N/A — every tool transits the same /mcp/v1 endpoint, the upstream's RBAC is the only URL gate.",
   "license": "Apache-2.0",
   "source": {

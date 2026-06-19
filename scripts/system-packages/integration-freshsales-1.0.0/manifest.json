@@ -7,7 +7,6 @@
   "description": "CRM platform for sales teams with AI-powered lead scoring",
   "keywords": ["crm", "sales"],
   "license": "Apache-2.0",
-  "icon": "https://www.google.com/s2/favicons?domain=freshsales.io&sz=128",
   "source": {
     "kind": "none"
   },

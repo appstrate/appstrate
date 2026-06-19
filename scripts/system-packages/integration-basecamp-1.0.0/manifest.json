@@ -7,7 +7,7 @@
   "description": "Project management and team communication platform",
   "keywords": ["project-management", "collaboration"],
   "license": "Apache-2.0",
-  "icon": "basecamp",
+  "icon": "logos:basecamp",
   "source": {
     "kind": "none"
   },

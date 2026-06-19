@@ -7,7 +7,7 @@
   "description": "Project tracking and issue management platform by Atlassian",
   "keywords": ["project-management", "issue-tracking"],
   "license": "Apache-2.0",
-  "icon": "jira",
+  "icon": "logos:jira",
   "source": {
     "kind": "none"
   },

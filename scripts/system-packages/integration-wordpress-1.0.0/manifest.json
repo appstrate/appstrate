@@ -7,7 +7,7 @@
   "description": "Content management system — manage posts, pages, media, and users via the REST API",
   "keywords": ["cms", "content"],
   "license": "Apache-2.0",
-  "icon": "wordpress",
+  "icon": "logos:wordpress-icon",
   "source": {
     "kind": "none"
   },

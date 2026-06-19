@@ -6,6 +6,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import { packageListPath } from "../../lib/package-paths";
 import { InlineMarkdown } from "../markdown";
 import { PageHeader } from "../page-header";
+import { IntegrationIcon } from "../integration-icon";
 
 const emojiMap: Record<PackageType, string> = {
   agent: "⚡",
@@ -21,6 +22,8 @@ interface SharedHeaderDetail {
   source: string;
   type: PackageType;
   version?: string | null;
+  /** Raw AFPS manifest `icon` (image URL or Iconify id); integrations only. */
+  icon?: string;
 }
 
 export function SharedHeader({
@@ -44,11 +47,17 @@ export function SharedHeader({
       ? t("detail.breadcrumb")
       : t(`packages.type.${detail.type}s`, { ns: "settings" });
 
+  const iconNode =
+    detail.type === "integration" && detail.icon ? (
+      <IntegrationIcon src={detail.icon} />
+    ) : undefined;
+
   return (
     <>
       <PageHeader
         title={detail.displayName}
         emoji={emojiMap[detail.type]}
+        icon={iconNode}
         breadcrumbs={[
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: breadcrumbLabel, href: breadcrumbPath },
