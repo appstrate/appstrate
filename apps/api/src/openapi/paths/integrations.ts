@@ -214,7 +214,7 @@ const authStatusSchema = {
     has_system_client: {
       type: "boolean",
       description:
-        "True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATION_CLIENTS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client.",
+        "True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client.",
     },
     client_auto_provisioned: {
       type: "boolean",

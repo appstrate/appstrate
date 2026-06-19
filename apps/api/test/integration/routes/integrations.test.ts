@@ -29,8 +29,8 @@ import {
 } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
-  initSystemIntegrationClients,
-  __resetSystemIntegrationClientsForTest,
+  initSystemIntegrations,
+  __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
 
 const app = getTestApp();
@@ -151,7 +151,7 @@ describe("GET /api/integrations", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
   });
-  afterEach(() => __resetSystemIntegrationClientsForTest());
+  afterEach(() => __resetSystemIntegrationsForTest());
 
   it("returns the org's integrations with `active: false` by default", async () => {
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
@@ -179,16 +179,20 @@ describe("GET /api/integrations", () => {
   });
 
   it("decorates `active: true` for a system integration with no install row", async () => {
-    // A SYSTEM_INTEGRATION_CLIENTS entry makes the integration auto-active out
+    // A SYSTEM_INTEGRATIONS entry makes the integration auto-active out
     // of the box — no application_packages row required.
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
-    initSystemIntegrationClients([
+    initSystemIntegrations([
       {
-        id: "gmail-system",
-        integrationId: "@myorg/gmail",
-        authKey: "google",
-        clientId: "sys-client.apps.googleusercontent.com",
-        clientSecret: "sys-secret",
+        id: "@myorg/gmail",
+        clients: [
+          {
+            id: "gmail-system",
+            auth_key: "google",
+            client_id: "sys-client.apps.googleusercontent.com",
+            client_secret: "sys-secret",
+          },
+        ],
       },
     ]);
     const res = await app.request("/api/integrations", { headers: authHeaders(ctx) });
@@ -201,13 +205,17 @@ describe("GET /api/integrations", () => {
     // Sticky opt-out: a disabled install row wins over the system-client
     // auto-active default, and never silently re-activates.
     const pkg = await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
-    initSystemIntegrationClients([
+    initSystemIntegrations([
       {
-        id: "gmail-system",
-        integrationId: "@myorg/gmail",
-        authKey: "google",
-        clientId: "sys-client.apps.googleusercontent.com",
-        clientSecret: "sys-secret",
+        id: "@myorg/gmail",
+        clients: [
+          {
+            id: "gmail-system",
+            auth_key: "google",
+            client_id: "sys-client.apps.googleusercontent.com",
+            client_secret: "sys-secret",
+          },
+        ],
       },
     ]);
     await db.insert(applicationPackages).values({
@@ -290,18 +298,22 @@ describe("GET /api/integrations/:packageId", () => {
   });
 
   it("flags has_system_client when a shared platform client serves the oauth2 auth", async () => {
-    // A SYSTEM_INTEGRATION_CLIENTS entry for (integration, auth) makes the auth
+    // A SYSTEM_INTEGRATIONS entry for (integration, auth) makes the auth
     // connectable out of the box — connect falls back to it without an
     // org-registered client. The detail must surface that so the UI unlocks the
     // connect button (the model-provider system-key fallback, mirrored).
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
-    initSystemIntegrationClients([
+    initSystemIntegrations([
       {
-        id: "gmail-system",
-        integrationId: "@myorg/gmail",
-        authKey: "google",
-        clientId: "sys-client.apps.googleusercontent.com",
-        clientSecret: "sys-secret",
+        id: "@myorg/gmail",
+        clients: [
+          {
+            id: "gmail-system",
+            auth_key: "google",
+            client_id: "sys-client.apps.googleusercontent.com",
+            client_secret: "sys-secret",
+          },
+        ],
       },
     ]);
     try {
@@ -320,7 +332,7 @@ describe("GET /api/integrations/:packageId", () => {
       // The api_key auth carries no client; the system client targets `google` only.
       expect(api?.has_system_client).toBe(false);
     } finally {
-      __resetSystemIntegrationClientsForTest();
+      __resetSystemIntegrationsForTest();
     }
   });
 
@@ -1306,19 +1318,23 @@ describe("multi-client: list + system-client connect", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
-    __resetSystemIntegrationClientsForTest();
+    __resetSystemIntegrationsForTest();
   });
 
-  afterEach(() => __resetSystemIntegrationClientsForTest());
+  afterEach(() => __resetSystemIntegrationsForTest());
 
   function seedSystem() {
-    initSystemIntegrationClients([
+    initSystemIntegrations([
       {
-        id: SYSTEM_ID,
-        integrationId: "@myorg/gmail",
-        authKey: "google",
-        clientId: "sys-client.apps.googleusercontent.com",
-        clientSecret: "sys-secret",
+        id: "@myorg/gmail",
+        clients: [
+          {
+            id: SYSTEM_ID,
+            auth_key: "google",
+            client_id: "sys-client.apps.googleusercontent.com",
+            client_secret: "sys-secret",
+          },
+        ],
       },
     ]);
   }

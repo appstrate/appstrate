@@ -2,7 +2,7 @@
 
 /**
  * Multiple OAuth clients per integration (issue #723): a system client
- * (SYSTEM_INTEGRATION_CLIENTS) and the org's custom per-application client
+ * (SYSTEM_INTEGRATIONS) and the org's custom per-application client
  * coexist. A connection pins WHICH client minted it via `client_ref` — a flat
  * client id (system env id or `integration_oauth_clients.id`); token refresh
  * resolves the same client's credentials by that id (system-first then DB-by-id,
@@ -31,8 +31,8 @@ import {
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { buildIntegrationOAuthRefreshContext } from "../../../src/services/integration-token-refresh.ts";
 import {
-  initSystemIntegrationClients,
-  __resetSystemIntegrationClientsForTest,
+  initSystemIntegrations,
+  __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
 import type { AppScope } from "../../../src/lib/scope.ts";
 import type { Actor } from "@appstrate/connect";
@@ -64,10 +64,10 @@ describe("integration multi-client", () => {
     scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
     actor = { type: "user", id: ctx.user.id };
     await seedPackage({ id: INTEGRATION, orgId: ctx.orgId, type: "integration", source: "local" });
-    __resetSystemIntegrationClientsForTest();
+    __resetSystemIntegrationsForTest();
   });
 
-  afterEach(() => __resetSystemIntegrationClientsForTest());
+  afterEach(() => __resetSystemIntegrationsForTest());
 
   /**
    * Insert a custom per-application OAuth client row directly; return its id.
@@ -95,13 +95,17 @@ describe("integration multi-client", () => {
   }
 
   function seedSystemClient(clientSecret = "sys-secret"): void {
-    initSystemIntegrationClients([
+    initSystemIntegrations([
       {
-        id: SYSTEM_ID,
-        integrationId: INTEGRATION,
-        authKey: AUTH_KEY,
-        clientId: "sys-client.apps.googleusercontent.com",
-        clientSecret,
+        id: INTEGRATION,
+        clients: [
+          {
+            id: SYSTEM_ID,
+            auth_key: AUTH_KEY,
+            client_id: "sys-client.apps.googleusercontent.com",
+            client_secret: clientSecret,
+          },
+        ],
       },
     ]);
   }
@@ -227,13 +231,17 @@ describe("integration multi-client", () => {
     });
 
     it("returns null when a pinned system id was remapped to another integration", async () => {
-      initSystemIntegrationClients([
+      initSystemIntegrations([
         {
-          id: SYSTEM_ID,
-          integrationId: "@other/integration",
-          authKey: AUTH_KEY,
-          clientId: "other-client",
-          clientSecret: "other-secret",
+          id: "@other/integration",
+          clients: [
+            {
+              id: SYSTEM_ID,
+              auth_key: AUTH_KEY,
+              client_id: "other-client",
+              client_secret: "other-secret",
+            },
+          ],
         },
       ]);
       const c = await resolveIntegrationClientById(

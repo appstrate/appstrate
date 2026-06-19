@@ -40,8 +40,8 @@ import {
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
 import {
-  initSystemIntegrationClients,
-  __resetSystemIntegrationClientsForTest,
+  initSystemIntegrations,
+  __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
 
 const app = getTestApp();
@@ -232,18 +232,22 @@ describe("block_user_connections — auto-active system integration", () => {
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/clickup"));
     // gmail ships a system client → auto-active. clickup does not.
-    initSystemIntegrationClients([
+    initSystemIntegrations([
       {
-        id: "gmail-system",
-        integrationId: "@myorg/gmail",
-        authKey: "google",
-        clientId: "sys-client.apps.googleusercontent.com",
-        clientSecret: "sys-secret",
+        id: "@myorg/gmail",
+        clients: [
+          {
+            id: "gmail-system",
+            auth_key: "google",
+            client_id: "sys-client.apps.googleusercontent.com",
+            client_secret: "sys-secret",
+          },
+        ],
       },
     ]);
   });
 
-  afterEach(() => __resetSystemIntegrationClientsForTest());
+  afterEach(() => __resetSystemIntegrationsForTest());
 
   it("materializes a row (enabled stays true) when toggling block on a system integration with no row", async () => {
     const res = await app.request("/api/integrations/@myorg/gmail/settings", {

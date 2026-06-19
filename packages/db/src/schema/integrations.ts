@@ -76,7 +76,7 @@ export const integrationConnections = pgTable(
       .default(sql`'{}'::text[]`),
     needsReconnection: boolean("needs_reconnection").notNull().default(false),
     // Which registered OAuth client minted this connection — a flat client id:
-    // the env id of a system client (SYSTEM_INTEGRATION_CLIENTS) or the
+    // the env id of a system client (SYSTEM_INTEGRATIONS) or the
     // `integration_oauth_clients.id` of the org's own per-application client.
     // Pinned so token refresh resolves the SAME client credentials that minted
     // the tokens. Resolved system-first then DB-by-id (mirrors the model-provider

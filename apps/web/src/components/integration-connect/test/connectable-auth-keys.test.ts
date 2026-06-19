@@ -3,7 +3,7 @@
 /**
  * Unit tests for the connect gate. An oauth2 auth is connectable when a usable
  * client exists — org-registered (`has_oauth_client`), the shared platform
- * client (`has_system_client`, SYSTEM_INTEGRATION_CLIENTS), or auto-provisioned
+ * client (`has_system_client`, SYSTEM_INTEGRATIONS), or auto-provisioned
  * at connect time (`client_auto_provisioned`, remote MCP CIMD/DCR). Without any,
  * the server refuses connect with 403, so the UI must not offer it. Pins the
  * single source of truth both the agent surfaces and the detail page consume.

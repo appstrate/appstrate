@@ -45,7 +45,7 @@ import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
   listSystemIntegrationClientsFor,
-  hasSystemIntegrationClient,
+  isSystemIntegration,
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
 import { mergeSystemAndDb, setExactlyOneDefault, isUuid } from "../lib/db-helpers.ts";
@@ -353,10 +353,11 @@ export async function selectAccessibleConnection(
  *      the explicit, sticky operator decision: an installed-and-enabled row is
  *      active; a disabled row (`enabled = false`) is inactive and STAYS inactive
  *      across runs (never silently re-enabled).
- *   2. NO row → auto-active iff the integration is a SYSTEM integration (ships a
- *      `SYSTEM_INTEGRATION_CLIENTS` client, via {@link hasSystemIntegrationClient}).
- *      System integrations work out of the box without an explicit install;
- *      everything else stays inactive until installed.
+ *   2. NO row → auto-active iff the integration is a SYSTEM integration (offered
+ *      by the deployment via `SYSTEM_INTEGRATIONS`, with or without a shared
+ *      OAuth client, via {@link isSystemIntegration}). System integrations work
+ *      out of the box without an explicit install; everything else stays
+ *      inactive until installed.
  *
  * Disabling a never-installed system integration materializes a row with
  * `enabled = false` (see the enable/disable upsert), which then wins via rule 1
@@ -378,7 +379,7 @@ export async function isIntegrationActive(
     )
     .limit(1);
   // Rule 1: explicit row wins. Rule 2: no row → auto-active iff system.
-  return row !== undefined ? row.enabled : hasSystemIntegrationClient(packageId);
+  return row !== undefined ? row.enabled : isSystemIntegration(packageId);
 }
 
 /**
@@ -409,7 +410,7 @@ export async function listActiveIntegrationIds(
   const active = new Set<string>();
   for (const id of packageIds) {
     const explicit = enabledById.get(id);
-    if (explicit !== undefined ? explicit : hasSystemIntegrationClient(id)) {
+    if (explicit !== undefined ? explicit : isSystemIntegration(id)) {
       active.add(id);
     }
   }
@@ -752,7 +753,7 @@ export function resolveConnectClient(
     );
   }
   // Confidential/classic auth: an admin must pre-register a client, or the
-  // platform must provide a system client via SYSTEM_INTEGRATION_CLIENTS.
+  // platform must provide a system client via SYSTEM_INTEGRATIONS.
   throw forbidden(
     `Administrator must register OAuth client credentials for '${integrationId}' auth '${authKey}' before connection`,
   );
@@ -2069,7 +2070,7 @@ export async function getIntegrationAuthStatuses(
       resource,
       connections: allConnections.filter((c) => c.auth_key === key),
       has_oauth_client: oauthClientKeys.has(key),
-      // Shared platform client (SYSTEM_INTEGRATION_CLIENTS): when one serves this
+      // Shared platform client (SYSTEM_INTEGRATIONS): when one serves this
       // (integration, auth), connect falls back to it, so the UI is connectable
       // even without an org-registered client. Registry is in-memory — no DB cost.
       has_system_client: listSystemIntegrationClientsFor(packageId, key).length > 0,

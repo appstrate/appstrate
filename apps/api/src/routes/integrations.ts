@@ -54,7 +54,7 @@ import { getAppScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "./../services/audit.ts";
 import { updateInstalledPackage } from "../services/application-packages.ts";
 import { listIntegrations } from "../services/integration-service.ts";
-import { hasSystemIntegrationClient } from "../services/integration-client-registry.ts";
+import { isSystemIntegration } from "../services/integration-client-registry.ts";
 import {
   assertIsIntegration,
   createIntegrationOAuthClient,
@@ -216,9 +216,10 @@ export function createIntegrationsRouter() {
     // Decorate with `active` + `blockUserConnections` flags for the
     // current application. Same precedence as `isIntegrationActive` (the one
     // source of truth): an explicit `application_packages` row wins via its
-    // `enabled` flag; with no row, a system integration (one shipping a
-    // `SYSTEM_INTEGRATION_CLIENTS` client) is auto-active. `blockUserConnections`
-    // defaults to false when no per-app row exists.
+    // `enabled` flag; with no row, a system integration (offered via
+    // `SYSTEM_INTEGRATIONS`, with or without a shared OAuth client) is
+    // auto-active. `blockUserConnections` defaults to false when no per-app row
+    // exists.
     const installedRows = await db
       .select({
         packageId: applicationPackages.packageId,
@@ -238,7 +239,7 @@ export function createIntegrationsRouter() {
       const row = installedMap.get(s.id);
       return {
         ...s,
-        active: row !== undefined ? row.enabled : hasSystemIntegrationClient(s.id),
+        active: row !== undefined ? row.enabled : isSystemIntegration(s.id),
         block_user_connections: row?.blockUserConnections ?? false,
       };
     });

@@ -47,7 +47,7 @@ import {
   type ConnectionResolutionSource,
 } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { hasSystemIntegrationClient } from "./integration-client-registry.ts";
+import { isSystemIntegration } from "./integration-client-registry.ts";
 import { conflict, notFound, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -99,7 +99,7 @@ export async function setBlockUserConnections(
   }
   // No row. Only a system integration is auto-active without one; anything else
   // is genuinely not installed.
-  if (!hasSystemIntegrationClient(integrationId)) {
+  if (!isSystemIntegration(integrationId)) {
     throw notFound(`Integration '${integrationId}' is not installed in this application`);
   }
   const [inserted] = await db

@@ -1,16 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * System-level integration OAuth clients (env-sourced).
+ * System-level integrations (env-sourced).
  *
- * The platform can provide a shared OAuth client (client_id/secret) for an
- * integration `auths.{key}` via the `SYSTEM_INTEGRATION_CLIENTS` env var. This
- * is the standard SaaS connector pattern: one vendor-registered, verified app
- * (e.g. the Appstrate Google app) used by every organization, so users connect
- * out of the box without registering their own Google Cloud project.
+ * The deployment declares which integrations it OFFERS out of the box via the
+ * `SYSTEM_INTEGRATIONS` env var. Membership in that list is the "auto-active"
+ * policy signal: a system integration is on by default — usable without any
+ * prior user action — until an org explicitly opts out (a sticky
+ * `application_packages.enabled = false`).
+ *
+ * Membership is decoupled from credentials. An entry MAY ship one or more
+ * shared OAuth clients (client_id/secret) for its `auths.{key}` — the standard
+ * SaaS connector pattern: one vendor-registered, verified app (e.g. the
+ * Appstrate Google app) used by every organization, so users connect out of the
+ * box without registering their own OAuth project. An entry MAY also ship NO
+ * clients: remote MCP integrations that rely on Dynamic Client Registration
+ * (RFC 7591) have no static client_id — they are still offered by default
+ * (auto-active) and provision their client lazily on first connect.
+ *
+ *   SYSTEM_INTEGRATIONS = [
+ *     // shared OAuth client (e.g. Gmail):
+ *     { "id": "@appstrate/gmail",
+ *       "clients": [{ "id": "gmail-sys", "auth_key": "google",
+ *                     "client_id": "…", "client_secret": "…" }] },
+ *     // DCR remote MCP — offered by default, no static client:
+ *     { "id": "@appstrate/foo-mcp" }
+ *   ]
  *
  * Tenant isolation lives at the token layer (per-connection encrypted tokens),
- * not at the client_id — the shared client only identifies the app to the IdP.
+ * not at the client_id — a shared client only identifies the app to the IdP.
  *
  * An org that registers its OWN per-application client (`integration_oauth_clients`,
  * "BYO-app") overrides the system client at connect time. Whichever client mints
@@ -18,13 +36,13 @@
  * the same credentials.
  *
  * Mirrors the model-provider system-key pattern (`model-registry.ts` +
- * `SYSTEM_PROVIDER_KEYS`): parse env JSON → validate with Zod → populate a
- * module-static Map at boot → expose read-only accessors.
+ * `SYSTEM_PROVIDER_KEYS`): parse env JSON → validate with Zod → populate
+ * module-static state at boot → expose read-only accessors.
  */
 
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
-import { loadSystemRegistry } from "../lib/system-registry.ts";
+import { logger } from "../lib/logger.ts";
 
 // `integration_connections.client_ref` is a flat client id — the env id of a
 // system client or the `integration_oauth_clients.id` (UUID) of a custom client.
@@ -44,6 +62,8 @@ export interface SystemIntegrationClientDefinition {
   clientSecret: string;
 }
 
+// Per-client entry, nested under an integration. Wire keys are snake_case
+// (env JSON, per CASING_CONVENTIONS); mapped to camelCase internally.
 const rawSystemIntegrationClientSchema = z.object({
   // Constrained to the same charset the wire `client_ref` accepts (`^[\w.-]+$`)
   // so every configured client is explicitly selectable at connect time — the
@@ -51,18 +71,24 @@ const rawSystemIntegrationClientSchema = z.object({
   // UUID-shaped: ids are resolved system-first, so a system id colliding with a
   // custom `integration_oauth_clients.id` (UUID) would shadow the custom row.
   id: z.string().regex(/^[\w.-]+$/, "id must match ^[\\w.-]+$"),
-  integrationId: z.string().min(1),
-  authKey: z
-    .string()
-    // AFPS §7.2: auth keys match `^[a-z][a-z0-9_]*$` — mirror the manifest gate.
-    .regex(/^[a-z][a-z0-9_]*$/, "authKey must match ^[a-z][a-z0-9_]*$"),
-  clientId: z.string().min(1),
+  // AFPS §7.2: auth keys match `^[a-z][a-z0-9_]*$` — mirror the manifest gate.
+  auth_key: z.string().regex(/^[a-z][a-z0-9_]*$/, "auth_key must match ^[a-z][a-z0-9_]*$"),
+  client_id: z.string().min(1),
   // Public clients (`token_endpoint_auth_method: "none"`) carry an empty secret.
-  clientSecret: z.string().default(""),
+  client_secret: z.string().default(""),
 });
 
-type RawSystemIntegrationClient = z.infer<typeof rawSystemIntegrationClientSchema>;
+// One offered integration. `clients` optional/empty → DCR remote MCP (offered
+// by default, no static client). Entry `id` is a package id (`@scope/name`),
+// not the `^[\w.-]+$` client-ref charset.
+const rawSystemIntegrationSchema = z.object({
+  id: z.string().min(1),
+  clients: rawSystemIntegrationClientSchema.array().default([]),
+});
 
+// Set of integration package ids offered by default (the auto-active policy).
+let systemIntegrationIds: Set<string> | null = null;
+// Flattened clients keyed by client id (the credential surface).
 let systemIntegrationClients: Map<string, SystemIntegrationClientDefinition> | null = null;
 
 /** Composite key for the `(integrationId, authKey)` index — JSON-encoded so the
@@ -72,44 +98,116 @@ function authIndexKey(integrationId: string, authKey: string): string {
 }
 
 /**
- * Parse + validate `SYSTEM_INTEGRATION_CLIENTS` and populate the module-static
- * registry. Invalid entries are skipped with a logged error (one bad entry
- * never blocks the rest), exactly like `initSystemModelProviderKeys`. Call once
- * at boot, before any connect/refresh path runs.
+ * Parse + validate `SYSTEM_INTEGRATIONS` and populate the module-static
+ * registry. Invalid entries (and invalid nested clients) are skipped with a
+ * logged error — one bad entry never blocks the rest, exactly like
+ * `initSystemModelProviderKeys`. Call once at boot, before any connect/refresh
+ * path runs.
  */
-export function initSystemIntegrationClients(rawOverride?: unknown[]): void {
-  systemIntegrationClients = loadSystemRegistry<
-    RawSystemIntegrationClient,
-    SystemIntegrationClientDefinition
-  >({
-    name: "integration-client-registry",
-    envVar: "SYSTEM_INTEGRATION_CLIENTS",
-    // Production reads the parsed env; tests inject a raw array directly (the
-    // env is cached at first access, so an override seam is cleaner than
-    // mutating process.env after boot).
-    entries: rawOverride ?? (getEnv().SYSTEM_INTEGRATION_CLIENTS as unknown[]),
-    schema: rawSystemIntegrationClientSchema,
-    // Validated shape is exactly SystemIntegrationClientDefinition.
-    toDefinition: (def) => def,
-    // Never log the secret.
-    redact: (entry) => ({ ...(entry as Record<string, unknown>), clientSecret: undefined }),
+export function initSystemIntegrations(rawOverride?: unknown[]): void {
+  // Production reads the parsed env; tests inject a raw array directly (the env
+  // is cached at first access, so an override seam is cleaner than mutating
+  // process.env after boot).
+  const entries = rawOverride ?? (getEnv().SYSTEM_INTEGRATIONS as unknown[]);
+
+  const ids = new Set<string>();
+  const clients = new Map<string, SystemIntegrationClientDefinition>();
+
+  for (const entry of entries) {
+    const parsed = rawSystemIntegrationSchema.safeParse(entry);
+    if (!parsed.success) {
+      logger.error("[integration-client-registry] SYSTEM_INTEGRATIONS: skipping invalid entry", {
+        error: parsed.error.issues[0]?.message,
+        // Drop nested client secrets before logging.
+        entry: redactEntry(entry),
+      });
+      continue;
+    }
+    const { id, clients: rawClients } = parsed.data;
+    if (ids.has(id)) {
+      logger.error(
+        "[integration-client-registry] SYSTEM_INTEGRATIONS: skipping duplicate integration id",
+        { id },
+      );
+      continue;
+    }
+    ids.add(id);
+
+    for (const c of rawClients) {
+      if (clients.has(c.id)) {
+        // Client ids are the `client_ref` keyspace and resolved globally
+        // (system-first by id) — they must be unique across ALL integrations,
+        // not just within one entry.
+        logger.error(
+          "[integration-client-registry] SYSTEM_INTEGRATIONS: skipping duplicate client id",
+          { id: c.id, integrationId: id },
+        );
+        continue;
+      }
+      clients.set(c.id, {
+        id: c.id,
+        integrationId: id,
+        authKey: c.auth_key,
+        clientId: c.client_id,
+        clientSecret: c.client_secret,
+      });
+    }
+  }
+
+  systemIntegrationIds = ids;
+  systemIntegrationClients = clients;
+  logger.info("[integration-client-registry] loaded", {
+    integrations: ids.size,
+    clients: clients.size,
   });
 }
 
-function ensureInitialized(): ReadonlyMap<string, SystemIntegrationClientDefinition> {
+/** Redact nested client secrets from a raw entry before logging. */
+function redactEntry(entry: unknown): unknown {
+  if (!entry || typeof entry !== "object") return entry;
+  const e = entry as Record<string, unknown>;
+  const clients = Array.isArray(e.clients)
+    ? e.clients.map((c) =>
+        c && typeof c === "object"
+          ? { ...(c as Record<string, unknown>), client_secret: undefined }
+          : c,
+      )
+    : e.clients;
+  return { ...e, clients };
+}
+
+function ensureInitialized(): {
+  ids: ReadonlySet<string>;
+  clients: ReadonlyMap<string, SystemIntegrationClientDefinition>;
+} {
   // Fail-fast on access-before-init — mirrors the sibling system registries
   // (`model-registry.ts`, `proxy-registry.ts`), which throw rather than lazily
-  // self-initialize. Boot calls initSystemIntegrationClients() eagerly before any
+  // self-initialize. Boot calls initSystemIntegrations() eagerly before any
   // connect/refresh path runs; a null here means that boot step was skipped (a
   // wiring bug), surfaced loudly instead of silently behaving as "no system
-  // clients". The test seam resets to an empty (initialized) registry, so this
-  // guard never fires in tests.
-  if (!systemIntegrationClients) {
+  // integrations". The test seam resets to an empty (initialized) registry, so
+  // this guard never fires in tests.
+  if (!systemIntegrationIds || !systemIntegrationClients) {
     throw new Error(
-      "[integration-client-registry] System integration clients not initialized. Call initSystemIntegrationClients() at boot.",
+      "[integration-client-registry] System integrations not initialized. Call initSystemIntegrations() at boot.",
     );
   }
-  return systemIntegrationClients;
+  return { ids: systemIntegrationIds, clients: systemIntegrationClients };
+}
+
+/**
+ * `true` when the integration is OFFERED by the deployment — listed in
+ * `SYSTEM_INTEGRATIONS`, regardless of whether it ships a shared OAuth client.
+ * This is the "auto-active" predicate: a system integration is on by default —
+ * usable out of the box — until an org explicitly opts out. Evaluated per
+ * package id, not per auth key, because activation lives on
+ * `application_packages` (per package). Boot-loaded, so present without any
+ * prior user action (unlike DCR `auto_provisioned` clients, which only exist
+ * after a first connect). DCR remote MCP integrations are offered with NO
+ * client and still return `true` here.
+ */
+export function isSystemIntegration(integrationId: string): boolean {
+  return ensureInitialized().ids.has(integrationId);
 }
 
 /** All system integration clients, keyed by id. */
@@ -117,14 +215,14 @@ export function getSystemIntegrationClients(): ReadonlyMap<
   string,
   SystemIntegrationClientDefinition
 > {
-  return ensureInitialized();
+  return ensureInitialized().clients;
 }
 
 /** Resolve a system client by its id, or `null` when unknown. */
 export function getSystemIntegrationClientById(
   id: string,
 ): SystemIntegrationClientDefinition | null {
-  return ensureInitialized().get(id) ?? null;
+  return ensureInitialized().clients.get(id) ?? null;
 }
 
 /**
@@ -138,28 +236,10 @@ export function listSystemIntegrationClientsFor(
 ): SystemIntegrationClientDefinition[] {
   const wanted = authIndexKey(integrationId, authKey);
   const out: SystemIntegrationClientDefinition[] = [];
-  for (const def of ensureInitialized().values()) {
+  for (const def of ensureInitialized().clients.values()) {
     if (authIndexKey(def.integrationId, def.authKey) === wanted) out.push(def);
   }
   return out;
-}
-
-/**
- * `true` when the platform ships a system OAuth client for ANY auth of this
- * integration (any `SYSTEM_INTEGRATION_CLIENTS` entry whose `integrationId`
- * matches). This is the "auto-active" predicate: a system integration is on by
- * default — usable out of the box — until an org explicitly opts out. Evaluated
- * per package id, not per auth key, because activation lives on
- * `application_packages` (per package); the one-click connect still resolves
- * per auth via {@link listSystemIntegrationClientsFor}. Boot-loaded, so present
- * without any prior user action (unlike DCR `auto_provisioned` clients, which
- * only exist after a first connect).
- */
-export function hasSystemIntegrationClient(integrationId: string): boolean {
-  for (const def of ensureInitialized().values()) {
-    if (def.integrationId === integrationId) return true;
-  }
-  return false;
 }
 
 /**
@@ -180,8 +260,8 @@ export function getDefaultSystemIntegrationClient(
  * guard — shared by the connect resolver (`resolveConnectClient`) and the
  * refresh resolver (`resolveIntegrationClientById`). Returns `null`
  * when the id is unknown OR was remapped to a different integration/auth: an
- * operator reshuffling `SYSTEM_INTEGRATION_CLIENTS` must never let one
- * integration's connection resolve another's credentials.
+ * operator reshuffling `SYSTEM_INTEGRATIONS` must never let one integration's
+ * connection resolve another's credentials.
  */
 export function resolveSystemClientForAuth(
   id: string,
@@ -197,8 +277,9 @@ export function resolveSystemClientForAuth(
  * Test-only reset hook. Resets to an empty *initialized* registry (not null) so
  * tests that touch the accessors after a reset without re-seeding observe an
  * empty set rather than tripping the access-before-init guard in
- * `ensureInitialized`. Seed by calling `initSystemIntegrationClients([...])`.
+ * `ensureInitialized`. Seed by calling `initSystemIntegrations([...])`.
  */
-export function __resetSystemIntegrationClientsForTest(): void {
+export function __resetSystemIntegrationsForTest(): void {
+  systemIntegrationIds = new Set();
   systemIntegrationClients = new Map();
 }

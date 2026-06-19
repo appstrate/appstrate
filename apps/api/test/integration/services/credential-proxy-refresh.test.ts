@@ -24,8 +24,8 @@ import {
 } from "@appstrate/db/schema";
 import { encryptCredentials } from "@appstrate/connect";
 import {
-  initSystemIntegrationClients,
-  __resetSystemIntegrationClientsForTest,
+  initSystemIntegrations,
+  __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
@@ -142,13 +142,17 @@ async function setupSystemPinned(
     clientRef: systemId,
     expiresAt: new Date(Date.now() - 60_000),
   });
-  initSystemIntegrationClients([
+  initSystemIntegrations([
     {
-      id: systemId,
-      integrationId: packageId,
-      authKey: "google",
-      clientId: "system_client_id",
-      clientSecret: "system_secret",
+      id: packageId,
+      clients: [
+        {
+          id: systemId,
+          auth_key: "google",
+          client_id: "system_client_id",
+          client_secret: "system_secret",
+        },
+      ],
     },
   ]);
 }
@@ -160,11 +164,11 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     await truncateAll();
     mockServer.clearRequests();
     mockServer.setTokenStatus(200);
-    __resetSystemIntegrationClientsForTest();
+    __resetSystemIntegrationsForTest();
     ctx = await createTestContext({ orgSlug: "cprefreshorg" });
   });
 
-  afterEach(() => __resetSystemIntegrationClientsForTest());
+  afterEach(() => __resetSystemIntegrationsForTest());
 
   it("refreshes the OAuth2 token and retries the call when upstream returns 401", async () => {
     const packageId = "@cprefreshorg/gmail";

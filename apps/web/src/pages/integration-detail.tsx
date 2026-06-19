@@ -238,7 +238,7 @@ function OAuthClientModal({
 
 /**
  * The admin hub for an auth's OAuth clients: every client that can mint a
- * connection — the platform's system client(s) (`SYSTEM_INTEGRATION_CLIENTS`,
+ * connection — the platform's system client(s) (`SYSTEM_INTEGRATIONS`,
  * read-only) plus the org's N custom (BYO-app) clients — with which is the
  * default. Multi-client: an admin registers as many custom clients as needed,
  * rotates or deletes each by id, and picks the default (the model-provider

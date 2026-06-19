@@ -5,7 +5,7 @@ import type { IntegrationAuthStatus, IntegrationManifestView } from "../../hooks
 /**
  * Whether an oauth2 auth can start a connect flow: it needs a usable client —
  * an org-registered one (`has_oauth_client`), the shared platform client
- * (`has_system_client`, `SYSTEM_INTEGRATION_CLIENTS`), or one auto-provisioned
+ * (`has_system_client`, `SYSTEM_INTEGRATIONS`), or one auto-provisioned
  * at connect time for remote MCP integrations (`client_auto_provisioned`,
  * MCP-spec CIMD/DCR). Without any, the server refuses connect with 403. Single
  * source of truth for the gate shared by the agent surfaces and the integration

@@ -85,7 +85,7 @@ export interface IntegrationAuthStatus {
   has_oauth_client: boolean;
   /**
    * True when the platform provides a shared system OAuth client for this auth
-   * via `SYSTEM_INTEGRATION_CLIENTS` (oauth2 only). The connect flow falls back
+   * via `SYSTEM_INTEGRATIONS` (oauth2 only). The connect flow falls back
    * to it when the org has not registered its own client, so the UI treats the
    * auth as connectable. Mirrors the model-provider system-key fallback.
    */

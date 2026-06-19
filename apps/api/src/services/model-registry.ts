@@ -135,7 +135,7 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
     envVar: "SYSTEM_PROVIDER_KEYS",
     // Production reads the parsed env; tests inject a raw array directly (the
     // env is cached at first access, so an override seam is cleaner than
-    // mutating process.env after boot) — mirrors initSystemIntegrationClients.
+    // mutating process.env after boot) — mirrors initSystemIntegrations.
     entries: rawOverride ?? (getEnv().SYSTEM_PROVIDER_KEYS as unknown[]),
     schema: rawModelProviderCredentialSchema,
     redact: (entry) => {

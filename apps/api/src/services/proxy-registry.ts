@@ -31,7 +31,7 @@ export function initSystemProxies(rawOverride?: unknown[]): void {
     name: "proxy-registry",
     envVar: "SYSTEM_PROXIES",
     // Production reads the parsed env; tests inject a raw array directly —
-    // mirrors initSystemIntegrationClients / initSystemModelProviderKeys.
+    // mirrors initSystemIntegrations / initSystemModelProviderKeys.
     entries: rawOverride ?? (getEnv().SYSTEM_PROXIES as unknown[]),
     schema: proxyDefinitionSchema,
     toDefinition: (p) => p,
