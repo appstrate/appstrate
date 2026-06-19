@@ -1,8 +1,8 @@
 diff --git a/dist/index.mjs b/dist/index.mjs
-index fed8ce01a0570c647db71d1149c9453d50dd46e6..7c28053d733a20c10ba91b6d8b51d93fb7cc308c 100644
+index fce743da07ec6daa688d86e516b2a90e8610a27f..a40f4f929178c05874561ee34974a053d73d0255 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
-@@ -4162,7 +4162,7 @@ function findRegisteredRedirectUri(registered, requested) {
+@@ -4105,7 +4105,7 @@ function findRegisteredRedirectUri(registered, requested) {
  		if (!req) return false;
  		try {
  			const reg = new URL(url);
