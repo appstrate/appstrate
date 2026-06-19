@@ -96,6 +96,18 @@ describe("integration activation precedence", () => {
     expect(await isIntegrationActive(SYSTEM_INTEGRATION, ctx.defaultAppId)).toBe(false);
   });
 
+  it("honors an explicit enabled row on a system integration (row wins, same outcome)", async () => {
+    // An explicit enabled=true row takes the row branch (not the auto-active
+    // fallback). The outcome matches auto-active, but this asserts the
+    // "row EXISTS → enabled flag wins" branch fires for a system integration too
+    // — so a later auto-active policy change can't silently flip an opted-in one.
+    await installRow(SYSTEM_INTEGRATION, true);
+    expect(await isIntegrationActive(SYSTEM_INTEGRATION, ctx.defaultAppId)).toBe(true);
+
+    const ids = await listActiveIntegrationIds([SYSTEM_INTEGRATION], ctx.defaultAppId);
+    expect(ids.has(SYSTEM_INTEGRATION)).toBe(true);
+  });
+
   it("honors an enabled install row for a non-system integration", async () => {
     await installRow(PLAIN_INTEGRATION, true);
     expect(await isIntegrationActive(PLAIN_INTEGRATION, ctx.defaultAppId)).toBe(true);

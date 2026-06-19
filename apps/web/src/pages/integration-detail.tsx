@@ -9,9 +9,10 @@
  * dropdown. Integrations are import-only — there is no in-app editor.
  *
  * Tabs:
- *   - Connexions — per-auth connect CTA (with the system/custom client picker
- *     when several clients coexist) and a table of connected accounts with
- *     rename / share / reconnect / disconnect. Runtime view, visible to members.
+ *   - Connexions — per-auth connect CTA (always the resolved default client —
+ *     the org's custom client when registered, else the system client) and a
+ *     table of connected accounts with rename / share / reconnect / disconnect.
+ *     Runtime view, visible to members.
  *   - Configuration (admin) — per-auth metadata (scopes, resource, authorized
  *     URIs), the OAuth clients table (system + custom) and the BYO-app
  *     registration form, the org-wide access rules (block member connections,
@@ -467,10 +468,10 @@ function AuthHeader({ status }: { status: IntegrationAuthStatus }) {
 // ─────────────────────────────────────────────
 
 /**
- * Per-auth connect surface: the "+ Ajouter" CTA (admin) with the system/custom
- * client picker when several clients coexist, and the table of connected
- * accounts with rename/share/reconnect/disconnect. Runtime view — the OAuth
- * client setup lives in the Configuration tab (see {@link ConfigAuthBlock}).
+ * Per-auth connect surface: the "+ Ajouter" CTA (admin) — which always connects
+ * via the resolved default client (no per-connect picker) — and the table of
+ * connected accounts with rename/share/reconnect/disconnect. Runtime view — the
+ * OAuth client setup lives in the Configuration tab (see {@link ConfigAuthBlock}).
  *
  * Scope-aware connect/upgrade still also lives on the agent surfaces
  * (AgentIntegrationsBlock + MissingConnectionsModal) where the per-agent scope

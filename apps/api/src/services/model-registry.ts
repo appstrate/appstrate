@@ -138,6 +138,10 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
     // mutating process.env after boot) — mirrors initSystemIntegrations.
     entries: rawOverride ?? (getEnv().SYSTEM_PROVIDER_KEYS as unknown[]),
     schema: rawModelProviderCredentialSchema,
+    // toDefinition populates mdlMap (the nested models) as a side effect, so a
+    // duplicate id must be rejected BEFORE it runs — else the losing entry's
+    // models still leak into systemModels while its credential is dropped.
+    idOf: (raw) => raw.id,
     redact: (entry) => {
       const e = entry as Record<string, unknown>;
       return { ...e, apiKey: e.apiKey ? "***" : undefined };

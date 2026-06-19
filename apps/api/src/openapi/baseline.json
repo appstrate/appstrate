@@ -4671,7 +4671,7 @@
                           },
                           "has_system_client": {
                             "type": "boolean",
-                            "description": "True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATION_CLIENTS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client."
+                            "description": "True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client."
                           },
                           "client_auto_provisioned": {
                             "type": "boolean",
@@ -4921,7 +4921,7 @@
                           },
                           "has_system_client": {
                             "type": "boolean",
-                            "description": "True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATION_CLIENTS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client."
+                            "description": "True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client."
                           },
                           "client_auto_provisioned": {
                             "type": "boolean",
@@ -4977,7 +4977,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Already active or wrong package type",
+            "description": "Wrong package type (not an integration)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5420,7 +5420,8 @@
                             "enum": ["built-in", "custom"]
                           },
                           "client_id": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "For `custom` clients, the org's OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`."
                           },
                           "is_default": {
                             "type": "boolean"
@@ -5545,7 +5546,8 @@
                             "enum": ["built-in", "custom"]
                           },
                           "client_id": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "For `custom` clients, the org's OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`."
                           },
                           "is_default": {
                             "type": "boolean"
@@ -6500,7 +6502,7 @@
                           },
                           "has_system_client": {
                             "type": "boolean",
-                            "description": "True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATION_CLIENTS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client."
+                            "description": "True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client."
                           },
                           "client_auto_provisioned": {
                             "type": "boolean",

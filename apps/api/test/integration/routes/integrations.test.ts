@@ -949,6 +949,48 @@ describe("OAuth client CRUD", () => {
     expect(clients.filter((c) => c.source === "custom" && c.is_default)).toHaveLength(1);
   });
 
+  it("rejects setting an unknown client_ref as default (400, no silent fallback)", async () => {
+    await createClient("client-a", "sa");
+    // A well-formed-but-unregistered UUID resolves to neither a custom row nor a
+    // system client → the route must 400, never silently keep/clear the default.
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/default-client", {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_ref: "11111111-1111-4111-8111-111111111111" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects pinning another application's custom client as default (cross-app escalation, 400)", async () => {
+    const a = await createClient("client-a", "sa"); // ctx's own client (the default)
+    // A client owned by a DIFFERENT org/application for the same (global)
+    // integration package. Inserted directly so it's genuinely foreign-scoped.
+    const otherCtx = await createTestContext({ orgSlug: "other" });
+    const [foreign] = await db
+      .insert(integrationOauthClients)
+      .values({
+        applicationId: otherCtx.defaultAppId,
+        integrationId: "@myorg/gmail",
+        authKey: "google",
+        clientId: "foreign",
+        clientSecretEncrypted: "enc",
+      })
+      .returning({ id: integrationOauthClients.id });
+
+    // ctx's app must not be able to pin the foreign-app client as its default —
+    // the resolver scopes custom rows to (applicationId, integration, auth).
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/default-client", {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_ref: foreign!.id }),
+    });
+    expect(res.status).toBe(400);
+
+    // ctx's own default is untouched by the rejected cross-app attempt.
+    const clients = await listClients();
+    expect(clients.find((c) => c.is_default)?.client_ref).toBe(a.id);
+  });
+
   it("deleting the default custom client falls back to no custom default", async () => {
     const a = await createClient("client-a", "sa");
     await createClient("client-b", "sb");

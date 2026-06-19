@@ -59,9 +59,9 @@ export interface IntegrationConnection {
   /**
    * The registered OAuth client that minted this connection — a flat client id
    * (system env id or `integration_oauth_clients.id`). `null` for non-oauth2
-   * auths (no client). The UI resolves it against the clients list to show which
-   * client each connection uses; a connection is bound to it (token refresh uses
-   * the same client), so changing it requires reconnecting.
+   * auths (no client). A connection is bound to it (token refresh uses the same
+   * client), so changing it requires reconnecting. Can be resolved against the
+   * clients list to show which client minted each connection.
    */
   client_ref: string | null;
   createdAt: string;

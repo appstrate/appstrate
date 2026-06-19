@@ -2,7 +2,7 @@
 
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { orgModels, organizations } from "@appstrate/db/schema";
+import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
 import { lookupCatalogModel } from "./pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
@@ -68,7 +68,6 @@ export function resolveModelMetadata(
  */
 const defaultModel = createDefaultPointer({
   table: orgModels,
-  pointerColumn: organizations.defaultModelId,
   pointerField: "defaultModelId",
   isSystem: isSystemModel,
   scopeWhere: (orgId, rowId) =>
@@ -305,13 +304,6 @@ export async function seedOrgModelsForCredential(
       return { created: 0, ids: [], promotedDefault: false };
     }
 
-    const [org] = await tx
-      .select({ defaultModelId: organizations.defaultModelId })
-      .from(organizations)
-      .where(eq(organizations.id, orgId))
-      .limit(1);
-    const needsDefault = !org?.defaultModelId;
-
     // Store catalog-derivable columns as null — read path falls back to
     // the live catalog via `resolveCatalogDefaults`, so a weekly catalog
     // refresh propagates to these rows without a backfill migration.
@@ -336,14 +328,13 @@ export async function seedOrgModelsForCredential(
       )
       .returning({ id: orgModels.id });
 
-    // Promote the first seeded model to the org default when none is set yet.
-    const promotedDefault = needsDefault && inserted.length > 0;
-    if (promotedDefault) {
-      await tx
-        .update(organizations)
-        .set({ defaultModelId: inserted[0]!.id, updatedAt: new Date() })
-        .where(eq(organizations.id, orgId));
-    }
+    // Promote the first seeded model to the org default when none is set yet —
+    // via the pointer helper, so the `defaultModelId` field name stays owned in
+    // one place (db-helpers) rather than re-hardcoded here.
+    const promotedDefault =
+      inserted.length > 0
+        ? await defaultModel.setDefaultIfUnset(tx, orgId, inserted[0]!.id)
+        : false;
 
     return {
       created: inserted.length,

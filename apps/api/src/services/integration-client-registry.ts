@@ -162,14 +162,20 @@ export function initSystemIntegrations(rawOverride?: unknown[]): void {
   });
 }
 
-/** Redact nested client secrets from a raw entry before logging. */
+/**
+ * Redact nested client credentials from a raw entry before logging. Drops BOTH
+ * `client_secret` and `client_id`: the system client_id is a deployment secret
+ * (never returned to the front — only an opaque fingerprint is, see
+ * `fingerprintSystemClientId` in integration-connections.ts), so it must not
+ * land in logs either.
+ */
 function redactEntry(entry: unknown): unknown {
   if (!entry || typeof entry !== "object") return entry;
   const e = entry as Record<string, unknown>;
   const clients = Array.isArray(e.clients)
     ? e.clients.map((c) =>
         c && typeof c === "object"
-          ? { ...(c as Record<string, unknown>), client_secret: undefined }
+          ? { ...(c as Record<string, unknown>), client_id: undefined, client_secret: undefined }
           : c,
       )
     : e.clients;

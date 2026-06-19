@@ -2,7 +2,7 @@
 
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { orgProxies, organizations } from "@appstrate/db/schema";
+import { orgProxies } from "@appstrate/db/schema";
 import { encrypt, decrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getSystemProxies, isSystemProxy } from "./proxy-registry.ts";
@@ -46,7 +46,6 @@ function maskProxyUrl(rawUrl: string): string {
  */
 const defaultProxy = createDefaultPointer({
   table: orgProxies,
-  pointerColumn: organizations.defaultProxyId,
   pointerField: "defaultProxyId",
   isSystem: isSystemProxy,
   scopeWhere: (orgId, rowId) =>

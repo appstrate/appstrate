@@ -5,12 +5,18 @@ import { logger } from "./logger.ts";
 
 /**
  * Shared skeleton for the env-sourced "system registries" that back the
- * system+DB merge surfaces (integration OAuth clients, model-provider keys,
- * proxies). Each one parses a JSON array from an env var, validates every entry
- * with Zod, skips invalid/duplicate entries with a logged error (one bad entry
- * never blocks the rest), and returns a `Map` keyed by `id`. The three
- * registries hand-rolled this identical parse→validate→dedupe→log loop; this
- * centralizes it. Callers keep their own typed accessors over the returned Map.
+ * system+DB merge surfaces. It parses a JSON array from an env var, validates
+ * every entry with Zod, skips invalid/duplicate entries with a logged error
+ * (one bad entry never blocks the rest), and returns a `Map` keyed by `id`.
+ *
+ * Used by the two FLAT id-keyed registries — model-provider keys
+ * (`model-registry.ts` / `SYSTEM_PROVIDER_KEYS`) and proxies (`proxy-registry.ts`
+ * / `SYSTEM_PROXIES`) — which hand-rolled this identical parse→validate→
+ * dedupe→log loop. The integration registry (`integration-client-registry.ts` /
+ * `SYSTEM_INTEGRATIONS`) keeps its own loop: its entries are a NESTED
+ * integration→clients[] shape (one entry yields a set membership plus N
+ * flattened clients), which doesn't fit this one-entry-one-id Map. Callers keep
+ * their own typed accessors over the returned Map.
  */
 
 export interface LoadSystemRegistryOptions<Raw, Def extends { id: string }> {
@@ -27,8 +33,21 @@ export interface LoadSystemRegistryOptions<Raw, Def extends { id: string }> {
    * it (the mapper logs its own reason — e.g. an unknown provider id). May have
    * side effects (e.g. populating a secondary map). `id` must be set so
    * duplicates can be detected.
+   *
+   * NOTE: when `toDefinition` has side effects, also supply `idOf` so a
+   * duplicate id is rejected BEFORE the mapper runs — otherwise the side effect
+   * fires for an entry that is then dropped (the def is skipped but its
+   * secondary-map writes already happened, leaving the two maps inconsistent).
    */
   toDefinition: (raw: Raw) => Def | null;
+  /**
+   * Extract the dedupe key from a validated entry, evaluated BEFORE
+   * `toDefinition`. Supply this whenever `toDefinition` mutates external state:
+   * a duplicate is skipped without ever invoking the side-effecting mapper. When
+   * omitted, dedupe falls back to `def.id` after mapping (safe only for pure
+   * mappers). Must agree with the resulting `def.id`.
+   */
+  idOf?: (raw: Raw) => string;
   /** Redact an entry before logging an invalid-entry error (drop secrets). */
   redact?: (entry: unknown) => unknown;
 }
@@ -50,6 +69,14 @@ export function loadSystemRegistry<Raw, Def extends { id: string }>(
         entry: opts.redact ? opts.redact(entry) : entry,
       });
       continue;
+    }
+    // Pre-map dedupe: reject a duplicate before any side-effecting mapper runs.
+    if (opts.idOf) {
+      const id = opts.idOf(parsed.data);
+      if (byId.has(id)) {
+        logger.error(`[${opts.name}] ${opts.envVar}: skipping duplicate id`, { id });
+        continue;
+      }
     }
     const def = opts.toDefinition(parsed.data);
     if (def === null) continue; // mapper logged its own reason

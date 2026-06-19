@@ -5,6 +5,7 @@ import { type PgColumn, type PgTable } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { organizations } from "@appstrate/db/schema";
 import { notFound } from "./errors.ts";
+import { logger } from "./logger.ts";
 
 /**
  * Shared helpers for system+DB merge patterns and partial update building.
@@ -145,7 +146,15 @@ export function mergeSystemAndDb<SystemDef, DbRow extends { id: string }, Out>(
   }
 
   for (const row of rows) {
-    if (system.has(row.id)) continue;
+    if (system.has(row.id)) {
+      // A DB row colliding with a system id is dropped (system wins). System
+      // ids are slugs and DB ids are UUIDs, so this is near-impossible — log it
+      // if it ever happens so the masked row isn't a silent mystery.
+      logger.debug("[mergeSystemAndDb] DB row dropped — id collides with a system entry", {
+        id: row.id,
+      });
+      continue;
+    }
     result.push(mapRow(row));
   }
 
@@ -183,13 +192,13 @@ export interface SetExactlyOneDefaultOptions {
 }
 
 /**
- * Atomically enforce the "exactly one default" invariant shared by every
- * system+DB surface (model providers, proxies, integration OAuth clients):
- * clear every default in the scope, then optionally flag one target — both in a
- * SINGLE transaction. The transaction matters: a partial-unique
- * `idx_*_one_default` index must never transiently see two defaults, and a crash
- * mid-flip must never leave the scope in a half-written state. `clear` always
- * runs before `set`.
+ * Atomically enforce the "exactly one default" invariant for a per-row
+ * `is_default` flag (currently the integration OAuth clients surface; org models
+ * and proxies use the `createDefaultPointer` org-column pattern instead): clear
+ * every default in the scope, then optionally flag one target — both in a SINGLE
+ * transaction. The transaction matters: a partial-unique `idx_*_one_default`
+ * index must never transiently see two defaults, and a crash mid-flip must never
+ * leave the scope in a half-written state. `clear` always runs before `set`.
  */
 export async function setExactlyOneDefault(opts: SetExactlyOneDefaultOptions): Promise<void> {
   await db.transaction(async (tx) => {
@@ -224,19 +233,32 @@ export interface DefaultPointer {
    */
   setDefault(orgId: string, id: string | null): Promise<void>;
   /**
+   * Inside the caller's transaction: point the org default at `id` ONLY when no
+   * default is set yet; no-op when one already exists. Returns whether it set.
+   * Covers the seed path's multi-insert case (where `promoteIfFirst`'s
+   * single-new-row count doesn't apply), so callers never hand-roll the
+   * pointer-column read/write — keeping the field name owned here.
+   */
+  setDefaultIfUnset(tx: DbTransaction, orgId: string, id: string): Promise<boolean>;
+  /**
    * After a row is deleted, clear the pointer iff it still names the deleted id
    * — so a now-dangling pointer never outlives its row.
    */
   clearDanglingPointer(orgId: string, deletedId: string): Promise<void>;
 }
 
+/** Org `organizations` columns usable as a default pointer (nullable `text`). */
+type OrgPointerField = "defaultModelId" | "defaultProxyId";
+
 export interface CreateDefaultPointerOptions {
   /** Domain table whose rows the pointer can name (needs a `uuid` `id` column). */
   table: PgTable & { id: PgColumn };
-  /** The `organizations` pointer column (e.g. `organizations.defaultModelId`). */
-  pointerColumn: PgColumn;
-  /** The Drizzle field name backing `pointerColumn` (e.g. `"defaultModelId"`). */
-  pointerField: string;
+  /**
+   * The Drizzle field name of the `organizations` pointer column. The column
+   * itself is derived from this (`organizations[pointerField]`) so the field and
+   * column can never desync — a single source of truth.
+   */
+  pointerField: OrgPointerField;
   /** True when `id` names a SYSTEM entry (carries no DB row). */
   isSystem: (id: string) => boolean;
   /**
@@ -250,7 +272,9 @@ export interface CreateDefaultPointerOptions {
 }
 
 export function createDefaultPointer(opts: CreateDefaultPointerOptions): DefaultPointer {
-  const { table, pointerColumn, pointerField, isSystem, scopeWhere, entityName } = opts;
+  const { table, pointerField, isSystem, scopeWhere, entityName } = opts;
+  // Derive the column from the field — one source of truth, no desync.
+  const pointerColumn: PgColumn = organizations[pointerField];
 
   async function getDefaultId(orgId: string): Promise<string | null> {
     const [row] = await db
@@ -286,6 +310,18 @@ export function createDefaultPointer(opts: CreateDefaultPointerOptions): Default
     await db.update(organizations).set(set).where(eq(organizations.id, orgId));
   }
 
+  async function setDefaultIfUnset(tx: DbTransaction, orgId: string, id: string): Promise<boolean> {
+    const [org] = await tx
+      .select({ value: pointerColumn })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1);
+    if (org?.value) return false; // a default already exists — leave it.
+    const set: Record<string, unknown> = { [pointerField]: id, updatedAt: new Date() };
+    await tx.update(organizations).set(set).where(eq(organizations.id, orgId));
+    return true;
+  }
+
   async function clearDanglingPointer(orgId: string, deletedId: string): Promise<void> {
     const set: Record<string, unknown> = { [pointerField]: null, updatedAt: new Date() };
     await db
@@ -294,5 +330,5 @@ export function createDefaultPointer(opts: CreateDefaultPointerOptions): Default
       .where(and(eq(organizations.id, orgId), eq(pointerColumn, deletedId)));
   }
 
-  return { getDefaultId, promoteIfFirst, setDefault, clearDanglingPointer };
+  return { getDefaultId, promoteIfFirst, setDefault, setDefaultIfUnset, clearDanglingPointer };
 }
