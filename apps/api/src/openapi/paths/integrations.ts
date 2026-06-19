@@ -419,6 +419,9 @@ export const integrationsPaths = {
       },
       responses: {
         "201": {
+          // Activation is a flag upsert (enabled=true) — idempotent: repeat
+          // activation of an already-active integration succeeds (201), it is
+          // not a 409.
           description: "Activated — returns the bare integration detail resource",
           headers: baseResponseHeaders,
           content: {
@@ -432,7 +435,7 @@ export const integrationsPaths = {
         },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Already active or wrong package type",
+          description: "Wrong package type (not an integration)",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -454,11 +457,12 @@ export const integrationsPaths = {
       ],
       responses: {
         "204": {
-          // Deactivation DELETEs the application_packages row (not a flag
-          // flip), so the strict mutation convention applies: DELETE → 204
-          // empty (#657). The integration detail stays GET-able afterwards
-          // (connections, OAuth clients, pins and org defaults survive) and
-          // serves `active: false`.
+          // Deactivation flips `enabled` to false (an upsert — the row is the
+          // explicit opt-out, persisted, not deleted: deleting it would let a
+          // system integration re-trigger its auto-active default). The strict
+          // mutation convention still applies: DELETE → 204 empty (#657). The
+          // integration detail stays GET-able afterwards (connections, OAuth
+          // clients, pins and org defaults survive) and serves `active: false`.
           description: "Deactivated — empty response. The integration detail remains GET-able.",
           headers: baseResponseHeaders,
         },

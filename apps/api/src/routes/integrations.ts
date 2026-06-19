@@ -52,7 +52,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "./../services/audit.ts";
-import { installPackage, uninstallPackage } from "../services/application-packages.ts";
+import { updateInstalledPackage } from "../services/application-packages.ts";
 import { listIntegrations } from "../services/integration-service.ts";
 import { hasSystemIntegrationClient } from "../services/integration-client-registry.ts";
 import {
@@ -330,11 +330,16 @@ export function createIntegrationsRouter() {
 
   // ─── Activate / deactivate ─────────────────
   //
-  // "Activating" creates the application_packages row; "deactivating"
-  // deletes it. Deactivation is non-destructive: connections, OAuth
-  // clients, pins and org defaults FK to (package, application) — not to
-  // application_packages — so they survive and are reused on reactivation
-  // (mirrors how disabling a provider keeps its credentials).
+  // Activation is the `application_packages.enabled` flag, NOT row presence.
+  // Both routes upsert the flag (never delete the row) so the rule holds
+  // uniformly for every integration — including a SYSTEM integration that is
+  // auto-active with no row: deleting the row there would re-trigger the
+  // auto-active default, so "deactivate" must persist an explicit `enabled =
+  // false` opt-out (sticky across runs). For a plain integration the observable
+  // result is unchanged (active ⇄ inactive). Deactivation stays non-destructive:
+  // connections, OAuth clients, pins and org defaults FK to (package,
+  // application) — not to application_packages — so they survive and are reused
+  // on reactivation (mirrors how disabling a provider keeps its credentials).
 
   router.post(
     "/:packageId{@[^/]+/[^/]+}/activate",
@@ -344,7 +349,7 @@ export function createIntegrationsRouter() {
       const scope = getAppScope(c);
       const actor = getActor(c);
       await assertIsIntegration(scope, packageId);
-      await installPackage(scope, packageId);
+      await updateInstalledPackage(scope, packageId, { enabled: true });
       await recordAuditFromContext(c, {
         action: "integration.activated",
         resourceType: "integration",
@@ -365,17 +370,16 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const scope = getAppScope(c);
       await assertIsIntegration(scope, packageId);
-      await uninstallPackage(scope, packageId);
+      await updateInstalledPackage(scope, packageId, { enabled: false });
       await recordAuditFromContext(c, {
         action: "integration.deactivated",
         resourceType: "integration",
         resourceId: packageId,
       });
-      // 204: deactivation DELETEs the `application_packages` row (it is not a
-      // flag flip), so under the strict mutation convention (issue #657) the
-      // response is empty. The integration detail itself stays GET-able —
-      // connections, OAuth clients, pins and org defaults survive (see the
-      // section comment above) and `GET /integrations/:packageId` serves the
+      // 204: deactivation flips `enabled` to false (upsert, so it also works
+      // for a never-installed auto-active system integration). Under the strict
+      // mutation convention (issue #657) the response is empty. The integration
+      // detail stays GET-able — `GET /integrations/:packageId` serves the
       // resource with `active: false`.
       return c.body(null, 204);
     },

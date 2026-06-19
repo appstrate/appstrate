@@ -453,9 +453,9 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
       method: "DELETE",
       headers: authHeaders(ctx),
     });
-    // DELETE → 204 empty (#657): deactivation removes the
-    // application_packages row. The detail stays GET-able afterwards and
-    // serves `active: false`.
+    // DELETE → 204 empty (#657): deactivation flips `enabled` to false (the
+    // row persists — it is the explicit opt-out, not a delete). The detail
+    // stays GET-able afterwards and serves `active: false`.
     expect(deactivate.status).toBe(204);
     expect(await deactivate.text()).toBe("");
 
@@ -475,8 +475,10 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
     expect(Array.isArray(detailBody.auths)).toBe(true);
     expect(Array.isArray(detailBody.tool_catalog)).toBe(true);
     expect(typeof detailBody.allow_undeclared_tools).toBe("boolean");
+    // The row survives, flagged disabled — this is the sticky opt-out, not a
+    // delete (deleting would let a system integration re-trigger auto-active).
     const after = await db
-      .select()
+      .select({ enabled: applicationPackages.enabled })
       .from(applicationPackages)
       .where(
         and(
@@ -484,7 +486,8 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
           eq(applicationPackages.packageId, "@myorg/gmail"),
         ),
       );
-    expect(after).toHaveLength(0);
+    expect(after).toHaveLength(1);
+    expect(after[0]?.enabled).toBe(false);
   });
 
   it("refuses to activate a non-integration package as integration (409)", async () => {
@@ -502,7 +505,10 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
     expect(res.status).toBe(409);
   });
 
-  it("returns 409 on duplicate activate", async () => {
+  it("is idempotent on repeat activate", async () => {
+    // Activation is a flag upsert (enabled=true), so re-activating an already
+    // active integration is a no-op success — not a 409. This is what lets a
+    // disabled (opt-out) integration be re-activated cleanly.
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
     const headers = { ...authHeaders(ctx), "Content-Type": "application/json" };
     const first = await app.request("/api/integrations/@myorg/gmail/activate", {
@@ -516,7 +522,42 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
       headers,
       body: "{}",
     });
-    expect(dup.status).toBe(409);
+    expect(dup.status).toBe(201);
+
+    // Exactly one row, enabled.
+    const rows = await db
+      .select({ enabled: applicationPackages.enabled })
+      .from(applicationPackages)
+      .where(
+        and(
+          eq(applicationPackages.applicationId, ctx.defaultAppId),
+          eq(applicationPackages.packageId, "@myorg/gmail"),
+        ),
+      );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.enabled).toBe(true);
+  });
+
+  it("re-activates a deactivated integration (opt-out cleared)", async () => {
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    const headers = { ...authHeaders(ctx), "Content-Type": "application/json" };
+    await app.request("/api/integrations/@myorg/gmail/activate", {
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+    await app.request("/api/integrations/@myorg/gmail/deactivate", {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    const reactivate = await app.request("/api/integrations/@myorg/gmail/activate", {
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+    expect(reactivate.status).toBe(201);
+    const body = (await reactivate.json()) as { active: boolean };
+    expect(body.active).toBe(true);
   });
 });
 

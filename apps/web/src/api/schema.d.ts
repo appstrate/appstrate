@@ -9371,7 +9371,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
-            /** @description Already active or wrong package type */
+            /** @description Wrong package type (not an integration) */
             409: {
                 headers: {
                     [name: string]: unknown;
