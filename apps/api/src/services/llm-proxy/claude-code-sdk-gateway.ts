@@ -38,6 +38,7 @@ import type { LlmProxyPrincipal } from "./types.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { AppEnv } from "../../types/index.ts";
 
 /** Provider id of the Claude Pro/Max/Team subscription credential. */
@@ -125,6 +126,13 @@ export async function handleClaudeCodeSdkGateway(
   }
   if (!resolved.credentialId) {
     throw invalidRequest(`Model preset "${presetId}" has no OAuth credential to resolve`);
+  }
+  // Defense-in-depth: the claude-code provider pins baseUrl to api.anthropic.com
+  // (baseUrlOverridable:false), so this is a no-op today — but it stops the
+  // gateway becoming an SSRF hole if that flag is ever flipped, instead of the
+  // protection silently depending on a provider def in another repo.
+  if (isBlockedUrl(resolved.baseUrl)) {
+    throw invalidRequest(`Model base URL targets a blocked network: ${resolved.baseUrl}`);
   }
 
   const buf = await c.req.arrayBuffer();

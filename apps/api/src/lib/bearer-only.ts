@@ -49,6 +49,11 @@ export function assertBearerOnly(authMethod: string | undefined, surfaceName: st
  * as the in-container sidecar that already serves these credentials to
  * runs).
  */
+// NOTE: for `chat-loopback`, the effective subscription gate is the loopback
+// HMAC secret (process-local, never persisted/transmitted — see
+// packages/module-chat/src/loopback-auth.ts), not this route check. Anything
+// that persists/exports that secret, or widens this set, breaks the invariant
+// that a personal subscription is never spendable by a third party.
 export const FIRST_PARTY_AUTH_METHODS: ReadonlySet<string> = new Set([
   "oauth2-dashboard",
   "chat-loopback",

@@ -18,14 +18,16 @@
  */
 
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
-import { z } from "zod";
 import { logger } from "../logger.ts";
+import { RENDER_HTML_DESCRIPTION, renderHtmlInputShape } from "../render-html-spec.ts";
+import {
+  TERMINAL_RUN_STATUSES,
+  WAIT_FOR_RUN_DEFAULT_TIMEOUT_S,
+  WAIT_FOR_RUN_DESCRIPTION,
+  WAIT_FOR_RUN_TIMEOUT_HINT,
+  waitForRunInputShape,
+} from "../run-wait-spec.ts";
 
-/** Mirrors `terminalRunStatusValues` in packages/db/src/schema/enums.ts. */
-const TERMINAL_STATUSES = new Set(["success", "failed", "timeout", "cancelled"]);
-
-const DEFAULT_WAIT_TIMEOUT_S = 180;
-const MAX_WAIT_TIMEOUT_S = 600;
 /** Platform long-poll cap (see getRun OpenAPI: held below proxy idle timeouts). */
 const LONG_POLL_CAP_S = 55;
 
@@ -53,12 +55,8 @@ export interface LocalToolsContext {
 export function createLocalToolsServer(ctx: LocalToolsContext) {
   const renderHtml = tool(
     "render_html",
-    "Render a complete, self-contained HTML document as a live artifact shown inline to the user. " +
-      "Inline CSS/JS allowed; no external network. Use for visualizations, diagrams, mockups, or small demos.",
-    {
-      code: z.string().describe("The complete, self-contained HTML document to render."),
-      title: z.string().optional().describe("Short title for the artifact."),
-    },
+    RENDER_HTML_DESCRIPTION,
+    renderHtmlInputShape,
     // Pure client-render: the HTML is in the call input; this only acks so the
     // model keeps streaming.
     async () => textResult({ rendered: true }),
@@ -66,23 +64,10 @@ export function createLocalToolsServer(ctx: LocalToolsContext) {
 
   const waitForRun = tool(
     "wait_for_run",
-    "Wait until an Appstrate run finishes and return its final status and result. " +
-      "Always call this right after triggering a run (runInline, runAgent, …) instead of polling getRun yourself. " +
-      "If it times out the run is still going: tell the user and offer to keep waiting (call it again with the same run_id).",
-    {
-      run_id: z.string().describe("The run id returned when the run was triggered (e.g. run_…)."),
-      timeout_seconds: z
-        .number()
-        .int()
-        .min(5)
-        .max(MAX_WAIT_TIMEOUT_S)
-        .optional()
-        .describe(
-          `How long to wait before giving up (default ${DEFAULT_WAIT_TIMEOUT_S}s, max ${MAX_WAIT_TIMEOUT_S}s).`,
-        ),
-    },
+    WAIT_FOR_RUN_DESCRIPTION,
+    waitForRunInputShape,
     async ({ run_id, timeout_seconds }) => {
-      const deadline = Date.now() + (timeout_seconds ?? DEFAULT_WAIT_TIMEOUT_S) * 1000;
+      const deadline = Date.now() + (timeout_seconds ?? WAIT_FOR_RUN_DEFAULT_TIMEOUT_S) * 1000;
       const start = Date.now();
       let last: RunStatusBody | undefined;
 
@@ -103,7 +88,7 @@ export function createLocalToolsServer(ctx: LocalToolsContext) {
           return textResult({ run_id, error: `getRun returned HTTP ${res.status}` });
         }
         last = (await res.json().catch(() => undefined)) as RunStatusBody | undefined;
-        if (last?.status && TERMINAL_STATUSES.has(last.status)) {
+        if (last?.status && TERMINAL_RUN_STATUSES.has(last.status)) {
           logger.info("wait_for_run done", {
             runId: run_id,
             status: last.status,
@@ -125,7 +110,7 @@ export function createLocalToolsServer(ctx: LocalToolsContext) {
         timed_out: true,
         status: last?.status ?? "unknown",
         waited_seconds: Math.round((Date.now() - start) / 1000),
-        hint: "Run still in progress. Call wait_for_run again with the same run_id to keep waiting, or report the run_id to the user.",
+        hint: WAIT_FOR_RUN_TIMEOUT_HINT,
       });
     },
   );

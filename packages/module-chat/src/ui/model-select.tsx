@@ -10,6 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import { CHAT_USABLE_FAMILIES } from "../chat-families.ts";
 
 export interface OrgModelOption {
   id: string;
@@ -31,17 +32,12 @@ export async function fetchModels(
     });
     if (!res.ok) return [];
     const body = (await res.json()) as { models?: OrgModelOption[]; data?: OrgModelOption[] };
-    // Same filter as the server (CHAT_USABLE_FAMILIES in llm.ts). claude-code
-    // is selectable via its anthropic-messages apiShape; the server routes it
-    // to the Claude Agent SDK engine by providerId.
-    const usable = new Set([
-      "openai-completions",
-      "anthropic-messages",
-      "mistral-conversations",
-      "openai-codex-responses",
-    ]);
+    // Same filter as the server (pickModel in llm.ts) — shared set so they
+    // never drift. claude-code is selectable via its anthropic-messages
+    // apiShape; the server routes it to the Claude Agent SDK engine by
+    // providerId.
     return (body.models ?? body.data ?? []).filter(
-      (m) => m.enabled !== false && usable.has(m.apiShape),
+      (m) => m.enabled !== false && CHAT_USABLE_FAMILIES.has(m.apiShape),
     );
   } catch {
     return [];

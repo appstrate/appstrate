@@ -16,6 +16,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModel } from "ai";
 import { badGateway, invalidRequest } from "@appstrate/core/api-errors";
+import { CHAT_USABLE_FAMILIES } from "./chat-families.ts";
 import { logger } from "./logger.ts";
 
 const LLM_PROXY_PATH = "/api/llm-proxy";
@@ -61,19 +62,6 @@ export async function listModels(
   }
   return models;
 }
-
-/**
- * The apiShapes the chat can use. API-key families + the first-party codex
- * subscription (served by the llm-proxy). `claude-code` is included via its
- * `anthropic-messages` apiShape — it is *selectable* here, but routed to the
- * Claude Agent SDK engine (by `providerId`, in chat-stream.ts), NOT the proxy.
- */
-export const CHAT_USABLE_FAMILIES = new Set([
-  "openai-completions",
-  "anthropic-messages",
-  "mistral-conversations",
-  "openai-codex-responses",
-]);
 
 export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
   // `enabled` is opt-out: a missing flag counts as enabled.

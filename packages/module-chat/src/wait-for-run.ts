@@ -17,26 +17,17 @@
 import { tool, type ToolSet, type ToolCallOptions } from "ai";
 import { z } from "zod";
 import { logger } from "./logger.ts";
-
-/** Mirrors `terminalRunStatusValues` in `packages/db/src/schema/enums.ts`. */
-const TERMINAL_STATUSES = new Set(["success", "failed", "timeout", "cancelled"]);
+import {
+  TERMINAL_RUN_STATUSES,
+  WAIT_FOR_RUN_DEFAULT_TIMEOUT_S,
+  WAIT_FOR_RUN_DESCRIPTION,
+  WAIT_FOR_RUN_TIMEOUT_HINT,
+  waitForRunInputShape,
+} from "./run-wait-spec.ts";
 
 const POLL_INTERVAL_MS = 3_000;
-const DEFAULT_TIMEOUT_S = 180;
-const MAX_TIMEOUT_S = 600;
 
-const inputSchema = z.object({
-  run_id: z.string().describe("The run id returned when the run was triggered (e.g. run_…)."),
-  timeout_seconds: z
-    .number()
-    .int()
-    .min(5)
-    .max(MAX_TIMEOUT_S)
-    .optional()
-    .describe(
-      `How long to wait before giving up (default ${DEFAULT_TIMEOUT_S}s, max ${MAX_TIMEOUT_S}s).`,
-    ),
-});
+const inputSchema = z.object(waitForRunInputShape);
 
 /** Abort-aware sleep; resolves early (without throwing) when the signal fires. */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -72,16 +63,13 @@ export function createWaitForRunTool(mcpTools: ToolSet) {
   const invoke = mcpTools["invoke_operation"];
 
   return tool({
-    description:
-      "Wait until an Appstrate run finishes and return its final status and result. " +
-      "Always call this right after triggering a run (runInline, runAgent, …) instead of polling getRun yourself. " +
-      "If it times out the run is still going: tell the user and offer to keep waiting (call it again with the same run_id).",
+    description: WAIT_FOR_RUN_DESCRIPTION,
     inputSchema,
     execute: async ({ run_id, timeout_seconds }, options: ToolCallOptions) => {
       if (!invoke?.execute)
         return { error: "invoke_operation tool unavailable on this MCP session" };
 
-      const timeoutMs = (timeout_seconds ?? DEFAULT_TIMEOUT_S) * 1000;
+      const timeoutMs = (timeout_seconds ?? WAIT_FOR_RUN_DEFAULT_TIMEOUT_S) * 1000;
       const start = Date.now();
       let lastBody: unknown;
 
@@ -101,7 +89,7 @@ export function createWaitForRunTool(mcpTools: ToolSet) {
 
         const run = body as { status?: string; result?: unknown; error?: unknown } | undefined;
         lastBody = run;
-        if (run?.status && TERMINAL_STATUSES.has(run.status)) {
+        if (run?.status && TERMINAL_RUN_STATUSES.has(run.status)) {
           logger.info("wait_for_run done", {
             runId: run_id,
             status: run.status,
@@ -123,7 +111,7 @@ export function createWaitForRunTool(mcpTools: ToolSet) {
             timed_out: true,
             status: run?.status ?? "unknown",
             waited_seconds: Math.round((Date.now() - start) / 1000),
-            hint: "Run still in progress. Call wait_for_run again with the same run_id to keep waiting, or report the run_id to the user.",
+            hint: WAIT_FOR_RUN_TIMEOUT_HINT,
             last_seen: lastBody ?? null,
           };
         }

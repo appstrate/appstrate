@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * The apiShapes the chat can use. API-key families + the first-party codex
+ * subscription (served by the llm-proxy). `claude-code` is selectable via its
+ * `anthropic-messages` apiShape but is routed to the Claude Agent SDK engine
+ * (by `providerId`, in chat-stream.ts), NOT the proxy.
+ *
+ * Shared by the server-side picker (`llm.ts`) and the client model picker
+ * (`ui/model-select.tsx`) so the two filters can never drift. Kept dependency-
+ * free so importing it into the browser bundle pulls in nothing else.
+ */
+export const CHAT_USABLE_FAMILIES = new Set([
+  "openai-completions",
+  "anthropic-messages",
+  "mistral-conversations",
+  "openai-codex-responses",
+]);

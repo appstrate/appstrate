@@ -25,6 +25,7 @@ import { createWaitForRunTool } from "./wait-for-run.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
 import { runClaudeAgentChat } from "./claude-agent/engine.ts";
+import { RENDER_HTML_DESCRIPTION, renderHtmlInputShape } from "./render-html-spec.ts";
 
 const MAX_STEPS = 16;
 
@@ -60,13 +61,8 @@ const NO_TOOLS_SYSTEM_PROMPT = `You are Appstrate's assistant. Right now your in
  * Appstrate capability — pure front rendering.
  */
 const renderHtmlTool = tool({
-  description:
-    "Render a complete, self-contained HTML document as a live artifact shown inline to the user. " +
-    "Inline CSS/JS allowed; no external network. Use for visualizations, diagrams, mockups, or small demos.",
-  inputSchema: z.object({
-    code: z.string().describe("The complete, self-contained HTML document to render."),
-    title: z.string().optional().describe("Short title for the artifact."),
-  }),
+  description: RENDER_HTML_DESCRIPTION,
+  inputSchema: z.object(renderHtmlInputShape),
   execute: async () => ({ rendered: true }),
 });
 
