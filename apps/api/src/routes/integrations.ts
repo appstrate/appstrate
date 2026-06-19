@@ -400,6 +400,9 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
+      // Resolve the integration + auth first so an unknown integration/auth 404s
+      // (the spec declares 404 here) instead of leaking an empty client list.
+      await readIntegrationAuth(scope, packageId, authKey);
       const clients = await listIntegrationClients(scope, packageId, authKey);
       return c.json(listResponse(clients));
     },

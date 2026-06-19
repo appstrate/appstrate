@@ -835,6 +835,13 @@ describe("OAuth client CRUD", () => {
     return body.data;
   }
 
+  it("returns 404 listing clients for an unknown integration (no empty-list leak)", async () => {
+    const res = await app.request("/api/integrations/@myorg/nonexistent/auths/google/clients", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(404);
+  });
+
   it("creates, lists, rotates, and deletes a custom OAuth client", async () => {
     // Create
     const created = await createClient("abc", "shh");
