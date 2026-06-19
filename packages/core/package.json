@@ -73,6 +73,7 @@
     "./permissions": "./src/permissions.ts",
     "./platform-types": "./src/platform-types.ts",
     "./token-usage": "./src/token-usage.ts",
+    "./token-budget": "./src/token-budget.ts",
     "./sidecar-types": "./src/sidecar-types.ts",
     "./pairing-token": "./src/pairing-token.ts",
     "./jwt": "./src/jwt.ts",

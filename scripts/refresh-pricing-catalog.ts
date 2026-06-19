@@ -236,10 +236,24 @@ function projectEntry(id: string, entry: LiteLLMEntry): CompactEntry | null {
     cost.cacheWrite = round(entry.cache_creation_input_token_cost * PER_MILLION);
   }
 
+  // Canonical model invariant: a request spends `input + output` from the
+  // same window, so `max_output_tokens < context_window` always holds.
+  // LiteLLM reports `max_output_tokens == max_input_tokens` for a class of
+  // models (devstral, kimi-k2.5, several grok/mistral entries) — a known
+  // upstream data bug (LiteLLM #22478). Drop the impossible value to null
+  // so the runtime derives a sane response reserve instead of inheriting a
+  // cap that swallows the whole window (which crashes the sidecar at boot
+  // and pins the compaction threshold at zero). See `@appstrate/core/token-budget`.
+  const contextWindow = entry.max_input_tokens;
+  const maxTokens =
+    typeof entry.max_output_tokens === "number" && entry.max_output_tokens < contextWindow
+      ? entry.max_output_tokens
+      : null;
+
   return {
     label: deriveLabel(id),
-    contextWindow: entry.max_input_tokens,
-    maxTokens: typeof entry.max_output_tokens === "number" ? entry.max_output_tokens : null,
+    contextWindow,
+    maxTokens,
     capabilities: caps,
     cost,
   };

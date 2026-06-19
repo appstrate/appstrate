@@ -40,46 +40,60 @@ import {
 } from "../lib/errors.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 
-export const createModelSchema = z.object({
-  /**
-   * Optional. When omitted, the server derives the label from the catalog
-   * (`<catalog>.label`) and dedupes against existing org rows. See
-   * {@link deriveModelLabel}.
-   */
-  label: z.string().min(1).optional(),
-  modelId: z.string().min(1, "modelId is required"),
-  // `org_models.credential_id` is a strict UUID FK to
-  // `model_provider_credentials.id` — built-in (system) credentials live
-  // in `SYSTEM_PROVIDER_KEYS` env, NOT in that table, and identify as
-  // slugs (e.g. "anthropic"). Validating as UUID here turns the
-  // legacy 500 ("invalid input syntax for type uuid") into a clean 400
-  // and lets the route handler emit a hint that points operators at the
-  // right knob (either update SYSTEM_PROVIDER_KEYS or create a custom
-  // credential).
-  credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
-  /**
-   * Catalog-derivable overrides. Omit (or send null on update) to let the
-   * read path fall back to the live catalog — keeps existing rows in sync
-   * with the weekly `refresh-pricing-catalog.ts` bump.
-   */
-  input: z.array(z.string()).optional(),
-  contextWindow: z.number().int().positive().optional(),
-  maxTokens: z.number().int().positive().optional(),
-  reasoning: z.boolean().optional(),
-  cost: modelCostSchema.optional(),
-});
+export const createModelSchema = z
+  .object({
+    /**
+     * Optional. When omitted, the server derives the label from the catalog
+     * (`<catalog>.label`) and dedupes against existing org rows. See
+     * {@link deriveModelLabel}.
+     */
+    label: z.string().min(1).optional(),
+    modelId: z.string().min(1, "modelId is required"),
+    // `org_models.credential_id` is a strict UUID FK to
+    // `model_provider_credentials.id` — built-in (system) credentials live
+    // in `SYSTEM_PROVIDER_KEYS` env, NOT in that table, and identify as
+    // slugs (e.g. "anthropic"). Validating as UUID here turns the
+    // legacy 500 ("invalid input syntax for type uuid") into a clean 400
+    // and lets the route handler emit a hint that points operators at the
+    // right knob (either update SYSTEM_PROVIDER_KEYS or create a custom
+    // credential).
+    credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
+    /**
+     * Catalog-derivable overrides. Omit (or send null on update) to let the
+     * read path fall back to the live catalog — keeps existing rows in sync
+     * with the weekly `refresh-pricing-catalog.ts` bump.
+     */
+    input: z.array(z.string()).optional(),
+    contextWindow: z.number().int().positive().optional(),
+    maxTokens: z.number().int().positive().optional(),
+    reasoning: z.boolean().optional(),
+    cost: modelCostSchema.optional(),
+  })
+  .refine(
+    // Canonical model invariant: `input + output <= context`, so a response
+    // cap can never reach the full window. Reject impossible overrides at the
+    // edge so the runtime never derives a reserve that swallows the window.
+    (d) => d.maxTokens == null || d.contextWindow == null || d.maxTokens < d.contextWindow,
+    { message: "maxTokens must be strictly less than contextWindow", path: ["maxTokens"] },
+  );
 
-export const updateModelSchema = z.object({
-  label: z.string().min(1).optional(),
-  modelId: z.string().min(1).optional(),
-  credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).optional(),
-  enabled: z.boolean().optional(),
-  input: z.array(z.string()).nullable().optional(),
-  contextWindow: z.number().int().positive().nullable().optional(),
-  maxTokens: z.number().int().positive().nullable().optional(),
-  reasoning: z.boolean().nullable().optional(),
-  cost: modelCostSchema.nullable().optional(),
-});
+export const updateModelSchema = z
+  .object({
+    label: z.string().min(1).optional(),
+    modelId: z.string().min(1).optional(),
+    credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).optional(),
+    enabled: z.boolean().optional(),
+    input: z.array(z.string()).nullable().optional(),
+    contextWindow: z.number().int().positive().nullable().optional(),
+    maxTokens: z.number().int().positive().nullable().optional(),
+    reasoning: z.boolean().nullable().optional(),
+    cost: modelCostSchema.nullable().optional(),
+  })
+  .refine(
+    // See createModelSchema: `max_output_tokens < context_window` always holds.
+    (d) => d.maxTokens == null || d.contextWindow == null || d.maxTokens < d.contextWindow,
+    { message: "maxTokens must be strictly less than contextWindow", path: ["maxTokens"] },
+  );
 
 export const setDefaultSchema = z.object({
   modelId: z.string().nullable(),

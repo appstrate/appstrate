@@ -593,6 +593,45 @@ describe("token-aware spill — env-var configuration via createApp", () => {
       else process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS = original;
     }
   });
+
+  it("boots (does not throw) when modelMaxTokens == modelContextWindow — the run_b6e99890 regression", () => {
+    // Exercises the EXACT crash site (`buildSidecarRuntimeDeps`), not just
+    // the TokenBudget constructor: the launcher forwards a resolved model's
+    // `(contextWindow, maxTokens)` verbatim, and Devstral 2512 carries the
+    // impossible `256000 / 256000` from the LiteLLM catalog. Pre-fix this
+    // threw → sidecar exited code 1 → no heartbeat → run failed after 60s.
+    const appDeps = makeDeps({
+      config: {
+        platformApiUrl: "http://mock:3000",
+        runToken: "tok",
+        proxyUrl: "",
+        modelContextWindow: 256_000,
+        modelMaxTokens: 256_000,
+      },
+    });
+    let runtimeDeps!: ReturnType<typeof buildSidecarRuntimeDeps>;
+    expect(() => {
+      runtimeDeps = buildSidecarRuntimeDeps(appDeps);
+    }).not.toThrow();
+    expect(runtimeDeps.tokenBudget.contextWindowTokens).toBe(256_000);
+    // Impossible cap dropped → derived default max(16384, 256000 × 0.2).
+    expect(runtimeDeps.tokenBudget.reserveTokens).toBe(51_200);
+    expect(runtimeDeps.tokenBudget.reserveTokens).toBeLessThan(256_000);
+  });
+
+  it("keeps a valid modelMaxTokens (< window) as the reserve at the wiring layer", () => {
+    const appDeps = makeDeps({
+      config: {
+        platformApiUrl: "http://mock:3000",
+        runToken: "tok",
+        proxyUrl: "",
+        modelContextWindow: 200_000,
+        modelMaxTokens: 64_000, // Claude Sonnet thinking — must be preserved
+      },
+    });
+    const runtimeDeps = buildSidecarRuntimeDeps(appDeps);
+    expect(runtimeDeps.tokenBudget.reserveTokens).toBe(64_000);
+  });
 });
 
 describe("token-aware spill — fallback when blob store is full", () => {
