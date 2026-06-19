@@ -18,7 +18,12 @@ import {
   type LlmProxyOauthConfig,
   type ModelSwap,
 } from "./helpers.ts";
-import { swapRequestModel, swapResponseModelJson, createSseModelSwapStream } from "./model-swap.ts";
+import {
+  swapRequestModel,
+  swapResponseModelJson,
+  createSseModelSwapStream,
+  scrubModelText,
+} from "./model-swap.ts";
 import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
   DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
@@ -185,6 +190,21 @@ async function passUpstream(
   }
 
   const contentType = (upstream.headers.get("content-type") ?? "").toLowerCase();
+
+  // Model-alias scrub for ERROR bodies. Provider error payloads name the model
+  // in free-form prose ("model `deepseek-chat` does not exist"), so the exact-
+  // field swap below misses it — and an alias's whole point is the agent never
+  // learns the backing id. An error body carries no generated content, so a
+  // blind substring replace is safe here (it isn't for 2xx). Applies to ANY
+  // content type on a non-2xx, mirroring the platform gateway (`llm-proxy/
+  // core.ts`); errors are tiny, so buffering them costs nothing.
+  if (swap && !upstream.ok) {
+    const text = await upstream.text();
+    return new Response(scrubModelText(text, swap), {
+      status: upstream.status,
+      headers: responseHeaders,
+    });
+  }
 
   // Model-alias swap (response real→alias). A non-stream JSON body can't be
   // rewritten chunk-by-chunk — buffer the whole thing, swap, re-serialize. SSE

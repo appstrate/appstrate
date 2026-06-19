@@ -91,6 +91,29 @@ describe("/llm/* model-alias swap (api_key)", () => {
     expect(text).not.toContain("deepseek-chat");
   });
 
+  it("scrubs the real id from an upstream error body (free-form prose)", async () => {
+    // Provider 4xx names the model in prose, not a top-level `model` field —
+    // the exact-field swap would miss it, so the sidecar must blind-scrub.
+    const fetchFn = mock(
+      async () =>
+        new Response(
+          JSON.stringify({ error: { message: "The model `deepseek-chat` does not exist" } }),
+          { status: 404, headers: { "Content-Type": "application/json" } },
+        ),
+    ) as unknown as typeof fetch;
+
+    const app = createApp(makeDeps(fetchFn));
+    const res = await app.request("/llm/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "appstrate-medium", messages: [] }),
+    });
+    expect(res.status).toBe(404);
+    const text = await res.text();
+    expect(text).not.toContain("deepseek-chat");
+    expect(text).toContain("appstrate-medium");
+  });
+
   it("rewrites the streaming (SSE) response model real→alias in every chunk", async () => {
     const sse =
       `data: {"object":"chat.completion.chunk","model":"deepseek-chat","choices":[]}\n\n` +
