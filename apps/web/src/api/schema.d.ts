@@ -1245,6 +1245,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/{packageId}/auths/{authKey}/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the OAuth clients registered for an integration auth
+         * @description Returns the org's custom (BYO-app) clients plus any platform-provided system clients, with `source` and which is the default. Secrets are never returned. Drives the admin clients CRUD table; new connections always use the default (no per-connect picker).
+         */
+        get: operations["listIntegrationClients"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/{packageId}/auths/{authKey}/connect/fields": {
         parameters: {
             query?: never;
@@ -1273,6 +1293,46 @@ export interface paths {
         put?: never;
         /** Initiate the OAuth2 PKCE flow for an integration auth */
         post: operations["initiateIntegrationOAuth"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/auths/{authKey}/default-client": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set the default OAuth client for an integration auth
+         * @description Choose which client mints NEW connections when none is picked explicitly (the model-provider `setDefaultModel` analogue). Selecting the org's custom client flags it default; selecting a system client un-flags the custom one so the cascade falls to the system client. Existing connections are bound to the client that minted them and are unaffected. Returns the refreshed clients list. Admin only.
+         */
+        put: operations["setDefaultIntegrationClient"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/auths/{authKey}/oauth-clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register a custom OAuth client for an integration auth
+         * @description Registers a NEW custom (BYO-app) client for this auth. Repeatable — an org may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR/CIMD) auths. Admin only.
+         */
+        post: operations["createIntegrationOAuthClient"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1372,19 +1432,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/integrations/{packageId}/oauth-clients/{authKey}": {
+    "/api/integrations/{packageId}/oauth-clients/{clientId}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Read the registered OAuth client for an integration auth */
-        get: operations["getIntegrationOAuthClient"];
-        /** Register or rotate the OAuth client for an integration auth */
-        put: operations["upsertIntegrationOAuthClient"];
+        get?: never;
+        /**
+         * Rotate a custom OAuth client's credentials
+         * @description Rotates one custom client in place, by its id. Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Admin only.
+         */
+        put: operations["rotateIntegrationOAuthClient"];
         post?: never;
-        /** Delete the OAuth client for an integration auth */
+        /**
+         * Delete a custom OAuth client
+         * @description Deletes one custom client by id. If it was the default, the cascade falls to the system client (no auto-promotion). Admin only.
+         */
         delete: operations["deleteIntegrationOAuthClient"];
         options?: never;
         head?: never;
@@ -4545,7 +4610,7 @@ export interface components {
             maxTokens?: number | null;
             reasoning?: boolean | null;
             enabled: boolean;
-            isDefault: boolean;
+            is_default: boolean;
             /** @enum {string} */
             source: "built-in" | "custom";
             /** @description ID of the backing `model_provider_credentials` row. */
@@ -4627,7 +4692,7 @@ export interface components {
             /** @description Masked proxy URL for display */
             urlPrefix: string;
             enabled: boolean;
-            isDefault: boolean;
+            is_default: boolean;
             /** @enum {string} */
             source: "built-in" | "custom";
             created_by: string | null;
@@ -5619,6 +5684,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationError"];
             /** @description CSRF check failed. */
             403: {
                 headers: {
@@ -5884,6 +5950,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -6147,6 +6214,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -6305,6 +6373,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Concurrent request with the same Idempotency-Key still in flight, the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference) */
             409: {
@@ -7109,6 +7178,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApplicationPackage"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -7313,6 +7383,7 @@ export interface operations {
                     "application/json": components["schemas"]["SmtpConfigView"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7364,6 +7435,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7391,6 +7463,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7430,6 +7503,8 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7460,6 +7535,7 @@ export interface operations {
                     "application/json": components["schemas"]["SocialProviderView"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7505,6 +7581,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7533,6 +7610,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -9175,12 +9253,16 @@ export interface operations {
                                 owner_id: string;
                                 label?: string | null;
                                 shared_with_org?: boolean;
+                                /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                                client_ref: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
                             has_oauth_client: boolean;
+                            /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
+                            has_system_client: boolean;
                             /** @description True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
                         }[];
@@ -9199,6 +9281,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Wrong package type */
             409: {
@@ -9273,12 +9356,16 @@ export interface operations {
                                 owner_id: string;
                                 label?: string | null;
                                 shared_with_org?: boolean;
+                                /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                                client_ref: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
                             has_oauth_client: boolean;
+                            /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
+                            has_system_client: boolean;
                             /** @description True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
                         }[];
@@ -9297,8 +9384,9 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Already active or wrong package type */
+            /** @description Wrong package type (not an integration) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9365,6 +9453,56 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listIntegrationClients: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Auth key as declared in the manifest's `auths` map. */
+                authKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Available OAuth clients */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        hasMore: boolean;
+                        data: {
+                            client_ref: string;
+                            /** @enum {string} */
+                            source: "built-in" | "custom";
+                            /** @description For `custom` clients, the org's OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            client_id: string;
+                            is_default: boolean;
+                            auto_provisioned: boolean;
+                            has_client_secret: boolean;
+                            redirect_uri: string | null;
+                        }[];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     connectIntegrationFields: {
@@ -9425,6 +9563,8 @@ export interface operations {
                         owner_id: string;
                         label?: string | null;
                         shared_with_org?: boolean;
+                        /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                        client_ref: string | null;
                         /** Format: date-time */
                         createdAt: string;
                         /** Format: date-time */
@@ -9485,6 +9625,124 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    setDefaultIntegrationClient: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Auth key as declared in the manifest's `auths` map. */
+                authKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Client to make default — a `client_ref` from GET .../clients. */
+                    client_ref: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Default set; available OAuth clients (re-badged) */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        hasMore: boolean;
+                        data: {
+                            client_ref: string;
+                            /** @enum {string} */
+                            source: "built-in" | "custom";
+                            /** @description For `custom` clients, the org's OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            client_id: string;
+                            is_default: boolean;
+                            auto_provisioned: boolean;
+                            has_client_secret: boolean;
+                            redirect_uri: string | null;
+                        }[];
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createIntegrationOAuthClient: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Auth key as declared in the manifest's `auths` map. */
+                authKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    client_id: string;
+                    /** @default  */
+                    client_secret: string;
+                    /** Format: uri */
+                    redirect_uri?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
+                         */
+                        id: string;
+                        applicationId: string;
+                        integration_package_id: string;
+                        auth_key: string;
+                        client_id: string;
+                        has_client_secret: boolean;
+                        redirect_uri: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                        /** Format: date-time */
+                        updatedAt: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listIntegrationConnections: {
         parameters: {
             query?: never;
@@ -9531,6 +9789,8 @@ export interface operations {
                             owner_id: string;
                             label?: string | null;
                             shared_with_org?: boolean;
+                            /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                            client_ref: string | null;
                             /** Format: date-time */
                             createdAt: string;
                             /** Format: date-time */
@@ -9540,6 +9800,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     updateIntegrationConnectionMetadata: {
@@ -9594,6 +9855,8 @@ export interface operations {
                         owner_id: string;
                         label?: string | null;
                         shared_with_org?: boolean;
+                        /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                        client_ref: string | null;
                         /** Format: date-time */
                         createdAt: string;
                         /** Format: date-time */
@@ -9653,6 +9916,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     deactivateIntegration: {
@@ -9681,6 +9945,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Wrong package type */
             409: {
@@ -9740,6 +10005,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     upsertIntegrationOrgDefault: {
@@ -9823,7 +10089,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    getIntegrationOAuthClient: {
+    rotateIntegrationOAuthClient: {
         parameters: {
             query?: never;
             header?: {
@@ -9835,52 +10101,8 @@ export interface operations {
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
                 packageId: string;
-                /** @description Auth key as declared in the manifest's `auths` map. */
-                authKey: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OAuth client */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        applicationId: string;
-                        integration_package_id: string;
-                        auth_key: string;
-                        client_id: string;
-                        has_client_secret: boolean;
-                        redirect_uri: string | null;
-                        /** Format: date-time */
-                        createdAt: string;
-                        /** Format: date-time */
-                        updatedAt: string;
-                    };
-                };
-            };
-            404: components["responses"]["NotFound"];
-        };
-    };
-    upsertIntegrationOAuthClient: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Integration package id (e.g. `@official/gmail`). */
-                packageId: string;
-                /** @description Auth key as declared in the manifest's `auths` map. */
-                authKey: string;
+                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
+                clientId: string;
             };
             cookie?: never;
         };
@@ -9896,7 +10118,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upserted */
+            /** @description Rotated */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -9905,6 +10127,11 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
+                         */
+                        id: string;
                         applicationId: string;
                         integration_package_id: string;
                         auth_key: string;
@@ -9919,6 +10146,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -9934,8 +10162,8 @@ export interface operations {
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
                 packageId: string;
-                /** @description Auth key as declared in the manifest's `auths` map. */
-                authKey: string;
+                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
+                clientId: string;
             };
             cookie?: never;
         };
@@ -9950,6 +10178,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -9986,6 +10215,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     upsertIntegrationPin: {
@@ -10125,12 +10355,16 @@ export interface operations {
                                 owner_id: string;
                                 label?: string | null;
                                 shared_with_org?: boolean;
+                                /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                                client_ref: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
                             has_oauth_client: boolean;
+                            /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
+                            has_system_client: boolean;
                             /** @description True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
                         }[];
@@ -10149,6 +10383,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
@@ -11342,6 +11577,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -11368,6 +11604,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
@@ -11405,7 +11642,7 @@ export interface operations {
                      *           "modelId": "gpt-4o",
                      *           "source": "built-in",
                      *           "enabled": true,
-                     *           "isDefault": false,
+                     *           "is_default": false,
                      *           "credentialId": "pk_abc123",
                      *           "contextWindow": 128000,
                      *           "maxTokens": 16384,
@@ -11521,8 +11758,10 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     searchOpenRouterModels: {
@@ -11773,6 +12012,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgModel"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -12125,6 +12365,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     createOAuthClient: {
@@ -12188,6 +12429,8 @@ export interface operations {
                     "application/json": components["schemas"]["OAuthClientWithSecret"];
                 };
             };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getOAuthClient: {
@@ -12217,6 +12460,7 @@ export interface operations {
                     "application/json": components["schemas"]["OAuthClientObject"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             /** @description Client not found. */
             404: {
                 headers: {
@@ -12247,6 +12491,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Client not found. */
             404: {
                 headers: {
@@ -12302,6 +12547,8 @@ export interface operations {
                     "application/json": components["schemas"]["OAuthClientObject"];
                 };
             };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
             /** @description Client not found. */
             404: {
                 headers: {
@@ -12338,6 +12585,7 @@ export interface operations {
                     "application/json": components["schemas"]["OAuthClientWithSecret"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             /** @description Client not found. */
             404: {
                 headers: {
@@ -12402,6 +12650,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     getOpenApiSpec: {
@@ -12780,6 +13029,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgInvitationInfo"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -12900,6 +13150,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgMember"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -15639,6 +15890,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserProfile"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -15695,6 +15947,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
         };
     };
@@ -15729,7 +15982,7 @@ export interface operations {
                      *           "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                      *           "source": "custom",
                      *           "enabled": true,
-                     *           "isDefault": false,
+                     *           "is_default": false,
                      *           "created_by": "usr_k7x9m2p4q1",
                      *           "createdAt": "2026-01-10T08:00:00Z",
                      *           "updatedAt": "2026-01-10T08:00:00Z"
@@ -15788,7 +16041,7 @@ export interface operations {
                      *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
-                     *       "isDefault": false,
+                     *       "is_default": false,
                      *       "created_by": "usr_k7x9m2p4q1",
                      *       "createdAt": "2026-01-10T08:00:00Z",
                      *       "updatedAt": "2026-01-10T08:00:00Z"
@@ -15800,7 +16053,6 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalServerError"];
         };
     };
     setDefaultProxy: {
@@ -15837,7 +16089,7 @@ export interface operations {
                      *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
-                     *       "isDefault": true,
+                     *       "is_default": true,
                      *       "created_by": "usr_k7x9m2p4q1",
                      *       "createdAt": "2026-01-10T08:00:00Z",
                      *       "updatedAt": "2026-01-10T08:00:00Z"
@@ -15854,9 +16106,10 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalServerError"];
+            404: components["responses"]["NotFound"];
         };
     };
     updateProxy: {
@@ -15897,7 +16150,7 @@ export interface operations {
                      *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
-                     *       "isDefault": false,
+                     *       "is_default": false,
                      *       "created_by": "usr_k7x9m2p4q1",
                      *       "createdAt": "2026-01-10T08:00:00Z",
                      *       "updatedAt": "2026-01-12T09:00:00Z"
@@ -15910,7 +16163,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
         };
     };
     deleteProxy: {
@@ -15937,7 +16189,6 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalServerError"];
         };
     };
     testProxy: {
@@ -16266,6 +16517,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["IdempotencyInProgress"];
             /** @description Missing integration connection (`missing_integration_connection`) */
             412: {
@@ -16344,6 +16596,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
         };
@@ -16669,6 +16922,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Run not cancellable (already completed/failed) */
             409: {
@@ -17741,6 +17995,7 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookObject"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -17891,6 +18146,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

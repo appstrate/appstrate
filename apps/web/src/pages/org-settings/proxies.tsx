@@ -3,9 +3,17 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Globe } from "lucide-react";
+import { Globe, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
   useProxies,
@@ -22,26 +30,9 @@ import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
-import type { TestResult } from "@appstrate/shared-types";
-
-function TestResultSpan({
-  result,
-  successKey,
-  failedKey,
-}: {
-  result: TestResult;
-  successKey: string;
-  failedKey: string;
-}) {
-  const { t } = useTranslation(["settings"]);
-  return (
-    <span className={`text-sm ${result.ok ? "text-green-500" : "text-destructive"}`}>
-      {result.ok
-        ? t(successKey, { latency: result.latency })
-        : t(failedKey, { message: result.message })}
-    </span>
-  );
-}
+import { TestResultSpan } from "../../components/test-result-span";
+import { SourceBadge } from "../../components/source-badge";
+import { DefaultCell } from "../../components/default-cell";
 
 export function OrgSettingsProxiesPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -73,7 +64,6 @@ export function OrgSettingsProxiesPage() {
   };
   const onDelete = (p: OrgProxyInfo) => setConfirmState({ label: p.label, id: p.id });
   const onSetDefault = (p: OrgProxyInfo) => setDefaultMutation.mutate({ body: { proxyId: p.id } });
-  const onRemoveDefault = () => setDefaultMutation.mutate({ body: { proxyId: null } });
 
   return (
     <>
@@ -82,70 +72,97 @@ export function OrgSettingsProxiesPage() {
       </div>
 
       {proxies && proxies.length > 0 ? (
-        <div className="flex flex-col gap-3">
-          {proxies.map((p) => {
-            const isBuiltIn = p.source === "built-in";
-            return (
-              <div key={p.id} className="border-border bg-card rounded-lg border p-5">
-                <div className="mb-3 flex items-center gap-3">
-                  <div className="flex-1">
-                    <h3 className="text-[0.95rem] font-semibold">{p.label}</h3>
-                    <span className="text-muted-foreground text-sm">{p.urlPrefix}</span>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      {p.isDefault && <Badge variant="success">{t("proxies.default")}</Badge>}
-                      {isBuiltIn && (
-                        <Badge variant="secondary" className="opacity-60">
-                          {t("proxies.builtIn")}
-                        </Badge>
-                      )}
-                      {!isBuiltIn && (
-                        <Badge variant="secondary" className="opacity-60">
-                          {p.enabled ? t("proxies.enabled") : t("proxies.disabled")}
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="border-border mt-3 flex items-center justify-end gap-2 border-t pt-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleTest(p.id)}
-                    disabled={testingId === p.id}
-                  >
-                    {testingId === p.id ? <Spinner /> : t("proxies.test")}
-                  </Button>
-                  {testResults[p.id] && (
-                    <TestResultSpan
-                      result={testResults[p.id]!}
-                      successKey="proxies.testSuccess"
-                      failedKey="proxies.testFailed"
-                    />
-                  )}
-                  {p.isDefault && !isBuiltIn && (
-                    <Button variant="outline" size="sm" onClick={onRemoveDefault}>
-                      {t("proxies.removeDefault")}
-                    </Button>
-                  )}
-                  {!p.isDefault && !isBuiltIn && (
-                    <Button variant="outline" size="sm" onClick={() => onSetDefault(p)}>
-                      {t("proxies.setDefault")}
-                    </Button>
-                  )}
-                  {!isBuiltIn && (
-                    <>
-                      <Button variant="ghost" size="sm" onClick={() => onEdit(p)}>
-                        {t("proxies.edit")}
-                      </Button>
-                      <Button variant="destructive" size="sm" onClick={() => onDelete(p)}>
-                        {t("proxies.delete")}
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+        <div className="overflow-hidden rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs">{t("proxies.col.source")}</TableHead>
+                <TableHead className="text-xs">{t("proxies.col.proxy")}</TableHead>
+                <TableHead className="text-xs">{t("proxies.col.default")}</TableHead>
+                <TableHead className="w-px text-right text-xs">
+                  {t("proxies.col.actions")}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {proxies.map((p) => {
+                const isBuiltIn = p.source === "built-in";
+                return (
+                  <TableRow key={p.id} data-testid={`proxy-row-${p.id}`}>
+                    <TableCell>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <SourceBadge source={p.source} />
+                        {!isBuiltIn && !p.enabled && (
+                          <Badge variant="secondary" className="opacity-60">
+                            {t("proxies.disabled")}
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">{p.label}</div>
+                        <div className="text-muted-foreground font-mono text-[0.65rem]">
+                          {p.urlPrefix}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <DefaultCell
+                        isDefault={p.is_default}
+                        defaultLabel={t("proxies.default")}
+                        setLabel={t("proxies.setDefault")}
+                        onSetDefault={() => onSetDefault(p)}
+                        testId={`set-default-proxy-${p.id}`}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        {testResults[p.id] && (
+                          <TestResultSpan
+                            result={testResults[p.id]!}
+                            successKey="proxies.testSuccess"
+                            failedKey="proxies.testFailed"
+                          />
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() => handleTest(p.id)}
+                          disabled={testingId === p.id}
+                        >
+                          {testingId === p.id ? <Spinner /> : t("proxies.test")}
+                        </Button>
+                        {!isBuiltIn && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0"
+                              onClick={() => onEdit(p)}
+                              aria-label={t("proxies.edit")}
+                            >
+                              <Pencil size={14} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0"
+                              onClick={() => onDelete(p)}
+                              aria-label={t("proxies.delete")}
+                            >
+                              <Trash2 size={14} className="text-destructive" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </div>
       ) : (
         <EmptyState message={t("proxies.empty")} icon={Globe} compact>

@@ -9,9 +9,11 @@
  *   - `POST   /:packageId/activate`                  — activate in current app
  *   - `DELETE /:packageId/deactivate`                — deactivate (non-destructive)
  *   - `GET    /:packageId`                           — manifest + per-auth status for caller
- *   - `GET    /:packageId/oauth-clients/:authKey`    — admin: read registered OAuth client
- *   - `PUT    /:packageId/oauth-clients/:authKey`    — admin: register/rotate OAuth client
- *   - `DELETE /:packageId/oauth-clients/:authKey`    — admin: delete OAuth client
+ *   - `GET    /:packageId/auths/:authKey/clients`    — admin: list available OAuth clients
+ *   - `PUT    /:packageId/auths/:authKey/default-client` — admin: choose the default client
+ *   - `POST   /:packageId/auths/:authKey/oauth-clients`  — admin: register a custom OAuth client
+ *   - `PUT    /:packageId/oauth-clients/:clientId`   — admin: rotate a custom OAuth client
+ *   - `DELETE /:packageId/oauth-clients/:clientId`   — admin: delete a custom OAuth client
  *   - `POST   /:packageId/auths/:authKey/connect/oauth2`  — initiate OAuth2 PKCE flow
  *   - `POST   /:packageId/auths/:authKey/connect/fields`  — connect api_key/basic/custom
  *   - `GET    /callback`                              — OAuth2 callback handler
@@ -50,18 +52,21 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "./../services/audit.ts";
-import { installPackage, uninstallPackage } from "../services/application-packages.ts";
+import { updateInstalledPackage } from "../services/application-packages.ts";
 import { listIntegrations } from "../services/integration-service.ts";
+import { isSystemIntegration } from "../services/integration-client-registry.ts";
 import {
   assertIsIntegration,
+  createIntegrationOAuthClient,
   deleteIntegrationOAuthClient,
   getIntegrationAuthStatuses,
-  getIntegrationOAuthClient,
-  type IntegrationOAuthClient,
+  listIntegrationClients,
   listIntegrationConnections,
   readIntegrationAuth,
   serializeIntegrationConnection,
-  upsertIntegrationOAuthClient,
+  setDefaultIntegrationClient,
+  toPublicClient,
+  updateIntegrationOAuthClient,
   usesAutoProvisionedClient,
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
@@ -111,6 +116,12 @@ export const connectOAuthSchema = z.object({
   scopes: z.array(z.string()).optional(),
   force_account_select: z.boolean().optional(),
   connection_id: z.uuid().optional(),
+});
+
+export const setDefaultClientSchema = z.object({
+  // The client to make default — a flat client id (system env id or custom
+  // `integration_oauth_clients.id`) from `GET .../auths/:authKey/clients`.
+  client_ref: z.string().regex(/^[\w.-]+$/, "client_ref must be a client id"),
 });
 
 export const updateSettingsSchema = z.object({
@@ -203,10 +214,12 @@ export function createIntegrationsRouter() {
     const pagination = parseListPagination(c, { defaultLimit: 100 });
     const summaries = await listIntegrations(scope.orgId);
     // Decorate with `active` + `blockUserConnections` flags for the
-    // current application. An integration is "active" when an
-    // application_packages row exists for it AND that install is enabled;
-    // `blockUserConnections` defaults to false for inactive rows (no
-    // per-app config row exists).
+    // current application. Same precedence as `isIntegrationActive` (the one
+    // source of truth): an explicit `application_packages` row wins via its
+    // `enabled` flag; with no row, a system integration (offered via
+    // `SYSTEM_INTEGRATIONS`, with or without a shared OAuth client) is
+    // auto-active. `blockUserConnections` defaults to false when no per-app row
+    // exists.
     const installedRows = await db
       .select({
         packageId: applicationPackages.packageId,
@@ -226,7 +239,7 @@ export function createIntegrationsRouter() {
       const row = installedMap.get(s.id);
       return {
         ...s,
-        active: row !== undefined && row.enabled,
+        active: row !== undefined ? row.enabled : isSystemIntegration(s.id),
         block_user_connections: row?.blockUserConnections ?? false,
       };
     });
@@ -318,11 +331,16 @@ export function createIntegrationsRouter() {
 
   // ─── Activate / deactivate ─────────────────
   //
-  // "Activating" creates the application_packages row; "deactivating"
-  // deletes it. Deactivation is non-destructive: connections, OAuth
-  // clients, pins and org defaults FK to (package, application) — not to
-  // application_packages — so they survive and are reused on reactivation
-  // (mirrors how disabling a provider keeps its credentials).
+  // Activation is the `application_packages.enabled` flag, NOT row presence.
+  // Both routes upsert the flag (never delete the row) so the rule holds
+  // uniformly for every integration — including a SYSTEM integration that is
+  // auto-active with no row: deleting the row there would re-trigger the
+  // auto-active default, so "deactivate" must persist an explicit `enabled =
+  // false` opt-out (sticky across runs). For a plain integration the observable
+  // result is unchanged (active ⇄ inactive). Deactivation stays non-destructive:
+  // connections, OAuth clients, pins and org defaults FK to (package,
+  // application) — not to application_packages — so they survive and are reused
+  // on reactivation (mirrors how disabling a provider keeps its credentials).
 
   router.post(
     "/:packageId{@[^/]+/[^/]+}/activate",
@@ -332,7 +350,7 @@ export function createIntegrationsRouter() {
       const scope = getAppScope(c);
       const actor = getActor(c);
       await assertIsIntegration(scope, packageId);
-      await installPackage(scope, packageId);
+      await updateInstalledPackage(scope, packageId, { enabled: true });
       await recordAuditFromContext(c, {
         action: "integration.activated",
         resourceType: "integration",
@@ -353,17 +371,16 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const scope = getAppScope(c);
       await assertIsIntegration(scope, packageId);
-      await uninstallPackage(scope, packageId);
+      await updateInstalledPackage(scope, packageId, { enabled: false });
       await recordAuditFromContext(c, {
         action: "integration.deactivated",
         resourceType: "integration",
         resourceId: packageId,
       });
-      // 204: deactivation DELETEs the `application_packages` row (it is not a
-      // flag flip), so under the strict mutation convention (issue #657) the
-      // response is empty. The integration detail itself stays GET-able —
-      // connections, OAuth clients, pins and org defaults survive (see the
-      // section comment above) and `GET /integrations/:packageId` serves the
+      // 204: deactivation flips `enabled` to false (upsert, so it also works
+      // for a never-installed auto-active system integration). Under the strict
+      // mutation convention (issue #657) the response is empty. The integration
+      // detail stays GET-able — `GET /integrations/:packageId` serves the
       // resource with `active: false`.
       return c.body(null, 204);
     },
@@ -371,23 +388,56 @@ export function createIntegrationsRouter() {
 
   // ─── OAuth client registration (admin) ─────
 
+  // List every OAuth client registered for this auth: the org's custom
+  // (BYO-app) clients plus any env-provided system clients, with `source` and
+  // which is the default. Secrets are never returned. Drives the admin clients
+  // CRUD table (register/rotate/delete/set-default). New connections always use
+  // the default — there is no per-connect picker.
   router.get(
-    "/:packageId{@[^/]+/[^/]+}/oauth-clients/:authKey",
+    "/:packageId{@[^/]+/[^/]+}/auths/:authKey/clients",
     requirePermission("integrations", "read"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
-      const client = await getIntegrationOAuthClient(scope, packageId, authKey);
-      if (!client)
-        throw notFound(`No OAuth client registered for '${packageId}' auth '${authKey}'`);
-      const { clientSecret: _clientSecret, ...publicShape } = client;
-      return c.json(publicShape satisfies IntegrationOAuthClient);
+      // Resolve the integration + auth first so an unknown integration/auth 404s
+      // (the spec declares 404 here) instead of leaking an empty client list.
+      await readIntegrationAuth(scope, packageId, authKey);
+      const clients = await listIntegrationClients(scope, packageId, authKey);
+      return c.json(listResponse(clients));
     },
   );
 
+  // Choose which OAuth client is the default for new connections on this auth
+  // (the model-provider `setDefaultModel` analogue). Selecting the org's custom
+  // client flags it default; selecting a system client un-flags the custom one
+  // so the resolution cascade falls to the system client. Returns the refreshed
+  // clients list so the UI re-badges the default without a second fetch.
   router.put(
-    "/:packageId{@[^/]+/[^/]+}/oauth-clients/:authKey",
+    "/:packageId{@[^/]+/[^/]+}/auths/:authKey/default-client",
+    requirePermission("integrations", "install"),
+    async (c) => {
+      const packageId = c.req.param("packageId")!;
+      const authKey = c.req.param("authKey")!;
+      const scope = getAppScope(c);
+      const body = parseBody(setDefaultClientSchema, await c.req.json());
+      await setDefaultIntegrationClient(scope, packageId, authKey, body.client_ref);
+      await recordAuditFromContext(c, {
+        action: "integration.default_client.set",
+        resourceType: "integration",
+        resourceId: `${packageId}#${authKey}`,
+      });
+      const clients = await listIntegrationClients(scope, packageId, authKey);
+      return c.json(listResponse(clients));
+    },
+  );
+
+  // Register a NEW custom (BYO-app) OAuth client for this auth — repeatable, so
+  // an org can hold N clients per auth (model-provider pattern). The first one
+  // becomes the default; subsequent ones are non-default until promoted via
+  // PUT .../default-client. Returns the created client (secret omitted).
+  router.post(
+    "/:packageId{@[^/]+/[^/]+}/auths/:authKey/oauth-clients",
     requirePermission("integrations", "install"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
@@ -407,32 +457,68 @@ export function createIntegrationsRouter() {
           `Integration '${packageId}' auth '${authKey}' provisions its OAuth client automatically at connect time (DCR/CIMD); a manual client must not be registered. Connect without supplying credentials, or delete the existing client to restore auto-registration.`,
         );
       }
-      const client = await upsertIntegrationOAuthClient(scope, packageId, authKey, {
+      const client = await createIntegrationOAuthClient(scope, packageId, authKey, {
         clientId: body.client_id,
         clientSecret: body.client_secret,
         ...(body.redirect_uri !== undefined ? { redirectUri: body.redirect_uri } : {}),
       });
       await recordAuditFromContext(c, {
-        action: "integration.oauth_client.upserted",
+        action: "integration.oauth_client.created",
         resourceType: "integration",
-        resourceId: `${packageId}#${authKey}`,
+        resourceId: `${packageId}#${authKey}#${client.id}`,
       });
-      return c.json(client);
+      return c.json(toPublicClient(client), 201);
     },
   );
 
-  router.delete(
-    "/:packageId{@[^/]+/[^/]+}/oauth-clients/:authKey",
+  // Rotate one custom client's credentials in place, by its id. Auto-provisioned
+  // (DCR) clients are machine-managed and rejected by the service.
+  router.put(
+    "/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId",
     requirePermission("integrations", "install"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
-      const authKey = c.req.param("authKey")!;
+      const clientId = c.req.param("clientId")!;
+      if (!z.uuid().safeParse(clientId).success) {
+        throw notFound(`OAuth client '${clientId}' not found`);
+      }
       const scope = getAppScope(c);
-      await deleteIntegrationOAuthClient(scope, packageId, authKey);
+      const body = parseBody(oauthClientSchema, await c.req.json());
+      const client = await updateIntegrationOAuthClient(scope, clientId, {
+        clientId: body.client_id,
+        clientSecret: body.client_secret,
+        ...(body.redirect_uri !== undefined ? { redirectUri: body.redirect_uri } : {}),
+      });
+      await recordAuditFromContext(c, {
+        action: "integration.oauth_client.rotated",
+        resourceType: "integration",
+        resourceId: `${packageId}#${client.auth_key}#${clientId}`,
+      });
+      return c.json(toPublicClient(client));
+    },
+  );
+
+  // Delete one custom client by its id. If it was the default, the resolution
+  // cascade falls to the system client (no auto-promotion). Connections pinned
+  // to this client are deleted with it (they can never refresh once its
+  // credentials are gone) — the audit `after.deletedConnections` records how
+  // many.
+  router.delete(
+    "/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId",
+    requirePermission("integrations", "install"),
+    async (c) => {
+      const packageId = c.req.param("packageId")!;
+      const clientId = c.req.param("clientId")!;
+      if (!z.uuid().safeParse(clientId).success) {
+        throw notFound(`OAuth client '${clientId}' not found`);
+      }
+      const scope = getAppScope(c);
+      const { deletedConnections } = await deleteIntegrationOAuthClient(scope, clientId);
       await recordAuditFromContext(c, {
         action: "integration.oauth_client.deleted",
         resourceType: "integration",
-        resourceId: `${packageId}#${authKey}`,
+        resourceId: `${packageId}#${clientId}`,
+        after: { deletedConnections },
       });
       return c.body(null, 204);
     },
@@ -545,7 +631,10 @@ export function createIntegrationsRouter() {
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
         },
-        { scopes, forceAccountSelect: body.force_account_select ?? false },
+        {
+          scopes,
+          forceAccountSelect: body.force_account_select ?? false,
+        },
       );
       return c.json({ auth_url: result.redirectUrl, state: result.state });
     },

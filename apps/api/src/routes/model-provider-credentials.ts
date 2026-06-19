@@ -13,7 +13,7 @@ import {
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { isSystemModelProviderKey } from "../services/model-registry.ts";
+import { isSystemModelProviderCredential } from "../services/model-registry.ts";
 import {
   createApiKeyCredential,
   dedupeCredentialLabel,
@@ -314,7 +314,7 @@ export function createModelProviderCredentialsRouter() {
     async (c) => {
       const orgId = c.get("orgId");
       const id = c.req.param("id")!;
-      if (isSystemModelProviderKey(id)) {
+      if (isSystemModelProviderCredential(id)) {
         throw systemEntityForbidden("model provider credential", id);
       }
       try {
@@ -340,7 +340,7 @@ export function createModelProviderCredentialsRouter() {
   router.put("/:id", requirePermission("model-provider-credentials", "write"), async (c) => {
     const orgId = c.get("orgId");
     const id = c.req.param("id")!;
-    if (isSystemModelProviderKey(id)) {
+    if (isSystemModelProviderCredential(id)) {
       throw systemEntityForbidden("model provider credential", id);
     }
     const body = await c.req.json();
@@ -374,7 +374,7 @@ export function createModelProviderCredentialsRouter() {
   router.delete("/:id", requirePermission("model-provider-credentials", "delete"), async (c) => {
     const orgId = c.get("orgId");
     const id = c.req.param("id")!;
-    if (isSystemModelProviderKey(id)) {
+    if (isSystemModelProviderCredential(id)) {
       throw systemEntityForbidden("model provider credential", id, "delete");
     }
     try {

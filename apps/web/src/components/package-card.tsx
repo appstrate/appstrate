@@ -2,26 +2,12 @@
 
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { PackageType } from "@appstrate/core/validation";
 import { ShieldCheck } from "lucide-react";
 import { Badge } from "./status-badge";
 import { RunAgentButton } from "./run-agent-button";
 import { packageDetailPath } from "../lib/package-paths";
 import { ScrollArea, ScrollBar } from "./ui/scroll-area";
-
-interface PackageCardProps {
-  id: string;
-  displayName: string;
-  description?: string | null;
-  type: PackageType;
-  source?: "system" | "local";
-  runningRuns?: number;
-  keywords?: string[];
-  usedByAgents?: number;
-  unreadCount?: number;
-  actions?: React.ReactNode;
-  autoInstalled?: boolean;
-}
+import type { CardItem } from "../pages/package-list";
 
 export function PackageCard({
   id,
@@ -35,7 +21,7 @@ export function PackageCard({
   unreadCount,
   actions,
   autoInstalled,
-}: PackageCardProps) {
+}: CardItem) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const href = packageDetailPath(type, id);
   const navigate = useNavigate();

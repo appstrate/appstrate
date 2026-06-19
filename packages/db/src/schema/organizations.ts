@@ -23,6 +23,23 @@ export const organizations = pgTable("organizations", {
   name: text("name").notNull(),
   slug: text("slug").unique().notNull(),
   orgSettings: jsonb("org_settings").notNull().default({}),
+  // The org's default model — a flat model id that may name a system model
+  // (SYSTEM_PROVIDER_KEYS) OR an `org_models.id` (UUID). A pointer rather than
+  // an `is_default` boolean on `org_models` so the default can point at a
+  // system model too (mirrors the integration `client_ref` pattern): picking
+  // any row — system or custom — makes exactly that row the default. NULL ⇒ no
+  // explicit default; the resolution cascade falls to the system-flagged model.
+  // No FK: a system id is not a DB row. Stale custom ids are cleared on delete
+  // and ignored by the resolver (it falls through to the cascade).
+  defaultModelId: text("default_model_id"),
+  // The org's default proxy — same pointer pattern as `default_model_id`: a flat
+  // proxy id naming a system proxy (SYSTEM_PROXIES) OR an `org_proxies.id` (UUID).
+  // A pointer rather than an `is_default` boolean on `org_proxies` so the default
+  // can point at a system proxy too; picking any row — system or custom — makes
+  // exactly that one the default. NULL ⇒ no explicit default; the resolver falls
+  // to the system-flagged proxy then `PROXY_URL`. No FK (a system id is not a DB
+  // row); stale custom ids are cleared on delete and ignored by the resolver.
+  defaultProxyId: text("default_proxy_id"),
   createdBy: text("created_by").references(() => user.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -115,7 +132,9 @@ export const orgProxies = pgTable(
     label: text("label").notNull(),
     urlEncrypted: text("url_encrypted").notNull(),
     enabled: boolean("enabled").notNull().default(true),
-    isDefault: boolean("is_default").notNull().default(false),
+    // The default proxy is an org-level pointer (`organizations.default_proxy_id`),
+    // not a per-row boolean — so it can point at a system proxy too. See the
+    // column comment on `organizations`.
     source: text("source").notNull().default("custom"), // "built-in" | "custom"
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -123,9 +142,6 @@ export const orgProxies = pgTable(
   },
   (table) => [
     index("idx_org_proxies_org_id").on(table.orgId),
-    uniqueIndex("idx_org_proxies_one_default")
-      .on(table.orgId)
-      .where(sql`${table.isDefault} = true`),
     check("org_proxies_source_valid", sql`source IN ('built-in', 'custom')`),
   ],
 );
@@ -308,7 +324,9 @@ export const orgModels = pgTable(
     reasoning: boolean("reasoning"), // true | null
     cost: jsonb("cost"), // { input, output, cacheRead, cacheWrite } in $/M tokens | null
     enabled: boolean("enabled").notNull().default(true),
-    isDefault: boolean("is_default").notNull().default(false),
+    // The default model is an org-level pointer (`organizations.default_model_id`),
+    // not a per-row boolean — so it can point at a system model too. See the
+    // column comment on `organizations`.
     source: text("source").notNull().default("custom"), // "built-in" | "custom"
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -316,9 +334,6 @@ export const orgModels = pgTable(
   },
   (table) => [
     index("idx_org_models_org_id").on(table.orgId),
-    uniqueIndex("idx_org_models_one_default")
-      .on(table.orgId)
-      .where(sql`${table.isDefault} = true`),
     check("org_models_source_valid", sql`source IN ('built-in', 'custom')`),
   ],
 );

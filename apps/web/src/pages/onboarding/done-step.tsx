@@ -31,7 +31,7 @@ export function OnboardingDoneStep() {
     { enabled: !!orgId },
   );
 
-  const defaultModel = models?.find((m) => m.isDefault);
+  const defaultModel = models?.find((m) => m.is_default);
   const invitationCount = orgData?.invitations?.length ?? 0;
 
   if (!orgId) return null;

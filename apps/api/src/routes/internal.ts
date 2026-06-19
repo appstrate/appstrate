@@ -5,17 +5,13 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  applicationPackages,
-  modelProviderCredentials,
-  packageVersions,
-  runs,
-} from "@appstrate/db/schema";
+import { modelProviderCredentials, packageVersions, runs } from "@appstrate/db/schema";
 import { sql } from "drizzle-orm";
 import { asRecord } from "@appstrate/core/safe-json";
 import { downloadVersionZip } from "../services/package-storage.ts";
 import { getSystemPackages } from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
+import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
@@ -53,6 +49,7 @@ import {
 } from "../services/integration-credentials-resolver.ts";
 import { readIntegrationManifestForRun } from "../services/integration-service.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
+import { isIntegrationActive } from "../services/integration-connections.ts";
 
 /**
  * Verify the run token from the Authorization header.
@@ -320,17 +317,10 @@ export function createInternalRouter() {
       });
       throw notFound(`Integration '${packageId}' is not a dependency of the running agent`);
     }
-    const [installRow] = await db
-      .select({ packageId: applicationPackages.packageId })
-      .from(applicationPackages)
-      .where(
-        and(
-          eq(applicationPackages.applicationId, run.applicationId),
-          eq(applicationPackages.packageId, packageId),
-        ),
-      )
-      .limit(1);
-    if (!installRow) {
+    // Same activation rule as the spawn resolver / agent readiness (single
+    // source of truth): an installed-and-enabled row OR a system integration
+    // auto-active with no row. A disabled row stays inactive.
+    if (!(await isIntegrationActive(packageId, run.applicationId))) {
       throw notFound(`Integration '${packageId}' is not installed in this application`);
     }
   }
@@ -513,17 +503,9 @@ export function createInternalRouter() {
     const deps = asRecord(asRecord(agent.manifest).dependencies);
     const integrations = asRecord(deps.integrations);
     for (const integrationId of Object.keys(integrations)) {
-      const [installRow] = await db
-        .select({ packageId: applicationPackages.packageId })
-        .from(applicationPackages)
-        .where(
-          and(
-            eq(applicationPackages.applicationId, run.applicationId),
-            eq(applicationPackages.packageId, integrationId),
-          ),
-        )
-        .limit(1);
-      if (!installRow) continue;
+      // Same activation rule as everywhere else (installed-and-enabled row, or
+      // system integration auto-active with no row); skip inactive ones.
+      if (!(await isIntegrationActive(integrationId, run.applicationId))) continue;
       // Read the integration manifest AT the version frozen for this run
       // (#686) so the authz check sees the same `source.server.name` the spawn
       // resolver did. No frozen entry (soft-resolved / legacy run) → draft.
@@ -594,10 +576,9 @@ async function assertOAuthModelCredential(
   } catch (err) {
     // PG `invalid_text_representation` (22P02) when the path param is not
     // a valid UUID — treat as not-found rather than leaking a 500. Drizzle
-    // wraps the underlying postgres.js error via `new Error(…, { cause })`.
-    const code =
-      (err as { code?: string })?.code ?? (err as { cause?: { code?: string } })?.cause?.code;
-    if (code === "22P02") {
+    // wraps the underlying postgres.js error via `new Error(…, { cause })`,
+    // so walk the cause chain via the shared detector.
+    if (isInvalidTextRepresentation(err)) {
       throw notFound(`OAuth model provider credential ${credentialId} not found`);
     }
     throw err;

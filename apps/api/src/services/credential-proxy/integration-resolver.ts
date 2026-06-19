@@ -137,6 +137,7 @@ export async function forceRefreshIntegrationProxyCredentials(
       connection.authKey,
       authDef,
       input.applicationId,
+      connection.clientRef,
     );
   } catch (err) {
     // Transient token-endpoint discovery failure (issuer-only manifest) —

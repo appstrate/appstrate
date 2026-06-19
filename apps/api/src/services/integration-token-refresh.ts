@@ -14,13 +14,12 @@
  * consume).
  */
 
-import { and, eq } from "drizzle-orm";
-import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
+import { integrationConnections } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import {
   RefreshError,
   performRefreshTokenExchange,
-  decryptCredentials,
   decryptCredentialsToStringMap,
   resolveOAuthEndpoints,
 } from "@appstrate/connect";
@@ -36,6 +35,7 @@ import {
   persistCredentialBundle,
   markIntegrationConnectionNeedsReconnection,
   recordIntegrationRefreshFailure,
+  resolveIntegrationClientById,
 } from "./integration-connections.ts";
 import { getEnv } from "@appstrate/env";
 
@@ -333,6 +333,15 @@ export async function buildIntegrationOAuthRefreshContext(
   authKey: string,
   authDef: AfpsManifestAuth,
   applicationId: string,
+  /**
+   * The minting client pinned on the connection
+   * (`integration_connections.client_ref`): a flat client id — the env id of a
+   * system client or the `integration_oauth_clients.id` of a custom client.
+   * Resolves WHICH client's credentials refresh the tokens — the same one that
+   * minted them. `null` only for non-oauth2 connections, which never reach this
+   * function (guarded below).
+   */
+  clientRef: string | null,
 ): Promise<IntegrationRefreshContext | null> {
   if (authDef.type !== "oauth2") return null;
   // AFPS §7.3: refresh POSTs to `token_endpoint`. When the manifest declares
@@ -367,57 +376,46 @@ export async function buildIntegrationOAuthRefreshContext(
     });
     return null;
   }
-  const [client] = await db
-    .select({
-      clientId: integrationOauthClients.clientId,
-      clientSecretEncrypted: integrationOauthClients.clientSecretEncrypted,
-    })
-    .from(integrationOauthClients)
-    .where(
-      and(
-        eq(integrationOauthClients.applicationId, applicationId),
-        eq(integrationOauthClients.integrationId, packageId),
-        eq(integrationOauthClients.authKey, authKey),
-      ),
-    )
-    .limit(1);
-  if (!client) {
-    // The application admin never registered an OAuth client for this auth —
-    // the connection was provisioned via DCR or a system-wide client. Cannot
-    // refresh without those credentials; skip.
-    logger.info("Integration auth refresh skipped — no per-app OAuth client", {
+  const tokenEndpointAuthMethod = afpsAuth.token_endpoint_auth_method;
+
+  // INVARIANT: an oauth2 connection always pins its minting client. A null here
+  // means a non-oauth2 row reached this oauth2-only path — a bug, not a state to
+  // tolerate. Skip safely (surfaces needs_reconnection at expiry) rather than
+  // guessing a client.
+  if (clientRef === null) {
+    logger.warn("Integration oauth2 connection has no client_ref — skipping refresh", {
       packageId,
       authKey,
     });
     return null;
   }
-  // Public clients (RFC 7591 §2, `token_endpoint_auth_method: "none"`) have
-  // no client_secret to decrypt — the client_secret_encrypted column may hold
-  // an empty/placeholder envelope. Skip decryption entirely for those.
-  const tokenEndpointAuthMethod = afpsAuth.token_endpoint_auth_method;
-  let clientSecret = "";
-  if (tokenEndpointAuthMethod !== "none") {
-    try {
-      const decrypted = decryptCredentials<{ client_secret?: string }>(
-        client.clientSecretEncrypted,
-      );
-      clientSecret = decrypted.client_secret ?? "";
-    } catch (err) {
-      logger.warn("Integration auth client_secret decrypt failed", {
-        packageId,
-        authKey,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return null;
-    }
+
+  // Resolve the SAME client that minted the connection by its pinned id (system
+  // env or per-application custom row), with the cross-scope escalation guard.
+  // Null → since-removed / remapped / cross-scope id: skip (needs_reconnection).
+  const client = await resolveIntegrationClientById(
+    clientRef,
+    applicationId,
+    packageId,
+    authKey,
+    tokenEndpointAuthMethod,
+  );
+  if (!client) {
+    logger.info("Integration auth refresh skipped — pinned client unresolved", {
+      packageId,
+      authKey,
+      clientRef,
+    });
+    return null;
   }
+  const { clientId, clientSecret } = client;
   // AFPS: `scope_separator` moved under `_meta["dev.appstrate/oauth"]`.
   const oauthMeta = (afpsAuth._meta?.["dev.appstrate/oauth"] ?? undefined) as
     | { scope_separator?: string }
     | undefined;
   return {
     tokenEndpoint,
-    clientId: client.clientId,
+    clientId,
     clientSecret,
     ...(tokenEndpointAuthMethod ? { tokenEndpointAuthMethod } : {}),
     ...(oauthMeta?.scope_separator ? { scopeSeparator: oauthMeta.scope_separator } : {}),

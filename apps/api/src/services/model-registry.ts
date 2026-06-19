@@ -3,13 +3,14 @@
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
+import { loadSystemRegistry } from "../lib/system-registry.ts";
 import { modelCostSchema } from "@appstrate/core/module";
 import type { ModelMetadata } from "@appstrate/shared-types";
 import { getModelProvider } from "./model-providers/registry.ts";
 
 // --- Types ---
 
-export interface SystemModelProviderKeyDefinition {
+export interface SystemModelProviderCredentialDefinition {
   id: string;
   /**
    * Optional. Resolved at boot from `getModelProvider(providerId).displayName`
@@ -51,7 +52,8 @@ export interface ModelDefinition extends ModelMetadata {
 
 // --- State ---
 
-let systemModelProviderKeys: Map<string, SystemModelProviderKeyDefinition> | null = null;
+let systemModelProviderCredentials: Map<string, SystemModelProviderCredentialDefinition> | null =
+  null;
 let systemModels: Map<string, ModelDefinition> | null = null;
 
 // --- Parsing ---
@@ -70,7 +72,7 @@ const rawModelSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-const rawModelProviderKeySchema = z.object({
+const rawModelProviderCredentialSchema = z.object({
   id: z.string().min(1),
   /** Optional — falls back to the registry's `displayName` for this providerId. */
   label: z.string().min(1).optional(),
@@ -91,7 +93,7 @@ const rawModelProviderKeySchema = z.object({
   models: z.array(rawModelSchema).optional(),
 });
 
-type RawModelProviderKey = z.infer<typeof rawModelProviderKeySchema>;
+type RawModelProviderCredential = z.infer<typeof rawModelProviderCredentialSchema>;
 
 /**
  * Initialize system model provider keys and models from the SYSTEM_PROVIDER_KEYS env var.
@@ -118,113 +120,122 @@ type RawModelProviderKey = z.infer<typeof rawModelProviderKeySchema>;
  * For `openai-compatible` (the only `baseUrlOverridable: true` provider),
  * add `"baseUrlOverride": "https://my-endpoint/v1"`.
  */
-export function initSystemModelProviderKeys(): void {
-  const pkMap = new Map<string, SystemModelProviderKeyDefinition>();
+export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
   const mdlMap = new Map<string, ModelDefinition>();
 
-  const raw = getEnv().SYSTEM_PROVIDER_KEYS as RawModelProviderKey[];
-
-  for (const pk of raw) {
-    const pkResult = rawModelProviderKeySchema.safeParse(pk);
-    if (!pkResult.success) {
-      logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping invalid entry", {
-        error: pkResult.error.issues[0]?.message,
-        modelProviderKey: { ...pk, apiKey: pk.apiKey ? "***" : undefined },
-      });
-      continue;
-    }
-    const validPk = pkResult.data;
-
-    const provider = getModelProvider(validPk.providerId);
-    if (!provider) {
-      logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping entry — unknown providerId", {
-        modelProviderKeyId: validPk.id,
-        providerId: validPk.providerId,
-      });
-      continue;
-    }
-
-    if (validPk.baseUrlOverride && !provider.baseUrlOverridable) {
-      logger.error(
-        "[model-registry] SYSTEM_PROVIDER_KEYS: skipping entry — baseUrlOverride supplied " +
-          "but provider does not allow it",
-        {
-          modelProviderKeyId: validPk.id,
-          providerId: validPk.providerId,
-        },
-      );
-      continue;
-    }
-
-    const apiShape = provider.apiShape;
-    const baseUrl = validPk.baseUrlOverride ?? provider.defaultBaseUrl;
-
-    pkMap.set(validPk.id, {
-      id: validPk.id,
-      // Pass through the env-supplied label as-is. The read path
-      // (`org-models.ts` resolved-model builders) falls back to
-      // `getModelProvider(providerId).displayName` when unset.
-      ...(validPk.label ? { label: validPk.label } : {}),
-      providerId: validPk.providerId,
-      apiShape,
-      baseUrl,
-      apiKey: validPk.apiKey,
-    });
-
-    // Parse models under this model provider key
-    if (Array.isArray(validPk.models)) {
-      for (const m of validPk.models) {
-        const mResult = rawModelSchema.safeParse(m);
-        if (!mResult.success) {
-          logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping invalid model", {
-            modelProviderKeyId: validPk.id,
-            error: mResult.error.issues[0]?.message,
-            model: m,
-          });
-          continue;
-        }
-        const validM = mResult.data;
-
-        const modelId = validM.id ?? `${validPk.id}:${validM.modelId}`;
-        mdlMap.set(modelId, {
-          id: modelId,
-          // Pass through env-supplied label; read path falls back to the
-          // vendored catalog (`<catalogProviderId ?? providerId>.label`).
-          ...(validM.label ? { label: validM.label } : {}),
-          providerId: validPk.providerId,
-          apiShape,
-          baseUrl,
-          modelId: validM.modelId,
-          apiKey: validPk.apiKey,
-          credentialId: validPk.id,
-          input: validM.input ?? null,
-          contextWindow: validM.contextWindow ?? null,
-          maxTokens: validM.maxTokens ?? null,
-          reasoning: validM.reasoning ?? null,
-          cost: validM.cost ?? null,
-          isDefault: validM.isDefault,
-          enabled: validM.enabled,
+  // The provider-key map uses the shared registry skeleton (parse → validate →
+  // dedupe → log). The nested models are built as a side effect of mapping each
+  // key (they inherit the key's resolved apiShape/baseUrl/apiKey), so they live
+  // inside `toDefinition` rather than a second pass.
+  systemModelProviderCredentials = loadSystemRegistry<
+    RawModelProviderCredential,
+    SystemModelProviderCredentialDefinition
+  >({
+    name: "model-registry",
+    envVar: "SYSTEM_PROVIDER_KEYS",
+    // Production reads the parsed env; tests inject a raw array directly (the
+    // env is cached at first access, so an override seam is cleaner than
+    // mutating process.env after boot) — mirrors initSystemIntegrations.
+    entries: rawOverride ?? (getEnv().SYSTEM_PROVIDER_KEYS as unknown[]),
+    schema: rawModelProviderCredentialSchema,
+    // toDefinition populates mdlMap (the nested models) as a side effect, so a
+    // duplicate id must be rejected BEFORE it runs — else the losing entry's
+    // models still leak into systemModels while its credential is dropped.
+    idOf: (raw) => raw.id,
+    redact: (entry) => {
+      const e = entry as Record<string, unknown>;
+      return { ...e, apiKey: e.apiKey ? "***" : undefined };
+    },
+    toDefinition: (validCredential) => {
+      const provider = getModelProvider(validCredential.providerId);
+      if (!provider) {
+        logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping entry — unknown providerId", {
+          modelProviderCredentialId: validCredential.id,
+          providerId: validCredential.providerId,
         });
+        return null;
       }
-    }
-  }
 
-  systemModelProviderKeys = pkMap;
+      if (validCredential.baseUrlOverride && !provider.baseUrlOverridable) {
+        logger.error(
+          "[model-registry] SYSTEM_PROVIDER_KEYS: skipping entry — baseUrlOverride supplied " +
+            "but provider does not allow it",
+          {
+            modelProviderCredentialId: validCredential.id,
+            providerId: validCredential.providerId,
+          },
+        );
+        return null;
+      }
+
+      const apiShape = provider.apiShape;
+      const baseUrl = validCredential.baseUrlOverride ?? provider.defaultBaseUrl;
+
+      // Parse models under this model provider key (side effect → mdlMap).
+      if (Array.isArray(validCredential.models)) {
+        for (const m of validCredential.models) {
+          const mResult = rawModelSchema.safeParse(m);
+          if (!mResult.success) {
+            logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping invalid model", {
+              modelProviderCredentialId: validCredential.id,
+              error: mResult.error.issues[0]?.message,
+              model: m,
+            });
+            continue;
+          }
+          const validM = mResult.data;
+
+          const modelId = validM.id ?? `${validCredential.id}:${validM.modelId}`;
+          mdlMap.set(modelId, {
+            id: modelId,
+            // Pass through env-supplied label; read path falls back to the
+            // vendored catalog (`<catalogProviderId ?? providerId>.label`).
+            ...(validM.label ? { label: validM.label } : {}),
+            providerId: validCredential.providerId,
+            apiShape,
+            baseUrl,
+            modelId: validM.modelId,
+            apiKey: validCredential.apiKey,
+            credentialId: validCredential.id,
+            input: validM.input ?? null,
+            contextWindow: validM.contextWindow ?? null,
+            maxTokens: validM.maxTokens ?? null,
+            reasoning: validM.reasoning ?? null,
+            cost: validM.cost ?? null,
+            isDefault: validM.isDefault,
+            enabled: validM.enabled,
+          });
+        }
+      }
+
+      return {
+        id: validCredential.id,
+        // Pass through the env-supplied label as-is. The read path
+        // (`org-models.ts` resolved-model builders) falls back to
+        // `getModelProvider(providerId).displayName` when unset.
+        ...(validCredential.label ? { label: validCredential.label } : {}),
+        providerId: validCredential.providerId,
+        apiShape,
+        baseUrl,
+        apiKey: validCredential.apiKey,
+      };
+    },
+  });
   systemModels = mdlMap;
 }
 
 // --- Accessors ---
 
-export function getSystemModelProviderKeys(): ReadonlyMap<
+export function getSystemModelProviderCredentials(): ReadonlyMap<
   string,
-  SystemModelProviderKeyDefinition
+  SystemModelProviderCredentialDefinition
 > {
-  if (!systemModelProviderKeys) {
+  if (!systemModelProviderCredentials) {
     throw new Error(
       "[model-registry] System model provider keys not initialized. Call initSystemModelProviderKeys() at boot.",
     );
   }
-  return systemModelProviderKeys;
+  return systemModelProviderCredentials;
 }
 
 export function getSystemModels(): ReadonlyMap<string, ModelDefinition> {
@@ -240,6 +251,6 @@ export function isSystemModel(modelId: string): boolean {
   return systemModels?.has(modelId) ?? false;
 }
 
-export function isSystemModelProviderKey(keyId: string): boolean {
-  return systemModelProviderKeys?.has(keyId) ?? false;
+export function isSystemModelProviderCredential(keyId: string): boolean {
+  return systemModelProviderCredentials?.has(keyId) ?? false;
 }

@@ -9,7 +9,12 @@ import { getSystemProxies, isSystemProxy } from "./proxy-registry.ts";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
-import { mergeSystemAndDb, buildUpdateSet } from "../lib/db-helpers.ts";
+import {
+  mergeSystemAndDb,
+  buildUpdateSet,
+  createDefaultPointer,
+  isInvalidTextRepresentation,
+} from "../lib/db-helpers.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 
@@ -29,12 +34,35 @@ function maskProxyUrl(rawUrl: string): string {
   }
 }
 
+// --- Default pointer (org-level) ---
+
+/**
+ * The org's default proxy pointer — a flat id naming a system proxy or an
+ * `org_proxies.id` (UUID), or `null` when no explicit default is set (the
+ * resolver then falls to the system-flagged proxy then `PROXY_URL`). Single
+ * read path for the pointer so list/resolve agree. The four pointer operations
+ * (read, first-row promotion, set-default, dangling-clear) are the generic
+ * `createDefaultPointer` helper — shared byte-for-byte with `org-models`.
+ */
+const defaultProxy = createDefaultPointer({
+  table: orgProxies,
+  pointerField: "defaultProxyId",
+  isSystem: isSystemProxy,
+  scopeWhere: (orgId, rowId) =>
+    rowId !== undefined
+      ? and(eq(orgProxies.id, rowId), eq(orgProxies.orgId, orgId))
+      : eq(orgProxies.orgId, orgId),
+  entityName: "Proxy",
+});
+
 // --- List (system + DB) ---
 
 export async function listOrgProxies(orgId: string): Promise<OrgProxyInfo[]> {
   const system = getSystemProxies();
   const rows = await db.select().from(orgProxies).where(eq(orgProxies.orgId, orgId));
-  const orgHasDefault = rows.some((r) => r.isDefault);
+  // The default is an org-level pointer: when set, exactly that id is the
+  // default (system or custom); when null, the system-flagged proxy wins.
+  const pointer = await defaultProxy.getDefaultId(orgId);
   const now = toISORequired(new Date());
 
   return mergeSystemAndDb({
@@ -45,7 +73,7 @@ export async function listOrgProxies(orgId: string): Promise<OrgProxyInfo[]> {
       label: def.label,
       urlPrefix: maskProxyUrl(def.url),
       enabled: def.enabled !== false,
-      isDefault: !orgHasDefault && def.isDefault === true,
+      is_default: pointer !== null ? id === pointer : def.isDefault === true,
       source: "built-in" as const,
       created_by: null,
       createdAt: now,
@@ -56,7 +84,7 @@ export async function listOrgProxies(orgId: string): Promise<OrgProxyInfo[]> {
       label: row.label,
       urlPrefix: maskProxyUrl(decrypt(row.urlEncrypted)),
       enabled: row.enabled,
-      isDefault: row.isDefault,
+      is_default: pointer !== null && row.id === pointer,
       source: row.source as "custom" | "built-in",
       created_by: row.createdBy,
       createdAt: toISORequired(row.createdAt),
@@ -88,17 +116,22 @@ export async function createOrgProxy(
 ): Promise<string> {
   if (isBlockedUrl(url)) throw new Error("URL targets a blocked network");
   const urlEncrypted = encrypt(url);
-  const [row] = await db
-    .insert(orgProxies)
-    .values({
-      orgId,
-      label,
-      urlEncrypted,
-      source: "custom",
-      createdBy: userId,
-    })
-    .returning({ id: orgProxies.id });
-  return row!.id;
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(orgProxies)
+      .values({
+        orgId,
+        label,
+        urlEncrypted,
+        source: "custom",
+        createdBy: userId,
+      })
+      .returning({ id: orgProxies.id });
+
+    // If this is the first proxy for the org, point the org default at it.
+    await defaultProxy.promoteIfFirst(tx, orgId, row!.id);
+    return row!.id;
+  });
 }
 
 export async function updateOrgProxy(
@@ -128,24 +161,21 @@ export async function deleteOrgProxy(orgId: string, proxyId: string): Promise<vo
     throw new Error("Cannot delete built-in proxy");
   }
   await db.delete(orgProxies).where(and(eq(orgProxies.id, proxyId), eq(orgProxies.orgId, orgId)));
+  // If the deleted proxy was the org default, clear the now-dangling pointer so
+  // the resolver falls cleanly to the system cascade (no stale-id badge).
+  await defaultProxy.clearDanglingPointer(orgId, proxyId);
 }
 
+/**
+ * Set (or clear, with `null`) the org's default proxy. The id may name a system
+ * proxy OR one of the org's own rows — picking any row makes exactly that row the
+ * default (the `setDefaultModel` analogue). An unknown custom id is rejected,
+ * never stored. A single pointer write — no per-row flag flip.
+ */
 export async function setDefaultProxy(orgId: string, proxyId: string | null): Promise<void> {
-  // Reset all defaults for this org
-  await db
-    .update(orgProxies)
-    .set({ isDefault: false, updatedAt: new Date() })
-    .where(eq(orgProxies.orgId, orgId));
-
-  if (proxyId === null) return;
-
-  // Only DB proxies can be flagged — system defaults are handled by the resolution cascade
-  if (!isSystemProxy(proxyId)) {
-    await db
-      .update(orgProxies)
-      .set({ isDefault: true, updatedAt: new Date() })
-      .where(and(eq(orgProxies.id, proxyId), eq(orgProxies.orgId, orgId)));
-  }
+  // Validate the target before storing it (mirrors setDefaultModel). A system id
+  // is trusted via the registry; a custom id must be a row the org owns.
+  await defaultProxy.setDefault(orgId, proxyId);
 }
 
 // --- Resolution ---
@@ -166,25 +196,14 @@ export async function resolveProxy(
     });
   }
 
-  // 2. Org default
-  const [dbDefault] = await db
-    .select()
-    .from(orgProxies)
-    .where(
-      and(
-        eq(orgProxies.orgId, orgId),
-        eq(orgProxies.isDefault, true),
-        eq(orgProxies.enabled, true),
-      ),
-    )
-    .limit(1);
-
-  if (dbDefault) {
-    try {
-      return { url: decrypt(dbDefault.urlEncrypted), label: dbDefault.label };
-    } catch {
-      logger.warn("Failed to decrypt default proxy URL", { proxyId: dbDefault.id });
-    }
+  // 2. Org default — the pointer names a system proxy or a custom row; load it
+  //    directly (loadProxy handles system lookup, enabled check, and decrypt). A
+  //    stale pointer (deleted/disabled row) resolves to null and falls through to
+  //    the system cascade.
+  const pointer = await defaultProxy.getDefaultId(orgId);
+  if (pointer) {
+    const resolved = await loadProxy(orgId, pointer);
+    if (resolved) return resolved;
   }
 
   // 3. System default
@@ -209,16 +228,26 @@ export async function loadProxy(
   const systemDef = system.get(proxyId);
   if (systemDef) return { url: systemDef.url, label: systemDef.label };
 
-  // Check DB
-  const [row] = await db
-    .select({
-      urlEncrypted: orgProxies.urlEncrypted,
-      enabled: orgProxies.enabled,
-      label: orgProxies.label,
-    })
-    .from(orgProxies)
-    .where(and(eq(orgProxies.id, proxyId), eq(orgProxies.orgId, orgId)))
-    .limit(1);
+  // Check DB. `orgProxies.id` is a `uuid` column — a `proxyId` that isn't a
+  // valid UUID makes Postgres raise `22P02 invalid_text_representation` rather
+  // than returning no rows. Normalise that one cast failure into "not found"
+  // (null) so callers see a clean miss instead of a 500; rethrow any other
+  // error. Mirrors `loadModel` in org-models.
+  let row: { urlEncrypted: string; enabled: boolean; label: string } | undefined;
+  try {
+    [row] = await db
+      .select({
+        urlEncrypted: orgProxies.urlEncrypted,
+        enabled: orgProxies.enabled,
+        label: orgProxies.label,
+      })
+      .from(orgProxies)
+      .where(and(eq(orgProxies.id, proxyId), eq(orgProxies.orgId, orgId)))
+      .limit(1);
+  } catch (err) {
+    if (isInvalidTextRepresentation(err)) return null;
+    throw err;
+  }
 
   if (!row || !row.enabled) return null;
 

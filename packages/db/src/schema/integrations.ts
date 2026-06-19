@@ -75,6 +75,18 @@ export const integrationConnections = pgTable(
       .notNull()
       .default(sql`'{}'::text[]`),
     needsReconnection: boolean("needs_reconnection").notNull().default(false),
+    // Which registered OAuth client minted this connection — a flat client id:
+    // the env id of a system client (SYSTEM_INTEGRATIONS) or the
+    // `integration_oauth_clients.id` of the org's own per-application client.
+    // Pinned so token refresh resolves the SAME client credentials that minted
+    // the tokens. Resolved system-first then DB-by-id (mirrors the model-provider
+    // credential pattern), so a system id MUST NOT be UUID-shaped.
+    //
+    // INVARIANT: NULL ⟺ a non-oauth2 auth (api_key / login_secret), which has no
+    // OAuth client. Every oauth2 connection carries a non-null client_ref (set
+    // by OAuth2Strategy on every connect/reconnect). Enforced at the service
+    // layer — a cross-table CHECK on the auth type is not expressible in SQL.
+    clientRef: text("client_ref"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     // Consecutive token-refresh failures classified as *transient* (network /
     // 5xx / parse — NOT `invalid_grant`, which flips `needsReconnection`
@@ -165,8 +177,18 @@ export const integrationConnections = pgTable(
  * uniformity with private clients. PKCE is mandatory for public clients
  * (enforced at the connect-flow layer).
  *
- * Lifecycle: created by admin on first OAuth setup, optionally rotated,
- * deleted when the integration is uninstalled (FK cascade).
+ * Multi-client: an admin may register **N** custom (BYO-app) clients per
+ * `(application, integration, auth)` — mirroring the model-provider pattern
+ * (N credentials, one `is_default`, system fallback). The connect resolver
+ * picks the `is_default` custom client (else the system client, else the
+ * first custom). Two carve-outs are DB-enforced by partial unique indexes:
+ *   - `idx_ioc_one_default` → at most one `is_default=true` custom per auth.
+ *   - `idx_ioc_one_auto`    → at most one `auto_provisioned=true` client per
+ *     auth (the DCR/CIMD machine client — find-or-create idempotence without
+ *     the old global UNIQUE).
+ *
+ * Lifecycle: created by admin (or auto-provisioned via DCR), optionally
+ * rotated, deleted when the integration is uninstalled (FK cascade).
  */
 export const integrationOauthClients = pgTable(
   "integration_oauth_clients",
@@ -184,16 +206,47 @@ export const integrationOauthClients = pgTable(
     clientSecretEncrypted: text("client_secret_encrypted").notNull(),
     /** Optional pre-registered redirect URI; falls back to the platform default at connect time. */
     redirectUri: text("redirect_uri"),
+    // Whether this custom (BYO-app) client is the default for new connections.
+    // A per-row `is_default` boolean (not an org-level pointer) BECAUSE the
+    // default is scoped per `(application, integration, auth)` tuple — unlike the
+    // org-scoped model/proxy default, which uses an `organizations.default_*_id`
+    // pointer (org scope → pointer). Here, among the N custom clients of an auth
+    // at most one is flagged default (DB-enforced by `idx_ioc_one_default`); the
+    // connect resolution cascade reads it (default custom → else system → else
+    // first custom). New clients are flagged default by the service only when no
+    // other custom default exists, so the column baseline is `false`.
+    isDefault: boolean("is_default").notNull().default(false),
+    // Provenance: `true` for a client minted automatically via DCR/CIMD at
+    // connect time (remote MCP public client), `false` for an admin-registered
+    // (BYO-app) client. Multi-custom registration is an oauth2-classic feature;
+    // an auto-provisioned auth keeps exactly ONE machine client, enforced by the
+    // partial unique `idx_ioc_one_auto`, which preserves DCR find-or-create
+    // idempotence now that the global UNIQUE is gone.
+    autoProvisioned: boolean("auto_provisioned").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("idx_integration_oauth_clients_unique").on(
+    // At most one default custom client per (app, integration, auth) — the
+    // model-provider one-default invariant, DB-enforced. "Default = system" is
+    // simply zero custom rows flagged default (valid under the partial index).
+    uniqueIndex("idx_ioc_one_default")
+      .on(table.applicationId, table.integrationId, table.authKey)
+      .where(sql`${table.isDefault}`),
+    // At most one auto-provisioned (DCR/CIMD) client per (app, integration,
+    // auth) — replaces the old global UNIQUE for the find-or-create path while
+    // leaving classic custom clients free to be N.
+    uniqueIndex("idx_ioc_one_auto")
+      .on(table.applicationId, table.integrationId, table.authKey)
+      .where(sql`${table.autoProvisioned}`),
+    index("idx_integration_oauth_clients_app").on(table.applicationId),
+    index("idx_integration_oauth_clients_package").on(table.integrationId),
+    // Hot path: the connect resolver + clients list enumerate every custom
+    // client for an (app, integration, auth).
+    index("idx_integration_oauth_clients_lookup").on(
       table.applicationId,
       table.integrationId,
       table.authKey,
     ),
-    index("idx_integration_oauth_clients_app").on(table.applicationId),
-    index("idx_integration_oauth_clients_package").on(table.integrationId),
   ],
 );

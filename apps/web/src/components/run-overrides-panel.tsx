@@ -152,8 +152,8 @@ export function RunOverridesPanel({
     }
   };
 
-  const orgDefaultModel = orgModels?.find((m) => m.isDefault && m.enabled);
-  const orgDefaultProxy = orgProxies?.find((p) => p.isDefault && p.enabled);
+  const orgDefaultModel = orgModels?.find((m) => m.is_default && m.enabled);
+  const orgDefaultProxy = orgProxies?.find((p) => p.is_default && p.enabled);
 
   const modelSelectValue = value.model_id_override ?? persistedModelId ?? INHERIT;
   const proxySelectValue = value.proxy_id_override ?? persistedProxyId ?? INHERIT;

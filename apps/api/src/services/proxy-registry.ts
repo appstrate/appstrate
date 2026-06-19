@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
-import { logger } from "../lib/logger.ts";
+import { loadSystemRegistry } from "../lib/system-registry.ts";
 
 export interface ProxyDefinition {
   id: string;
@@ -22,32 +22,20 @@ const proxyDefinitionSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-function parseEnvProxies(): ProxyDefinition[] {
-  const raw = getEnv().SYSTEM_PROXIES;
-  return raw as ProxyDefinition[];
-}
-
 /**
  * Initialize system proxies from the SYSTEM_PROXIES env var.
  * Call once at boot before any proxy lookups.
  */
-export function initSystemProxies(): void {
-  const map = new Map<string, ProxyDefinition>();
-  const proxies = parseEnvProxies();
-
-  for (const p of proxies) {
-    const result = proxyDefinitionSchema.safeParse(p);
-    if (!result.success) {
-      logger.error("[proxy-registry] SYSTEM_PROXIES: skipping invalid entry", {
-        error: result.error.issues[0]?.message,
-        proxy: p,
-      });
-      continue;
-    }
-    map.set(result.data.id, result.data);
-  }
-
-  systemProxies = map;
+export function initSystemProxies(rawOverride?: unknown[]): void {
+  systemProxies = loadSystemRegistry({
+    name: "proxy-registry",
+    envVar: "SYSTEM_PROXIES",
+    // Production reads the parsed env; tests inject a raw array directly —
+    // mirrors initSystemIntegrations / initSystemModelProviderKeys.
+    entries: rawOverride ?? (getEnv().SYSTEM_PROXIES as unknown[]),
+    schema: proxyDefinitionSchema,
+    toDefinition: (p) => p,
+  });
 }
 
 export function getSystemProxies(): ReadonlyMap<string, ProxyDefinition> {

@@ -6,7 +6,7 @@ import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { isSystemModel, getSystemModelProviderKeys } from "../services/model-registry.ts";
+import { isSystemModel, getSystemModelProviderCredentials } from "../services/model-registry.ts";
 import { modelCostSchema } from "@appstrate/core/module";
 import {
   listOrgModels,
@@ -140,7 +140,7 @@ export function createModelsRouter() {
       // (the operator can declare a UUID in env if they want), then fails at
       // the Postgres FK with a 500 the caller can't act on. Pointing them at
       // the env var instead is the actionable fix.
-      if (getSystemModelProviderKeys().has(credentialId)) {
+      if (getSystemModelProviderCredentials().has(credentialId)) {
         throw invalidRequest(
           "Cannot add custom models against a built-in credential — declare the model in the " +
             "SYSTEM_PROVIDER_KEYS env var (models[] field), or create a custom credential via " +
@@ -211,7 +211,7 @@ export function createModelsRouter() {
     // Same constraint as POST /api/models — seeding a built-in credential
     // would FK-fail the org_models insert. Block early with an actionable
     // hint instead of cascading to a 500.
-    if (getSystemModelProviderKeys().has(data.credentialId)) {
+    if (getSystemModelProviderCredentials().has(data.credentialId)) {
       throw invalidRequest(
         "Cannot seed models against a built-in credential — declare them in the " +
           "SYSTEM_PROVIDER_KEYS env var (models[] field), or create a custom credential.",
@@ -296,15 +296,18 @@ export function createModelsRouter() {
         resourceType: "model",
         resourceId: data.modelId,
       });
-      // Return the bare *effective* default model resource — `isDefault` is
+      // Return the bare *effective* default model resource — `is_default` is
       // recomputed by listOrgModels (DB flag, or the system-default fallback
       // when no DB row is flagged) — so callers see the resulting state
       // without a follow-up GET (#657). When no default remains in effect
       // (cleared with no system fallback) there is no resource: 204.
       const all = await listOrgModels(orgId);
-      const def = all.find((m) => m.isDefault);
+      const def = all.find((m) => m.is_default);
       return def ? c.json(def) : c.body(null, 204);
     } catch (err) {
+      // A deliberate client error (e.g. unknown model ref → 404) must surface as
+      // itself, not be masked as a 500 by the catch-all.
+      if (err instanceof ApiError) throw err;
       logger.error("Set default model failed", {
         error: getErrorMessage(err),
       });
@@ -480,7 +483,7 @@ export function createModelsRouter() {
     }
     // Same FK constraint applies to updates that re-point a model to a
     // different credential. Catch the same case here.
-    if (data.credentialId && getSystemModelProviderKeys().has(data.credentialId)) {
+    if (data.credentialId && getSystemModelProviderCredentials().has(data.credentialId)) {
       throw invalidRequest(
         "Cannot bind a custom model to a built-in credential — declare it in the " +
           "SYSTEM_PROVIDER_KEYS env var instead.",

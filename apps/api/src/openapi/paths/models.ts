@@ -41,7 +41,7 @@ export const modelsPaths = {
                     modelId: "gpt-4o",
                     source: "built-in",
                     enabled: true,
-                    isDefault: false,
+                    is_default: false,
                     credentialId: "pk_abc123",
                     contextWindow: 128000,
                     maxTokens: 16384,
@@ -179,8 +179,13 @@ export const modelsPaths = {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        // Unknown custom `modelId` (not a system id and no org-owned row) →
+        // `setDefaultModel` throws `notFound`. The pointer never silently keeps
+        // a stale/absent default.
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -483,6 +488,7 @@ export const modelsPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
