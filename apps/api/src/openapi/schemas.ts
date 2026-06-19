@@ -1011,8 +1011,16 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       label: { type: "string" },
-      apiShape: { type: "string" },
-      baseUrl: { type: "string" },
+      apiShape: {
+        type: ["string", "null"],
+        description:
+          "Protocol family. `null` for a built-in credential whose every backing model is an alias (#727) — binding hidden so the endpoint doesn't reveal the provider.",
+      },
+      baseUrl: {
+        type: ["string", "null"],
+        description:
+          "Endpoint base URL. `null` for an alias-only built-in credential (see apiShape).",
+      },
       source: { type: "string", enum: ["built-in", "custom"] },
       authMode: { type: "string", enum: ["api_key", "oauth2"] },
       providerId: {

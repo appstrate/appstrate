@@ -4505,8 +4505,10 @@ export interface components {
         ModelProviderCredential: {
             id: string;
             label: string;
-            apiShape: string;
-            baseUrl: string;
+            /** @description Protocol family. `null` for a built-in credential whose every backing model is an alias (#727) — binding hidden so the endpoint doesn't reveal the provider. */
+            apiShape: string | null;
+            /** @description Endpoint base URL. `null` for an alias-only built-in credential (see apiShape). */
+            baseUrl: string | null;
             /** @enum {string} */
             source: "built-in" | "custom";
             /** @enum {string} */

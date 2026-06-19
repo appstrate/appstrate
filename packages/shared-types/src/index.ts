@@ -642,8 +642,16 @@ export interface OrgModelInfo extends ModelMetadata {
 export interface ModelProviderCredentialInfo {
   id: string;
   label: string;
-  apiShape: string;
-  baseUrl: string;
+  /**
+   * Protocol family + endpoint. Both `null` for a **built-in** credential
+   * whose every backing model is a model alias (issue #727): exposing the
+   * endpoint host (e.g. `api.anthropic.com`) would reveal the hidden backing
+   * provider to an org admin who can read credentials but did not configure
+   * the env key. Custom credentials always carry them (the admin configured
+   * the binding themselves).
+   */
+  apiShape: string | null;
+  baseUrl: string | null;
   source: "built-in" | "custom";
   /** Auth mode of the underlying credential (matches the registry vocabulary). */
   authMode: "api_key" | "oauth2";

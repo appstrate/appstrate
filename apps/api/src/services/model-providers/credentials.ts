@@ -28,7 +28,7 @@ import { getModelProvider } from "./registry.ts";
 import type { ModelApiShape, OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 import type { ModelProviderIdentity } from "@appstrate/core/module";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
-import { getSystemModelProviderCredentials } from "../model-registry.ts";
+import { getSystemModelProviderCredentials, getSystemModels } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
 
@@ -545,16 +545,38 @@ export async function listOrgModelProviderCredentials(
     .from(modelProviderCredentials)
     .where(scopedWhere(modelProviderCredentials, { orgId }));
 
+  // Built-in credentials whose EVERY backing model is an alias (issue #727):
+  // hide the binding (apiShape + baseUrl) so the endpoint host doesn't reveal
+  // the hidden provider to an org admin who can read credentials but never
+  // configured the env key. Mirrors `projectAliasedModel` for the model list.
+  // Only built-in: a custom credential's binding was set by the org admin
+  // themselves, so there is nothing to hide from them. A built-in key backing
+  // any non-aliased model keeps its binding (that model exposes it anyway).
+  const aliasOnlySystemCredentials = new Set<string>();
+  {
+    const byCredential = new Map<string, { total: number; aliased: number }>();
+    for (const m of getSystemModels().values()) {
+      const acc = byCredential.get(m.credentialId) ?? { total: 0, aliased: 0 };
+      acc.total += 1;
+      if (m.aliased === true) acc.aliased += 1;
+      byCredential.set(m.credentialId, acc);
+    }
+    for (const [credId, acc] of byCredential) {
+      if (acc.total > 0 && acc.total === acc.aliased) aliasOnlySystemCredentials.add(credId);
+    }
+  }
+
   return mergeSystemAndDb({
     system,
     rows,
     mapSystem: (id, def): ModelProviderCredentialInfo => {
       const provider = getModelProvider(def.providerId);
+      const aliasOnly = aliasOnlySystemCredentials.has(id);
       return {
         id,
         label: def.label ?? provider?.displayName ?? def.providerId,
-        apiShape: def.apiShape,
-        baseUrl: def.baseUrl,
+        apiShape: aliasOnly ? null : def.apiShape,
+        baseUrl: aliasOnly ? null : def.baseUrl,
         source: "built-in",
         authMode: "api_key",
         created_by: null,

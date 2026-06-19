@@ -319,6 +319,10 @@ function ModelFormBody({
       (k) =>
         k.authMode === "api_key" &&
         k.apiShape === apiShape &&
+        // `baseUrl` is null only for alias-only built-in credentials, which are
+        // already excluded by the `customOnly` filter above — guard anyway so
+        // the type narrows (binding-hidden credentials never match a form pick).
+        k.baseUrl != null &&
         k.baseUrl.replace(/\/+$/, "") === normalizedBase,
     );
   }, [credentialsQuery.data, apiShape, baseUrl, isOauthProvider, providerId]);
