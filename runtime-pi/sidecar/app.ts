@@ -316,12 +316,13 @@ async function logOauthLlmResponse(
     // body unreadable — log what we have
   }
   // Drop credential-bearing headers (set-cookie, www-authenticate, …)
-  // before the response hits the operator log. We don't regex-scrub the
-  // body sample — upstream JSON error payloads never echo bearer tokens
-  // back, and a 200-char preview is enough to diagnose without amplifying
-  // log noise.
+  // before the response hits the operator log. A 200-char preview is enough
+  // to diagnose. Upstream JSON error payloads don't echo bearer tokens, but
+  // we still scrub bearer/api-key patterns from the sample so the no-leak
+  // guarantee holds independent of upstream behavior.
   const responseHeaders = filterSensitiveHeaders(upstream.headers);
-  const truncated = bodySample.length > 200 ? bodySample.slice(0, 200) + "…" : bodySample;
+  const scrubbed = bodySample.replace(/(sk-ant-[a-z0-9-]+|Bearer\s+[\w.~+/=-]+)/gi, "[redacted]");
+  const truncated = scrubbed.length > 200 ? scrubbed.slice(0, 200) + "…" : scrubbed;
   logger.warn("oauth llm: upstream response non-2xx", {
     credentialId,
     targetUrl,
@@ -681,7 +682,14 @@ export function createApp(deps: AppDeps): Hono {
             401,
           );
         }
-        // Fall through with whatever we have — best-effort.
+        // Refresh/replay failed for another reason (network, parse) — log it
+        // so a recurring 401 isn't silently masked as a plain upstream 401,
+        // then fall through and return the original response best-effort.
+        logger.warn("oauth llm: token refresh/replay failed after 401", {
+          credentialId: llmConfig.credentialId,
+          targetUrl,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 

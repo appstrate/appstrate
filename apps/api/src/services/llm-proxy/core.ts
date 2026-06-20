@@ -198,16 +198,27 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
 
   if (isSse && upstream.body) {
     const [clientStream, tapStream] = upstream.body.tee();
-    void tapSseUsage(tapStream, inputs.adapter).then((usage) =>
-      recordProxyUsage({
-        principal: inputs.principal,
-        runId: inputs.runId,
-        presetId,
-        resolved,
-        usage,
-        durationMs: Date.now() - started,
-      }),
-    );
+    void tapSseUsage(tapStream, inputs.adapter)
+      .then((usage) =>
+        recordProxyUsage({
+          principal: inputs.principal,
+          runId: inputs.runId,
+          presetId,
+          resolved,
+          usage,
+          durationMs: Date.now() - started,
+        }),
+      )
+      .catch((err: unknown) => {
+        // Metering tap is best-effort and out-of-band of the client stream;
+        // a parse/insert failure must surface in logs, not vanish into an
+        // unhandled rejection (silent usage under-counting otherwise).
+        logger.error("llm-proxy: SSE usage metering failed", {
+          runId: inputs.runId,
+          presetId,
+          error: getErrorMessage(err),
+        });
+      });
     const headers = cloneResponseHeaders(upstream.headers);
     // Rewrite the echoed real id back to the alias in every SSE frame. The tap
     // above reads the untouched `tapStream`, so accounting still sees the real

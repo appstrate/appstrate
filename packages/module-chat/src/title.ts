@@ -35,7 +35,7 @@ const SYSTEM =
   "Réponds uniquement par le titre, sans guillemets ni ponctuation finale.";
 
 /** Strip wrapping quotes/space and trailing punctuation a model may add. */
-function cleanTitle(raw: string): string {
+export function cleanTitle(raw: string): string {
   return raw
     .trim()
     .replace(/^["'«»\s]+/, "")

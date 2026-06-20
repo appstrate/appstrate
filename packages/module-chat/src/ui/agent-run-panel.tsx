@@ -347,11 +347,15 @@ function RunCard({
     // threadStatus in deps: refetch when the run reaches a terminal state, so
     // the journal + connections + final status land even without SSE.
     void (async () => {
-      const r = await fetchRun(getHeaders, runId).catch(() => null);
-      if (cancelled || !r) return;
-      setRun(r);
-      const entries = await fetchLogs(getHeaders, runId).catch(() => [] as LogEntry[]);
-      if (!cancelled) setLogs(entries);
+      try {
+        const r = await fetchRun(getHeaders, runId).catch(() => null);
+        if (cancelled || !r) return;
+        setRun(r);
+        const entries = await fetchLogs(getHeaders, runId).catch(() => [] as LogEntry[]);
+        if (!cancelled) setLogs(entries);
+      } catch {
+        // setState after teardown / transient render error — non-fatal.
+      }
     })();
     return () => {
       cancelled = true;
@@ -376,12 +380,16 @@ function RunCard({
       setLiveStatus(u.status);
       if (u.status !== "running" && u.status !== "pending") {
         void (async () => {
-          const [r, entries] = await Promise.all([
-            fetchRun(getHeaders, runId).catch(() => null),
-            fetchLogs(getHeaders, runId).catch(() => null),
-          ]);
-          if (r) setRun(r);
-          if (entries) setLogs(entries);
+          try {
+            const [r, entries] = await Promise.all([
+              fetchRun(getHeaders, runId).catch(() => null),
+              fetchLogs(getHeaders, runId).catch(() => null),
+            ]);
+            if (r) setRun(r);
+            if (entries) setLogs(entries);
+          } catch {
+            // setState after teardown / transient render error — non-fatal.
+          }
         })();
       }
     },

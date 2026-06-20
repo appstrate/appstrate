@@ -115,7 +115,17 @@ export class ClaudeAgentRunner implements Runner {
   /** Lazily resolve the real SDK `query` only when no driver was injected. */
   private async resolveQuery(): Promise<ClaudeQueryFn> {
     if (this.opts.query) return this.opts.query;
-    const { query } = await import("@anthropic-ai/claude-agent-sdk");
+    let query: typeof import("@anthropic-ai/claude-agent-sdk").query;
+    try {
+      ({ query } = await import("@anthropic-ai/claude-agent-sdk"));
+    } catch (err) {
+      // The SDK is a runtime dep of the claude runner image; a resolution
+      // failure here means the image was built wrong. Surface it explicitly
+      // instead of leaking a raw module-not-found at first run().
+      throw new Error(
+        `claude-agent-runner: @anthropic-ai/claude-agent-sdk is not available (${errorMessage(err)})`,
+      );
+    }
     return (input) =>
       query({
         prompt: input.prompt,
