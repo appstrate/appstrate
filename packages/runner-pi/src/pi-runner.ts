@@ -44,6 +44,8 @@ import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   emptyRunResult,
   reduceEvents,
+  truncateToolResult,
+  toolResultByteLimit,
   type RunError,
   type RunOptions,
   type Runner,
@@ -573,104 +575,11 @@ interface PiToolExecutionEndEvent {
 }
 type PiSubscribedEvent = { type: string } & Record<string, unknown>;
 
-/**
- * Hard ceiling on the byte size of a tool result payload forwarded as
- * `appstrate.progress.data.result`. Anything beyond this is replaced
- * with a `__truncated: true` marker so downstream sinks (HTTP POST to
- * the platform, JSONL stdout, web `run_logs` row) stay bounded —
- * filesystem/HTTP reads can produce MB-sized strings that have no
- * business sitting in a log row. Sinks render their own per-mode
- * preview length on top of this hard cap.
- *
- * Default sized for the typical "tail of a stack trace + a few JSON
- * blobs" — large enough to keep useful detail, small enough that 100
- * tool calls per run × 2KB = 200KB stays well below the platform's
- * `SIDECAR_MAX_MCP_ENVELOPE_BYTES` defaults and a single `run_logs`
- * row stays cheap.
- *
- * Operator-tunable via the `TOOL_RESULT_BYTE_LIMIT` env var (same
- * runtime-env contract as `MODEL_RETRY_ENABLED`, forwarded into the
- * agent container by `container-env.ts`). Tool results carrying the
- * run's actual output are truncated at WRITE time — no read-side knob
- * can recover them afterwards — so deployments whose consumers read
- * `getRunLogs` for results raise this cap here. Keep it comfortably
- * below the platform's 32 KB `run_logs.data` write-boundary cap
- * (`runLogDataSchema`): a `data` payload exceeding that is dropped
- * wholesale, which is strictly worse than truncation. Invalid or
- * non-positive values fall back to the compiled default.
- */
-const TOOL_RESULT_BYTE_LIMIT = 2048;
-
-/** Resolve the effective tool-result cap: env override or compiled default. */
-export function toolResultByteLimit(): number {
-  const raw = process.env.TOOL_RESULT_BYTE_LIMIT;
-  if (raw === undefined || raw === "") return TOOL_RESULT_BYTE_LIMIT;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed <= 0) return TOOL_RESULT_BYTE_LIMIT;
-  return parsed;
-}
-
-/**
- * Truncate an arbitrary tool result for safe transport on the event
- * sink. Strategy:
- *   - `string` payloads: byte-aware truncation with a single trailing
- *     "...(truncated, N bytes)" marker so the rendered output stays
- *     valid UTF-8 and self-documents the truncation.
- *   - everything else: serialise to JSON, apply the same cap; on
- *     overflow return a structured marker preserving the original type
- *     hint and original byte size so sinks can render "[truncated …]"
- *     without re-serialising.
- *
- * Exposed for tests; not part of the bridge's public surface.
- */
-export function truncateToolResult(
-  result: unknown,
-  limitBytes: number = toolResultByteLimit(),
-): unknown {
-  if (result === undefined || result === null) return result;
-  if (typeof result === "string") {
-    return truncateString(result, limitBytes);
-  }
-  // Booleans / numbers / bigint / symbols never trigger truncation.
-  if (typeof result !== "object") return result;
-  let serialised: string;
-  try {
-    serialised = JSON.stringify(result);
-  } catch {
-    // Circular / non-serialisable — replace with a structured marker.
-    return { __truncated: true, reason: "non_serialisable" };
-  }
-  if (serialised === undefined) return result;
-  const byteLength = Buffer.byteLength(serialised, "utf8");
-  if (byteLength <= limitBytes) return result;
-  // Re-parse so the sink still receives a structured payload (the
-  // canonical event validators only accept plain JSON values, never
-  // arbitrary class instances). Fallback to the marker on parse error.
-  return {
-    __truncated: true,
-    reason: "size",
-    bytes: byteLength,
-    limit: limitBytes,
-    preview: truncateString(serialised, Math.min(512, limitBytes)),
-  };
-}
-
-function truncateString(s: string, limitBytes: number): string {
-  const byteLength = Buffer.byteLength(s, "utf8");
-  if (byteLength <= limitBytes) return s;
-  // Walk back from the byte limit so the returned slice is a valid
-  // UTF-8 boundary (Buffer.toString handles partial code points but
-  // produces a replacement char — cheaper to land on a clean boundary).
-  let cut = limitBytes;
-  const buf = Buffer.from(s, "utf8");
-  // UTF-8 continuation bytes have the bit pattern 10xxxxxx — walk
-  // back until we land on a leading byte (or the start of the
-  // buffer). `buf[cut]` may be undefined if `cut === buf.length`,
-  // which is fine — `?? 0` short-circuits the loop in that case.
-  while (cut > 0 && ((buf[cut] ?? 0) & 0xc0) === 0x80) cut -= 1;
-  const head = buf.subarray(0, cut).toString("utf8");
-  return `${head}…(truncated, ${byteLength} bytes)`;
-}
+// Tool-result truncation (byte-aware, env-tunable via `TOOL_RESULT_BYTE_LIMIT`)
+// is shared with the Claude Agent SDK runner, so it lives in
+// `@appstrate/afps-runtime/runner` (imported above for the bridge's own use).
+// Re-exported here for this package's existing test imports + public surface.
+export { truncateToolResult, toolResultByteLimit };
 
 /**
  * True when a settled assistant turn's `stopReason` represents a terminal

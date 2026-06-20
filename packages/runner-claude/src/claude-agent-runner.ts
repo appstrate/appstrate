@@ -38,6 +38,7 @@ import {
   type Runner,
   type RunResult,
 } from "@appstrate/afps-runtime/runner";
+import { buildClaudeSdkEnv } from "@appstrate/core/claude-binary";
 import { SdkRunEventMapper, type SdkRunMessage } from "./sdk-event-mapper.ts";
 import { buildRuntimeToolsMcpServer } from "./runtime-tools-mcp.ts";
 
@@ -84,36 +85,6 @@ export interface ClaudeAgentRunnerOptions {
 
 /** Upper bound on agent turns per run (autonomous loop). */
 const DEFAULT_MAX_TURNS = 100;
-
-/**
- * Curated environment for the spawned `claude` binary. Mirrors the chat
- * engine's `buildSdkEnv`: never forward the full `process.env` (would leak
- * platform secrets into the subprocess), only the bits the binary needs plus
- * the gateway pointers and the flags that keep it from phoning home or picking
- * up an ambient API key.
- */
-export function buildClaudeSdkEnv(opts: {
-  baseUrl: string;
-  placeholderToken: string;
-  extra?: Record<string, string>;
-}): Record<string, string> {
-  const passthrough = ["PATH", "HOME", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL"];
-  const env: Record<string, string> = {};
-  for (const key of passthrough) {
-    const value = process.env[key];
-    if (value) env[key] = value;
-  }
-  env.ANTHROPIC_BASE_URL = opts.baseUrl;
-  env.ANTHROPIC_AUTH_TOKEN = opts.placeholderToken;
-  // Never let an ambient API key flip the binary onto the API-key path.
-  env.ANTHROPIC_API_KEY = "";
-  // Keep the subscription binary quiet and non-self-updating in a server.
-  env.DISABLE_AUTOUPDATER = "1";
-  env.DISABLE_TELEMETRY = "1";
-  env.DISABLE_ERROR_REPORTING = "1";
-  env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
-  return { ...env, ...(opts.extra ?? {}) };
-}
 
 function resolveStartMessage(context: ExecutionContext, explicit: string | undefined): string {
   if (typeof explicit === "string" && explicit.length > 0) return explicit;

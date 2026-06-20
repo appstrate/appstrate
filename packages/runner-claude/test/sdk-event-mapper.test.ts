@@ -2,11 +2,8 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
-import {
-  SdkRunEventMapper,
-  truncateToolResult,
-  type SdkRunMessage,
-} from "../src/sdk-event-mapper.ts";
+import { SdkRunEventMapper, type SdkRunMessage } from "../src/sdk-event-mapper.ts";
+import { truncateToolResult } from "@appstrate/afps-runtime/runner";
 
 const RUN_ID = "run_test";
 const fixedNow = () => 1_700_000_000_000;

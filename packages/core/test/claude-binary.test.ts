@@ -6,6 +6,7 @@ import {
   candidateBinaryPackages,
   binaryFileName,
   resolveClaudeCodeBinary,
+  buildClaudeSdkEnv,
 } from "../src/claude-binary.ts";
 
 describe("candidateBinaryPackages", () => {
@@ -87,5 +88,29 @@ describe("resolveClaudeCodeBinary", () => {
         resolve: () => "unused",
       }),
     ).toThrow(/freebsd\/x64/);
+  });
+});
+
+describe("buildClaudeSdkEnv", () => {
+  test("curates env: gateway pointers, blanked API key, telemetry off, no process.env leak", () => {
+    const env = buildClaudeSdkEnv({ baseUrl: "http://gw", placeholderToken: "ph" });
+    expect(env.ANTHROPIC_BASE_URL).toBe("http://gw");
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe("ph");
+    expect(env.ANTHROPIC_API_KEY).toBe("");
+    expect(env.DISABLE_AUTOUPDATER).toBe("1");
+    expect(env.DISABLE_TELEMETRY).toBe("1");
+    expect(env.DISABLE_ERROR_REPORTING).toBe("1");
+    expect(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe("1");
+    // A platform secret in process.env must not leak into the subprocess env.
+    expect(Object.keys(env)).not.toContain("DATABASE_URL");
+  });
+
+  test("merges explicit extra env last", () => {
+    const env = buildClaudeSdkEnv({
+      baseUrl: "http://gw",
+      placeholderToken: "ph",
+      extra: { FOO: "bar" },
+    });
+    expect(env.FOO).toBe("bar");
   });
 });

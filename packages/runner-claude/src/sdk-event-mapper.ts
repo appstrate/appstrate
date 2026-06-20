@@ -31,7 +31,12 @@
  */
 
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import type { RunError, RunResult, TokenUsage } from "@appstrate/afps-runtime/runner";
+import {
+  truncateToolResult,
+  type RunError,
+  type RunResult,
+  type TokenUsage,
+} from "@appstrate/afps-runtime/runner";
 
 // ─── Minimal structural view of the SDK messages we read ───────────────
 
@@ -100,9 +105,6 @@ export interface SdkTerminal {
   structuredOutput?: unknown;
 }
 
-/** Hard cap (bytes) on a forwarded tool-result payload — mirrors the Pi runner. */
-const TOOL_RESULT_BYTE_LIMIT = 2048;
-
 /** Map SDK error `result.subtype` → a stable {@link RunError.code}. */
 function errorCodeForSubtype(subtype: string | undefined): string {
   switch (subtype) {
@@ -134,44 +136,6 @@ function addUsage(into: TokenUsage, delta: SdkUsage | undefined): void {
     (into.cache_creation_input_tokens ?? 0) + (delta.cache_creation_input_tokens ?? 0);
   into.cache_read_input_tokens =
     (into.cache_read_input_tokens ?? 0) + (delta.cache_read_input_tokens ?? 0);
-}
-
-/**
- * Truncate an arbitrary tool result for safe transport on the event sink.
- * Byte-aware for strings (valid UTF-8 boundary + self-documenting marker),
- * structured marker for oversized/non-serialisable objects. Mirrors the Pi
- * runner's `truncateToolResult` — kept local so this package carries no Pi
- * dependency; a candidate for a shared util in the DRY pass.
- */
-export function truncateToolResult(result: unknown, limitBytes = TOOL_RESULT_BYTE_LIMIT): unknown {
-  if (result === undefined || result === null) return result;
-  if (typeof result === "string") return truncateString(result, limitBytes);
-  if (typeof result !== "object") return result;
-  let serialised: string;
-  try {
-    serialised = JSON.stringify(result);
-  } catch {
-    return { __truncated: true, reason: "non_serialisable" };
-  }
-  if (serialised === undefined) return result;
-  const byteLength = Buffer.byteLength(serialised, "utf8");
-  if (byteLength <= limitBytes) return result;
-  return {
-    __truncated: true,
-    reason: "size",
-    bytes: byteLength,
-    limit: limitBytes,
-    preview: truncateString(serialised, Math.min(512, limitBytes)),
-  };
-}
-
-function truncateString(s: string, limitBytes: number): string {
-  const byteLength = Buffer.byteLength(s, "utf8");
-  if (byteLength <= limitBytes) return s;
-  const buf = Buffer.from(s, "utf8");
-  let cut = limitBytes;
-  while (cut > 0 && ((buf[cut] ?? 0) & 0xc0) === 0x80) cut -= 1;
-  return `${buf.subarray(0, cut).toString("utf8")}…(truncated, ${byteLength} bytes)`;
 }
 
 function asContentBlocks(content: unknown): SdkContentBlock[] {

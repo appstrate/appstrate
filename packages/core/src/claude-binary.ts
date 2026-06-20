@@ -35,6 +35,47 @@ import { createRequire } from "node:module";
 const SDK_SCOPE = "@anthropic-ai/claude-agent-sdk";
 
 /**
+ * Curated environment for a spawned `claude` Agent SDK binary. Shared by every
+ * host that drives the SDK as a subprocess (the chat engine + the agent
+ * runner).
+ *
+ * Security posture: deliberately does NOT forward the full `process.env` —
+ * that would leak platform secrets (DATABASE_URL, signing keys, …) into the
+ * subprocess. Only the bits the binary needs to run, plus the gateway pointers
+ * and the flags that keep it from phoning home or picking up an ambient API
+ * key (which would flip it onto the API-key path instead of the subscription
+ * bearer the gateway injects).
+ *
+ * - `baseUrl` → `ANTHROPIC_BASE_URL` (the non-forging credential-injection
+ *   gateway).
+ * - `placeholderToken` → `ANTHROPIC_AUTH_TOKEN` (the gateway swaps it for the
+ *   real subscription token server-side).
+ * - `extra` is merged last, for host-specific additions.
+ */
+export function buildClaudeSdkEnv(opts: {
+  baseUrl: string;
+  placeholderToken: string;
+  extra?: Record<string, string>;
+}): Record<string, string> {
+  const passthrough = ["PATH", "HOME", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL"];
+  const env: Record<string, string> = {};
+  for (const key of passthrough) {
+    const value = process.env[key];
+    if (value) env[key] = value;
+  }
+  env.ANTHROPIC_BASE_URL = opts.baseUrl;
+  env.ANTHROPIC_AUTH_TOKEN = opts.placeholderToken;
+  // Never let an ambient API key flip the binary onto the API-key path.
+  env.ANTHROPIC_API_KEY = "";
+  // Keep the subscription binary quiet and non-self-updating in a server.
+  env.DISABLE_AUTOUPDATER = "1";
+  env.DISABLE_TELEMETRY = "1";
+  env.DISABLE_ERROR_REPORTING = "1";
+  env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
+  return { ...env, ...(opts.extra ?? {}) };
+}
+
+/**
  * A module-specifier resolver — `require.resolve`-shaped. Injected so the
  * algorithm is unit-testable without the 200 MB binaries on disk, and so each
  * consumer can anchor resolution at its own `node_modules` scope.

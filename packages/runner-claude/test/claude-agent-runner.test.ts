@@ -6,7 +6,6 @@ import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import {
   ClaudeAgentRunner,
-  buildClaudeSdkEnv,
   type ClaudeAgentRunnerOptions,
   type ClaudeQueryInput,
 } from "../src/claude-agent-runner.ts";
@@ -229,25 +228,5 @@ describe("ClaudeAgentRunner — cancellation", () => {
     expect(m.result).toBeNull();
   });
 });
-
-describe("buildClaudeSdkEnv", () => {
-  it("curates env: gateway pointers, blanked API key, telemetry off, no process.env leak", () => {
-    const env = buildClaudeSdkEnv({ baseUrl: "http://gw", placeholderToken: "ph" });
-    expect(env.ANTHROPIC_BASE_URL).toBe("http://gw");
-    expect(env.ANTHROPIC_AUTH_TOKEN).toBe("ph");
-    expect(env.ANTHROPIC_API_KEY).toBe("");
-    expect(env.DISABLE_AUTOUPDATER).toBe("1");
-    expect(env.DISABLE_TELEMETRY).toBe("1");
-    // A platform secret in process.env must not appear.
-    expect(Object.keys(env)).not.toContain("DATABASE_URL");
-  });
-
-  it("merges explicit extra env last", () => {
-    const env = buildClaudeSdkEnv({
-      baseUrl: "http://gw",
-      placeholderToken: "ph",
-      extra: { FOO: "bar" },
-    });
-    expect(env.FOO).toBe("bar");
-  });
-});
+// `buildClaudeSdkEnv` is shared infra — its tests live in
+// `@appstrate/core` (test/claude-binary.test.ts).

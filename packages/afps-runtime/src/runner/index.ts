@@ -3,6 +3,7 @@
 
 export { type Runner, type RunOptions } from "./types.ts";
 export { reduceEvents, foldEvent, emptyRunResult, type ReduceOptions } from "./reducer.ts";
+export { truncateToolResult, toolResultByteLimit } from "./tool-result.ts";
 export {
   runContainerLifecycle,
   RunTimeoutError,

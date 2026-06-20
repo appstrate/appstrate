@@ -9,14 +9,12 @@
 
 export {
   ClaudeAgentRunner,
-  buildClaudeSdkEnv,
   type ClaudeAgentRunnerOptions,
   type ClaudeQueryFn,
   type ClaudeQueryInput,
 } from "./claude-agent-runner.ts";
 export {
   SdkRunEventMapper,
-  truncateToolResult,
   type SdkRunMessage,
   type SdkTerminal,
   type SdkUsage,

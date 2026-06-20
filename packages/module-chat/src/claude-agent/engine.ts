@@ -23,6 +23,7 @@
  */
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { buildClaudeSdkEnv } from "@appstrate/core/claude-binary";
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from "ai";
 import { resolveClaudeCodeBinary } from "./binary.ts";
 import { createLocalToolsServer, type LocalToolsContext } from "./local-tools.ts";
@@ -82,32 +83,16 @@ export interface ClaudeAgentChatInput {
 }
 
 /**
- * Curated environment for the spawned `claude` binary. Deliberately does NOT
- * forward `process.env` — that would leak DATABASE_URL, signing secrets, etc.
- * into a subprocess. Only the bits the binary needs to run, plus the gateway
- * pointers and flags that keep it from phoning home / picking up an ambient
- * API key.
+ * Curated environment for the spawned `claude` binary. Thin wrapper over the
+ * shared `@appstrate/core/claude-binary` builder (single source for the
+ * credential-isolation posture shared with the agent runner); keeps the chat's
+ * positional signature for its existing call site + tests.
  */
 export function buildSdkEnv(
   gatewayBaseUrl: string,
   placeholderToken: string,
 ): Record<string, string> {
-  const passthrough = ["PATH", "HOME", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL"];
-  const env: Record<string, string> = {};
-  for (const key of passthrough) {
-    const value = process.env[key];
-    if (value) env[key] = value;
-  }
-  env.ANTHROPIC_BASE_URL = gatewayBaseUrl;
-  env.ANTHROPIC_AUTH_TOKEN = placeholderToken;
-  // Never let an ambient API key flip the binary onto the API-key path.
-  env.ANTHROPIC_API_KEY = "";
-  // Keep the subscription binary quiet and non-self-updating in a server.
-  env.DISABLE_AUTOUPDATER = "1";
-  env.DISABLE_TELEMETRY = "1";
-  env.DISABLE_ERROR_REPORTING = "1";
-  env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
-  return env;
+  return buildClaudeSdkEnv({ baseUrl: gatewayBaseUrl, placeholderToken });
 }
 
 /** Flatten the UI thread into a transcript prompt (the SDK takes a prompt, not a UIMessage[]). */
