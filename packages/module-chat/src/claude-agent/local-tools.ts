@@ -31,6 +31,17 @@ import {
 /** Platform long-poll cap (see getRun OpenAPI: held below proxy idle timeouts). */
 const LONG_POLL_CAP_S = 55;
 
+/**
+ * Floor between polls. The server's `?wait=` degrades to an immediate
+ * (no-wait) response once an identity holds 10 concurrent waits — exactly when
+ * many chat turns share the loopback identity. Without a floor the loop would
+ * re-fetch with zero delay against an already-busy API. Mirrors the ai-sdk
+ * sibling's `POLL_INTERVAL_MS` (wait-for-run.ts).
+ */
+const POLL_FLOOR_MS = 2_000;
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
 function textResult(payload: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(payload) }] };
 }
@@ -74,6 +85,7 @@ export function createLocalToolsServer(ctx: LocalToolsContext) {
       while (Date.now() < deadline) {
         const remainingS = Math.ceil((deadline - Date.now()) / 1000);
         const waitS = Math.max(1, Math.min(LONG_POLL_CAP_S, remainingS));
+        const before = Date.now();
         let res: Response;
         try {
           res = await fetch(`${ctx.origin}/api/runs/${encodeURIComponent(run_id)}?wait=${waitS}`, {
@@ -102,6 +114,12 @@ export function createLocalToolsServer(ctx: LocalToolsContext) {
             waited_seconds: Math.round((Date.now() - start) / 1000),
           });
         }
+        // Degrade-to-immediate guard: when the server returned far sooner than
+        // the requested wait (concurrent-wait cap → `wait` ignored), floor-sleep
+        // so we don't hot-loop. No effect on a real long-poll (it ate the budget).
+        const slept = Date.now() - before;
+        const floor = Math.min(POLL_FLOOR_MS - slept, deadline - Date.now());
+        if (floor > 0) await sleep(floor);
       }
 
       logger.info("wait_for_run timed out", { runId: run_id, waitedMs: Date.now() - start });

@@ -53,17 +53,24 @@ export interface ChatPanelProps {
 const MODEL_STORAGE_KEY = "appstrate.chat.model";
 
 export function ChatPanel({ context, getHeaders, modelId, className }: ChatPanelProps) {
+  // The context + selected model ride in refs so the transport (memoized once)
+  // reads the latest value at request time without rebuilding mid-thread. Synced
+  // in effects, not during render (Rules of React: no ref writes in render) — a
+  // one-render-late ref is fine, the transport only reads it when a turn is sent.
   const contextRef = useRef(context);
-  contextRef.current = context;
+  useEffect(() => {
+    contextRef.current = context;
+  }, [context]);
 
-  // Model picker (hidden when the host pins `modelId`). The selection rides
-  // in a ref so switching models never rebuilds the transport mid-thread.
+  // Model picker (hidden when the host pins `modelId`).
   const [models, setModels] = useState<OrgModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(() =>
     typeof localStorage === "undefined" ? null : localStorage.getItem(MODEL_STORAGE_KEY),
   );
   const selectedModelRef = useRef(selectedModel);
-  selectedModelRef.current = modelId ?? selectedModel;
+  useEffect(() => {
+    selectedModelRef.current = modelId ?? selectedModel;
+  }, [modelId, selectedModel]);
 
   useEffect(() => {
     if (modelId) return;
@@ -81,33 +88,50 @@ export function ChatPanel({ context, getHeaders, modelId, className }: ChatPanel
     localStorage.setItem(MODEL_STORAGE_KEY, id);
   };
 
+  // Ref reads live in these callbacks (request-time, not render) — the
+  // sanctioned place to read a ref. Stable identities keep the transport memo
+  // from rebuilding when only the selected model / context changes.
+  const buildHeaders = useCallback(
+    (): Record<string, string> => ({
+      ...getHeaders?.(),
+      ...(selectedModelRef.current ? { "X-Model-Id": selectedModelRef.current } : {}),
+    }),
+    [getHeaders],
+  );
+  // Inject the host context into the JSON body — done in a fetch wrapper so we
+  // stay on the transport's native request shape.
+  const fetchWithContext = useCallback(
+    async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      let body = init?.body;
+      if (typeof body === "string") {
+        try {
+          body = JSON.stringify({
+            ...(JSON.parse(body) as Record<string, unknown>),
+            context: contextRef.current,
+          });
+        } catch {
+          // Not JSON — forward untouched.
+        }
+      }
+      return fetch(input, { ...init, body });
+    },
+    [],
+  );
+
   const transport = useMemo(
     () =>
+      // buildHeaders/fetchWithContext read refs only at REQUEST time;
+      // AssistantChatTransport stores them, it doesn't invoke them during
+      // construction. The refs rule can't see past the constructor boundary, so
+      // it false-flags this as a render-time ref read.
+      // eslint-disable-next-line react-hooks/refs
       new AssistantChatTransport({
         api: "/api/chat",
         credentials: "include",
-        headers: (): Record<string, string> => ({
-          ...getHeaders?.(),
-          ...(selectedModelRef.current ? { "X-Model-Id": selectedModelRef.current } : {}),
-        }),
-        // Inject the host context into the JSON body — done in a fetch
-        // wrapper so we stay on the transport's native request shape.
-        fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
-          let body = init?.body;
-          if (typeof body === "string") {
-            try {
-              body = JSON.stringify({
-                ...(JSON.parse(body) as Record<string, unknown>),
-                context: contextRef.current,
-              });
-            } catch {
-              // Not JSON — forward untouched.
-            }
-          }
-          return fetch(input, { ...init, body });
-        }) as typeof fetch,
+        headers: buildHeaders,
+        fetch: fetchWithContext as typeof fetch,
       }),
-    [getHeaders],
+    [buildHeaders, fetchWithContext],
   );
 
   const runtime = useChatRuntime({ transport });
@@ -164,17 +188,21 @@ export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
   const [panelCollapsed, setPanelCollapsed] = useState(true);
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const openPanel = useCallback(() => setPanelCollapsed(false), []);
-  const openArtifact = (a: Artifact) => {
+  // Stable identity: it's passed as the ArtifactPanelContext value, so a fresh
+  // closure each render would re-render every consumer.
+  const openArtifact = useCallback((a: Artifact) => {
     setArtifact(a);
     setPanelCollapsed(false);
-  };
+  }, []);
 
   const [models, setModels] = useState<OrgModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(() =>
     typeof localStorage === "undefined" ? null : localStorage.getItem(MODEL_STORAGE_KEY),
   );
   const selectedModelRef = useRef(selectedModel);
-  selectedModelRef.current = selectedModel;
+  useEffect(() => {
+    selectedModelRef.current = selectedModel;
+  }, [selectedModel]);
 
   useEffect(() => {
     void fetchModels(getHeaders).then((list) => {
@@ -194,17 +222,23 @@ export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
   const runtime = useRemoteThreadListRuntime({
     adapter,
     runtimeHook: function PageChatRuntime() {
+      // Ref read in a request-time callback (not render). Stable identity keeps
+      // the transport memo from rebuilding on model change.
+      const buildHeaders = useCallback(
+        (): Record<string, string> => ({
+          ...getHeaders?.(),
+          ...(selectedModelRef.current ? { "X-Model-Id": selectedModelRef.current } : {}),
+        }),
+        [],
+      );
       const transport = useMemo(
         () =>
           new AssistantChatTransport({
             api: "/api/chat",
             credentials: "include",
-            headers: (): Record<string, string> => ({
-              ...getHeaders?.(),
-              ...(selectedModelRef.current ? { "X-Model-Id": selectedModelRef.current } : {}),
-            }),
+            headers: buildHeaders,
           }),
-        [getHeaders],
+        [buildHeaders],
       );
       return useChatRuntime({ transport });
     },

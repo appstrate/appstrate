@@ -176,11 +176,15 @@ export async function resolveModel(args: ResolveArgs): Promise<LanguageModel> {
  * and forward it as `X-Application-Id` on the MCP request. Cached per org —
  * the default app rarely changes.
  */
-const appCache = new Map<string, string | null>();
+// Only RESOLVED ids are cached — never a miss. A miss (transient failure OR an
+// empty 200) is left uncached so the next turn retries: an empty
+// `/api/applications` is anomalous (every org normally has a default app), so
+// caching it would strip app-scoped MCP tools org-wide until eviction.
+const appCache = new Map<string, string>();
 const APP_CACHE_MAX = 500;
 
 /** Bounded insert: evict the oldest entry once the per-org cache is full. */
-function cacheApp(orgId: string, id: string | null): void {
+function cacheApp(orgId: string, id: string): void {
   if (appCache.size >= APP_CACHE_MAX && !appCache.has(orgId)) {
     const oldest = appCache.keys().next().value;
     if (oldest !== undefined) appCache.delete(oldest);
@@ -195,28 +199,23 @@ export async function resolveDefaultApplicationId(
   fetchImpl: typeof fetch = fetch,
 ): Promise<string | undefined> {
   const cached = appCache.get(orgId);
-  if (cached !== undefined) return cached ?? undefined;
+  if (cached !== undefined) return cached;
   try {
     const res = await fetchImpl(`${origin}/api/applications`, { headers });
-    if (!res.ok) {
-      // Transient upstream failure — do NOT cache, or a single blip would
-      // poison the cache and strip app-scoped MCP tools for this org until
-      // eviction. Return undefined and let the next call retry.
-      return undefined;
-    }
+    if (!res.ok) return undefined; // transient — don't cache
     interface App {
       id: string;
       isDefault?: boolean;
     }
     const body = (await res.json()) as { data?: App[] } | App[];
     const apps = Array.isArray(body) ? body : (body.data ?? []);
-    const id = (apps.find((a) => a.isDefault) ?? apps[0])?.id ?? null;
-    // Only resolved state is cached: a real id, or null for "org genuinely has
-    // no application" — never a transient fetch failure.
-    cacheApp(orgId, id);
-    return id ?? undefined;
+    const id = (apps.find((a) => a.isDefault) ?? apps[0])?.id;
+    if (id) {
+      cacheApp(orgId, id);
+      return id;
+    }
+    return undefined; // empty 200 — anomalous, don't cache
   } catch {
-    // Network error — transient, don't poison the cache.
-    return undefined;
+    return undefined; // network error — transient, don't cache
   }
 }

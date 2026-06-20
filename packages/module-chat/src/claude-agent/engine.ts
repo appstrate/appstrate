@@ -49,7 +49,7 @@ function capacityResponse(): Response {
       detail:
         "Le service de chat Claude est temporairement saturé. Réessayez dans quelques instants.",
       code: "chat_capacity",
-      retryAfter: retryAfterSeconds,
+      retry_after: retryAfterSeconds,
     }),
     {
       status: 429,

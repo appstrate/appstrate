@@ -40,6 +40,19 @@ describe("resolveDefaultApplicationId", () => {
     expect(await resolveDefaultApplicationId(ORIGIN, {}, orgId, fn)).toBe("app_1");
   });
 
+  it("does not cache an empty 200 — a later call recovers", async () => {
+    const orgId = `org_${Math.random().toString(36).slice(2)}`;
+    const { fn } = seqFetch([
+      () => Response.json({ data: [] }),
+      () => Response.json({ data: [{ id: "app_3", isDefault: true }] }),
+    ]);
+
+    // Empty 200 → undefined, and must NOT poison the cache.
+    expect(await resolveDefaultApplicationId(ORIGIN, {}, orgId, fn)).toBeUndefined();
+    // Second call sees the now-present app.
+    expect(await resolveDefaultApplicationId(ORIGIN, {}, orgId, fn)).toBe("app_3");
+  });
+
   it("caches a resolved id (no second fetch)", async () => {
     const orgId = `org_${Math.random().toString(36).slice(2)}`;
     const { fn, calls } = seqFetch([

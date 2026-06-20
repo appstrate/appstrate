@@ -15,7 +15,6 @@ import {
 } from "@assistant-ui/react";
 import {
   PlusIcon,
-  SearchIcon,
   PencilIcon,
   Trash2Icon,
   EllipsisVerticalIcon,
@@ -57,17 +56,6 @@ export function ThreadList() {
           panels, so the three columns share one aligned header band. */}
       <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
         <span className="flex-1 text-sm font-medium">Conversations</span>
-        {/* Search is prepared for a future "search past conversations" feature
-            — assistant-ui/AI SDK expose no native thread search, so the icon is
-            a placeholder until a search path (backend or client filter) lands. */}
-        <button
-          type="button"
-          aria-label="Rechercher dans les conversations (bientôt)"
-          title="Rechercher dans les conversations (bientôt)"
-          className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-md p-1.5"
-        >
-          <SearchIcon className="size-4" />
-        </button>
         <ThreadListPrimitive.New asChild>
           <button
             type="button"
