@@ -455,9 +455,11 @@
     "runtime-pi": {
       "name": "appstrate-pi-runtime",
       "dependencies": {
+        "@anthropic-ai/claude-agent-sdk": "^0.3.183",
         "@appstrate/afps-runtime": "workspace:*",
         "@appstrate/core": "workspace:*",
         "@appstrate/mcp-transport": "workspace:*",
+        "@appstrate/runner-claude": "workspace:*",
         "@appstrate/runner-pi": "workspace:*",
         "@mariozechner/pi-ai": "0.73.1",
         "@mariozechner/pi-coding-agent": "0.73.1",

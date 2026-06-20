@@ -73,14 +73,23 @@ COPY packages/connect/src         packages/connect/src
 COPY packages/core/src            packages/core/src
 COPY packages/mcp-transport/src   packages/mcp-transport/src
 COPY packages/runner-pi/src       packages/runner-pi/src
+COPY packages/runner-claude/src   packages/runner-claude/src
 COPY runtime-pi/extensions/       runtime-pi/extensions/
 COPY runtime-pi/mcp/              runtime-pi/mcp/
 COPY runtime-pi/*.ts              runtime-pi/
 
+# `@anthropic-ai/claude-agent-sdk` is kept `--external` (like the Pi SDK pair):
+# the ClaudeAgentRunner `await import`s it lazily (only for `claude-code` runs),
+# it ships its own prebuilt per-arch binary resolved at runtime from node_modules
+# via `pathToClaudeCodeExecutable`, and bundling its dynamic provider dispatch
+# inlines transient modules that hurt cold-start. The symlinked package + its
+# musl binary sibling remain on disk in the runtime stage so the lazy import +
+# `resolveClaudeCodeBinary` resolve at runtime.
 RUN bun build runtime-pi/entrypoint.ts \
         --target=bun \
         --external='@mariozechner/pi-ai' \
         --external='@mariozechner/pi-coding-agent' \
+        --external='@anthropic-ai/claude-agent-sdk' \
         --outfile=runtime-pi/dist/entrypoint.js
 
 # ── Stage 2 — runtime ─────────────────────────────────────────────
@@ -183,6 +192,11 @@ COPY --chown=pi:pi packages/mcp-transport/src           ./packages/mcp-transport
 COPY --chown=pi:pi packages/mcp-transport/package.json  ./packages/mcp-transport/
 COPY --chown=pi:pi packages/runner-pi/src               ./packages/runner-pi/src
 COPY --chown=pi:pi packages/runner-pi/package.json      ./packages/runner-pi/
+# runner-claude is source-only with no extra runtime deps of its own (its
+# imports are workspace packages already present + the external Agent SDK), so
+# only its src + manifest + workspace symlink are needed.
+COPY --chown=pi:pi packages/runner-claude/src           ./packages/runner-claude/src
+COPY --chown=pi:pi packages/runner-claude/package.json  ./packages/runner-claude/
 COPY --chown=pi:pi packages/core/src                    ./packages/core/src
 COPY --chown=pi:pi packages/core/package.json           ./packages/core/
 COPY --chown=pi:pi packages/afps-shared/src             ./packages/afps-shared/src
@@ -191,11 +205,12 @@ COPY --chown=pi:pi packages/afps-shared/package.json    ./packages/afps-shared/
 # Restore the `@appstrate/*` workspace symlinks materialised by
 # `bun install` (docker COPY dereferences them into real directories).
 RUN mkdir -p node_modules/@appstrate \
- && rm -rf  node_modules/@appstrate/afps-runtime node_modules/@appstrate/afps-shared node_modules/@appstrate/mcp-transport node_modules/@appstrate/runner-pi node_modules/@appstrate/core \
+ && rm -rf  node_modules/@appstrate/afps-runtime node_modules/@appstrate/afps-shared node_modules/@appstrate/mcp-transport node_modules/@appstrate/runner-pi node_modules/@appstrate/runner-claude node_modules/@appstrate/core \
  && ln -s   /runtime/packages/afps-runtime  node_modules/@appstrate/afps-runtime \
  && ln -s   /runtime/packages/afps-shared   node_modules/@appstrate/afps-shared \
  && ln -s   /runtime/packages/mcp-transport node_modules/@appstrate/mcp-transport \
  && ln -s   /runtime/packages/runner-pi     node_modules/@appstrate/runner-pi \
+ && ln -s   /runtime/packages/runner-claude node_modules/@appstrate/runner-claude \
  && ln -s   /runtime/packages/core          node_modules/@appstrate/core \
  && chown -h pi:pi \
         node_modules/@appstrate \
@@ -203,6 +218,7 @@ RUN mkdir -p node_modules/@appstrate \
         node_modules/@appstrate/afps-shared \
         node_modules/@appstrate/mcp-transport \
         node_modules/@appstrate/runner-pi \
+        node_modules/@appstrate/runner-claude \
         node_modules/@appstrate/core
 
 # Pi SDK pair (@mariozechner/pi-ai, @mariozechner/pi-coding-agent) lands
@@ -217,6 +233,18 @@ RUN mkdir -p node_modules/@mariozechner \
         node_modules/@mariozechner \
         node_modules/@mariozechner/pi-ai \
         node_modules/@mariozechner/pi-coding-agent
+
+# The Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) is a direct dep of
+# `appstrate-pi-runtime`, so bun symlinks it into runtime-pi/node_modules. The
+# bundled entrypoint resolves from /runtime/node_modules, so surface it there
+# (same fix as the Pi pair above). The SDK's per-arch `claude` binary lives
+# beside it in the shared .bun store and `resolveClaudeCodeBinary` hops to it
+# through the SDK's own scope — no separate symlink needed for the binary.
+RUN mkdir -p node_modules/@anthropic-ai \
+ && ln -s /runtime/runtime-pi/node_modules/@anthropic-ai/claude-agent-sdk node_modules/@anthropic-ai/claude-agent-sdk \
+ && chown -h pi:pi \
+        node_modules/@anthropic-ai \
+        node_modules/@anthropic-ai/claude-agent-sdk
 
 # Bootstrap sources. Glob is single-level (no recursion into `sidecar/`
 # or `test/`), so adding a new `.ts` file at `runtime-pi/*.ts` is picked
