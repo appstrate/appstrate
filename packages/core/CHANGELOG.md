@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`@appstrate/core/claude-binary`** — shared Claude Agent SDK runtime helpers
+  used by every host that drives `@anthropic-ai/claude-agent-sdk` under Bun (the
+  chat engine + the agent runner). Exports `resolveClaudeCodeBinary`,
+  `makeSdkScopeResolver`, `candidateBinaryPackages`, `binaryFileName` (resolve
+  the prebuilt per-arch `claude` binary via `pathToClaudeCodeExecutable`), and
+  `buildClaudeSdkEnv` (curated, no-secret-leak subprocess env). Imports nothing
+  from the SDK — only resolves package-specifier strings — so core gains no
+  Agent SDK dependency.
+- **`@appstrate/core/sidecar-types`** gains `LlmProxyOauthPassthroughConfig`
+  (`authMode: "oauth-passthrough"`) — the non-forging `/llm` mode for a driver
+  that signs its own provider fingerprint (the official Claude Agent SDK). The
+  sidecar swaps the bearer + ensures the OAuth beta only; no identity headers or
+  body transforms. Added to the `LlmProxyConfig` union.
+
 - **`@appstrate/core/model-swap`** — the model-alias swap (LLM-gateway alias
   pattern, appstrate#727). Exports `swapRequestModel`, `swapResponseModelJson`,
   `createSseModelSwapStream`, `scrubModelText`, `isAliasableApiShape`, and
