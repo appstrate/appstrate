@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test, afterEach } from "bun:test";
+import { describe, expect, it, afterEach } from "bun:test";
 import {
   acquireClaudeSlot,
   activeClaudeSlots,
@@ -14,17 +14,17 @@ afterEach(() => {
 });
 
 describe("claudeMaxConcurrency", () => {
-  test("defaults to 6 when unset", () => {
+  it("defaults to 6 when unset", () => {
     delete process.env.CHAT_CLAUDE_MAX_CONCURRENCY;
     expect(claudeMaxConcurrency()).toBe(6);
   });
 
-  test("honours a positive integer override", () => {
+  it("honours a positive integer override", () => {
     process.env.CHAT_CLAUDE_MAX_CONCURRENCY = "3";
     expect(claudeMaxConcurrency()).toBe(3);
   });
 
-  test("falls back to the default on non-numeric / non-positive input", () => {
+  it("falls back to the default on non-numeric / non-positive input", () => {
     process.env.CHAT_CLAUDE_MAX_CONCURRENCY = "nope";
     expect(claudeMaxConcurrency()).toBe(6);
     process.env.CHAT_CLAUDE_MAX_CONCURRENCY = "0";
@@ -35,7 +35,7 @@ describe("claudeMaxConcurrency", () => {
 });
 
 describe("acquireClaudeSlot", () => {
-  test("hands out slots up to the cap, then returns null until one frees", () => {
+  it("hands out slots up to the cap, then returns null until one frees", () => {
     process.env.CHAT_CLAUDE_MAX_CONCURRENCY = "2";
     expect(activeClaudeSlots()).toBe(0);
 
@@ -60,7 +60,7 @@ describe("acquireClaudeSlot", () => {
     expect(activeClaudeSlots()).toBe(0);
   });
 
-  test("release is idempotent — a double release does not under-count the gate", () => {
+  it("release is idempotent — a double release does not under-count the gate", () => {
     process.env.CHAT_CLAUDE_MAX_CONCURRENCY = "1";
     const a = acquireClaudeSlot();
     expect(a).not.toBeNull();

@@ -204,7 +204,7 @@ export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
               ...(selectedModelRef.current ? { "X-Model-Id": selectedModelRef.current } : {}),
             }),
           }),
-        [],
+        [getHeaders],
       );
       return useChatRuntime({ transport });
     },

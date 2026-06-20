@@ -254,7 +254,12 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
         });
         stepStart = now;
       },
-      onError: ({ error }) => logger.error("chat stream error", { err: String(error) }),
+      onError: ({ error }) => {
+        logger.error("chat stream error", { err: String(error) });
+        // AI-SDK fires onError (not onFinish) on a stream failure, so the MCP
+        // session must be closed here too or it leaks on every failed turn.
+        void mcp?.close().catch((err) => logger.warn("mcp close failed", { err: String(err) }));
+      },
       onFinish: ({ totalUsage, finishReason }) => {
         logger.info("chat turn done", {
           steps: step,

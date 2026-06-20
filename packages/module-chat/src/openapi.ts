@@ -243,7 +243,7 @@ export const chatPaths = {
                   minItems: 1,
                 },
                 modelId: { type: "string" },
-                sessionId: { type: "string" },
+                id: { type: "string", description: "Thread id (assistant-ui)" },
                 context: {
                   type: "object",
                   required: ["type", "id"],

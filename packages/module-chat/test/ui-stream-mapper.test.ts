@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   SdkUiStreamMapper,
   normalizeToolName,
@@ -18,20 +18,20 @@ const ev = (event: Record<string, unknown>): ClaudeSdkMessage =>
   ({ type: "stream_event", event }) as ClaudeSdkMessage;
 
 describe("normalizeToolName", () => {
-  test("strips the mcp__<server>__ prefix", () => {
+  it("strips the mcp__<server>__ prefix", () => {
     expect(normalizeToolName("mcp__platform__search_operations")).toBe("search_operations");
     expect(normalizeToolName("mcp__appstrate_local__render_html")).toBe("render_html");
   });
-  test("preserves tool names that themselves contain __", () => {
+  it("preserves tool names that themselves contain __", () => {
     expect(normalizeToolName("mcp__platform__a__b")).toBe("a__b");
   });
-  test("passes through non-mcp names", () => {
+  it("passes through non-mcp names", () => {
     expect(normalizeToolName("wait_for_run")).toBe("wait_for_run");
   });
 });
 
 describe("SdkUiStreamMapper — text turn", () => {
-  test("maps a streamed text turn to start-step → text-* → finish-step", () => {
+  it("maps a streamed text turn to start-step → text-* → finish-step", () => {
     const chunks = run([
       ev({ type: "message_start" }),
       ev({ type: "content_block_start", index: 0, content_block: { type: "text" } }),
@@ -52,7 +52,7 @@ describe("SdkUiStreamMapper — text turn", () => {
 });
 
 describe("SdkUiStreamMapper — tool call + result", () => {
-  test("streams tool input then maps the tool_result to tool-output-available", () => {
+  it("streams tool input then maps the tool_result to tool-output-available", () => {
     const chunks = run([
       ev({ type: "message_start" }),
       ev({
@@ -112,7 +112,7 @@ describe("SdkUiStreamMapper — tool call + result", () => {
     ]);
   });
 
-  test("maps an errored tool_result to tool-output-error", () => {
+  it("maps an errored tool_result to tool-output-error", () => {
     const chunks = run([
       {
         type: "user",
@@ -129,7 +129,7 @@ describe("SdkUiStreamMapper — tool call + result", () => {
     ]);
   });
 
-  test("tolerates malformed tool input JSON (falls back to {})", () => {
+  it("tolerates malformed tool input JSON (falls back to {})", () => {
     const chunks = run([
       ev({ type: "message_start" }),
       ev({
@@ -150,7 +150,7 @@ describe("SdkUiStreamMapper — tool call + result", () => {
 });
 
 describe("SdkUiStreamMapper — reasoning", () => {
-  test("maps thinking blocks to reasoning-* chunks", () => {
+  it("maps thinking blocks to reasoning-* chunks", () => {
     const chunks = run([
       ev({ type: "message_start" }),
       ev({ type: "content_block_start", index: 0, content_block: { type: "thinking" } }),
@@ -171,7 +171,7 @@ describe("SdkUiStreamMapper — reasoning", () => {
 });
 
 describe("SdkUiStreamMapper — multi-step block ids", () => {
-  test("namespaces block ids per step so they never collide across turns", () => {
+  it("namespaces block ids per step so they never collide across turns", () => {
     const chunks = run([
       ev({ type: "message_start" }),
       ev({ type: "content_block_start", index: 0, content_block: { type: "text" } }),
@@ -190,7 +190,7 @@ describe("SdkUiStreamMapper — multi-step block ids", () => {
 });
 
 describe("SdkUiStreamMapper — terminal metadata", () => {
-  test("captures success usage/cost and a stop finishReason", () => {
+  it("captures success usage/cost and a stop finishReason", () => {
     const mapper = new SdkUiStreamMapper();
     mapper.map({
       type: "result",
@@ -208,7 +208,7 @@ describe("SdkUiStreamMapper — terminal metadata", () => {
     });
   });
 
-  test("max_tokens stop maps to finishReason length", () => {
+  it("max_tokens stop maps to finishReason length", () => {
     const mapper = new SdkUiStreamMapper();
     mapper.map({
       type: "result",
@@ -219,7 +219,7 @@ describe("SdkUiStreamMapper — terminal metadata", () => {
     expect((mapper.finishChunk() as { finishReason: string }).finishReason).toBe("length");
   });
 
-  test("error result is flagged and finishes with finishReason error", () => {
+  it("error result is flagged and finishes with finishReason error", () => {
     const mapper = new SdkUiStreamMapper();
     mapper.map({
       type: "result",
@@ -233,7 +233,7 @@ describe("SdkUiStreamMapper — terminal metadata", () => {
     expect((mapper.finishChunk() as { finishReason: string }).finishReason).toBe("error");
   });
 
-  test("finishChunk defaults to stop when no result was seen", () => {
+  it("finishChunk defaults to stop when no result was seen", () => {
     const mapper = new SdkUiStreamMapper();
     expect(mapper.finishChunk()).toEqual({
       type: "finish",
@@ -244,14 +244,14 @@ describe("SdkUiStreamMapper — terminal metadata", () => {
 });
 
 describe("SdkUiStreamMapper — assistant error", () => {
-  test("surfaces an assistant-level auth error as an error chunk", () => {
+  it("surfaces an assistant-level auth error as an error chunk", () => {
     const chunks = run([{ type: "assistant", error: "authentication_failed" } as ClaudeSdkMessage]);
     expect(chunks).toHaveLength(1);
     expect(chunks[0]!.type).toBe("error");
     expect((chunks[0] as { errorText: string }).errorText).toMatch(/Authentification/);
   });
 
-  test("a clean assistant message emits nothing (text/tools already streamed)", () => {
+  it("a clean assistant message emits nothing (text/tools already streamed)", () => {
     const chunks = run([
       {
         type: "assistant",
@@ -263,7 +263,7 @@ describe("SdkUiStreamMapper — assistant error", () => {
 });
 
 describe("SdkUiStreamMapper — startChunk", () => {
-  test("emits a start chunk carrying the message id", () => {
+  it("emits a start chunk carrying the message id", () => {
     const mapper = new SdkUiStreamMapper();
     expect(mapper.startChunk("msg_1")).toEqual({ type: "start", messageId: "msg_1" });
   });
@@ -280,7 +280,7 @@ describe("SdkUiStreamMapper — startChunk", () => {
  * instead of silently in production. Assert the ENTIRE sequence, not a subset.
  */
 describe("SdkUiStreamMapper — full turn (captured real shapes)", () => {
-  test("maps a thinking→text→tool→result→answer turn to the exact UI-chunk sequence", () => {
+  it("maps a thinking→text→tool→result→answer turn to the exact UI-chunk sequence", () => {
     const mapper = new SdkUiStreamMapper();
     const out: UIMessageChunk[] = [];
     const push = (m: ClaudeSdkMessage) => out.push(...mapper.map(m));

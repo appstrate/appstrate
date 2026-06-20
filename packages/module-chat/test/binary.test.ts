@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { existsSync, statSync } from "node:fs";
 import { resolveClaudeCodeBinary } from "../src/claude-agent/binary.ts";
 
@@ -11,7 +11,7 @@ import { resolveClaudeCodeBinary } from "../src/claude-agent/binary.ts";
 // `node_modules`. A miss would otherwise surface as an opaque SDK spawn crash
 // at the first chat turn.
 describe("resolveClaudeCodeBinary (host integration)", () => {
-  test("resolves the installed native binary on this host", () => {
+  it("resolves the installed native binary on this host", () => {
     const path = resolveClaudeCodeBinary();
     expect(path).toContain("claude-agent-sdk-");
     expect(existsSync(path)).toBe(true);

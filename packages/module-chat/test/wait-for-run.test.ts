@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import type { ToolSet } from "ai";
 import { createWaitForRunTool } from "../src/wait-for-run.ts";
 
@@ -23,7 +23,7 @@ const opts = (signal?: AbortSignal) =>
   ({ toolCallId: "tc", messages: [], abortSignal: signal }) as never;
 
 describe("createWaitForRunTool", () => {
-  test("returns the terminal run on the first poll without waiting", async () => {
+  it("returns the terminal run on the first poll without waiting", async () => {
     const tool = createWaitForRunTool(
       fakeMcp(() => ({ status: 200, body: { status: "success", result: { ok: 1 } } })),
     );
@@ -34,7 +34,7 @@ describe("createWaitForRunTool", () => {
     expect(out.error).toBeNull();
   });
 
-  test("surfaces a >=400 platform response as an error (never converges)", async () => {
+  it("surfaces a >=400 platform response as an error (never converges)", async () => {
     const tool = createWaitForRunTool(
       fakeMcp(() => ({ status: 404, body: { detail: "not found" } })),
     );
@@ -43,7 +43,7 @@ describe("createWaitForRunTool", () => {
     expect(out.detail).toEqual({ detail: "not found" });
   });
 
-  test("returns aborted=true when the signal is already aborted", async () => {
+  it("returns aborted=true when the signal is already aborted", async () => {
     const tool = createWaitForRunTool(
       fakeMcp(() => ({ status: 200, body: { status: "running" } })),
     );
@@ -54,7 +54,7 @@ describe("createWaitForRunTool", () => {
     expect(out).toEqual({ run_id: "run_2", aborted: true });
   });
 
-  test("errors cleanly when invoke_operation is absent on the session", async () => {
+  it("errors cleanly when invoke_operation is absent on the session", async () => {
     const tool = createWaitForRunTool({} as ToolSet);
     const out = (await tool.execute!({ run_id: "run_3" }, opts())) as Record<string, unknown>;
     expect(out.error).toContain("invoke_operation tool unavailable");

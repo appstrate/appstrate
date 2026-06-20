@@ -8494,7 +8494,8 @@ export interface operations {
                 "application/json": {
                     messages: Record<string, never>[];
                     modelId?: string;
-                    sessionId?: string;
+                    /** @description Thread id (assistant-ui) */
+                    id?: string;
                     context?: {
                         type: string;
                         id: string;

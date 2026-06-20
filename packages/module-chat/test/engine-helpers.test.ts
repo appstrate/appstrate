@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test, afterEach } from "bun:test";
+import { describe, expect, it, afterEach } from "bun:test";
 import type { UIMessage } from "ai";
 import { buildPromptFromMessages, buildSdkEnv } from "../src/claude-agent/engine.ts";
 
@@ -16,11 +16,11 @@ const assistantMsg = (text: string): UIMessage => ({
 });
 
 describe("buildPromptFromMessages", () => {
-  test("a single user turn is sent verbatim (no transcript labels)", () => {
+  it("a single user turn is sent verbatim (no transcript labels)", () => {
     expect(buildPromptFromMessages([userMsg("salut")])).toBe("salut");
   });
 
-  test("multi-turn threads become a labelled transcript", () => {
+  it("multi-turn threads become a labelled transcript", () => {
     const prompt = buildPromptFromMessages([
       userMsg("bonjour"),
       assistantMsg("salut, comment puis-je aider ?"),
@@ -31,7 +31,7 @@ describe("buildPromptFromMessages", () => {
     );
   });
 
-  test("skips messages with no text content and ignores non-text parts", () => {
+  it("skips messages with no text content and ignores non-text parts", () => {
     const withTool: UIMessage = {
       id: "x",
       role: "assistant",
@@ -40,7 +40,7 @@ describe("buildPromptFromMessages", () => {
     expect(buildPromptFromMessages([userMsg("hi"), withTool])).toBe("User: hi\n\nAssistant: ok");
   });
 
-  test("returns an empty string when there is no usable content", () => {
+  it("returns an empty string when there is no usable content", () => {
     expect(buildPromptFromMessages([])).toBe("");
     expect(buildPromptFromMessages([userMsg("   ")])).toBe("");
   });
@@ -51,7 +51,7 @@ describe("buildSdkEnv — credential isolation", () => {
     delete process.env.APPSTRATE_FAKE_SECRET;
   });
 
-  test("injects the gateway pointers and a placeholder bearer", () => {
+  it("injects the gateway pointers and a placeholder bearer", () => {
     const env = buildSdkEnv("http://127.0.0.1:3000/api/llm-proxy/claude-code-sdk/p1", "chatloop_x");
     expect(env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:3000/api/llm-proxy/claude-code-sdk/p1");
     expect(env.ANTHROPIC_AUTH_TOKEN).toBe("chatloop_x");
@@ -59,7 +59,7 @@ describe("buildSdkEnv — credential isolation", () => {
     expect(env.ANTHROPIC_API_KEY).toBe("");
   });
 
-  test("does NOT forward arbitrary platform secrets to the spawned binary", () => {
+  it("does NOT forward arbitrary platform secrets to the spawned binary", () => {
     process.env.APPSTRATE_FAKE_SECRET = "super-secret-value";
     const env = buildSdkEnv("http://gw", "tok");
     expect(env.APPSTRATE_FAKE_SECRET).toBeUndefined();
@@ -68,7 +68,7 @@ describe("buildSdkEnv — credential isolation", () => {
     delete process.env.APPSTRATE_FAKE_SECRET;
   });
 
-  test("passes through only the runtime essentials the binary needs", () => {
+  it("passes through only the runtime essentials the binary needs", () => {
     const env = buildSdkEnv("http://gw", "tok");
     // PATH is required to spawn; it is forwarded when present.
     if (process.env.PATH) expect(env.PATH).toBe(process.env.PATH);

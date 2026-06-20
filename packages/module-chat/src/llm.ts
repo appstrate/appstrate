@@ -185,20 +185,23 @@ function cacheApp(orgId: string, id: string | null): void {
     const oldest = appCache.keys().next().value;
     if (oldest !== undefined) appCache.delete(oldest);
   }
-  cacheApp(orgId, id);
+  appCache.set(orgId, id);
 }
 
 export async function resolveDefaultApplicationId(
   origin: string,
   headers: Record<string, string>,
   orgId: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<string | undefined> {
   const cached = appCache.get(orgId);
   if (cached !== undefined) return cached ?? undefined;
   try {
-    const res = await fetch(`${origin}/api/applications`, { headers });
+    const res = await fetchImpl(`${origin}/api/applications`, { headers });
     if (!res.ok) {
-      cacheApp(orgId, null);
+      // Transient upstream failure — do NOT cache, or a single blip would
+      // poison the cache and strip app-scoped MCP tools for this org until
+      // eviction. Return undefined and let the next call retry.
       return undefined;
     }
     interface App {
@@ -208,10 +211,12 @@ export async function resolveDefaultApplicationId(
     const body = (await res.json()) as { data?: App[] } | App[];
     const apps = Array.isArray(body) ? body : (body.data ?? []);
     const id = (apps.find((a) => a.isDefault) ?? apps[0])?.id ?? null;
+    // Only resolved state is cached: a real id, or null for "org genuinely has
+    // no application" — never a transient fetch failure.
     cacheApp(orgId, id);
     return id ?? undefined;
   } catch {
-    cacheApp(orgId, null);
+    // Network error — transient, don't poison the cache.
     return undefined;
   }
 }

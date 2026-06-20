@@ -57,11 +57,41 @@ export function buildClaudeSdkEnv(opts: {
   placeholderToken: string;
   extra?: Record<string, string>;
 }): Record<string, string> {
-  const passthrough = ["PATH", "HOME", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL"];
+  // Forward the proxy vars so the spawned `claude` binary's native tools
+  // (Bash/WebFetch) egress through the sidecar forward-proxy — the same
+  // outbound isolation the Pi runner gets. Without these the subprocess would
+  // reach the internet directly, bypassing the sidecar's allowlist/MITM.
+  // Both casings: curl/libcurl read lowercase, Node/Bun read uppercase.
+  const passthrough = [
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "LANG",
+    "LC_ALL",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+  ];
   const env: Record<string, string> = {};
   for (const key of passthrough) {
     const value = process.env[key];
     if (value) env[key] = value;
+  }
+  // The container sets only the uppercase proxy vars; mirror them to lowercase
+  // so curl/wget (which prefer lowercase) inside native Bash also egress through
+  // the sidecar. Mirror lowercase→uppercase too for completeness.
+  for (const [upper, lower] of [
+    ["HTTP_PROXY", "http_proxy"],
+    ["HTTPS_PROXY", "https_proxy"],
+    ["NO_PROXY", "no_proxy"],
+  ] as const) {
+    if (env[upper] && !env[lower]) env[lower] = env[upper];
+    if (env[lower] && !env[upper]) env[upper] = env[lower];
   }
   // Keep the subscription binary quiet and non-self-updating in a server.
   env.DISABLE_AUTOUPDATER = "1";

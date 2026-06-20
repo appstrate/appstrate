@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   CHAT_LOOPBACK_AUTH_METHOD,
   chatLoopbackStrategy,
@@ -20,7 +20,7 @@ function authHeaders(token: string): Headers {
 }
 
 describe("mintLoopbackToken + chatLoopbackStrategy round-trip", () => {
-  test("a freshly minted token authenticates back to the caller's identity", async () => {
+  it("a freshly minted token authenticates back to the caller's identity", async () => {
     const token = mintLoopbackToken(claims);
     const res = await chatLoopbackStrategy.authenticate({ headers: authHeaders(token) } as never);
     expect(res).not.toBeNull();
@@ -30,7 +30,7 @@ describe("mintLoopbackToken + chatLoopbackStrategy round-trip", () => {
     expect(res!.authMethod).toBe(CHAT_LOOPBACK_AUTH_METHOD);
   });
 
-  test("resolves exactly the least-privilege permission set", async () => {
+  it("resolves exactly the least-privilege permission set", async () => {
     const res = await chatLoopbackStrategy.authenticate({
       headers: authHeaders(mintLoopbackToken(claims)),
     } as never);
@@ -39,25 +39,25 @@ describe("mintLoopbackToken + chatLoopbackStrategy round-trip", () => {
 });
 
 describe("chatLoopbackStrategy rejection paths", () => {
-  test("no-match: a foreign Authorization header passes straight through (null)", async () => {
+  it("no-match: a foreign Authorization header passes straight through (null)", async () => {
     const res = await chatLoopbackStrategy.authenticate({
       headers: new Headers({ authorization: "Bearer ask_somethingelse" }),
     } as never);
     expect(res).toBeNull();
   });
 
-  test("no-match: a missing Authorization header is ignored", async () => {
+  it("no-match: a missing Authorization header is ignored", async () => {
     const res = await chatLoopbackStrategy.authenticate({ headers: new Headers() } as never);
     expect(res).toBeNull();
   });
 
-  test("expired token is refused", async () => {
+  it("expired token is refused", async () => {
     const token = mintLoopbackToken(claims, { ttlMs: -1 });
     const res = await chatLoopbackStrategy.authenticate({ headers: authHeaders(token) } as never);
     expect(res).toBeNull();
   });
 
-  test("tampered signature is refused", async () => {
+  it("tampered signature is refused", async () => {
     const token = mintLoopbackToken(claims);
     const [payload] = token.slice("chatloop_".length).split(".");
     const forged = `chatloop_${payload}.${"A".repeat(43)}`;
@@ -65,7 +65,7 @@ describe("chatLoopbackStrategy rejection paths", () => {
     expect(res).toBeNull();
   });
 
-  test("tampered payload (valid shape, wrong signature) is refused", async () => {
+  it("tampered payload (valid shape, wrong signature) is refused", async () => {
     const good = mintLoopbackToken(claims);
     const evil = mintLoopbackToken({ ...claims, orgRole: "owner" });
     const goodSig = good.slice("chatloop_".length).split(".")[1];
@@ -76,7 +76,7 @@ describe("chatLoopbackStrategy rejection paths", () => {
     expect(res).toBeNull();
   });
 
-  test("malformed token (no dot separator) is refused", async () => {
+  it("malformed token (no dot separator) is refused", async () => {
     const res = await chatLoopbackStrategy.authenticate({
       headers: authHeaders("chatloop_garbage"),
     } as never);

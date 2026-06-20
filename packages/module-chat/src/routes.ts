@@ -22,7 +22,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { requireModulePermission } from "@appstrate/core/permissions";
-import { notFound, parseBody } from "@appstrate/core/api-errors";
+import { notFound, parseBody, invalidRequest } from "@appstrate/core/api-errors";
 import { handleChatStream } from "./chat-stream.ts";
 import { handleGenerateTitle } from "./title.ts";
 
@@ -198,6 +198,12 @@ export function createChatRouter() {
     async (c) => {
       const session = await getOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
       const entry = parseBody(messageEntrySchema, await c.req.json().catch(() => null));
+      // `content` is a notNull jsonb column; z.unknown() permits a missing/null
+      // value which would hit the DB as NULL → 500. Reject it as a 400 instead.
+      if (entry.content == null) {
+        throw invalidRequest("content is required", "content");
+      }
+      const content = entry.content as typeof chatMessages.$inferInsert.content;
 
       await db
         .insert(chatMessages)
@@ -206,13 +212,13 @@ export function createChatRouter() {
           messageId: entry.id,
           parentId: entry.parent_id,
           format: entry.format,
-          content: (entry.content ?? null) as typeof chatMessages.$inferInsert.content,
+          content,
         })
         .onConflictDoUpdate({
           target: [chatMessages.sessionId, chatMessages.messageId],
           set: {
             parentId: entry.parent_id,
-            content: (entry.content ?? null) as typeof chatMessages.$inferInsert.content,
+            content,
             format: entry.format,
           },
         });

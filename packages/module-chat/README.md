@@ -43,3 +43,14 @@ inachevé.
 - **Sélecteur de modèle** dans `ChatPanel` : le header `X-Model-Id` est câblé côté serveur, le sélecteur côté UI reste à ajouter.
 - **Rate limiting** : `rateLimit()`/`idempotency()` sont internes à apps/api ; un module npm ne peut pas encore les appliquer tant qu'ils ne sont pas exportés.
 - **End-users** : `endUserGrantable` reste désactivé jusqu'à l'arrivée du chat embarqué B2B2C.
+
+## Configuration (variables d'environnement)
+
+Ces variables sont lues directement par le module (pas via le schéma Zod
+`@appstrate/env`), toutes optionnelles :
+
+| Variable                      | Défaut                   | Rôle                                                                                                                                                                                                        |
+| ----------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CHAT_SELF_ORIGIN`            | `http://127.0.0.1:$PORT` | Origine loopback pour les appels in-process (`/api/models`, `/api/llm-proxy`, `/api/mcp`). **Doit rester loopback** : ce hop transmet le cookie/Authorization de l'appelant (rejeté sinon — cf. `self.ts`). |
+| `CHAT_CLAUDE_MAX_CONCURRENCY` | `6`                      | Nombre maximum de tours claude-code (Agent SDK) exécutés simultanément par processus.                                                                                                                       |
+| `CHAT_DEBUG`                  | _(absent)_               | Si défini, active les logs de debug verbeux du module.                                                                                                                                                      |

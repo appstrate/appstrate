@@ -76,8 +76,6 @@ export async function handleGenerateTitle(c: Context<any>): Promise<Response> {
           body: e.responseBody,
         });
       },
-      // Codex (ChatGPT) backend quirks, ignored by other providers (see chat-stream).
-      providerOptions: { openai: { store: false, instructions: SYSTEM } },
     });
     return c.json({ title: cleanTitle(await result.text) });
   } catch (err) {
