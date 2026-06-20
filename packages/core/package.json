@@ -79,7 +79,8 @@
     "./pairing-token": "./src/pairing-token.ts",
     "./jwt": "./src/jwt.ts",
     "./credential-template": "./src/credential-template.ts",
-    "./dedupe-label": "./src/dedupe-label.ts"
+    "./dedupe-label": "./src/dedupe-label.ts",
+    "./extraction": "./src/extraction.ts"
   },
   "dependencies": {
     "@afps-spec/schema": "^0.6.1",
@@ -96,10 +97,14 @@
     "@aws-sdk/lib-storage": "^3",
     "@aws-sdk/s3-request-presigner": "^3",
     "hono": "^4.12.9",
-    "typescript": "^5"
+    "typescript": "^5",
+    "unpdf": "^1.4.0"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-s3": {
+      "optional": true
+    },
+    "unpdf": {
       "optional": true
     },
     "@aws-sdk/lib-storage": {
