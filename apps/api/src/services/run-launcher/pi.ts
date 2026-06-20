@@ -26,7 +26,7 @@ import { logger } from "../../lib/logger.ts";
 import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
 import { buildRuntimePiEnv } from "@appstrate/runner-pi";
-import { selectRunEngine } from "./engine-select.ts";
+import { selectRunEngine, buildOauthSidecarLlm } from "./engine-select.ts";
 import {
   getOrchestrator,
   type ContainerOrchestrator,
@@ -45,11 +45,7 @@ import {
 
 import { getEnv } from "@appstrate/env";
 import { isOAuthModelProvider, getModelProvider } from "../model-providers/registry.ts";
-import type {
-  LlmProxyConfig,
-  LlmProxyOauthConfig,
-  SidecarLaunchSpec,
-} from "@appstrate/core/sidecar-types";
+import type { LlmProxyConfig, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 
 /** Terminal state reported back to the caller once the container has exited. */
 export interface PlatformContainerResult {
@@ -180,19 +176,25 @@ async function runPlatformContainerImpl(
       ? { alias: llmConfig.aliasId, real: llmConfig.modelId }
       : undefined;
 
+    // Engine selection (Pi vs the official Claude Agent SDK). Computed once and
+    // reused for both the sidecar `/llm` mode (forging `oauth` vs non-forging
+    // `oauth-passthrough`) and the container's RUN_ENGINE.
+    const engine = selectRunEngine(llmConfig, getEnv().RUNNER_CLAUDE_ENGINE);
+
     let sidecarLlm: LlmProxyConfig | undefined;
     if (isOauthCredential) {
       // Read `oauthWireFormat` straight from the registry at the sidecar-
       // config boundary — the provider definition is the source of truth.
+      // `buildOauthSidecarLlm` ignores it on the `claude` engine path (the
+      // official binary signs its own fingerprint → no forging).
       const providerCfg = getModelProvider(llmConfig.providerId);
-      const oauthCfg: LlmProxyOauthConfig = {
-        authMode: "oauth",
+      sidecarLlm = buildOauthSidecarLlm({
+        engine,
         baseUrl: llmConfig.baseUrl,
         credentialId: llmConfig.credentialId!,
         ...(providerCfg?.oauthWireFormat ? { wireFormat: providerCfg.oauthWireFormat } : {}),
         ...(modelSwap ? { modelSwap } : {}),
-      };
-      sidecarLlm = oauthCfg;
+      });
     } else if (llmApiKey) {
       // API-key flow: the sidecar forwards directly to the upstream
       // provider. The Pi SDK's native retry (Retry-After honoring +
@@ -247,7 +249,7 @@ async function runPlatformContainerImpl(
     // platform/sidecar boundary. The sidecar overwrites Authorization with
     // a fresh upstream token at request time — see `runtime-pi/sidecar/`.
     const containerEnv = buildRuntimePiEnv({
-      engine: selectRunEngine(llmConfig, getEnv().RUNNER_CLAUDE_ENGINE),
+      engine,
       model: {
         api: llmConfig.apiShape,
         modelId,

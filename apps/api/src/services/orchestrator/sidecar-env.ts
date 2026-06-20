@@ -31,10 +31,10 @@ export function applySpecToSidecarEnv(
     target.MODEL_MAX_TOKENS = String(spec.modelMaxTokens);
   }
   if (spec.llm) {
-    if (spec.llm.authMode === "oauth") {
-      // OAuth wire format: ship the LlmProxyOauthConfig as JSON so
-      // server.ts parses it into config.llm at boot. Without this,
-      // /llm/* returns 503 "LLM proxy not configured".
+    if (spec.llm.authMode === "oauth" || spec.llm.authMode === "oauth-passthrough") {
+      // OAuth config (forging `oauth` or non-forging `oauth-passthrough`): ship
+      // the full LlmProxyConfig as JSON so server.ts parses it into config.llm
+      // at boot. Without this, /llm/* returns 503 "LLM proxy not configured".
       target.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(spec.llm);
     } else {
       target.PI_BASE_URL = spec.llm.baseUrl;

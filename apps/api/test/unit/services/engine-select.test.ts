@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { selectRunEngine } from "../../../src/services/run-launcher/engine-select.ts";
+import {
+  selectRunEngine,
+  buildOauthSidecarLlm,
+} from "../../../src/services/run-launcher/engine-select.ts";
 
 describe("selectRunEngine", () => {
   it("routes claude-code to the Claude engine when enabled", () => {
@@ -24,5 +27,49 @@ describe("selectRunEngine", () => {
     for (const providerId of ["claude-code", "anthropic", "codex", "openai-compatible"]) {
       expect(selectRunEngine({ providerId }, false)).toBe("pi");
     }
+  });
+});
+
+describe("buildOauthSidecarLlm", () => {
+  const wireFormat = {
+    identityHeaders: { "x-app": "cli" },
+    systemPrepend: { type: "text" as const, text: "You are Claude Code." },
+  };
+
+  it("uses oauth-passthrough on the claude engine and drops the forging wireFormat", () => {
+    const cfg = buildOauthSidecarLlm({
+      engine: "claude",
+      baseUrl: "https://api.anthropic.com",
+      credentialId: "cred_1",
+      wireFormat,
+    });
+    expect(cfg).toEqual({
+      authMode: "oauth-passthrough",
+      baseUrl: "https://api.anthropic.com",
+      credentialId: "cred_1",
+    });
+    // No identity-header / system-prepend forging leaks onto the passthrough path.
+    expect("wireFormat" in cfg).toBe(false);
+  });
+
+  it("uses forging oauth on the pi engine and keeps the wireFormat", () => {
+    const cfg = buildOauthSidecarLlm({
+      engine: "pi",
+      baseUrl: "https://api.anthropic.com",
+      credentialId: "cred_1",
+      wireFormat,
+    });
+    expect(cfg.authMode).toBe("oauth");
+    expect((cfg as { wireFormat?: unknown }).wireFormat).toEqual(wireFormat);
+  });
+
+  it("carries modelSwap through on both engines", () => {
+    const modelSwap = { alias: "appstrate-small", real: "claude-haiku-4-5" };
+    expect(
+      buildOauthSidecarLlm({ engine: "claude", baseUrl: "u", credentialId: "c", modelSwap }),
+    ).toMatchObject({ authMode: "oauth-passthrough", modelSwap });
+    expect(
+      buildOauthSidecarLlm({ engine: "pi", baseUrl: "u", credentialId: "c", modelSwap }),
+    ).toMatchObject({ authMode: "oauth", modelSwap });
   });
 });
