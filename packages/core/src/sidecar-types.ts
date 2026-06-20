@@ -482,7 +482,10 @@ export interface IntegrationSpawnSpec {
  *     body transforms read from `wireFormat` (system-prepend, force-stream,
  *     force-store).
  */
-export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
+export type LlmProxyConfig =
+  | LlmProxyApiKeyConfig
+  | LlmProxyOauthConfig
+  | LlmProxyOauthPassthroughConfig;
 
 /**
  * Canonical wire-format identifier for every LLM model provider Appstrate
@@ -549,6 +552,34 @@ export interface LlmProxyOauthConfig {
    * transforms apply.
    */
   wireFormat?: OAuthWireFormat;
+}
+
+/**
+ * OAuth **pass-through** mode — the ToS-clean path for an agent driver that
+ * signs its OWN provider fingerprint (the official Claude Agent SDK binary).
+ *
+ * Unlike {@link LlmProxyOauthConfig} (`authMode: "oauth"`), the sidecar here
+ * does NOT forge anything: no {@link OAuthWireFormat} identity headers, no
+ * `system`-prepend / `forceStream` body transform. It only resolves a fresh
+ * access token from the platform, swaps the request bearer for it, and ensures
+ * the OAuth beta flag ({@link oauthBeta}) is present — leaving the driver's own
+ * user-agent / `x-app` / `anthropic-beta` fingerprint untouched. This is the
+ * runner-side counterpart of the chat's `claude-code-sdk-gateway` and the
+ * reason the Pi `oauthWireFormat` forge can be retired for `claude-code` runs.
+ */
+export interface LlmProxyOauthPassthroughConfig {
+  authMode: "oauth-passthrough";
+  /** Fallback base URL — the sidecar prefers `baseUrl` returned by the platform's token endpoint. */
+  baseUrl: string;
+  /** ID of the `model_provider_credentials` row backing this OAuth connection. */
+  credentialId: string;
+  /**
+   * OAuth beta flag ensured on the outbound `anthropic-beta` header (merged,
+   * never replacing the driver's own betas). Defaults to `oauth-2025-04-20`.
+   */
+  oauthBeta?: string;
+  /** Set for model aliases — rewrite `model` alias↔real in req/resp. See {@link ModelSwap}. */
+  modelSwap?: ModelSwap;
 }
 
 /**

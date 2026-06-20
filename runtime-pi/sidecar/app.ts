@@ -16,6 +16,7 @@ import {
   type SidecarConfig,
   type CredentialsResponse,
   type LlmProxyOauthConfig,
+  type LlmProxyOauthPassthroughConfig,
   type ModelSwap,
 } from "./helpers.ts";
 import {
@@ -163,7 +164,24 @@ const HEADER_CANONICAL_CASE: Record<string, string> = {
 interface LlmStreamObservation {
   targetUrl?: string;
   credentialId?: string;
-  authMode?: "oauth" | "api_key";
+  authMode?: "oauth" | "oauth-passthrough" | "api_key";
+}
+
+/** Default OAuth beta flag merged onto outbound `anthropic-beta` in passthrough mode. */
+const DEFAULT_OAUTH_BETA = "oauth-2025-04-20";
+
+/**
+ * Merge an OAuth beta flag into a comma-separated `anthropic-beta` header
+ * without dropping the driver's own betas (e.g. the Agent SDK's context/feature
+ * flags). Order-preserving; idempotent.
+ */
+export function mergeAnthropicBeta(existing: string | undefined, beta: string): string {
+  const parts = (existing ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!parts.includes(beta)) parts.push(beta);
+  return parts.join(",");
 }
 
 async function passUpstream(
@@ -506,6 +524,10 @@ export function createApp(deps: AppDeps): Hono {
       return handleOauthLlmRequest(c, config.llm);
     }
 
+    if (config.llm.authMode === "oauth-passthrough") {
+      return handleOauthPassthroughLlmRequest(c, config.llm);
+    }
+
     const apiKeyConfig = config.llm; // discriminated narrowing
     const baseUrl = apiKeyConfig.baseUrl;
 
@@ -736,6 +758,131 @@ export function createApp(deps: AppDeps): Hono {
         targetUrl,
         credentialId: llmConfig.credentialId,
         authMode: "oauth",
+      },
+      llmConfig.modelSwap,
+    );
+  }
+
+  // OAuth pass-through: resolve the real bearer and ensure the OAuth beta is
+  // present, but DO NOT forge — no identity headers, no body transform. The
+  // driver (the official Claude Agent SDK binary) signs its own fingerprint;
+  // we forward its user-agent / x-app / anthropic-beta untouched. This is the
+  // ToS-clean runner path and the in-container twin of the chat's
+  // `claude-code-sdk-gateway`.
+  async function handleOauthPassthroughLlmRequest(
+    c: Context,
+    llmConfig: LlmProxyOauthPassthroughConfig,
+  ): Promise<Response> {
+    const tokenCache = deps.oauthTokenCache;
+    if (!tokenCache) {
+      return c.json({ error: "OAuth token cache not configured" }, 503);
+    }
+
+    let token: CachedToken;
+    try {
+      token = await tokenCache.getToken(llmConfig.credentialId);
+    } catch (err) {
+      if (err instanceof NeedsReconnectionError) {
+        return c.json(
+          { error: "OAuth connection needs reconnection", needsReconnection: true },
+          401,
+        );
+      }
+      return c.json({ error: `OAuth token resolution failed: ${stringifyError(err)}` }, 502);
+    }
+
+    const baseUrl = llmConfig.baseUrl;
+    if (isBlockedUrl(baseUrl)) {
+      return c.json({ error: "Resolved OAuth base URL targets a blocked network range" }, 403);
+    }
+
+    const path = c.req.path.slice("/llm".length) || "/";
+    const qs = new URL(c.req.url).search;
+    const targetUrl = `${baseUrl}${path}${qs}`;
+    const method = c.req.method;
+    const oauthBeta = llmConfig.oauthBeta ?? DEFAULT_OAUTH_BETA;
+
+    // Forward the driver's headers verbatim except: drop any x-api-key (this
+    // path is bearer-only), force the real bearer, and merge the OAuth beta.
+    // The driver's own fingerprint (user-agent, x-app, anthropic-beta) is
+    // preserved — the whole point of pass-through.
+    const buildHeaders = (accessToken: string): Record<string, string> => {
+      const filtered = filterHeaders(c.req.header(), new Set(["x-api-key"]));
+      const headers: Record<string, string> = { ...filtered };
+      // filterHeaders preserves original casing — find any anthropic-beta variant.
+      let betaKey: string | undefined;
+      for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === "anthropic-beta") betaKey = key;
+        if (key.toLowerCase() === "authorization") delete headers[key];
+      }
+      headers["anthropic-beta"] = mergeAnthropicBeta(
+        betaKey ? headers[betaKey] : undefined,
+        oauthBeta,
+      );
+      if (betaKey && betaKey !== "anthropic-beta") delete headers[betaKey];
+      headers["authorization"] = `Bearer ${accessToken}`;
+      return headers;
+    };
+
+    // Buffer the request body (inference JSON, bounded by
+    // SIDECAR_MAX_REQUEST_BODY_BYTES) so a 401 can be replayed after a token
+    // refresh — a consumed stream can't be. Apply the model-alias swap here
+    // when configured; otherwise forward the body verbatim.
+    let body: string | undefined;
+    if (method !== "GET" && method !== "HEAD") {
+      const text = await c.req.raw.text();
+      body =
+        text && llmConfig.modelSwap
+          ? swapRequestModel(text, llmConfig.modelSwap)
+          : text || undefined;
+    }
+
+    const doFetch = (headers: Record<string, string>): Promise<Response> =>
+      fetchFn(targetUrl, {
+        method,
+        headers,
+        body,
+        signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
+      } as RequestInit);
+
+    let upstream: Response;
+    try {
+      upstream = await doFetch(buildHeaders(token.accessToken));
+    } catch (err) {
+      logger.error("oauth-passthrough llm: upstream fetch threw", {
+        credentialId: llmConfig.credentialId,
+        targetUrl,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return llmFetchErrorResponse(c, targetUrl, err);
+    }
+
+    upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
+
+    // 401 retry: invalidate + force-refresh the token, replay once.
+    if (upstream.status === 401) {
+      tokenCache.invalidate(llmConfig.credentialId);
+      try {
+        const refreshed = await tokenCache.forceRefresh(llmConfig.credentialId);
+        upstream = await doFetch(buildHeaders(refreshed.accessToken));
+        upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
+      } catch (err) {
+        if (err instanceof NeedsReconnectionError) {
+          return c.json(
+            { error: "OAuth connection needs reconnection", needsReconnection: true },
+            401,
+          );
+        }
+        // Fall through with whatever we have — best-effort.
+      }
+    }
+
+    return passUpstream(
+      upstream,
+      {
+        targetUrl,
+        credentialId: llmConfig.credentialId,
+        authMode: "oauth-passthrough",
       },
       llmConfig.modelSwap,
     );
