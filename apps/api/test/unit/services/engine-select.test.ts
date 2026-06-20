@@ -13,9 +13,13 @@ describe("selectRunEngine", () => {
     expect(selectRunEngine({ providerId: "claude-code" })).toBe("claude");
   });
 
-  it("routes every other provider to Pi", () => {
+  it("routes codex to the Codex engine (official Codex CLI)", () => {
+    expect(selectRunEngine({ providerId: "codex" })).toBe("codex");
+  });
+
+  it("routes every api-key provider to Pi", () => {
     // anthropic (api-key) shares the apiShape but must stay on Pi.
-    for (const providerId of ["anthropic", "openai", "codex", "openai-compatible"]) {
+    for (const providerId of ["anthropic", "openai", "openai-compatible"]) {
       expect(selectRunEngine({ providerId })).toBe("pi");
     }
   });
@@ -38,9 +42,19 @@ describe("assertRunnableOnEngine", () => {
     ).not.toThrow();
   });
 
+  it("allows a codex oauth credential on the codex engine", () => {
+    expect(() =>
+      assertRunnableOnEngine({ engine: "codex", providerId: "codex", isOauthCredential: true }),
+    ).not.toThrow();
+  });
+
   it("rejects an oauth-subscription provider that resolves to pi (no forging fallback)", () => {
     expect(() =>
-      assertRunnableOnEngine({ engine: "pi", providerId: "codex", isOauthCredential: true }),
+      assertRunnableOnEngine({
+        engine: "pi",
+        providerId: "some-oauth-sub",
+        isOauthCredential: true,
+      }),
     ).toThrow(UnrunnableOauthProviderError);
   });
 });

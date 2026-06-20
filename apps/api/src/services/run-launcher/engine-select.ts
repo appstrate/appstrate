@@ -9,25 +9,32 @@
  * instead — the ToS-clean path where the official `claude` binary signs its own
  * client fingerprint.
  *
- * There is deliberately no fingerprint-forging fallback. An OAuth-subscription
- * provider whose driver cannot sign its own fingerprint (e.g. codex) has no
- * runnable engine — {@link assertRunnableOnEngine} rejects it rather than forge.
+ * There is deliberately no fingerprint-forging fallback. Each OAuth-subscription
+ * provider runs on the engine that drives the vendor's OFFICIAL binary (which
+ * signs its own fingerprint): `claude-code` → Claude Agent SDK, `codex` → Codex
+ * CLI. A subscription with no such engine is rejected by
+ * {@link assertRunnableOnEngine} rather than forged.
  */
 
 import type { LlmProxyOauthConfig, ModelSwap } from "@appstrate/core/sidecar-types";
 
 /** The in-container agent engine for a run. */
-export type RunEngine = "pi" | "claude";
+export type RunEngine = "pi" | "claude" | "codex";
 
 /** Provider id of the Claude Pro/Max/Team subscription credential. */
 const CLAUDE_CODE_PROVIDER_ID = "claude-code";
+/** Provider id of the Codex (ChatGPT Plus/Pro/Business) subscription credential. */
+const CODEX_PROVIDER_ID = "codex";
 
 /**
  * Pick the engine for a resolved model. `claude-code` → `"claude"` (official
- * Claude Agent SDK); everything else → `"pi"`. Pure for unit testing.
+ * Claude Agent SDK), `codex` → `"codex"` (official Codex CLI); everything else →
+ * `"pi"`. Pure for unit testing.
  */
 export function selectRunEngine(resolved: { providerId: string }): RunEngine {
-  return resolved.providerId === CLAUDE_CODE_PROVIDER_ID ? "claude" : "pi";
+  if (resolved.providerId === CLAUDE_CODE_PROVIDER_ID) return "claude";
+  if (resolved.providerId === CODEX_PROVIDER_ID) return "codex";
+  return "pi";
 }
 
 /**
@@ -38,9 +45,10 @@ export class UnrunnableOauthProviderError extends Error {
   constructor(public readonly providerId: string) {
     super(
       `Provider "${providerId}" uses an OAuth subscription credential but has no ` +
-        `ToS-compliant execution engine. Subscription runs are only supported for ` +
-        `"claude-code" (the official Claude Agent SDK, which signs its own client ` +
-        `fingerprint). Connect an API-key model provider to run this agent.`,
+        `ToS-compliant execution engine. Subscription runs are supported for ` +
+        `"claude-code" (Claude Agent SDK) and "codex" (Codex CLI) — both drive the ` +
+        `vendor's official binary, which signs its own client fingerprint. Connect ` +
+        `an API-key model provider to run this agent.`,
     );
     this.name = "UnrunnableOauthProviderError";
   }
@@ -48,18 +56,19 @@ export class UnrunnableOauthProviderError extends Error {
 
 /**
  * Guard: an OAuth-subscription credential can only execute on an engine whose
- * driver signs its own client fingerprint. Today that is exclusively the
- * `claude` engine (claude-code). Any other subscription resolves to the `pi`
- * engine, which has no forging path — so we refuse. Throws
- * {@link UnrunnableOauthProviderError}.
+ * driver signs its own client fingerprint — the `claude` (claude-code) or
+ * `codex` engine. Any other subscription resolves to the `pi` engine, which has
+ * no forging path — so we refuse. Throws {@link UnrunnableOauthProviderError}.
  */
+const SUBSCRIPTION_ENGINES: ReadonlySet<RunEngine> = new Set(["claude", "codex"]);
+
 export function assertRunnableOnEngine(params: {
   engine: RunEngine;
   providerId: string;
   isOauthCredential: boolean;
 }): void {
   const { engine, providerId, isOauthCredential } = params;
-  if (isOauthCredential && engine !== "claude") {
+  if (isOauthCredential && !SUBSCRIPTION_ENGINES.has(engine)) {
     throw new UnrunnableOauthProviderError(providerId);
   }
 }
