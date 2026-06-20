@@ -12,8 +12,10 @@
     "@appstrate/core": "workspace:*",
     "@appstrate/mcp-transport": "workspace:*",
     "@appstrate/runner-claude": "workspace:*",
+    "@appstrate/runner-codex": "workspace:*",
     "@appstrate/runner-pi": "workspace:*",
     "@mariozechner/pi-coding-agent": "0.73.1",
-    "@mariozechner/pi-ai": "0.73.1"
+    "@mariozechner/pi-ai": "0.73.1",
+    "@openai/codex": "^0.141.0"
   }
 }

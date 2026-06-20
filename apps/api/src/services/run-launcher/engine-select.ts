@@ -27,6 +27,16 @@ const CLAUDE_CODE_PROVIDER_ID = "claude-code";
 const CODEX_PROVIDER_ID = "codex";
 
 /**
+ * Per-run egress allowlist for a `codex` run's forward proxy. The Codex CLI
+ * holds the real subscription token in-container (it talks to the upstream
+ * directly), so its outbound traffic is locked to OpenAI's hosts only —
+ * `chatgpt.com` (the Codex backend) and `openai.com` (auth/api, suffix-matched).
+ * Every other destination is refused, so the token cannot be exfiltrated. The
+ * platform host stays reachable regardless (HMAC-scoped sink traffic).
+ */
+export const CODEX_EGRESS_ALLOWLIST: readonly string[] = ["chatgpt.com", "openai.com"];
+
+/**
  * Pick the engine for a resolved model. `claude-code` → `"claude"` (official
  * Claude Agent SDK), `codex` → `"codex"` (official Codex CLI); everything else →
  * `"pi"`. Pure for unit testing.

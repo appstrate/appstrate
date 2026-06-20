@@ -26,7 +26,12 @@ import { logger } from "../../lib/logger.ts";
 import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
 import { buildRuntimePiEnv } from "@appstrate/runner-pi";
-import { selectRunEngine, assertRunnableOnEngine, buildOauthSidecarLlm } from "./engine-select.ts";
+import {
+  selectRunEngine,
+  assertRunnableOnEngine,
+  buildOauthSidecarLlm,
+  CODEX_EGRESS_ALLOWLIST,
+} from "./engine-select.ts";
 import {
   getOrchestrator,
   type ContainerOrchestrator,
@@ -189,8 +194,19 @@ async function runPlatformContainerImpl(
     });
 
     let sidecarLlm: LlmProxyConfig | undefined;
-    if (isOauthCredential) {
-      // Only the `claude` engine reaches here (asserted above). The official
+    // Codex runs hold the real token in-container and lock egress to OpenAI's
+    // hosts (the binary talks to the upstream directly; no reverse proxy is
+    // possible). Set only for the `codex` engine.
+    let egressAllowlist: readonly string[] | undefined;
+    if (engine === "codex") {
+      // Vend mode: the sidecar hands the resolved token to the in-container
+      // Codex runner via `/credential-vend` instead of swapping the bearer in
+      // flight. No model alias (subscription models aren't aliased).
+      sidecarLlm = { authMode: "vend", credentialId: llmConfig.credentialId! };
+      egressAllowlist = CODEX_EGRESS_ALLOWLIST;
+    } else if (isOauthCredential) {
+      // Only the `claude` engine reaches here (codex took the branch above, and
+      // assertRunnableOnEngine rejected any other oauth provider). The official
       // binary signs its own fingerprint, so the sidecar just swaps the bearer
       // + ensures the OAuth beta — no forging.
       sidecarLlm = buildOauthSidecarLlm({
@@ -224,6 +240,8 @@ async function runPlatformContainerImpl(
       // sidecar applies a conservative fallback when either is unset.
       ...(llmConfig.contextWindow != null ? { modelContextWindow: llmConfig.contextWindow } : {}),
       ...(llmConfig.maxTokens != null ? { modelMaxTokens: llmConfig.maxTokens } : {}),
+      // Codex runs: lock the forward proxy to OpenAI's hosts (in-container token).
+      ...(egressAllowlist ? { egressAllowlist } : {}),
       // Phase 1.4 — integrations the sidecar will spawn + multiplex onto
       // the agent-facing `/mcp` surface. Resolved upstream by
       // `resolveIntegrationSpawns` (run-context-builder).

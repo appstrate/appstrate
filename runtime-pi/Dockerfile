@@ -74,6 +74,7 @@ COPY packages/core/src            packages/core/src
 COPY packages/mcp-transport/src   packages/mcp-transport/src
 COPY packages/runner-pi/src       packages/runner-pi/src
 COPY packages/runner-claude/src   packages/runner-claude/src
+COPY packages/runner-codex/src    packages/runner-codex/src
 COPY runtime-pi/extensions/       runtime-pi/extensions/
 COPY runtime-pi/mcp/              runtime-pi/mcp/
 COPY runtime-pi/*.ts              runtime-pi/
@@ -197,6 +198,11 @@ COPY --chown=pi:pi packages/runner-pi/package.json      ./packages/runner-pi/
 # only its src + manifest + workspace symlink are needed.
 COPY --chown=pi:pi packages/runner-claude/src           ./packages/runner-claude/src
 COPY --chown=pi:pi packages/runner-claude/package.json  ./packages/runner-claude/
+# runner-codex is source-only with no extra runtime deps of its own (workspace
+# packages already present + the external Codex CLI binary), so only its src +
+# manifest + workspace symlink are needed.
+COPY --chown=pi:pi packages/runner-codex/src            ./packages/runner-codex/src
+COPY --chown=pi:pi packages/runner-codex/package.json   ./packages/runner-codex/
 COPY --chown=pi:pi packages/core/src                    ./packages/core/src
 COPY --chown=pi:pi packages/core/package.json           ./packages/core/
 COPY --chown=pi:pi packages/afps-shared/src             ./packages/afps-shared/src
@@ -205,12 +211,13 @@ COPY --chown=pi:pi packages/afps-shared/package.json    ./packages/afps-shared/
 # Restore the `@appstrate/*` workspace symlinks materialised by
 # `bun install` (docker COPY dereferences them into real directories).
 RUN mkdir -p node_modules/@appstrate \
- && rm -rf  node_modules/@appstrate/afps-runtime node_modules/@appstrate/afps-shared node_modules/@appstrate/mcp-transport node_modules/@appstrate/runner-pi node_modules/@appstrate/runner-claude node_modules/@appstrate/core \
+ && rm -rf  node_modules/@appstrate/afps-runtime node_modules/@appstrate/afps-shared node_modules/@appstrate/mcp-transport node_modules/@appstrate/runner-pi node_modules/@appstrate/runner-claude node_modules/@appstrate/runner-codex node_modules/@appstrate/core \
  && ln -s   /runtime/packages/afps-runtime  node_modules/@appstrate/afps-runtime \
  && ln -s   /runtime/packages/afps-shared   node_modules/@appstrate/afps-shared \
  && ln -s   /runtime/packages/mcp-transport node_modules/@appstrate/mcp-transport \
  && ln -s   /runtime/packages/runner-pi     node_modules/@appstrate/runner-pi \
  && ln -s   /runtime/packages/runner-claude node_modules/@appstrate/runner-claude \
+ && ln -s   /runtime/packages/runner-codex  node_modules/@appstrate/runner-codex \
  && ln -s   /runtime/packages/core          node_modules/@appstrate/core \
  && chown -h pi:pi \
         node_modules/@appstrate \
@@ -219,6 +226,7 @@ RUN mkdir -p node_modules/@appstrate \
         node_modules/@appstrate/mcp-transport \
         node_modules/@appstrate/runner-pi \
         node_modules/@appstrate/runner-claude \
+        node_modules/@appstrate/runner-codex \
         node_modules/@appstrate/core
 
 # Pi SDK pair (@mariozechner/pi-ai, @mariozechner/pi-coding-agent) lands
@@ -245,6 +253,26 @@ RUN mkdir -p node_modules/@anthropic-ai \
  && chown -h pi:pi \
         node_modules/@anthropic-ai \
         node_modules/@anthropic-ai/claude-agent-sdk
+
+# The Codex CLI (`@openai/codex`) is a direct dep of `appstrate-pi-runtime`, so
+# bun symlinks it into runtime-pi/node_modules. The bundled entrypoint resolves
+# from /runtime/node_modules, so surface it there (same pattern as the Claude
+# SDK above). `resolveCodexBinary` hops through the main package's scope to its
+# per-arch `@openai/codex-<plat>-<arch>` optional-dep sibling (a musl-static
+# binary that runs on Alpine), so no separate symlink is needed for that sibling.
+RUN mkdir -p node_modules/@openai \
+ && ln -s /runtime/runtime-pi/node_modules/@openai/codex node_modules/@openai/codex \
+ && chown -h pi:pi \
+        node_modules/@openai \
+        node_modules/@openai/codex
+
+# Belt-and-suspenders: also expose the resolved musl `codex` binary on PATH at
+# /usr/local/bin/codex, so the runner's final fallback (bare `codex`) works even
+# if the per-arch scope resolution ever fails. Primary path stays
+# `resolveCodexBinary`; this is a safety net only. Done as root before USER pi.
+RUN set -e; \
+    CODEX_BIN="$(find /runtime/node_modules /runtime/runtime-pi/node_modules -path '*vendor/*-linux-musl/bin/codex' -type f 2>/dev/null | head -1)"; \
+    if [ -n "$CODEX_BIN" ]; then chmod +x "$CODEX_BIN"; ln -sf "$CODEX_BIN" /usr/local/bin/codex; echo "codex binary on PATH -> $CODEX_BIN"; else echo "WARN: codex musl binary not found at build time"; fi
 
 # Bootstrap sources. Glob is single-level (no recursion into `sidecar/`
 # or `test/`), so adding a new `.ts` file at `runtime-pi/*.ts` is picked

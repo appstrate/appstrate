@@ -389,6 +389,20 @@
         "@anthropic-ai/claude-agent-sdk": "^0.3.183",
       },
     },
+    "packages/runner-codex": {
+      "name": "@appstrate/runner-codex",
+      "version": "0.0.0",
+      "dependencies": {
+        "@appstrate/afps-runtime": "workspace:*",
+        "@appstrate/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@openai/codex": "^0.141.0",
+      },
+      "peerDependencies": {
+        "@openai/codex": "^0.141.0",
+      },
+    },
     "packages/runner-pi": {
       "name": "@appstrate/runner-pi",
       "version": "0.0.0",
@@ -461,9 +475,11 @@
         "@appstrate/core": "workspace:*",
         "@appstrate/mcp-transport": "workspace:*",
         "@appstrate/runner-claude": "workspace:*",
+        "@appstrate/runner-codex": "workspace:*",
         "@appstrate/runner-pi": "workspace:*",
         "@mariozechner/pi-ai": "0.73.1",
         "@mariozechner/pi-coding-agent": "0.73.1",
+        "@openai/codex": "^0.141.0",
       },
     },
     "runtime-pi/sidecar": {
@@ -563,6 +579,8 @@
     "@appstrate/module-codex": ["@appstrate/module-codex@workspace:packages/module-codex"],
 
     "@appstrate/runner-claude": ["@appstrate/runner-claude@workspace:packages/runner-claude"],
+
+    "@appstrate/runner-codex": ["@appstrate/runner-codex@workspace:packages/runner-codex"],
 
     "@appstrate/runner-pi": ["@appstrate/runner-pi@workspace:packages/runner-pi"],
 

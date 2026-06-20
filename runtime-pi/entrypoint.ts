@@ -48,7 +48,9 @@ import {
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { ClaudeAgentRunner } from "@appstrate/runner-claude";
+import { CodexAgentRunner } from "@appstrate/runner-codex";
 import { resolveClaudeCodeBinary, makeSdkScopeResolver } from "@appstrate/core/claude-binary";
+import { resolveCodexBinary, makeCodexScopeResolver } from "@appstrate/core/codex-binary";
 import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import {
   BUNDLE_FORMAT_VERSION,
@@ -427,7 +429,12 @@ const sidecarUrl = env.sidecarUrl;
 // runtime tools + the sidecar `/mcp` over HTTP), so the Pi-specific MCP client
 // + extension factories below are skipped for it — but the integration boot
 // gate stays (engine-agnostic).
-const runEngine: "pi" | "claude" = process.env.RUN_ENGINE === "claude" ? "claude" : "pi";
+const runEngine: "pi" | "claude" | "codex" =
+  process.env.RUN_ENGINE === "claude"
+    ? "claude"
+    : process.env.RUN_ENGINE === "codex"
+      ? "codex"
+      : "pi";
 
 // When no sidecar is attached (no integrations + static API
 // key), the agent runs without MCP-backed tools. The platform wires
@@ -737,9 +744,54 @@ function buildClaudeAgentRunner(): ClaudeAgentRunner {
   });
 }
 
+/**
+ * Construct the Codex CLI runner (a `codex` run). It drives the official
+ * `codex` binary as a subprocess. Unlike the Claude runner, the binary talks to
+ * the upstream (`chatgpt.com`) DIRECTLY — its models-manager ignores any base-URL
+ * override — so the sidecar cannot reverse-proxy it. Instead the runner VENDS
+ * the real subscription token from the sidecar's `/credential-vend` at run start
+ * and the binary egresses straight out, locked to the provider's hosts by the
+ * sidecar's per-run egress allowlist. Nothing is forged (the binary signs its
+ * own fingerprint).
+ */
+function buildCodexAgentRunner(): CodexAgentRunner {
+  if (!sidecarUrl) {
+    // A codex run is always OAuth → always sidecar-backed (the vend endpoint
+    // that hands over the real token). No sidecar means a launcher bug.
+    throw new Error("Codex engine selected but no sidecar is attached (no /credential-vend).");
+  }
+  const base = sidecarUrl.replace(/\/$/, "");
+  // Resolve order: explicit CODEX_BINARY_PATH → the bundled per-arch package →
+  // bare `codex` on PATH (the image also symlinks the binary onto PATH as a
+  // belt-and-suspenders). Mirrors the chat engine's fallback chain.
+  let codexBinary: string;
+  if (process.env.CODEX_BINARY_PATH) {
+    codexBinary = process.env.CODEX_BINARY_PATH;
+  } else {
+    try {
+      codexBinary = resolveCodexBinary({ resolve: makeCodexScopeResolver(import.meta.url) });
+    } catch {
+      codexBinary = "codex";
+    }
+  }
+  return new CodexAgentRunner({
+    binaryPath: codexBinary,
+    modelId: env.modelId,
+    systemPrompt,
+    credentialUrl: `${base}/credential-vend`,
+    cwd: WORKSPACE,
+    modelCost: env.modelCost,
+  });
+}
+
 const startTime = Date.now();
 try {
-  const runner = runEngine === "claude" ? buildClaudeAgentRunner() : buildPiRunner();
+  const runner =
+    runEngine === "claude"
+      ? buildClaudeAgentRunner()
+      : runEngine === "codex"
+        ? buildCodexAgentRunner()
+        : buildPiRunner();
 
   await runner.run({
     bundle: runnerBundle,
