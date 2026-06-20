@@ -26,6 +26,7 @@
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
 import { createStorageRouter, createDiskSchema } from "./routes.ts";
 import { setCredentialProxy } from "./service.ts";
+import { setEventEmitter } from "./events.ts";
 import { storagePaths, storageComponentSchemas } from "./openapi.ts";
 import { z } from "zod";
 
@@ -48,6 +49,11 @@ const storageModule: AppstrateModule = {
     // API through it, reusing the user's existing integration connection (no
     // module-side OAuth). The native + S3 disks don't need it.
     setCredentialProxy(ctx.services.credentialProxy.call);
+    //
+    // Capture the platform event emitter: every object mutation forwards a
+    // storage→search event (`object.upserted`/`deleted`/`acl_changed`) onto the
+    // bus for `search` to index/evict/re-scope. Fire-and-forget — see events.ts.
+    setEventEmitter(ctx.services.events.emit);
     //
     // Per-route rate limiting is wired through `setRateLimitFactory` (routes.ts)
     // — left UNWIRED here because the core `PlatformServices` does not expose a
