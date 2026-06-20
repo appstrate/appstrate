@@ -26,6 +26,7 @@ import { logger } from "../../lib/logger.ts";
 import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
 import { buildRuntimePiEnv } from "@appstrate/runner-pi";
+import { selectRunEngine } from "./engine-select.ts";
 import {
   getOrchestrator,
   type ContainerOrchestrator,
@@ -246,6 +247,7 @@ async function runPlatformContainerImpl(
     // platform/sidecar boundary. The sidecar overwrites Authorization with
     // a fresh upstream token at request time — see `runtime-pi/sidecar/`.
     const containerEnv = buildRuntimePiEnv({
+      engine: selectRunEngine(llmConfig, getEnv().RUNNER_CLAUDE_ENGINE),
       model: {
         api: llmConfig.apiShape,
         modelId,
