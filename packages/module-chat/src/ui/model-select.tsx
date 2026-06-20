@@ -14,13 +14,20 @@ import { CHAT_USABLE_FAMILIES } from "../chat-families.ts";
 
 export interface OrgModelOption {
   id: string;
-  modelId: string;
-  apiShape: string;
-  providerId?: string;
+  /** `null` for model aliases — the real binding is hidden from the browser. */
+  modelId: string | null;
+  /** `null` for model aliases — the backing protocol is hidden from the browser. */
+  apiShape: string | null;
+  providerId?: string | null;
   label: string | null;
   isDefault?: boolean;
   enabled?: boolean;
+  /** Model-alias flag — selectable in chat without exposing the backing model. */
+  aliased?: boolean;
 }
+
+/** Group/button label for an alias — provider-neutral so the backing stays hidden. */
+const ALIAS_LABEL = "Alias";
 
 export async function fetchModels(
   getHeaders?: () => Record<string, string>,
@@ -32,12 +39,20 @@ export async function fetchModels(
     });
     if (!res.ok) return [];
     const body = (await res.json()) as { models?: OrgModelOption[]; data?: OrgModelOption[] };
-    // Same filter as the server (pickModel in llm.ts) — shared set so they
+    // Same family gate as the server (pickModel in llm.ts) — shared set so they
     // never drift. claude-code is selectable via its anthropic-messages
     // apiShape; the server routes it to the Claude Agent SDK engine by
     // providerId.
+    //
+    // Model aliases reach this cookie-authed surface with their backing stripped
+    // (`apiShape: null`), so the family gate can't see it — but they're meant to
+    // be usable in chat (the user picks the alias; the server resolves the real
+    // model). Always include enabled aliases; the loopback `pickModel` does the
+    // authoritative family check against the real (unstripped) backing.
     return (body.models ?? body.data ?? []).filter(
-      (m) => m.enabled !== false && CHAT_USABLE_FAMILIES.has(m.apiShape),
+      (m) =>
+        m.enabled !== false &&
+        (m.aliased === true || (!!m.apiShape && CHAT_USABLE_FAMILIES.has(m.apiShape))),
     );
   } catch {
     return [];
@@ -51,10 +66,17 @@ const PROVIDERS: Record<string, string> = {
   "mistral-conversations": "Mistral",
 };
 
-function providerLabel(model: { apiShape: string; providerId?: string }): string {
+function providerLabel(model: {
+  apiShape: string | null;
+  providerId?: string | null;
+  aliased?: boolean;
+}): string {
+  // Aliases hide their backing — group/badge them neutrally, never by the real
+  // provider/protocol (which is null on the browser-facing projection anyway).
+  if (model.aliased) return ALIAS_LABEL;
   if (model.providerId === "claude-code") return "Claude Code";
   if (model.providerId === "codex") return "ChatGPT";
-  return PROVIDERS[model.apiShape] ?? model.apiShape;
+  return (model.apiShape && PROVIDERS[model.apiShape]) || ALIAS_LABEL;
 }
 
 interface Props {
