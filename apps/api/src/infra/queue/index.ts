@@ -14,6 +14,16 @@ export type {
 } from "./interface.ts";
 export { PermanentJobError } from "./interface.ts";
 
+/**
+ * Whether THIS process executes job handlers. This branch has no worker-role
+ * split (no `apps/api/src/worker.ts`), so every process that creates a queue
+ * also processes it inline. Restore the `APP_ROLE=api` enqueue-only gate here
+ * — and in `createQueue` — when a dedicated worker process lands.
+ */
+export function queueProcessingEnabled(): boolean {
+  return true;
+}
+
 /** Create a job queue — BullMQ when Redis is available, in-memory otherwise. */
 export async function createQueue<T>(
   name: string,

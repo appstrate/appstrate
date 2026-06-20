@@ -383,6 +383,39 @@ export interface ModuleHooks {
   afterRun: (params: RunStatusChangeParams) => Promise<Record<string, unknown> | null>;
 }
 
+/**
+ * The object ACL carried on storage→search events. `storage` owns this
+ * (source of truth); `search` denormalises a copy onto its index and re-syncs
+ * it on `onStorageObjectAclChanged` (strategy §5 — the Onyx pitfall).
+ */
+export interface StorageObjectEventAcl {
+  visibility: "org" | "private";
+  ownerId: string | null;
+}
+
+/** `onStorageObjectUpserted` payload — a stored object to (re)index by id. */
+export interface StorageObjectUpsertedParams {
+  /** The OPAQUE object id consumers read bytes by — never the driver key. */
+  id: string;
+  orgId: string;
+  diskId: string;
+  mime: string | null;
+  acl: StorageObjectEventAcl;
+}
+
+/** `onStorageObjectDeleted` payload — evict the object from the index. */
+export interface StorageObjectDeletedParams {
+  id: string;
+  orgId: string;
+}
+
+/** `onStorageObjectAclChanged` payload — re-scope the object's index copy. */
+export interface StorageObjectAclChangedParams {
+  id: string;
+  orgId: string;
+  acl: StorageObjectEventAcl;
+}
+
 /** Known events and their signatures. Handlers may be sync or async. */
 export interface ModuleEvents {
   /** Run status changed — broadcast on every run lifecycle transition. */
@@ -400,6 +433,16 @@ export interface ModuleEvents {
   onOrgCreate: (orgId: string, userEmail: string) => void | Promise<void>;
   /** Org deleted — broadcast before an organization is deleted. */
   onOrgDelete: (orgId: string) => void | Promise<void>;
+  /**
+   * A storage object was created or its bytes changed — (re)index it.
+   * Emitted by `storage` through `services.events.emit`, consumed by `search`.
+   * The storage→search seam (strategy §5): events, never JOIN.
+   */
+  onStorageObjectUpserted: (params: StorageObjectUpsertedParams) => void | Promise<void>;
+  /** A storage object was deleted — evict it from the index. */
+  onStorageObjectDeleted: (params: StorageObjectDeletedParams) => void | Promise<void>;
+  /** A storage object's ACL changed — re-scope the index's denormalised copy. */
+  onStorageObjectAclChanged: (params: StorageObjectAclChangedParams) => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -935,14 +978,61 @@ export interface ModuleInitContext {
 }
 
 // ---------------------------------------------------------------------------
+// Module job queues — the structural subset of the platform queue surface
+// exposed to modules through `services.queues`. The platform's own JobQueue
+// implementations (BullMQ / in-memory) satisfy these shapes structurally;
+// modules never import apps/api internals. Scheduler (cron) methods are
+// deliberately absent — no module consumer.
+// ---------------------------------------------------------------------------
+
+export interface ModuleQueueJob<T> {
+  readonly id: string;
+  readonly name: string;
+  readonly data: T;
+  readonly attemptsMade: number;
+}
+
+export interface ModuleJobAddOptions {
+  attempts?: number;
+  backoff?: { type: "custom" };
+  removeOnComplete?: number | boolean;
+  removeOnFail?: number | boolean;
+}
+
+export interface ModuleWorkerOptions {
+  concurrency?: number;
+  limiter?: { max: number; duration: number };
+  /** Custom backoff strategy: given attempt number (1-based), return delay in ms. */
+  backoffStrategy?: (attempt: number) => number;
+}
+
+export interface ModuleJobQueue<T> {
+  /** Add a one-shot job. Returns job ID. */
+  add(name: string, data: T, opts?: ModuleJobAddOptions): Promise<string>;
+  /**
+   * Start processing jobs with the given handler. No-op when the process role
+   * excludes job processing (`APP_ROLE=api`) — check
+   * `services.queues.processingEnabled` to log/branch explicitly. A handler
+   * that throws is retried up to the queue's `attempts`; return cleanly for
+   * "nothing to do" so a vanished input never burns the retry budget.
+   */
+  process(handler: (job: ModuleQueueJob<T>) => Promise<void>, opts?: ModuleWorkerOptions): void;
+  /** Graceful shutdown: drain active jobs, close connections. */
+  shutdown(): Promise<void>;
+  /** Current queue depth (waiting/delayed/active). */
+  count(): Promise<number>;
+}
+
+// ---------------------------------------------------------------------------
 // PlatformServices — injected platform capabilities
 //
 // Deliberately minimal: a capability lands here ONLY when a real cross-tenant
 // consumer needs it (the same razor `scripts/verify-module-contract.ts`
-// applies to the `AppstrateModule` members). Today the sole consumer is the
-// `cloud` billing module, which reads the per-run `llm_usage` ledger via
-// `runs.listLlmUsage`. The previous broad surface (orchestrator / pubsub /
-// realtime / inline / packages / models / applications / run CRUD) mirrored
+// applies to the `AppstrateModule` members). Consumers today: the `cloud`
+// billing module (`runs.listLlmUsage`), `storage` (`credentialProxy`), and
+// `search` (`events` for the storage seam + `queues` for the heavy
+// extract/embed ingestion). The previous broad surface (orchestrator / pubsub
+// / realtime / inline / packages / models / applications / run CRUD) mirrored
 // the in-process `chat` module that has since been removed — it carried zero
 // live consumers, so it was dropped rather than left as speculative API.
 // Re-add a member here the moment a second consumer genuinely needs it.
@@ -951,6 +1041,40 @@ export interface ModuleInitContext {
 export interface PlatformServices {
   /** Structured JSON logger (pino). */
   logger: Logger;
+  /**
+   * Emit a module event to ALL loaded modules that listen for it (the same
+   * broadcast fan-out the platform uses for its own events: every handler is
+   * called, errors isolated per handler). This lets one module SIGNAL another
+   * without importing it — the cross-module path is events, never a SQL join
+   * or a code dependency.
+   *
+   * Consumer: `storage` emits `onStorageObject{Upserted,Deleted,AclChanged}`
+   * for `search` to index/evict/re-scope (strategy §5). The razor (a capability
+   * lands here only with a real consumer) is satisfied: search is that consumer.
+   */
+  events: {
+    emit<E extends keyof ModuleEvents>(
+      name: E,
+      ...args: Parameters<ModuleEvents[E]>
+    ): Promise<void>;
+  };
+  /**
+   * Background job queues — BullMQ when Redis is configured, in-memory
+   * otherwise. Queue names are global: prefix with the module id (e.g.
+   * `search-indexing`) to avoid collisions.
+   *
+   * Consumer: `search` runs its heavy extract → chunk → embed ingestion off
+   * the request path so a storage upsert never blocks on indexing. Deployment
+   * roles (`APP_ROLE`): `combined` (default) processes jobs in-process; `api`
+   * only enqueues (a separate `worker` process consumes); splitting roles
+   * requires Redis (in-memory queues are per-process — the platform warns and
+   * keeps processing inline).
+   */
+  queues: {
+    create<T>(name: string, defaults?: ModuleJobAddOptions): Promise<ModuleJobQueue<T>>;
+    /** Whether THIS process executes job handlers (role ≠ `api`). */
+    processingEnabled: boolean;
+  };
   /** Run-ledger read surface. */
   runs: {
     /**

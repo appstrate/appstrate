@@ -28,7 +28,20 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.logger.info).toBe("function");
   });
 
-  it("wires the run-ledger read (runs.listLlmUsage — sole cross-tenant consumer: cloud)", () => {
+  it("wires the run-ledger read (runs.listLlmUsage — consumer: cloud)", () => {
     expect(typeof services.runs.listLlmUsage).toBe("function");
+  });
+
+  it("wires the credential proxy (credentialProxy.call — consumer: storage)", () => {
+    expect(typeof services.credentialProxy.call).toBe("function");
+  });
+
+  it("wires the event emitter (events.emit — consumer: storage→search seam)", () => {
+    expect(typeof services.events.emit).toBe("function");
+  });
+
+  it("wires job queues (queues.create + processingEnabled — consumer: search ingestion)", () => {
+    expect(typeof services.queues.create).toBe("function");
+    expect(typeof services.queues.processingEnabled).toBe("boolean");
   });
 });
