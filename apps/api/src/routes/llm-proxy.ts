@@ -24,8 +24,13 @@
  *     forging any client identity — the chat's official Claude Agent SDK signs
  *     the legit Claude Code fingerprint itself. See
  *     services/llm-proxy/claude-code-sdk-gateway.ts.
- *   - No other subscription has a chat path. The generic gateway forges
- *     nothing, so an OAuth-subscription model (e.g. codex) is refused with
+ *   - The Codex (ChatGPT) subscription (`codex`) is served by the
+ *     `/codex-sdk/:presetId/*` gateway, which swaps the placeholder bearer for
+ *     the real subscription token + stamps the real chatgpt-account-id — again
+ *     WITHOUT forging any client identity (the official `codex` CLI signs its
+ *     own fingerprint). See services/llm-proxy/codex-sdk-gateway.ts.
+ *   - The generic gateway (`proxyLlmCall`) forges nothing, so an
+ *     OAuth-subscription model with no dedicated CLI gateway is refused with
  *     `LlmProxyUnsupportedSubscriptionError`. Connect an API-key provider.
  *
  * Security:
@@ -63,6 +68,7 @@ import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
 import { handleClaudeCodeSdkGateway } from "../services/llm-proxy/claude-code-sdk-gateway.ts";
+import { handleCodexSdkGateway } from "../services/llm-proxy/codex-sdk-gateway.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -131,6 +137,26 @@ export function createLlmProxyRouter() {
       rateLimit(limits.rate_per_min),
       requirePermission("llm-proxy", "call"),
       sdkGateway,
+    );
+  }
+
+  // Codex (ChatGPT) subscription CLI gateway — FIRST-PARTY ONLY. The chat
+  // module's official `codex` CLI is pointed here via `-c chatgpt_base_url=…`;
+  // the gateway swaps the placeholder bearer for the real subscription token +
+  // stamps the real chatgpt-account-id, forging nothing (the CLI signs its own
+  // fingerprint). A wildcard path forwards whatever subpath the CLI appends
+  // (`/responses`, `/api/codex/ps/mcp`, …). See
+  // services/llm-proxy/codex-sdk-gateway.ts.
+  const codexGateway = async (c: Context<AppEnv>): Promise<Response> => {
+    assertFirstPartyOnly(c.get("authMethod"), "Codex CLI gateway");
+    return handleCodexSdkGateway(c, limits.max_request_bytes);
+  };
+  for (const path of ["/codex-sdk/:presetId/*", "/codex-sdk/:presetId"]) {
+    router.all(
+      path,
+      rateLimit(limits.rate_per_min),
+      requirePermission("llm-proxy", "call"),
+      codexGateway,
     );
   }
 
