@@ -1,26 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Runner engine selection (plan §5 / Phase 3).
+ * Runner engine selection.
  *
  * Which in-container agent engine a run executes on. Pi (the
- * `@mariozechner/pi-coding-agent` loop) is the default for everything; a
+ * `@mariozechner/pi-coding-agent` loop) runs every API-key provider; a
  * `claude-code` subscription run executes on the official **Claude Agent SDK**
- * instead — the ToS-clean path that lets the official `claude` binary sign its
- * own client fingerprint, removing the sidecar `oauthWireFormat` forging the
- * Pi path relies on for subscriptions.
+ * instead — the ToS-clean path where the official `claude` binary signs its own
+ * client fingerprint.
  *
- * Selection is gated by `RUNNER_CLAUDE_ENGINE` (a transition flag + kill-switch
- * — see `@appstrate/env`): when off, even `claude-code` stays on Pi, so the new
- * engine can land dark and flip in one place once validated.
+ * There is deliberately no fingerprint-forging fallback. An OAuth-subscription
+ * provider whose driver cannot sign its own fingerprint (e.g. codex) has no
+ * runnable engine — {@link assertRunnableOnEngine} rejects it rather than forge.
  */
 
-import type {
-  LlmProxyOauthConfig,
-  LlmProxyOauthPassthroughConfig,
-  ModelSwap,
-  OAuthWireFormat,
-} from "@appstrate/core/sidecar-types";
+import type { LlmProxyOauthConfig, ModelSwap } from "@appstrate/core/sidecar-types";
 
 /** The in-container agent engine for a run. */
 export type RunEngine = "pi" | "claude";
@@ -29,56 +23,64 @@ export type RunEngine = "pi" | "claude";
 const CLAUDE_CODE_PROVIDER_ID = "claude-code";
 
 /**
- * Pick the engine for a resolved model. `claude-code` → `"claude"` only when
- * the Claude engine is enabled; everything else (and `claude-code` while the
- * flag is off) → `"pi"`. Pure for unit testing — the caller reads the flag.
+ * Pick the engine for a resolved model. `claude-code` → `"claude"` (official
+ * Claude Agent SDK); everything else → `"pi"`. Pure for unit testing.
  */
-export function selectRunEngine(
-  resolved: { providerId: string },
-  claudeEngineEnabled: boolean,
-): RunEngine {
-  if (claudeEngineEnabled && resolved.providerId === CLAUDE_CODE_PROVIDER_ID) {
-    return "claude";
-  }
-  return "pi";
+export function selectRunEngine(resolved: { providerId: string }): RunEngine {
+  return resolved.providerId === CLAUDE_CODE_PROVIDER_ID ? "claude" : "pi";
 }
 
 /**
- * Build the sidecar `/llm` config for an OAuth-credentialled run, choosing the
- * forging vs non-forging mode by engine:
- *
- *   - `claude` engine → `oauth-passthrough`: the official Claude Agent SDK
- *     binary signs its OWN fingerprint, so the sidecar must NOT apply
- *     `oauthWireFormat` (no identity headers, no system-prepend). It only swaps
- *     the bearer + ensures the OAuth beta.
- *   - `pi` engine → `oauth`: the Pi SDK does not sign a subscription
- *     fingerprint, so the sidecar forges it from the provider's `wireFormat`.
- *
- * Pure for unit testing. `wireFormat` is ignored on the `claude` path by
- * construction — passing it is harmless, mirroring the registry lookup the
- * caller does once for both branches.
+ * Thrown when a run cannot execute because its credential is an OAuth
+ * subscription with no ToS-compliant engine.
+ */
+export class UnrunnableOauthProviderError extends Error {
+  constructor(public readonly providerId: string) {
+    super(
+      `Provider "${providerId}" uses an OAuth subscription credential but has no ` +
+        `ToS-compliant execution engine. Subscription runs are only supported for ` +
+        `"claude-code" (the official Claude Agent SDK, which signs its own client ` +
+        `fingerprint). Connect an API-key model provider to run this agent.`,
+    );
+    this.name = "UnrunnableOauthProviderError";
+  }
+}
+
+/**
+ * Guard: an OAuth-subscription credential can only execute on an engine whose
+ * driver signs its own client fingerprint. Today that is exclusively the
+ * `claude` engine (claude-code). Any other subscription resolves to the `pi`
+ * engine, which has no forging path — so we refuse. Throws
+ * {@link UnrunnableOauthProviderError}.
+ */
+export function assertRunnableOnEngine(params: {
+  engine: RunEngine;
+  providerId: string;
+  isOauthCredential: boolean;
+}): void {
+  const { engine, providerId, isOauthCredential } = params;
+  if (isOauthCredential && engine !== "claude") {
+    throw new UnrunnableOauthProviderError(providerId);
+  }
+}
+
+/**
+ * Build the sidecar `/llm` config for an OAuth-subscription run. The official
+ * Claude Agent SDK binary signs its OWN fingerprint, so the sidecar only swaps
+ * the bearer + ensures the OAuth beta — no identity headers, no system-prepend,
+ * no body transform. Callers MUST have passed {@link assertRunnableOnEngine}
+ * first (only the `claude` engine ever reaches here). Pure for unit testing.
  */
 export function buildOauthSidecarLlm(params: {
-  engine: RunEngine;
   baseUrl: string;
   credentialId: string;
-  wireFormat?: OAuthWireFormat;
   modelSwap?: ModelSwap;
-}): LlmProxyOauthConfig | LlmProxyOauthPassthroughConfig {
-  const { engine, baseUrl, credentialId, wireFormat, modelSwap } = params;
-  if (engine === "claude") {
-    return {
-      authMode: "oauth-passthrough",
-      baseUrl,
-      credentialId,
-      ...(modelSwap ? { modelSwap } : {}),
-    };
-  }
+}): LlmProxyOauthConfig {
+  const { baseUrl, credentialId, modelSwap } = params;
   return {
     authMode: "oauth",
     baseUrl,
     credentialId,
-    ...(wireFormat ? { wireFormat } : {}),
     ...(modelSwap ? { modelSwap } : {}),
   };
 }

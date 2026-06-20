@@ -426,14 +426,6 @@ const envSchema = z
     PI_IMAGE: z.string().default("appstrate-pi:latest"),
     SIDECAR_IMAGE: z.string().default("appstrate-sidecar:latest"),
 
-    // Transition gate for the runner's Claude Agent SDK engine (plan §5).
-    // When ON, `claude-code` subscription runs execute on the official Claude
-    // Agent SDK (ToS-clean, no forging) instead of Pi + the sidecar
-    // `oauthWireFormat` forge. Default OFF during rollout — flip to "true" once
-    // the engine + image + gateway are validated; also the operational
-    // kill-switch (fall back to Pi if the SDK path regresses).
-    RUNNER_CLAUDE_ENGINE: boolEnv("false"),
-
     // Per-run workspace volume init image. A minimal image (~5 MB) used
     // once per run to chown the freshly created Docker volume to UID
     // 1001 (the agent's `pi` user). Override only if your environment

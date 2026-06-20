@@ -19,20 +19,14 @@
  * own adapter binding instead of sharing a single dispatch table.
  *
  * Subscription shapes (FIRST-PARTY-ONLY):
- *   - `openai-codex-responses` (the `codex` ChatGPT subscription) has a proxy
- *     route restricted to first-party interactive callers
- *     (`assertFirstPartyOnly`: dashboard OIDC JWT or the chat module's
- *     in-process loopback). The invariant — an API key or external token can
- *     NEVER spend a personal subscription; the org's own members through the
- *     org's own surfaces can — is the same trust boundary as the in-container
- *     sidecar. It applies the codex module's declarative `oauthWireFormat`
- *     from the registry via `@appstrate/core/oauth-wire-format`.
- *   - The Claude Pro/Max/Team subscription (`claude-code`) is served instead by
- *     the `/claude-code-sdk/:presetId/*` gateway, which injects the token
- *     WITHOUT forging any client identity — the chat's official Claude Agent
- *     SDK signs the legit Claude Code fingerprint itself. The old forging
- *     `/claude-code-messages` adapter route is gone. See
+ *   - The Claude Pro/Max/Team subscription (`claude-code`) is served by the
+ *     `/claude-code-sdk/:presetId/*` gateway, which injects the token WITHOUT
+ *     forging any client identity — the chat's official Claude Agent SDK signs
+ *     the legit Claude Code fingerprint itself. See
  *     services/llm-proxy/claude-code-sdk-gateway.ts.
+ *   - No other subscription has a chat path. The generic gateway forges
+ *     nothing, so an OAuth-subscription model (e.g. codex) is refused with
+ *     `LlmProxyUnsupportedSubscriptionError`. Connect an API-key provider.
  *
  * Security:
  *   - Bearer auth only — API keys with `llm-proxy:call` (headless) OR
@@ -63,11 +57,11 @@ import {
   proxyLlmCall,
   LlmProxyModelApiMismatchError,
   LlmProxyUnsupportedModelError,
+  LlmProxyUnsupportedSubscriptionError,
 } from "../services/llm-proxy/core.ts";
 import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
-import { codexResponsesAdapter } from "../services/llm-proxy/codex.ts";
 import { handleClaudeCodeSdkGateway } from "../services/llm-proxy/claude-code-sdk-gateway.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
@@ -83,8 +77,6 @@ export function createLlmProxyRouter() {
     urlPath: string;
     upstreamPath: string;
     adapter: LlmProxyAdapter;
-    /** Restrict to first-party interactive callers (subscription routes). */
-    firstPartyOnly?: boolean;
   }> = [
     // `upstreamPath` mirrors each SDK's own path convention so a stored
     // `baseUrl` produces the same final URL whether pi-ai calls the
@@ -111,19 +103,6 @@ export function createLlmProxyRouter() {
       upstreamPath: "/v1/chat/completions",
       adapter: mistralConversationsAdapter,
     },
-    // Codex (ChatGPT subscription) — FIRST-PARTY ONLY. The blanket
-    // "subscriptions never proxy" rule protects against third parties
-    // (API keys, external tokens) spending a personal subscription; the
-    // org's own interactive surfaces (dashboard JWT, in-process chat
-    // loopback) are the same trust boundary as the in-container sidecar
-    // that already serves these credentials to runs. The OpenAI Responses
-    // provider appends `/responses` → urlPath ends at `/codex`.
-    {
-      urlPath: "/openai-codex-responses/codex/responses",
-      upstreamPath: "/codex/responses",
-      adapter: codexResponsesAdapter,
-      firstPartyOnly: true,
-    },
   ];
 
   for (const entry of routes) {
@@ -131,11 +110,7 @@ export function createLlmProxyRouter() {
       entry.urlPath,
       rateLimit(limits.rate_per_min),
       requirePermission("llm-proxy", "call"),
-      async (c) => {
-        if (entry.firstPartyOnly)
-          assertFirstPartyOnly(c.get("authMethod"), "Subscription LLM proxy");
-        return handleProxy(c, entry.adapter, entry.upstreamPath, limits);
-      },
+      async (c) => handleProxy(c, entry.adapter, entry.upstreamPath, limits),
     );
   }
 
@@ -226,6 +201,9 @@ async function handleProxy(
     // only for errors from an actual upstream attempt.
     if (err instanceof LlmProxyUnsupportedModelError) {
       throw invalidRequest(err.message);
+    }
+    if (err instanceof LlmProxyUnsupportedSubscriptionError) {
+      throw invalidRequest(err.message, "model");
     }
     if (err instanceof LlmProxyModelApiMismatchError) {
       throw invalidRequest(err.message, "model");

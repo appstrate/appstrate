@@ -10,12 +10,12 @@
  *
  *   - **No forging.** The Agent SDK drives the official `claude` binary,
  *     which signs the request with the legitimate Claude Code client
- *     identity itself. Unlike the (removed) `/claude-code-messages` adapter,
- *     this gateway does NOT apply any `oauthWireFormat` (no "You are Claude
- *     Code" prelude, no fingerprint headers). It is the SANCTIONED path —
- *     Anthropic's Help Center allows third-party apps on the Agent SDK with a
- *     Claude subscription. We only swap the bearer for the real subscription
- *     token + add the OAuth beta.
+ *     identity itself. This gateway forges nothing — no "You are Claude Code"
+ *     prelude, no fingerprint headers. It is the SANCTIONED path — Anthropic's
+ *     Help Center allows third-party apps on the Agent SDK with a Claude
+ *     subscription. We only swap the bearer for the real subscription token +
+ *     add the OAuth beta. (This is the chat-side twin of the runner's sidecar
+ *     `oauth` mode.)
  *   - **No body rewrite.** The SDK sends the real upstream model id and its
  *     own system prompt; we forward the body verbatim. The preset id comes
  *     from the URL (it carries the credential + cost), not `body.model`.
@@ -24,9 +24,8 @@
  *     subscription token is resolved here, server-side, and never enters the
  *     binary's environment.
  *
- * FIRST-PARTY ONLY — same trust boundary as the codex route and the
- * in-container sidecar: a personal subscription is never spendable through an
- * API key or external token.
+ * FIRST-PARTY ONLY — same trust boundary as the in-container sidecar: a
+ * personal subscription is never spendable through an API key or external token.
  */
 
 import type { Context } from "hono";

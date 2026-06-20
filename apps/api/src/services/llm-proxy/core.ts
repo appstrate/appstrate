@@ -28,7 +28,6 @@ import { cloneResponseHeaders, recordProxyUsage, tapSseUsage } from "./metering.
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getModelProvider } from "../model-providers/registry.ts";
-import { buildIdentityHeaders, applyOAuthBodyTransform } from "@appstrate/core/oauth-wire-format";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
 import {
   swapResponseModelJson,
@@ -74,6 +73,26 @@ export class LlmProxyModelApiMismatchError extends Error {
   }
 }
 
+/**
+ * Thrown when an OAuth-subscription model is requested through this generic
+ * gateway. The gateway forges nothing — a raw bearer alone won't satisfy a
+ * subscription upstream — so subscription providers have no path here. The only
+ * supported subscription is `claude-code`, served by its own dedicated SDK
+ * gateway (`claude-code-sdk-gateway.ts`), where the official Claude Agent SDK
+ * signs its own client fingerprint. Any other subscription has no
+ * ToS-compliant chat path.
+ */
+export class LlmProxyUnsupportedSubscriptionError extends Error {
+  constructor(public readonly providerId: string) {
+    super(
+      `Provider "${providerId}" is an OAuth subscription and cannot be served through ` +
+        `this gateway (no fingerprint forging). Only "claude-code" supports subscription ` +
+        `chat, via its dedicated SDK gateway. Use an API-key model instead.`,
+    );
+    this.name = "LlmProxyUnsupportedSubscriptionError";
+  }
+}
+
 export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   const fetchImpl = inputs.fetchImpl ?? fetch;
   const maxBytes = inputs.maxRequestBytes ?? DEFAULT_MAX_REQUEST_BYTES;
@@ -89,19 +108,14 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     inputs.adapter.apiShape,
   );
 
-  let rewrittenBody = request.rewriteModel(resolved.modelId);
-
-  // Subscription providers (codex, claude-code) declare an `oauthWireFormat`
-  // on their module. Apply the SAME body transform the in-container sidecar
-  // applies (system prelude + stream/store coercion) so the first-party
-  // proxy path is byte-identical to the run path — both read the module as
-  // the single source of truth (`@appstrate/core/oauth-wire-format`).
-  const wireFormat = getModelProvider(resolved.providerId)?.oauthWireFormat;
-  if (wireFormat) {
-    rewrittenBody = new TextEncoder().encode(
-      applyOAuthBodyTransform(wireFormat, new TextDecoder().decode(rewrittenBody)),
-    );
+  // No fingerprint forging: an OAuth-subscription provider has no path through
+  // this generic gateway (a bare bearer won't satisfy a subscription upstream).
+  // claude-code is served by its own SDK gateway; reject everything else.
+  if (getModelProvider(resolved.providerId)?.authMode === "oauth2") {
+    throw new LlmProxyUnsupportedSubscriptionError(resolved.providerId);
   }
+
+  const rewrittenBody = request.rewriteModel(resolved.modelId);
 
   // Model-alias swap (issue #727). When the resolved preset is an alias, the
   // upstream echoes the REAL id in its response `model` field (and may name it
@@ -147,11 +161,6 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     resolved.apiKey,
     resolved.accountId,
   );
-  // Module-declared identity headers (+ accountId echo) win over whatever
-  // the adapter set — same precedence as the sidecar.
-  if (wireFormat) {
-    Object.assign(upstreamHeaders, buildIdentityHeaders(wireFormat, resolved.accountId));
-  }
 
   const started = Date.now();
   let upstream: Response;

@@ -420,13 +420,13 @@ await progress(
 
 const sidecarUrl = env.sidecarUrl;
 
-// Engine selection (plan §5 / Phase B). Set by the launcher's `RUN_ENGINE`
-// container env (`container-env.ts`) — only ever `"claude"` for a `claude-code`
-// run while `RUNNER_CLAUDE_ENGINE` is on; everything else (and the absent var)
-// is the Pi default. The Claude engine drives the official Agent SDK and owns
-// its OWN MCP/tool wiring (in-process runtime tools + the sidecar `/mcp` over
-// HTTP), so the Pi-specific MCP client + extension factories below are skipped
-// for it — but the integration boot gate stays (engine-agnostic).
+// Engine selection. Set by the launcher's `RUN_ENGINE` container env
+// (`container-env.ts`) — `"claude"` for a `claude-code` subscription run,
+// the Pi default for everything else (and the absent var). The Claude engine
+// drives the official Agent SDK and owns its OWN MCP/tool wiring (in-process
+// runtime tools + the sidecar `/mcp` over HTTP), so the Pi-specific MCP client
+// + extension factories below are skipped for it — but the integration boot
+// gate stays (engine-agnostic).
 const runEngine: "pi" | "claude" = process.env.RUN_ENGINE === "claude" ? "claude" : "pi";
 
 // When no sidecar is attached (no integrations + static API
@@ -693,9 +693,9 @@ function buildPiRunner(): PiRunner {
 }
 
 /**
- * Construct the Claude Agent SDK runner (a `claude-code` run with the Claude
- * engine on). It drives the official `claude` binary, pointed at the sidecar's
- * non-forging `oauth-passthrough` `/llm` gateway, and reaches integrations via
+ * Construct the Claude Agent SDK runner (a `claude-code` run). It drives the
+ * official `claude` binary, pointed at the sidecar's non-forging `oauth` `/llm`
+ * gateway (swap bearer + ensure beta only), and reaches integrations via
  * the sidecar `/mcp` over HTTP (its own client, not the Pi one). Runtime tools
  * (log/note/pin/report) are hosted in-process by the runner; `output` is native
  * via the SDK's `outputFormat`.
@@ -723,8 +723,8 @@ function buildClaudeAgentRunner(): ClaudeAgentRunner {
     binaryPath: resolveClaudeCodeBinary({ resolve: makeSdkScopeResolver(import.meta.url) }),
     modelId: env.modelId,
     systemPrompt,
-    // The sidecar `/llm` runs in `oauth-passthrough`: it swaps the placeholder
-    // bearer for the real subscription token without forging a fingerprint.
+    // The sidecar `/llm` runs in `oauth` mode: it swaps the placeholder bearer
+    // for the real subscription token without forging a fingerprint.
     baseUrl: `${base}/llm`,
     placeholderToken: env.modelApiKey ?? "placeholder",
     cwd: WORKSPACE,

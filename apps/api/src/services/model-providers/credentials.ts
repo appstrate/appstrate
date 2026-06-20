@@ -63,9 +63,7 @@ export type CredentialsBlob = ApiKeyBlob | OAuthBlob;
  * Single decrypted credential shape exposed by `loadInferenceCredentials`
  * (the only public read path). Carries the registry-derived `apiShape` and
  * `baseUrl` inline so downstream consumers don't have to re-look-up
- * `getModelProvider`. The declarative `oauthWireFormat` quirks are NOT
- * ferried here — consumers (pi.ts) read them straight from the registry
- * by `providerId` at the sidecar-config boundary.
+ * `getModelProvider`.
  */
 export interface DecryptedModelProviderCredentials {
   /** Canonical registry id ("anthropic", "openai", …). */

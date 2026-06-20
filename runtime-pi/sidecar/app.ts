@@ -16,7 +16,6 @@ import {
   type SidecarConfig,
   type CredentialsResponse,
   type LlmProxyOauthConfig,
-  type LlmProxyOauthPassthroughConfig,
   type ModelSwap,
 } from "./helpers.ts";
 import {
@@ -32,12 +31,6 @@ import {
   readPositiveTokenEnv,
 } from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
-import {
-  buildIdentityHeaders,
-  transformBody,
-  adaptHeaderForRetry,
-  TransformBodyTooLargeError,
-} from "./oauth-identity.ts";
 import { logger } from "./logger.ts";
 import { filterSensitiveHeaders } from "./redact.ts";
 
@@ -164,10 +157,10 @@ const HEADER_CANONICAL_CASE: Record<string, string> = {
 interface LlmStreamObservation {
   targetUrl?: string;
   credentialId?: string;
-  authMode?: "oauth" | "oauth-passthrough" | "api_key";
+  authMode?: "oauth" | "api_key";
 }
 
-/** Default OAuth beta flag merged onto outbound `anthropic-beta` in passthrough mode. */
+/** Default OAuth beta flag merged onto outbound `anthropic-beta` in OAuth mode. */
 const DEFAULT_OAUTH_BETA = "oauth-2025-04-20";
 
 /**
@@ -503,14 +496,12 @@ export function createApp(deps: AppDeps): Hono {
   //     for the real key and forward directly to the upstream provider.
   //     Request/response bodies stream through zero-copy. The Pi SDK
   //     handles retry on 429/5xx natively (Retry-After honoring + jitter).
-  //   - oauth: the sidecar resolves a fresh access token from the
-  //     platform (`/internal/oauth-token/:id`), injects bearer +
-  //     provider identity headers, applies the declarative body
-  //     transforms read from `wireFormat` (system-prepend, force-stream,
-  //     force-store). Bodies are buffered (transform requirement) but
-  //     the response still streams. On 401 we refresh + retry once; on
-  //     the wireFormat-configured adaptive-retry trigger we strip the
-  //     designated header token and retry once.
+  //   - oauth: the ToS-clean path for a driver that signs its OWN provider
+  //     fingerprint (the official Claude Agent SDK binary). The sidecar
+  //     resolves a fresh access token from the platform
+  //     (`/internal/oauth-token/:id`), swaps the request bearer for it, and
+  //     ensures the OAuth beta header — forging nothing. On 401 we refresh +
+  //     retry once. There is no fingerprint-forging mode.
   app.all("/llm/*", async (c) => {
     if (!config.llm) {
       return c.json({ error: "LLM proxy not configured" }, 503);
@@ -522,10 +513,6 @@ export function createApp(deps: AppDeps): Hono {
 
     if (config.llm.authMode === "oauth") {
       return handleOauthLlmRequest(c, config.llm);
-    }
-
-    if (config.llm.authMode === "oauth-passthrough") {
-      return handleOauthPassthroughLlmRequest(c, config.llm);
     }
 
     const apiKeyConfig = config.llm; // discriminated narrowing
@@ -585,193 +572,14 @@ export function createApp(deps: AppDeps): Hono {
     return passUpstream(upstream, { targetUrl, authMode: "api_key" }, apiKeyConfig.modelSwap);
   });
 
+  // OAuth: resolve the real bearer and ensure the OAuth beta is present, but
+  // DO NOT forge — no identity headers, no body transform. The driver (the
+  // official Claude Agent SDK binary) signs its own fingerprint; we forward its
+  // user-agent / x-app / anthropic-beta untouched. This is the ToS-clean runner
+  // path and the in-container twin of the chat's `claude-code-sdk-gateway`.
   async function handleOauthLlmRequest(
     c: Context,
     llmConfig: LlmProxyOauthConfig,
-  ): Promise<Response> {
-    const tokenCache = deps.oauthTokenCache;
-    if (!tokenCache) {
-      return c.json({ error: "OAuth token cache not configured" }, 503);
-    }
-
-    let token: CachedToken;
-    try {
-      token = await tokenCache.getToken(llmConfig.credentialId);
-    } catch (err) {
-      if (err instanceof NeedsReconnectionError) {
-        return c.json(
-          { error: "OAuth connection needs reconnection", needsReconnection: true },
-          401,
-        );
-      }
-      return c.json({ error: `OAuth token resolution failed: ${stringifyError(err)}` }, 502);
-    }
-
-    const baseUrl = llmConfig.baseUrl;
-    if (isBlockedUrl(baseUrl)) {
-      return c.json({ error: "Resolved OAuth base URL targets a blocked network range" }, 403);
-    }
-
-    const incomingPath = c.req.path.slice("/llm".length) || "/";
-    const qs = new URL(c.req.url).search;
-    const rewrite = llmConfig.wireFormat?.rewriteUrlPath;
-    const rewrittenPath = rewrite ? incomingPath.replace(rewrite.from, rewrite.to) : incomingPath;
-    const targetUrl = `${baseUrl}${rewrittenPath}${qs}`;
-
-    const method = c.req.method;
-    const filtered = filterHeaders(c.req.header());
-    const baseHeaders: Record<string, string> = { ...filtered };
-
-    // Strip any auth/api-key/UA/accept the agent SDK may have set — the
-    // OAuth path forces all four (real bearer + provider-mandated fingerprint
-    // headers). Case-insensitive removal: filterHeaders preserves the caller's
-    // original casing, so we delete every variant before re-injecting our own.
-    const STRIP_HEADERS = ["authorization", "x-api-key", "user-agent", "accept"];
-    for (const key of Object.keys(baseHeaders)) {
-      if (STRIP_HEADERS.includes(key.toLowerCase())) {
-        delete baseHeaders[key];
-      }
-    }
-
-    const identityHeaders = buildIdentityHeaders(llmConfig.wireFormat, token);
-    let forwardedHeaders: Record<string, string> = {
-      ...baseHeaders,
-      ...identityHeaders,
-      authorization: `Bearer ${token.accessToken}`,
-    };
-
-    let bodyText: string | undefined;
-    if (method !== "GET" && method !== "HEAD") {
-      bodyText = await c.req.raw.text();
-      if (bodyText) {
-        try {
-          bodyText = transformBody(llmConfig.wireFormat, bodyText);
-        } catch (err) {
-          if (err instanceof TransformBodyTooLargeError) {
-            return c.json(
-              {
-                error: err.message,
-                limit: err.limitBytes,
-                actual: err.actualBytes,
-                envVar: "SIDECAR_MAX_REQUEST_BODY_BYTES",
-              },
-              413,
-            );
-          }
-          throw err;
-        }
-        // Model-alias swap (request alias→real) — after the wire-format
-        // transform, before content-length is recomputed.
-        if (llmConfig.modelSwap) {
-          bodyText = swapRequestModel(bodyText, llmConfig.modelSwap);
-        }
-        // Refresh content-length to match the transformed body so the
-        // upstream doesn't read a stale value forwarded from the agent.
-        forwardedHeaders["content-length"] = String(new TextEncoder().encode(bodyText).byteLength);
-      }
-    }
-
-    const doFetch = async (
-      headers: Record<string, string>,
-      body: string | undefined,
-    ): Promise<Response> => {
-      return fetchFn(targetUrl, {
-        method,
-        headers,
-        body,
-        signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
-      } as RequestInit);
-    };
-
-    let upstream: Response;
-    try {
-      upstream = await doFetch(forwardedHeaders, bodyText);
-    } catch (err) {
-      logger.error("oauth llm: upstream fetch threw", {
-        credentialId: llmConfig.credentialId,
-        targetUrl,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return llmFetchErrorResponse(c, targetUrl, err);
-    }
-
-    upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
-
-    // 401 retry: invalidate cache, force-refresh token, replay once.
-    if (upstream.status === 401) {
-      tokenCache.invalidate(llmConfig.credentialId);
-      let refreshed: CachedToken;
-      try {
-        refreshed = await tokenCache.forceRefresh(llmConfig.credentialId);
-      } catch (err) {
-        if (err instanceof NeedsReconnectionError) {
-          return c.json(
-            { error: "OAuth connection needs reconnection", needsReconnection: true },
-            401,
-          );
-        }
-        // Fall through with the original 401 — best-effort.
-        return passUpstream(
-          upstream,
-          {
-            targetUrl,
-            credentialId: llmConfig.credentialId,
-            authMode: "oauth",
-          },
-          llmConfig.modelSwap,
-        );
-      }
-      forwardedHeaders = {
-        ...forwardedHeaders,
-        ...buildIdentityHeaders(llmConfig.wireFormat, refreshed),
-        authorization: `Bearer ${refreshed.accessToken}`,
-      };
-      try {
-        upstream = await doFetch(forwardedHeaders, bodyText);
-      } catch (err) {
-        return llmFetchErrorResponse(c, targetUrl, err);
-      }
-      upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
-      // No second-level retry on the retry — propagate whatever we got.
-    }
-
-    // Adaptive header retry: provider declares the policy (status +
-    // body pattern → header-token strip) via `wireFormat.adaptiveRetry`.
-    // Best-effort, replays the request once.
-    const adaptivePolicy = llmConfig.wireFormat?.adaptiveRetry;
-    if (adaptivePolicy && upstream.status === adaptivePolicy.status) {
-      const text = await upstream.clone().text();
-      const adapted = adaptHeaderForRetry(adaptivePolicy, upstream.status, text, forwardedHeaders);
-      if (adapted) {
-        try {
-          upstream = await doFetch(adapted.headers, bodyText);
-          forwardedHeaders = adapted.headers;
-        } catch (err) {
-          return llmFetchErrorResponse(c, targetUrl, err);
-        }
-      }
-    }
-
-    return passUpstream(
-      upstream,
-      {
-        targetUrl,
-        credentialId: llmConfig.credentialId,
-        authMode: "oauth",
-      },
-      llmConfig.modelSwap,
-    );
-  }
-
-  // OAuth pass-through: resolve the real bearer and ensure the OAuth beta is
-  // present, but DO NOT forge — no identity headers, no body transform. The
-  // driver (the official Claude Agent SDK binary) signs its own fingerprint;
-  // we forward its user-agent / x-app / anthropic-beta untouched. This is the
-  // ToS-clean runner path and the in-container twin of the chat's
-  // `claude-code-sdk-gateway`.
-  async function handleOauthPassthroughLlmRequest(
-    c: Context,
-    llmConfig: LlmProxyOauthPassthroughConfig,
   ): Promise<Response> {
     const tokenCache = deps.oauthTokenCache;
     if (!tokenCache) {
@@ -849,7 +657,7 @@ export function createApp(deps: AppDeps): Hono {
     try {
       upstream = await doFetch(buildHeaders(token.accessToken));
     } catch (err) {
-      logger.error("oauth-passthrough llm: upstream fetch threw", {
+      logger.error("oauth llm: upstream fetch threw", {
         credentialId: llmConfig.credentialId,
         targetUrl,
         error: err instanceof Error ? err.message : String(err),
@@ -882,7 +690,7 @@ export function createApp(deps: AppDeps): Hono {
       {
         targetUrl,
         credentialId: llmConfig.credentialId,
-        authMode: "oauth-passthrough",
+        authMode: "oauth",
       },
       llmConfig.modelSwap,
     );

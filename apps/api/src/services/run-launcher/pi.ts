@@ -26,7 +26,7 @@ import { logger } from "../../lib/logger.ts";
 import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
 import { buildRuntimePiEnv } from "@appstrate/runner-pi";
-import { selectRunEngine, buildOauthSidecarLlm } from "./engine-select.ts";
+import { selectRunEngine, assertRunnableOnEngine, buildOauthSidecarLlm } from "./engine-select.ts";
 import {
   getOrchestrator,
   type ContainerOrchestrator,
@@ -177,22 +177,25 @@ async function runPlatformContainerImpl(
       : undefined;
 
     // Engine selection (Pi vs the official Claude Agent SDK). Computed once and
-    // reused for both the sidecar `/llm` mode (forging `oauth` vs non-forging
-    // `oauth-passthrough`) and the container's RUN_ENGINE.
-    const engine = selectRunEngine(llmConfig, getEnv().RUNNER_CLAUDE_ENGINE);
+    // reused for both the sidecar `/llm` mode and the container's RUN_ENGINE.
+    const engine = selectRunEngine(llmConfig);
+    // No fingerprint-forging fallback: an OAuth subscription provider can only
+    // run on an engine whose driver signs its own fingerprint (claude-code →
+    // the Claude Agent SDK). Anything else (e.g. codex) is rejected here.
+    assertRunnableOnEngine({
+      engine,
+      providerId: llmConfig.providerId,
+      isOauthCredential,
+    });
 
     let sidecarLlm: LlmProxyConfig | undefined;
     if (isOauthCredential) {
-      // Read `oauthWireFormat` straight from the registry at the sidecar-
-      // config boundary — the provider definition is the source of truth.
-      // `buildOauthSidecarLlm` ignores it on the `claude` engine path (the
-      // official binary signs its own fingerprint → no forging).
-      const providerCfg = getModelProvider(llmConfig.providerId);
+      // Only the `claude` engine reaches here (asserted above). The official
+      // binary signs its own fingerprint, so the sidecar just swaps the bearer
+      // + ensures the OAuth beta — no forging.
       sidecarLlm = buildOauthSidecarLlm({
-        engine,
         baseUrl: llmConfig.baseUrl,
         credentialId: llmConfig.credentialId!,
-        ...(providerCfg?.oauthWireFormat ? { wireFormat: providerCfg.oauthWireFormat } : {}),
         ...(modelSwap ? { modelSwap } : {}),
       });
     } else if (llmApiKey) {

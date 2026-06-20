@@ -10,13 +10,14 @@ describe("codex module", () => {
     expect(defs[0]?.providerId).toBe("codex");
   });
 
-  it("codex provider keeps the chatgpt.com wire-format quirks", () => {
-    const codex = codexModule.modelProviders?.()[0];
-    expect(codex?.apiShape).toBe("openai-codex-responses");
-    expect(codex?.oauthWireFormat?.forceStream).toBe(true);
-    expect(codex?.oauthWireFormat?.forceStore).toBe(false);
-    expect(codex?.oauthWireFormat?.rewriteUrlPath).toBeUndefined();
-    expect(codex?.defaultBaseUrl).toBe("https://chatgpt.com/backend-api");
+  it("codex provider targets the chatgpt.com responses shape but declares no forge", () => {
+    const codex = codexModule.modelProviders?.()[0] as Record<string, unknown>;
+    expect(codex.apiShape).toBe("openai-codex-responses");
+    expect(codex.defaultBaseUrl).toBe("https://chatgpt.com/backend-api");
+    // Forging is removed: the provider no longer carries a sidecar/chat
+    // wire-format forge. Codex stays connectable (its self-contained probe) but
+    // is non-executable (no run/chat engine) until it migrates to its own SDK.
+    expect(codex.oauthWireFormat).toBeUndefined();
   });
 
   it("OAuth metadata points at the openai authorization server", () => {

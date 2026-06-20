@@ -17,11 +17,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `buildClaudeSdkEnv` (curated, no-secret-leak subprocess env). Imports nothing
   from the SDK — only resolves package-specifier strings — so core gains no
   Agent SDK dependency.
-- **`@appstrate/core/sidecar-types`** gains `LlmProxyOauthPassthroughConfig`
-  (`authMode: "oauth-passthrough"`) — the non-forging `/llm` mode for a driver
-  that signs its own provider fingerprint (the official Claude Agent SDK). The
-  sidecar swaps the bearer + ensures the OAuth beta only; no identity headers or
-  body transforms. Added to the `LlmProxyConfig` union.
+- **`@appstrate/core/sidecar-types`** — `LlmProxyOauthConfig`
+  (`authMode: "oauth"`) is now the single, **non-forging** OAuth `/llm` mode: the
+  sidecar swaps the bearer + ensures the OAuth beta only, leaving the driver's own
+  fingerprint untouched (the official Claude Agent SDK binary signs its own). The
+  `LlmProxyConfig` union is `LlmProxyApiKeyConfig | LlmProxyOauthConfig`.
+
+### Removed — OAuth subscription fingerprint forging (BREAKING)
+
+- **`@appstrate/core/oauth-wire-format` subpath deleted** (`buildIdentityHeaders`,
+  `applyOAuthBodyTransform`) — all fingerprint forging is removed platform-wide. A
+  subscription provider whose driver cannot sign its own client fingerprint has no
+  execution path; it is refused, never forged.
+- **`OAuthWireFormat` interface + `OAuthAdaptiveRetryPolicy` removed** from
+  `@appstrate/core/sidecar-types`, and **`ModelProviderDefinition.oauthWireFormat`
+  removed** from `@appstrate/core/module`. Provider modules no longer declare
+  identity headers / system-prepend / body coercions / adaptive retries.
+- The previous (forging) `LlmProxyOauthConfig` and the transitional
+  `LlmProxyOauthPassthroughConfig` are gone — folded into the single non-forging
+  `LlmProxyOauthConfig` above.
 
 - **`@appstrate/core/model-swap`** — the model-alias swap (LLM-gateway alias
   pattern, appstrate#727). Exports `swapRequestModel`, `swapResponseModelJson`,

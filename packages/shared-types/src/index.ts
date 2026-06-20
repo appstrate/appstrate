@@ -687,7 +687,7 @@ export interface ModelProviderCredentialInfo {
  * data-driven (no hardcoded provider list client-side). Mirrors
  * {@link import("@appstrate/core/module").ModelProviderDefinition} with the
  * optional-fields normalised to nullable for wire clarity (and stripped of
- * the platform-internal `hooks` / `oauthWireFormat` blocks).
+ * the platform-internal `hooks` block).
  */
 export interface ProviderRegistryEntry {
   providerId: string;

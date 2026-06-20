@@ -20,30 +20,13 @@
  * is fully impossible end-to-end. Operators who want plain API-key
  * Anthropic stay on the `anthropic` provider in `core-providers`.
  *
- * Anthropic OAuth tokens are NOT JWTs — the CLI surfaces `email` /
- * `subscriptionType` from the token endpoint response body, not from a
- * self-describing access token, so this module ships no `hooks`. Every
- * Anthropic-specific wire-format quirk lives declaratively on the
- * provider's `oauthWireFormat` block (the sidecar applies it generically):
- *   - `identityHeaders` — reproduces the static
- *     `anthropic-dangerous-direct-browser-access: true` + `x-app: cli`
- *     pair the Claude Code CLI sends on every authenticated
- *     `/v1/messages` request.
- *   - `systemPrepend` — prepends the third-party-tier filter prelude
- *     ("You are Claude Code, …") to the request body's `system` field.
- *     Reproduced verbatim from `anthropic-ai/claude-code`'s
- *     `THIRD_PARTY_TIER_FILTER_PREFIX` — paraphrasing it (even
- *     capitalisation) trips Anthropic's third-party tier filter and
- *     silently 429s every request.
- *   - `adaptiveRetry` — when the upstream returns a 400 carrying "out of
- *     extra usage" or "long context beta not available", strip the
- *     `context-1m-2025-08-07` token from `anthropic-beta` and replay
- *     once. Lets the agent keep working when the long-context beta runs
- *     out without surfacing a fatal error to the user.
- *
- * The in-container Pi-AI runtime supplies its own `anthropic-beta`
- * (e.g. `claude-code-20250219,oauth-2025-04-20,…`) and `user-agent:
- * claude-cli/<v>`, so this module does NOT inject those.
+ * No fingerprint forging anywhere. A `claude-code` run executes on the official
+ * Claude Agent SDK (the `claude` runner engine) and the chat on the same SDK —
+ * the official `claude` binary signs its own client fingerprint, and the sidecar
+ * / chat gateways only swap the bearer + ensure the `oauth-2025-04-20` beta. The
+ * provider therefore declares no `oauthWireFormat`; the module's only `hooks`
+ * entry is a minimal credential-validation / model-discovery probe that sends
+ * just the bearer + version + oauth beta (no `x-app`, no `system` prelude).
  */
 
 import type {
@@ -54,12 +37,18 @@ import type {
 } from "@appstrate/core/module";
 
 /**
- * 1-token `/v1/messages` probe with the exact OAuth wire fingerprint
- * the sidecar uses at runtime: bearer token (NOT `x-api-key` — the
- * generic anthropic-messages test request would send the wrong header
- * for a subscription token), the static identity headers, the
- * third-party-tier `system` prelude, and the oauth beta token. Used by
- * the connection test AND per-model discovery (`available_model_ids`).
+ * 1-token `/v1/messages` probe to validate a subscription credential and
+ * discover which models the plan serves (`available_model_ids`). Sends ONLY the
+ * OAuth bearer (NOT `x-api-key` — the generic anthropic-messages test would send
+ * the wrong header for a subscription token), the `anthropic-version`, and the
+ * `oauth-2025-04-20` beta the OAuth token requires.
+ *
+ * It does NOT forge the Claude Code client fingerprint — no `x-app: cli`, no
+ * `anthropic-dangerous-direct-browser-access`, no third-party-tier `system`
+ * prelude. Forging is removed platform-wide: real inference runs on the official
+ * Claude Agent SDK binary (which signs its own fingerprint), and this probe is
+ * a plain authenticated request. A model the probe can't reach is simply dropped
+ * from `available_model_ids`.
  */
 function buildClaudeCodeInferenceRequest(config: {
   baseUrl: string;
@@ -73,17 +62,12 @@ function buildClaudeCodeInferenceRequest(config: {
       Authorization: `Bearer ${config.apiKey}`,
       "anthropic-version": "2023-06-01",
       "anthropic-beta": "oauth-2025-04-20",
-      "anthropic-dangerous-direct-browser-access": "true",
-      "x-app": "cli",
       accept: "application/json",
       "content-type": "application/json",
     },
     body: JSON.stringify({
       model: config.modelId,
       max_tokens: 1,
-      // Same prelude as `oauthWireFormat.systemPrepend` — Anthropic's
-      // third-party tier filter requires it verbatim.
-      system: [{ type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." }],
       messages: [{ role: "user", content: "ping" }],
     }),
   };
@@ -142,35 +126,12 @@ const claudeCodeProvider: ModelProviderDefinition = {
     "claude-sonnet-4-5",
     "claude-haiku-4-5",
   ],
-  // Anthropic OAuth tokens are not JWTs — no JWT identity decoding. The
-  // inference probe above carries the OAuth wire fingerprint (bearer +
-  // beta token + tier prelude); the sidecar's runtime fingerprint lives
-  // in `oauthWireFormat` below.
+  // Anthropic OAuth tokens are not JWTs — no JWT identity decoding. There is no
+  // sidecar fingerprint forging: a `claude-code` run executes on the official
+  // Claude Agent SDK (the `claude` runner engine), whose binary signs its own
+  // client fingerprint. The sidecar's OAuth mode only swaps the bearer + ensures
+  // the OAuth beta — see `runtime-pi/sidecar/app.ts` and `engine-select.ts`.
   hooks: claudeCodeHooks,
-  oauthWireFormat: {
-    // Static identity headers Anthropic enforces on every OAuth-authenticated
-    // `/v1/messages` call. `accept`/`content-type` are NOT pinned — the agent
-    // picks the right pair per request.
-    identityHeaders: {
-      accept: "application/json",
-      "anthropic-dangerous-direct-browser-access": "true",
-      "x-app": "cli",
-    },
-    // System-prompt prelude Anthropic's third-party-tier filter requires.
-    // Reproduced verbatim from `anthropic-ai/claude-code`'s
-    // `THIRD_PARTY_TIER_FILTER_PREFIX`. Paraphrasing (even capitalisation)
-    // trips the filter and silently 429s every request.
-    systemPrepend: {
-      type: "text",
-      text: "You are Claude Code, Anthropic's official CLI for Claude.",
-    },
-    adaptiveRetry: {
-      status: 400,
-      bodyPatterns: ["out of extra usage", "long context beta not available"],
-      headerName: "anthropic-beta",
-      removeToken: "context-1m-2025-08-07",
-    },
-  },
 };
 
 // ---------------------------------------------------------------------------

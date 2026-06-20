@@ -57,7 +57,7 @@ export interface ClaudeAgentRunnerOptions {
   modelId: string;
   /** Enriched platform system prompt (the agent persona + host context). */
   systemPrompt: string;
-  /** `ANTHROPIC_BASE_URL` — the sidecar `/llm` oauth-passthrough gateway. */
+  /** `ANTHROPIC_BASE_URL` — the sidecar `/llm` oauth gateway (non-forging). */
   baseUrl: string;
   /** Placeholder bearer the SDK sends; the gateway swaps it for the real token. */
   placeholderToken: string;

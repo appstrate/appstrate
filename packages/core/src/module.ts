@@ -15,7 +15,7 @@ import type { Hono, MiddlewareHandler } from "hono";
 import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
-import type { ModelApiShape, OAuthWireFormat } from "./sidecar-types.ts";
+import type { ModelApiShape } from "./sidecar-types.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -641,18 +641,6 @@ export interface ModelProviderDefinition {
   authMode: "api_key" | "oauth2";
   /** Required iff `authMode === "oauth2"`. */
   oauth?: ModelProviderOAuthConfig;
-  /**
-   * Declarative wire-format quirks the sidecar must apply on this
-   * provider's behalf — static identity headers, accountId routing
-   * header, system-prompt prepend, body coercions (`forceStream`/
-   * `forceStore`), URL path rewriting, adaptive header retries.
-   *
-   * Only meaningful for OAuth providers. The platform forwards this
-   * struct verbatim into the sidecar's `LlmProxyOauthConfig.wireFormat`
-   * at boot, so the sidecar runtime never branches on `providerId` —
-   * adding a new OAuth provider is a pure declarative change.
-   */
-  oauthWireFormat?: OAuthWireFormat;
 
   // — Catalog —
   /**

@@ -60,24 +60,11 @@ describe("applySpecToSidecarEnv", () => {
     expect(processEnv.INTEGRATION_RUNTIME_ADAPTER).toBe("process");
   });
 
-  it("ships oauth llm config as JSON instead of api-key vars", () => {
-    const spec: SidecarLaunchSpec = {
-      runToken: "rt_test",
-      llm: { authMode: "oauth", provider: "anthropic" } as unknown as SidecarLaunchSpec["llm"],
-    };
-    const env: Record<string, string> = {};
-    applySpecToSidecarEnv(spec, env);
-
-    expect(env.PI_LLM_OAUTH_CONFIG_JSON).toBe(JSON.stringify(spec.llm));
-    expect(env.PI_BASE_URL).toBeUndefined();
-    expect(env.PI_API_KEY).toBeUndefined();
-  });
-
-  it("ships oauth-passthrough llm config as JSON (no api-key vars)", () => {
+  it("ships the (non-forging) oauth llm config as JSON instead of api-key vars", () => {
     const spec: SidecarLaunchSpec = {
       runToken: "rt_test",
       llm: {
-        authMode: "oauth-passthrough",
+        authMode: "oauth",
         baseUrl: "https://api.anthropic.com",
         credentialId: "cred_1",
       } as unknown as SidecarLaunchSpec["llm"],
