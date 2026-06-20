@@ -10,7 +10,7 @@
  * covered hermetically in `packages/connect/test/integration-oauth.test.ts`).
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import {
@@ -28,6 +28,10 @@ import {
   applicationPackages,
 } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  initSystemIntegrations,
+  __resetSystemIntegrationsForTest,
+} from "../../../src/services/integration-client-registry.ts";
 
 const app = getTestApp();
 
@@ -147,6 +151,7 @@ describe("GET /api/integrations", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
   });
+  afterEach(() => __resetSystemIntegrationsForTest());
 
   it("returns the org's integrations with `active: false` by default", async () => {
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
@@ -171,6 +176,58 @@ describe("GET /api/integrations", () => {
     const body = (await res.json()) as { data: Array<{ id: string; active: boolean }> };
     const gmail = body.data.find((i) => i.id === "@myorg/gmail");
     expect(gmail?.active).toBe(true);
+  });
+
+  it("decorates `active: true` for a system integration with no install row", async () => {
+    // A SYSTEM_INTEGRATIONS entry makes the integration auto-active out
+    // of the box — no application_packages row required.
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    initSystemIntegrations([
+      {
+        id: "@myorg/gmail",
+        clients: [
+          {
+            id: "gmail-system",
+            auth_key: "google",
+            client_id: "sys-client.apps.googleusercontent.com",
+            client_secret: "sys-secret",
+          },
+        ],
+      },
+    ]);
+    const res = await app.request("/api/integrations", { headers: authHeaders(ctx) });
+    const body = (await res.json()) as { data: Array<{ id: string; active: boolean }> };
+    const gmail = body.data.find((i) => i.id === "@myorg/gmail");
+    expect(gmail?.active).toBe(true);
+  });
+
+  it("decorates `active: false` when a system integration is explicitly disabled", async () => {
+    // Sticky opt-out: a disabled install row wins over the system-client
+    // auto-active default, and never silently re-activates.
+    const pkg = await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    initSystemIntegrations([
+      {
+        id: "@myorg/gmail",
+        clients: [
+          {
+            id: "gmail-system",
+            auth_key: "google",
+            client_id: "sys-client.apps.googleusercontent.com",
+            client_secret: "sys-secret",
+          },
+        ],
+      },
+    ]);
+    await db.insert(applicationPackages).values({
+      applicationId: ctx.defaultAppId,
+      packageId: pkg.id,
+      config: {},
+      enabled: false,
+    });
+    const res = await app.request("/api/integrations", { headers: authHeaders(ctx) });
+    const body = (await res.json()) as { data: Array<{ id: string; active: boolean }> };
+    const gmail = body.data.find((i) => i.id === "@myorg/gmail");
+    expect(gmail?.active).toBe(false);
   });
 
   it("projects only requested fields, dropping the heavy manifest", async () => {
@@ -238,6 +295,45 @@ describe("GET /api/integrations/:packageId", () => {
     // falls back to the integration's `tools` keys. Shape assertion keeps
     // the contract present without coupling to fixture catalog edits.
     expect(Array.isArray(body.tool_catalog)).toBe(true);
+  });
+
+  it("flags has_system_client when a shared platform client serves the oauth2 auth", async () => {
+    // A SYSTEM_INTEGRATIONS entry for (integration, auth) makes the auth
+    // connectable out of the box — connect falls back to it without an
+    // org-registered client. The detail must surface that so the UI unlocks the
+    // connect button (the model-provider system-key fallback, mirrored).
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    initSystemIntegrations([
+      {
+        id: "@myorg/gmail",
+        clients: [
+          {
+            id: "gmail-system",
+            auth_key: "google",
+            client_id: "sys-client.apps.googleusercontent.com",
+            client_secret: "sys-secret",
+          },
+        ],
+      },
+    ]);
+    try {
+      const res = await app.request("/api/integrations/@myorg/gmail", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        auths: Array<{ auth_key: string; has_oauth_client: boolean; has_system_client: boolean }>;
+      };
+      const google = body.auths.find((a) => a.auth_key === "google");
+      const api = body.auths.find((a) => a.auth_key === "api");
+      // oauth2 auth with a matching system client → connectable, no org client.
+      expect(google?.has_system_client).toBe(true);
+      expect(google?.has_oauth_client).toBe(false);
+      // The api_key auth carries no client; the system client targets `google` only.
+      expect(api?.has_system_client).toBe(false);
+    } finally {
+      __resetSystemIntegrationsForTest();
+    }
   });
 
   it("returns 404 for non-existent integration", async () => {
@@ -369,9 +465,9 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
       method: "DELETE",
       headers: authHeaders(ctx),
     });
-    // DELETE → 204 empty (#657): deactivation removes the
-    // application_packages row. The detail stays GET-able afterwards and
-    // serves `active: false`.
+    // DELETE → 204 empty (#657): deactivation flips `enabled` to false (the
+    // row persists — it is the explicit opt-out, not a delete). The detail
+    // stays GET-able afterwards and serves `active: false`.
     expect(deactivate.status).toBe(204);
     expect(await deactivate.text()).toBe("");
 
@@ -391,8 +487,10 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
     expect(Array.isArray(detailBody.auths)).toBe(true);
     expect(Array.isArray(detailBody.tool_catalog)).toBe(true);
     expect(typeof detailBody.allow_undeclared_tools).toBe("boolean");
+    // The row survives, flagged disabled — this is the sticky opt-out, not a
+    // delete (deleting would let a system integration re-trigger auto-active).
     const after = await db
-      .select()
+      .select({ enabled: applicationPackages.enabled })
       .from(applicationPackages)
       .where(
         and(
@@ -400,7 +498,8 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
           eq(applicationPackages.packageId, "@myorg/gmail"),
         ),
       );
-    expect(after).toHaveLength(0);
+    expect(after).toHaveLength(1);
+    expect(after[0]?.enabled).toBe(false);
   });
 
   it("refuses to activate a non-integration package as integration (409)", async () => {
@@ -418,7 +517,10 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
     expect(res.status).toBe(409);
   });
 
-  it("returns 409 on duplicate activate", async () => {
+  it("is idempotent on repeat activate", async () => {
+    // Activation is a flag upsert (enabled=true), so re-activating an already
+    // active integration is a no-op success — not a 409. This is what lets a
+    // disabled (opt-out) integration be re-activated cleanly.
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
     const headers = { ...authHeaders(ctx), "Content-Type": "application/json" };
     const first = await app.request("/api/integrations/@myorg/gmail/activate", {
@@ -432,7 +534,42 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
       headers,
       body: "{}",
     });
-    expect(dup.status).toBe(409);
+    expect(dup.status).toBe(201);
+
+    // Exactly one row, enabled.
+    const rows = await db
+      .select({ enabled: applicationPackages.enabled })
+      .from(applicationPackages)
+      .where(
+        and(
+          eq(applicationPackages.applicationId, ctx.defaultAppId),
+          eq(applicationPackages.packageId, "@myorg/gmail"),
+        ),
+      );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.enabled).toBe(true);
+  });
+
+  it("re-activates a deactivated integration (opt-out cleared)", async () => {
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    const headers = { ...authHeaders(ctx), "Content-Type": "application/json" };
+    await app.request("/api/integrations/@myorg/gmail/activate", {
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+    await app.request("/api/integrations/@myorg/gmail/deactivate", {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    const reactivate = await app.request("/api/integrations/@myorg/gmail/activate", {
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+    expect(reactivate.status).toBe(201);
+    const body = (await reactivate.json()) as { active: boolean };
+    expect(body.active).toBe(true);
   });
 });
 
@@ -672,51 +809,62 @@ describe("OAuth client CRUD", () => {
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
   });
 
-  it("registers, reads, rotates, and deletes the OAuth client", async () => {
-    // Initially absent
-    const initial = await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
+  /** Register a custom client via the create route; return its id. */
+  async function createClient(
+    clientId: string,
+    clientSecret: string,
+  ): Promise<{ status: number; id: string }> {
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
+    });
+    const body = res.status === 201 ? ((await res.json()) as { id?: string }) : {};
+    return { status: res.status, id: body.id ?? "" };
+  }
+
+  async function listClients(): Promise<
+    Array<{ client_ref: string; source: string; is_default: boolean; client_id: string }>
+  > {
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/clients", {
       headers: authHeaders(ctx),
     });
-    expect(initial.status).toBe(404);
+    const body = (await res.json()) as {
+      data: Array<{ client_ref: string; source: string; is_default: boolean; client_id: string }>;
+    };
+    return body.data;
+  }
 
+  it("returns 404 listing clients for an unknown integration (no empty-list leak)", async () => {
+    const res = await app.request("/api/integrations/@myorg/nonexistent/auths/google/clients", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("creates, lists, rotates, and deletes a custom OAuth client", async () => {
     // Create
-    const put = await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
+    const created = await createClient("abc", "shh");
+    expect(created.status).toBe(201);
+    expect(created.id).not.toBe("");
+
+    // List — the custom client is present and is the default.
+    let clients = await listClients();
+    const custom = clients.find((c) => c.source === "custom");
+    expect(custom).toMatchObject({ client_id: "abc", is_default: true });
+
+    // Rotate by id
+    const rotate = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
-    });
-    expect(put.status).toBe(200);
-    const body = (await put.json()) as { client_id: string; has_client_secret: boolean };
-    expect(body.client_id).toBe("abc");
-    expect(body.has_client_secret).toBe(true);
-
-    // Read
-    const get = await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
-      headers: authHeaders(ctx),
-    });
-    expect(get.status).toBe(200);
-
-    // Rotate (idempotent upsert)
-    const rotate = await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
-      method: "PUT",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: "abc", client_secret: "different" }),
+      body: JSON.stringify({ client_id: "abc2", client_secret: "different" }),
     });
     expect(rotate.status).toBe(200);
-    const stored = await db
-      .select()
-      .from(integrationOauthClients)
-      .where(
-        and(
-          eq(integrationOauthClients.applicationId, ctx.defaultAppId),
-          eq(integrationOauthClients.integrationId, "@myorg/gmail"),
-          eq(integrationOauthClients.authKey, "google"),
-        ),
-      );
-    expect(stored).toHaveLength(1);
+    clients = await listClients();
+    expect(clients.find((c) => c.source === "custom")?.client_id).toBe("abc2");
 
-    // Delete
-    const del = await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
+    // Delete by id
+    const del = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
       method: "DELETE",
       headers: authHeaders(ctx),
     });
@@ -728,19 +876,205 @@ describe("OAuth client CRUD", () => {
     expect(after).toHaveLength(0);
   });
 
-  it("refuses to register an OAuth client against a non-oauth2 auth (400)", async () => {
-    const res = await app.request("/api/integrations/@myorg/gmail/oauth-clients/api", {
+  it("deleting a client cascades: connections pinned to it are deleted, others survive", async () => {
+    const target = await createClient("target", "s1");
+    const other = await createClient("other", "s2");
+
+    // Two connections pinned to `target` + one pinned to `other`. The `other`
+    // one is the control: it must survive the `target` delete.
+    await db.insert(integrationConnections).values([
+      {
+        integrationId: "@myorg/gmail",
+        authKey: "google",
+        accountId: "a@x.test",
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        credentialsEncrypted: "enc",
+        clientRef: target.id,
+      },
+      {
+        integrationId: "@myorg/gmail",
+        authKey: "google",
+        accountId: "b@x.test",
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        credentialsEncrypted: "enc",
+        clientRef: target.id,
+      },
+      {
+        integrationId: "@myorg/gmail",
+        authKey: "google",
+        accountId: "c@x.test",
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        credentialsEncrypted: "enc",
+        clientRef: other.id,
+      },
+    ]);
+
+    const del = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${target.id}`, {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    expect(del.status).toBe(204);
+
+    const conns = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, "@myorg/gmail"));
+    // The two `target` connections are gone; the `other` one remains.
+    expect(conns).toHaveLength(1);
+    expect(conns[0]?.clientRef).toBe(other.id);
+  });
+
+  it("registers N custom clients; only the first is default; set-default flips", async () => {
+    const a = await createClient("client-a", "sa");
+    const b = await createClient("client-b", "sb");
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+
+    let clients = await listClients();
+    const customs = clients.filter((c) => c.source === "custom");
+    expect(customs).toHaveLength(2);
+    // First registered wins the default; exactly one is default.
+    expect(customs.filter((c) => c.is_default)).toHaveLength(1);
+    expect(clients.find((c) => c.is_default)?.client_ref).toBe(a.id);
+
+    // Promote the second.
+    const setDefault = await app.request(
+      "/api/integrations/@myorg/gmail/auths/google/default-client",
+      {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ client_ref: b.id }),
+      },
+    );
+    expect(setDefault.status).toBe(200);
+    clients = await listClients();
+    expect(clients.find((c) => c.is_default)?.client_ref).toBe(b.id);
+    // Still exactly one default (the one-default invariant holds).
+    expect(clients.filter((c) => c.source === "custom" && c.is_default)).toHaveLength(1);
+  });
+
+  it("rejects setting an unknown client_ref as default (400, no silent fallback)", async () => {
+    await createClient("client-a", "sa");
+    // A well-formed-but-unregistered UUID resolves to neither a custom row nor a
+    // system client → the route must 400, never silently keep/clear the default.
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/default-client", {
       method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_ref: "11111111-1111-4111-8111-111111111111" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects pinning another application's custom client as default (cross-app escalation, 400)", async () => {
+    const a = await createClient("client-a", "sa"); // ctx's own client (the default)
+    // A client owned by a DIFFERENT org/application for the same (global)
+    // integration package. Inserted directly so it's genuinely foreign-scoped.
+    const otherCtx = await createTestContext({ orgSlug: "other" });
+    const [foreign] = await db
+      .insert(integrationOauthClients)
+      .values({
+        applicationId: otherCtx.defaultAppId,
+        integrationId: "@myorg/gmail",
+        authKey: "google",
+        clientId: "foreign",
+        clientSecretEncrypted: "enc",
+      })
+      .returning({ id: integrationOauthClients.id });
+
+    // ctx's app must not be able to pin the foreign-app client as its default —
+    // the resolver scopes custom rows to (applicationId, integration, auth).
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/default-client", {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_ref: foreign!.id }),
+    });
+    expect(res.status).toBe(400);
+
+    // ctx's own default is untouched by the rejected cross-app attempt.
+    const clients = await listClients();
+    expect(clients.find((c) => c.is_default)?.client_ref).toBe(a.id);
+  });
+
+  it("deleting the default custom client falls back to no custom default", async () => {
+    const a = await createClient("client-a", "sa");
+    await createClient("client-b", "sb");
+    // `a` is the default; delete it.
+    const del = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${a.id}`, {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    expect(del.status).toBe(204);
+    // No auto-promotion — the remaining custom is NOT silently made default.
+    const clients = await listClients();
+    const customs = clients.filter((c) => c.source === "custom");
+    expect(customs).toHaveLength(1);
+    // With no system client and no flagged default, the list still surfaces a
+    // default (first custom as connectable fallback) — but no row carries the
+    // is_default DB flag, so a fresh delete didn't promote anyone.
+    const rows = await db
+      .select()
+      .from(integrationOauthClients)
+      .where(eq(integrationOauthClients.integrationId, "@myorg/gmail"));
+    expect(rows.filter((r) => r.isDefault)).toHaveLength(0);
+  });
+
+  it("rejects rotating an unknown client id (404)", async () => {
+    const res = await app.request(
+      "/api/integrations/@myorg/gmail/oauth-clients/11111111-1111-4111-8111-111111111111",
+      {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: "x", client_secret: "y" }),
+      },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects a non-UUID client id on the by-id routes (404)", async () => {
+    const res = await app.request("/api/integrations/@myorg/gmail/oauth-clients/not-a-uuid", {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses to register an OAuth client against a non-oauth2 auth (400)", async () => {
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/api/oauth-clients", {
+      method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ client_id: "x", client_secret: "y" }),
     });
     expect(res.status).toBe(400);
   });
 
+  it("refuses a manual client on an auto-provisioned (remote MCP) auth (400)", async () => {
+    // The auto-DCR auth's token endpoint only accepts a public client acquired
+    // via DCR/CIMD; a hand-entered client_id points at the wrong OAuth server
+    // and, once stored, silently disables auto-registration. The create route
+    // must reject it (mirrors the UI hiding the form) so the trap can't be
+    // created via curl either.
+    await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
+    const res = await app.request("/api/integrations/@myorg/remote-mcp/auths/oauth/oauth-clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "L8NTR0830JX39XG8MWYFZ9ZV0WBARPLR", client_secret: "x" }),
+    });
+    expect(res.status).toBe(400);
+    // Nothing persisted — DCR stays the only path.
+    const rows = await db
+      .select()
+      .from(integrationOauthClients)
+      .where(eq(integrationOauthClients.integrationId, "@myorg/remote-mcp"));
+    expect(rows).toHaveLength(0);
+  });
+
   it("forbids a non-admin member from persisting an OAuth client secret (403)", async () => {
-    // PUT .../oauth-clients/:authKey requires `integrations:install`, which
-    // the `member` role does not hold (it only has read/connect/disconnect).
-    // Persisting a clientSecret must therefore be admin-gated.
+    // POST .../oauth-clients requires `integrations:install`, which the `member`
+    // role does not hold (it only has read/connect/disconnect). Persisting a
+    // clientSecret must therefore be admin-gated.
     const member = await createTestUser({ email: "oauth-member@myorg.test" });
     await addOrgMember(ctx.orgId, member.id, "member");
     const memberHeaders = {
@@ -749,8 +1083,8 @@ describe("OAuth client CRUD", () => {
       "X-Application-Id": ctx.defaultAppId,
       "Content-Type": "application/json",
     };
-    const res = await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
-      method: "PUT",
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
+      method: "POST",
       headers: memberHeaders,
       body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
     });
@@ -807,8 +1141,8 @@ describe("OAuth2 connect initiate", () => {
 
   it("returns a PKCE-protected authorize URL after registering OAuth client", async () => {
     // Register OAuth client first
-    await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
-      method: "PUT",
+    await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
+      method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
     });
@@ -1022,5 +1356,137 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
       body: JSON.stringify({ connection_id: connId }),
     });
     expect(res.status).toBe(403);
+  });
+});
+
+describe("multi-client: list + system-client connect", () => {
+  let ctx: TestContext;
+  const SYSTEM_ID = "gmail-system";
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    __resetSystemIntegrationsForTest();
+  });
+
+  afterEach(() => __resetSystemIntegrationsForTest());
+
+  function seedSystem() {
+    initSystemIntegrations([
+      {
+        id: "@myorg/gmail",
+        clients: [
+          {
+            id: SYSTEM_ID,
+            auth_key: "google",
+            client_id: "sys-client.apps.googleusercontent.com",
+            client_secret: "sys-secret",
+          },
+        ],
+      },
+    ]);
+  }
+
+  async function listClients() {
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/clients", {
+      headers: authHeaders(ctx),
+    });
+    return res;
+  }
+
+  it("GET clients returns an empty list when nothing is configured", async () => {
+    const res = await listClients();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { object: string; data: unknown[] };
+    expect(body.object).toBe("list");
+    expect(body.data).toEqual([]);
+  });
+
+  it("GET clients surfaces the system client as default, no secret", async () => {
+    seedSystem();
+    const res = await listClients();
+    const body = (await res.json()) as {
+      data: Array<{ client_ref: string; source: string; is_default: boolean; client_id: string }>;
+    };
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toMatchObject({
+      client_ref: "gmail-system",
+      source: "built-in",
+      is_default: true,
+    });
+    expect(JSON.stringify(body.data)).not.toContain("sys-secret");
+    // Neither the secret NOR the real system client_id leaks — the descriptor
+    // returns an opaque `sys_` fingerprint for system clients.
+    expect(JSON.stringify(body.data)).not.toContain("sys-client.apps.googleusercontent.com");
+    expect(body.data[0]!.client_id).toMatch(/^sys_[0-9a-f]{16}$/);
+  });
+
+  it("GET clients lists custom (default) + system once an org registers its own app", async () => {
+    seedSystem();
+    const put = await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "org-client", client_secret: "org-secret" }),
+    });
+    expect(put.status).toBe(201);
+
+    const body = (await (await listClients()).json()) as {
+      data: Array<{ client_ref: string; source: string; is_default: boolean }>;
+    };
+    expect(body.data).toHaveLength(2);
+    const custom = body.data.find((c) => c.source === "custom")!;
+    // The custom client_ref is the per-application row id (a UUID), not a sentinel.
+    expect(custom.is_default).toBe(true);
+    expect(custom.client_ref).not.toBe("gmail-system");
+    expect(custom.client_ref.length).toBeGreaterThan(0);
+    expect(body.data.find((c) => c.source === "built-in")).toMatchObject({
+      client_ref: "gmail-system",
+      is_default: false,
+    });
+  });
+
+  it("connects with the system client out of the box (no per-org client registered)", async () => {
+    seedSystem();
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { auth_url: string; state: string };
+    // The authorize URL carries the SYSTEM client_id — the shared app.
+    expect(body.auth_url).toContain("client_id=sys-client.apps.googleusercontent.com");
+    expect(body.state).toBeTruthy();
+  });
+
+  it("still 403s when neither a custom nor a system client exists", async () => {
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("connects with the org's custom client by default when one is registered", async () => {
+    seedSystem();
+    await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "org-client", client_secret: "org-secret" }),
+    });
+    // No per-connect picker — the first registered custom client becomes the
+    // default and wins over the system client.
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { auth_url: string };
+    // Uses the ORG client_id, NOT the system one.
+    expect(body.auth_url).toContain("client_id=org-client");
+    expect(body.auth_url).not.toContain("sys-client");
   });
 });

@@ -38,7 +38,7 @@ export const runsPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version — 404 `no_published_version` if nothing is published), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Default when omitted: the latest published version when one exists, the draft otherwise** — programmatic callers (API, MCP, CLI, CI) run what was published unless they explicitly ask for the draft. The editor UI passes `version=draft` for test-runs. The run object's `version_ref` states which definition executed. Ignored for system agents.",
+            "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Omitting the parameter is strictly identical to `published`** — the latest published version, or `404 no_published_version` when nothing is published. The working copy is NEVER an implicit default: run it by passing `version=draft` explicitly (the editor UI does this for test-runs). This unified default keeps every caller — API, MCP, CLI, CI, schedules and the dashboard — coherent on every selector. The run object's `version_ref` states which definition executed. Ignored for system agents.",
         },
       ],
       requestBody: {
@@ -71,6 +71,7 @@ export const runsPaths = {
                 },
                 config: {
                   type: "object",
+                  additionalProperties: true,
                   description:
                     "Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair.",
                 },
@@ -80,11 +81,18 @@ export const runsPaths = {
                     'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
                   additionalProperties: { type: "string" },
                 },
+                dependency_overrides: {
+                  type: "object",
+                  description:
+                    'Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. By default every skill in the agent\'s closure resolves against PUBLISHED versions honoring its manifest pin; an entry here overrides that for a single run — `"draft"` pulls the dependency\'s mutable working copy (the skill edit loop: edit → run → observe, no republish), any other value replaces the pin with that spec. Run-scoped only (never stored in the manifest) and recorded on the run object so a run that consumed draft bytes is never mistaken for a reproducible one. An unsatisfiable pin (including a never-published dependency) returns 422 `dependency_unresolved` before the run starts — pass an override or publish the dependency to fix it.',
+                  additionalProperties: { type: "string" },
+                },
               },
             },
             example: {
               input: { message: "Summarize my latest emails" },
               config: { dryRun: true },
+              dependency_overrides: { "@test/test-skill": "draft" },
             },
           },
         },
@@ -124,8 +132,7 @@ export const runsPaths = {
                 completed_at: null,
                 duration: null,
                 cost: null,
-                notifiedAt: null,
-                readAt: null,
+                unread: false,
                 runNumber: 17,
                 token_usage: null,
                 version_label: "1.2.0",
@@ -142,6 +149,7 @@ export const runsPaths = {
                 contextSnapshot: null,
                 modelCredentialId: "mpc_8h2k4m6n",
                 connection_overrides: null,
+                dependency_overrides: null,
                 user_name: null,
                 end_user_name: null,
                 api_key_name: null,
@@ -170,6 +178,7 @@ export const runsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
@@ -411,8 +420,7 @@ export const runsPaths = {
                 completed_at: null,
                 duration: null,
                 cost: null,
-                notifiedAt: null,
-                readAt: null,
+                unread: false,
                 runNumber: 1,
                 token_usage: null,
                 version_label: null,
@@ -429,6 +437,7 @@ export const runsPaths = {
                 contextSnapshot: null,
                 modelCredentialId: "mpc_8h2k4m6n",
                 connection_overrides: null,
+                dependency_overrides: null,
                 user_name: null,
                 end_user_name: null,
                 api_key_name: null,
@@ -467,6 +476,7 @@ export const runsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "409": { $ref: "#/components/responses/IdempotencyInProgress" },
         "412": {
           description: "Missing integration connection (`missing_integration_connection`)",
@@ -550,6 +560,7 @@ export const runsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
@@ -689,8 +700,7 @@ export const runsPaths = {
                 completed_at: "2026-01-15T10:31:12Z",
                 duration: 72000,
                 cost: 0.0034,
-                notifiedAt: "2026-01-15T10:31:12Z",
-                readAt: null,
+                unread: true,
                 runNumber: 17,
                 token_usage: {
                   input_tokens: 8200,
@@ -712,6 +722,7 @@ export const runsPaths = {
                 contextSnapshot: null,
                 modelCredentialId: null,
                 connection_overrides: null,
+                dependency_overrides: null,
                 user_name: "Pierre",
                 end_user_name: null,
                 api_key_name: null,
@@ -861,8 +872,7 @@ export const runsPaths = {
                 completed_at: "2026-01-15T10:30:45Z",
                 duration: 45000,
                 cost: 0.0012,
-                notifiedAt: null,
-                readAt: null,
+                unread: false,
                 runNumber: 18,
                 token_usage: null,
                 version_label: "1.2.0",
@@ -879,6 +889,7 @@ export const runsPaths = {
                 contextSnapshot: null,
                 modelCredentialId: null,
                 connection_overrides: null,
+                dependency_overrides: null,
                 user_name: "Pierre",
                 end_user_name: null,
                 api_key_name: null,
@@ -890,6 +901,7 @@ export const runsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description: "Run not cancellable (already completed/failed)",
@@ -986,6 +998,12 @@ export const runsPaths = {
                 },
                 applicationId: { type: "string", minLength: 1 },
                 input: { type: "object" },
+                dependency_overrides: {
+                  type: "object",
+                  description:
+                    'Per-run dependency version overrides (#666/#686). Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. `"draft"` opts that dependency into its working copy; any other value replaces the manifest pin. An unsatisfiable pin aborts the run with `dependency_unresolved` (422).',
+                  additionalProperties: { type: "string" },
+                },
                 contextSnapshot: {
                   type: "object",
                   description:

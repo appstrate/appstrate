@@ -62,6 +62,7 @@ const OIDC_REDIRECT_KEY = "appstrate_oidc_redirect";
 async function initPkceFlow(
   config: OidcConfig,
   redirectTo: string | undefined,
+  loginHint?: string,
 ): Promise<URLSearchParams> {
   const state = generateState();
   const codeVerifier = generateCodeVerifier();
@@ -76,7 +77,7 @@ async function initPkceFlow(
   // `validAudiences` (`${APP_URL}/api/auth`). The SPA never consumes the
   // minted tokens — the BA session cookie is the real auth — but the
   // grant still has to succeed, so `resource` is non-negotiable.
-  return new URLSearchParams({
+  const params = new URLSearchParams({
     response_type: "code",
     client_id: config.clientId,
     redirect_uri: config.callbackUrl,
@@ -89,6 +90,16 @@ async function initPkceFlow(
     code_challenge_method: "S256",
     resource: config.issuer,
   });
+
+  // OIDC `login_hint` (standard param) — the oauth-provider carries it
+  // through (signed) to the server-rendered login/register pages, which
+  // pre-fill and lock the email field. Used by the invitation flow to pin
+  // the invited address. Purely UX: the accept endpoint re-checks that the
+  // session email matches the invitation server-side, so a tampered field
+  // cannot escape it.
+  if (loginHint) params.set("login_hint", loginHint);
+
+  return params;
 }
 
 /**
@@ -98,12 +109,12 @@ async function initPkceFlow(
  * handles authentication. On success the browser lands on `/auth/callback`
  * with an authorization code.
  */
-export async function startOidcLogin(redirectTo?: string): Promise<void> {
+export async function startOidcLogin(redirectTo?: string, loginHint?: string): Promise<void> {
   const config = getOidcConfig();
   if (!config) {
     throw new Error("OIDC not configured — window.__APP_CONFIG__.oidc is missing");
   }
-  const params = await initPkceFlow(config, redirectTo);
+  const params = await initPkceFlow(config, redirectTo, loginHint);
   window.location.assign(`/api/auth/oauth2/authorize?${params.toString()}`);
 }
 
@@ -114,12 +125,12 @@ export async function startOidcLogin(redirectTo?: string): Promise<void> {
  * reusing the same `state`/`code_challenge`/`resource` that were generated
  * here, so the callback handler cannot tell login and signup apart.
  */
-export async function startOidcSignup(redirectTo?: string): Promise<void> {
+export async function startOidcSignup(redirectTo?: string, loginHint?: string): Promise<void> {
   const config = getOidcConfig();
   if (!config) {
     throw new Error("OIDC not configured — window.__APP_CONFIG__.oidc is missing");
   }
-  const params = await initPkceFlow(config, redirectTo);
+  const params = await initPkceFlow(config, redirectTo, loginHint);
   window.location.assign(`/api/oauth/register?${params.toString()}`);
 }
 
@@ -194,9 +205,23 @@ export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
 /**
  * OIDC logout — redirect through the server-side logout endpoint.
  * Clears the BA session cookie + the OIDC session on the IdP side.
+ *
+ * The post-logout redirect always lands on `/login` (the only URI the
+ * server validates against the client's registered `postLogoutRedirectUris`
+ * — an exact-match check, so a dynamic path like `/invite/:token` can't be
+ * passed there). To still return the user somewhere specific after they
+ * re-authenticate, `postLoginRedirect` is stashed in the same
+ * `OIDC_REDIRECT_KEY` that `handleOidcCallback` consumes: logout → `/login`
+ * → the gate re-runs `startOidcLogin(undefined)` (which does NOT overwrite
+ * the key) → the callback reads the stash and returns there. Used by the
+ * invite "log out and retry" path so a wrong-account user lands back on the
+ * invitation after signing in with the correct account.
  */
-export function startOidcLogout(): void {
+export function startOidcLogout(postLoginRedirect?: string): void {
   const config = getOidcConfig();
+  if (postLoginRedirect) {
+    sessionStorage.setItem(OIDC_REDIRECT_KEY, postLoginRedirect);
+  }
   if (!config) {
     window.location.assign("/login");
     return;

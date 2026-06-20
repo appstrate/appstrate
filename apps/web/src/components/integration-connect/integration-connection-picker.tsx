@@ -79,6 +79,11 @@ export type ConnectionPickerPersistence =
  * orchestration (OAuth popup + fields modal) are identical across both; only
  * where the pick lands differs.
  */
+// Module-level constant so the default prop is a stable reference across
+// renders (a `{ mode: "pin" }` literal default would be a new object each
+// render — react/no-object-type-as-default-prop).
+const DEFAULT_PERSISTENCE: ConnectionPickerPersistence = { mode: "pin" };
+
 export function IntegrationConnectionPicker({
   integrationId,
   agentPackageId,
@@ -87,7 +92,7 @@ export function IntegrationConnectionPicker({
   displayName,
   agentTools,
   agentScopes,
-  persistence = { mode: "pin" },
+  persistence = DEFAULT_PERSISTENCE,
 }: {
   integrationId: string;
   agentPackageId: string;

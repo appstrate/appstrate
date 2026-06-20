@@ -48,7 +48,7 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
   const connectionsUsed = run.connections_used ?? null;
   const hasUsage = run.cost != null || usage != null || run.model_label != null;
   const runnerOriginLabel =
-    run.runOrigin === "remote" ? t("exec.infoRunnerRemote") : t("exec.infoRunnerPlatform");
+    run.runOrigin === "remote" ? t("run.infoRunnerRemote") : t("run.infoRunnerPlatform");
   // Append the runner name when present so the dashboard shows
   // "Distant · pierres-mbp" or "Distant · acme/web #42" instead of the
   // bare origin word.
@@ -74,43 +74,43 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
                 {run.version_ref !== "draft"
                   ? `v${run.version_ref}`
                   : run.version_label && run.version_label !== "draft"
-                    ? `${t("exec.draft")} (v${run.version_label} ${t("exec.versionDirty")})`
-                    : t("exec.draft")}
+                    ? `${t("run.draft")} (v${run.version_label} ${t("run.versionDirty")})`
+                    : t("run.draft")}
               </span>
             }
           />
         )}
-        <InfoCard label={t("exec.infoTrigger")} value={<RunTrigger run={run} />} />
+        <InfoCard label={t("run.infoTrigger")} value={<RunTrigger run={run} />} />
       </div>
 
       {/* Input */}
       {input && Object.keys(input).length > 0 && (
-        <SectionCard title={t("exec.infoInput")}>
+        <SectionCard title={t("run.infoInput")}>
           <JsonView data={input} />
         </SectionCard>
       )}
 
       {config && Object.keys(config).length > 0 && (
-        <SectionCard title={t("exec.infoConfig")}>
+        <SectionCard title={t("run.infoConfig")}>
           <JsonView data={config} />
         </SectionCard>
       )}
 
       {/* Execution — who ran it, when, and with which wiring. Always shown:
           runner origin + startedAt are populated for every run. */}
-      <SectionCard title={t("exec.infoExecution")}>
+      <SectionCard title={t("run.infoExecution")}>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <InfoCard label={t("exec.infoRunner")} value={runnerLabel} />
+          <InfoCard label={t("run.infoRunner")} value={runnerLabel} />
           {run.duration != null && (
-            <InfoCard label={t("exec.infoDuration")} value={formatDuration(run.duration)} />
+            <InfoCard label={t("run.infoDuration")} value={formatDuration(run.duration)} />
           )}
-          {startedAt && <InfoCard label={t("exec.infoStartedAt")} value={startedAt} />}
-          {completedAt && <InfoCard label={t("exec.infoCompletedAt")} value={completedAt} />}
+          {startedAt && <InfoCard label={t("run.infoStartedAt")} value={startedAt} />}
+          {completedAt && <InfoCard label={t("run.infoCompletedAt")} value={completedAt} />}
           {run.model_label != null && (
-            <InfoCard label={t("exec.usageModel")} value={run.model_label} />
+            <InfoCard label={t("run.usageModel")} value={run.model_label} />
           )}
           {run.proxy_label != null && (
-            <InfoCard label={t("exec.infoProxy")} value={run.proxy_label} />
+            <InfoCard label={t("run.infoProxy")} value={run.proxy_label} />
           )}
         </div>
       </SectionCard>
@@ -121,54 +121,54 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
           authoritative finalize-time values once the run terminates. */}
       {hasUsage ? (
         <SectionCard
-          title={t("exec.infoUsage")}
+          title={t("run.infoUsage")}
           headerRight={
             run.status && (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(run.status) ? (
               <span className="bg-primary/15 text-primary inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
                 <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
-                {t("exec.usageLive")}
+                {t("run.usageLive")}
               </span>
             ) : null
           }
         >
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {run.cost != null && (
-              <InfoCard label={t("exec.usageCost")} value={`$${run.cost.toFixed(4)}`} />
+              <InfoCard label={t("run.usageCost")} value={`$${run.cost.toFixed(4)}`} />
             )}
             {usage?.input_tokens != null && (
               <InfoCard
-                label={t("exec.usageInputTokens")}
+                label={t("run.usageInputTokens")}
                 value={usage.input_tokens.toLocaleString()}
               />
             )}
             {usage?.output_tokens != null && (
               <InfoCard
-                label={t("exec.usageOutputTokens")}
+                label={t("run.usageOutputTokens")}
                 value={usage.output_tokens.toLocaleString()}
               />
             )}
             {usage?.cache_creation_input_tokens != null && (
               <InfoCard
-                label={t("exec.usageCacheCreation")}
+                label={t("run.usageCacheCreation")}
                 value={usage.cache_creation_input_tokens.toLocaleString()}
               />
             )}
             {usage?.cache_read_input_tokens != null && (
               <InfoCard
-                label={t("exec.usageCacheRead")}
+                label={t("run.usageCacheRead")}
                 value={usage.cache_read_input_tokens.toLocaleString()}
               />
             )}
           </div>
         </SectionCard>
       ) : (
-        <EmptyState message={t("exec.emptyUsage")} icon={Coins} compact />
+        <EmptyState message={t("run.emptyUsage")} icon={Coins} compact />
       )}
 
       {/* Connexions — connections resolved for this run, denormalized at
           kickoff so the panel survives a connection rename/deletion. */}
       {connectionsUsed && connectionsUsed.length > 0 && (
-        <SectionCard title={t("exec.infoConnections")}>
+        <SectionCard title={t("run.infoConnections")}>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {connectionsUsed.map((c) => (
               <InfoCard
@@ -181,7 +181,7 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
                       <span className="text-muted-foreground text-xs">{c.account_id}</span>
                     )}
                     <span className="text-muted-foreground text-xs">
-                      {t(`exec.connSource.${c.source}`, { defaultValue: c.source })}
+                      {t(`run.connSource.${c.source}`, { defaultValue: c.source })}
                     </span>
                   </span>
                 }
@@ -202,14 +202,14 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
       {run.package_ephemeral && (
         <>
           {run.inline_prompt ? (
-            <SectionCard title={t("exec.tabPrompt")}>
+            <SectionCard title={t("run.tabPrompt")}>
               <pre className="bg-muted/30 overflow-x-auto rounded-md p-4 font-mono text-xs whitespace-pre-wrap">
                 {run.inline_prompt}
               </pre>
             </SectionCard>
           ) : null}
           {run.inline_manifest ? (
-            <SectionCard title={t("exec.tabManifest")}>
+            <SectionCard title={t("run.tabManifest")}>
               <JsonView data={run.inline_manifest} />
             </SectionCard>
           ) : null}

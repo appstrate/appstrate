@@ -16,7 +16,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Boxes, Plus, Puzzle, Search } from "lucide-react";
+import { Boxes, Plus, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -24,6 +24,7 @@ import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useIntegrations, type IntegrationSummaryWire } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
+import { IntegrationIcon } from "../components/integration-icon";
 
 function matchesQuery(integration: IntegrationSummaryWire, query: string): boolean {
   if (!query) return true;
@@ -47,31 +48,6 @@ function ActiveBadge({ active }: { active: boolean }) {
     <span className="bg-warning/10 text-warning rounded px-1.5 py-0.5 text-[0.65rem] font-medium">
       {t("integrations.badge.inactive")}
     </span>
-  );
-}
-
-/**
- * Integration logo with a guaranteed fallback: no `icon` declared, or a
- * broken/blocked image URL, both resolve to a neutral default tile so every
- * card reads consistently. Tracks the load error in state rather than hiding
- * the `<img>` (which previously left a blank gap).
- */
-function IntegrationIcon({ src }: { src?: string }) {
-  const [errored, setErrored] = useState(false);
-  if (src && !errored) {
-    return (
-      <img
-        src={src}
-        alt=""
-        className="size-10 shrink-0 rounded-md object-contain"
-        onError={() => setErrored(true)}
-      />
-    );
-  }
-  return (
-    <div className="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-md">
-      <Puzzle size={20} />
-    </div>
   );
 }
 

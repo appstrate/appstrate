@@ -248,9 +248,12 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       loginPage: "/api/oauth/login",
       consentPage: "/api/oauth/consent",
       // basePath is `/api/auth` (not `/`), so BA advises ensuring the
-      // discovery doc at `/.well-known/oauth-authorization-server/api/auth`
-      // is served — which this plugin itself serves. The warning is purely
-      // advisory for the non-root basePath; clear it via the documented flag.
+      // discovery doc at `/.well-known/oauth-authorization-server/api/auth` is
+      // served. BA itself only exposes the suffix form
+      // (`/api/auth/.well-known/...`); the RFC 8414 path-inserted form at the
+      // origin root is served by this module's router (see `routes.ts` OIDC
+      // discovery). The warning is purely advisory for the non-root basePath;
+      // clear it via the documented flag.
       silenceWarnings: { oauthAuthServerConfig: true },
       // OIDC scope vocabulary (identity scopes + OIDC_ALLOWED_SCOPES). Owned
       // wholly by this module — there is no cross-module scope contribution

@@ -7,7 +7,6 @@
   "description": "Collaborative work management platform for teams and enterprises",
   "keywords": ["project-management", "collaboration"],
   "license": "Apache-2.0",
-  "icon": "https://www.google.com/s2/favicons?domain=wrike.com&sz=128",
   "source": {
     "kind": "none"
   },

@@ -28,6 +28,7 @@ import { reconcileBootstrapTokenAtBoot } from "./bootstrap-token.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../services/model-registry.ts";
+import { initSystemIntegrations } from "../services/integration-client-registry.ts";
 import { registerModelProviders } from "../services/model-providers/registry.ts";
 import { initRunLimits } from "../services/run-limits.ts";
 import { initProxyLimits } from "../services/proxy-limits.ts";
@@ -164,6 +165,10 @@ export async function boot(): Promise<void> {
   // Load system provider keys + models from SYSTEM_PROVIDER_KEYS env var
   initSystemModelProviderKeys();
   logger.info("System provider keys loaded");
+
+  // Load system integrations (auto-active policy + shared OAuth clients) from
+  // the SYSTEM_INTEGRATIONS env var
+  initSystemIntegrations();
 
   // Load system packages from ZIPs, sync to DB + S3
   await loadAndSyncSystemPackages().catch((err) => {

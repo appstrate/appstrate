@@ -22,7 +22,7 @@ import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
 import { RunRow } from "../components/run-row";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
-import { useMarkRead } from "../hooks/use-notifications";
+import { useMarkReadByRun } from "../hooks/use-notifications";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
 import { formatDateField } from "../lib/markdown";
@@ -61,14 +61,20 @@ export function RunDetailPage() {
 
   const qc = useQueryClient();
 
-  const markRead = useMarkRead();
+  const markRead = useMarkReadByRun();
 
-  // Auto-mark notification as read when viewing an run
+  // Auto-mark notification as read when viewing a terminal run. Keyed on
+  // `status`: the SSE run patch carries `status` (see `runUpdateToRunPatch`),
+  // so a run that finalizes while the page is open marks read the moment
+  // status flips terminal. Idempotent server-side (no-op for a non-recipient /
+  // already-read), and `status` is stable once terminal so the effect does not
+  // re-fire on subsequent renders.
   useEffect(() => {
-    if (run && runId && run.notifiedAt && !run.readAt) {
+    const terminal = !!status && !(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
+    if (run && runId && terminal) {
       markRead.mutate({ params: { path: { runId } } });
     }
-  }, [run?.notifiedAt, run?.readAt, runId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [status, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runAgent = useRunAgent(packageId);
   const cancelRun = useCancelRun();
@@ -176,7 +182,7 @@ export function RunDetailPage() {
     : { label: agent?.display_name || packageId || "", href: `/agents/${packageId}` };
 
   const runCrumbLabel = runNumber
-    ? t("exec.breadcrumb", { number: runNumber })
+    ? t("run.breadcrumb", { number: runNumber })
     : date || runId?.slice(0, 8) || "";
 
   // Inline agents are 1:1 with their single run — the agent crumb already
@@ -230,9 +236,9 @@ export function RunDetailPage() {
           onValueChange={(v) => setActiveTab(v as "logs" | "result" | "memory" | "info")}
         >
           <TabsList>
-            {hasResult && <TabsTrigger value="result">{t("exec.tabResultGroup")}</TabsTrigger>}
+            {hasResult && <TabsTrigger value="result">{t("run.tabResultGroup")}</TabsTrigger>}
             <TabsTrigger value="logs">
-              {t("exec.tabLogs")}
+              {t("run.tabLogs")}
               {allLogs.length > 0 && (
                 <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
                   {allLogs.length}
@@ -241,13 +247,13 @@ export function RunDetailPage() {
             </TabsTrigger>
             {hasRunMemory && (
               <TabsTrigger value="memory">
-                {t("exec.tabMemory")}
+                {t("run.tabMemory")}
                 <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
                   {runMemoryCount}
                 </span>
               </TabsTrigger>
             )}
-            <TabsTrigger value="info">{t("exec.tabInfo")}</TabsTrigger>
+            <TabsTrigger value="info">{t("run.tabInfo")}</TabsTrigger>
           </TabsList>
         </Tabs>
         <div className="flex items-center gap-2">
@@ -278,7 +284,7 @@ export function RunDetailPage() {
           {!isRunning && !isInline && agent && (
             <Button variant="outline" size="sm" onClick={() => setInputOpen(true)}>
               <Play className="size-3.5" />
-              {t("exec.rerun")}
+              {t("run.rerun")}
             </Button>
           )}
           {/* Cancel hidden for remote-origin runs — the process runs on the
@@ -301,8 +307,8 @@ export function RunDetailPage() {
           {hasReport && hasOutput && (
             <Tabs value={resultSubTab} onValueChange={(v) => setUserSubTab(v as "report" | "data")}>
               <TabsList>
-                <TabsTrigger value="report">{t("exec.tabReport")}</TabsTrigger>
-                <TabsTrigger value="data">{t("exec.tabResult")}</TabsTrigger>
+                <TabsTrigger value="report">{t("run.tabReport")}</TabsTrigger>
+                <TabsTrigger value="data">{t("run.tabResult")}</TabsTrigger>
               </TabsList>
             </Tabs>
           )}

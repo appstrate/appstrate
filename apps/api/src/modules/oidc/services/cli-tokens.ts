@@ -67,7 +67,7 @@
  */
 
 import { randomBytes, createHash } from "node:crypto";
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
 import { user as userTable, organizationMembers } from "@appstrate/db/schema";
@@ -918,14 +918,6 @@ export async function lookupCliDeviceName(familyId: string): Promise<string | nu
   }
 }
 
-/**
- * Test-only — drop the device-name cache between fixtures so stale
- * entries from one test don't bleed into the next.
- */
-export function _resetRunnerDeviceNameCacheForTesting(): void {
-  _runnerDeviceNameCache.clear();
-}
-
 // ─── Phase 3: admin org-scoped oversight (#251) ─────────────────────────────
 
 /**
@@ -1046,19 +1038,6 @@ export async function revokeFamilyForOrgAdmin(params: {
   if (head.revokedAt) return false;
   await revokeFamily(familyId, "org_admin_revoked");
   return true;
-}
-
-/**
- * Test-only export — covers a regression around membership scoping.
- * Production callers always go through {@link listSessionsForOrg} or
- * {@link revokeFamilyForOrgAdmin}.
- */
-export async function _orgMembersUserIdsForTesting(orgId: string): Promise<string[]> {
-  const rows = await db
-    .select({ userId: organizationMembers.userId })
-    .from(organizationMembers)
-    .where(inArray(organizationMembers.orgId, [orgId]));
-  return rows.map((r) => r.userId);
 }
 
 async function revokeFamily(familyId: string, reason: string): Promise<void> {

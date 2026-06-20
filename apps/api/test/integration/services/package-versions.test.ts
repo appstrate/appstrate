@@ -3,7 +3,8 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packageVersions } from "@appstrate/db/schema";
+import { packageVersions, packageVersionDependencies } from "@appstrate/db/schema";
+import type { DepEntry } from "@appstrate/core/dependencies";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser } from "../../helpers/auth.ts";
 import { createTestOrg } from "../../helpers/auth.ts";
@@ -11,6 +12,7 @@ import { seedPackage } from "../../helpers/seed.ts";
 import {
   createPackageVersion,
   createVersionAndUpload,
+  createVersionFromDraft,
   listPackageVersions,
   getLatestVersionId,
   getVersionCount,
@@ -125,6 +127,67 @@ describe("package-versions service", () => {
 
       const latestId = await getLatestVersionId(pkg.id);
       expect(latestId).toBe(v2!.id);
+    });
+
+    it("rolls back the version row when the dependency-index write fails (atomic)", async () => {
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/atomic-agent` });
+      // Invalid `depType` (not in the package_type enum) makes the dependency
+      // insert throw — inside the same transaction as the version row. Atomic =
+      // the version row must NOT survive the rollback.
+      const badDeps: DepEntry[] = [
+        {
+          depScope: "@acme",
+          depName: "x",
+          depType: "not-a-type" as DepEntry["depType"],
+          versionRange: "^1.0.0",
+        },
+      ];
+
+      await expect(
+        createPackageVersion({
+          packageId: pkg.id,
+          version: "1.0.0",
+          integrity: "sha256-abc",
+          artifactSize: 1024,
+          manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
+          createdBy: userId,
+          deps: badDeps,
+        }),
+      ).rejects.toThrow();
+
+      expect(await getVersionCount(pkg.id)).toBe(0);
+    });
+
+    it("does not duplicate dependency-index rows when the same version is created twice", async () => {
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/dup-deps-agent` });
+      const params = {
+        packageId: pkg.id,
+        version: "1.0.0",
+        integrity: "sha256-abc",
+        artifactSize: 1024,
+        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
+        createdBy: userId,
+        deps: [
+          {
+            depScope: "@acme",
+            depName: "fathom",
+            depType: "integration" as DepEntry["depType"],
+            versionRange: "^1.0.0",
+          },
+        ],
+      };
+
+      const first = await createPackageVersion(params);
+      // Second create hits the "exists" branch → returns the existing row and
+      // must NOT re-insert the dependency index.
+      const second = await createPackageVersion(params);
+      expect(second!.id).toBe(first!.id);
+
+      const rows = await db
+        .select({ id: packageVersionDependencies.id })
+        .from(packageVersionDependencies)
+        .where(eq(packageVersionDependencies.versionId, first!.id));
+      expect(rows.length).toBe(1);
     });
   });
 
@@ -298,6 +361,79 @@ describe("package-versions service", () => {
       const info = await getVersionInfo(`@${orgSlug}/info-no-manifest-ver`, orgId);
       expect(info.active_version).toBeNull();
       expect(info.latest_published_version).toBeNull();
+    });
+  });
+
+  // ── createVersionFromDraft ────────────────────────────────
+
+  describe("createVersionFromDraft", () => {
+    // Regression: a prompt-only agent (no skills) declaring integrations used
+    // to lose its entire `dependencies` block at publish (buildDependencies
+    // returned null → the whole block was deleted), so the runtime saw
+    // tool_not_found. Publish must preserve the authored dependencies verbatim.
+    it("preserves authored dependencies.integrations verbatim for a skill-less agent", async () => {
+      const id = `@${orgSlug}/prompt-only`;
+      const draftManifest = {
+        name: id,
+        version: "1.0.0",
+        type: "agent",
+        dependencies: {
+          integrations: {
+            "@acme/fathom": "^1.2.4",
+            "@appstrate/github": "^1.0.0",
+          },
+        },
+        integrations_configuration: {
+          "@acme/fathom": { tools: ["api_call"], auth_key: "primary" },
+          "@appstrate/github": { tools: ["api_call"], auth_key: "primary" },
+        },
+      };
+      const pkg = await seedPackage({ orgId, id, draftManifest, draftContent: "Prompt." });
+
+      const result = await createVersionFromDraft({ packageId: pkg.id, orgId, userId });
+      expect("error" in result).toBe(false);
+
+      const [stored] = await db
+        .select({ manifest: packageVersions.manifest })
+        .from(packageVersions)
+        .where(and(eq(packageVersions.packageId, pkg.id), eq(packageVersions.version, "1.0.0")))
+        .limit(1);
+
+      const deps = (
+        stored!.manifest as { dependencies?: { integrations?: Record<string, string> } }
+      ).dependencies?.integrations;
+      expect(deps).toEqual({
+        "@acme/fathom": "^1.2.4",
+        "@appstrate/github": "^1.0.0",
+      });
+    });
+
+    // Atomicity: the derived dependency index is written in the same
+    // transaction as the version row (no committed version with a missing index).
+    it("populates the dependency index in the same step as the version row", async () => {
+      const id = `@${orgSlug}/indexed`;
+      const pkg = await seedPackage({
+        orgId,
+        id,
+        draftManifest: {
+          name: id,
+          version: "1.0.0",
+          type: "agent",
+          dependencies: { integrations: { "@acme/fathom": "^1.2.4" } },
+          integrations_configuration: { "@acme/fathom": { tools: ["api_call"] } },
+        },
+        draftContent: "Prompt.",
+      });
+
+      const result = await createVersionFromDraft({ packageId: pkg.id, orgId, userId });
+      expect("error" in result).toBe(false);
+      const versionId = (result as { id: number }).id;
+
+      const rows = await db
+        .select({ depName: packageVersionDependencies.depName })
+        .from(packageVersionDependencies)
+        .where(eq(packageVersionDependencies.versionId, versionId));
+      expect(rows.map((r) => r.depName)).toContain("fathom");
     });
   });
 

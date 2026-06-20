@@ -7,7 +7,7 @@
   "description": "Cloud file storage and sharing by Microsoft",
   "keywords": ["storage", "productivity"],
   "license": "Apache-2.0",
-  "icon": "microsoftonedrive",
+  "icon": "logos:microsoft-onedrive",
   "source": {
     "kind": "none"
   },

@@ -41,6 +41,14 @@ export interface LoginPageProps {
    * these buttons is safe.
    */
   allowSignup: boolean;
+  /**
+   * Lock the email field (read-only, pre-filled from `email`). Set when the
+   * authorize request carried an OIDC `login_hint` — the invitation flow
+   * pins the invited address so the user cannot accidentally sign in with a
+   * different account. UX only: the invitation accept endpoint re-checks the
+   * session email server-side.
+   */
+  lockEmail?: boolean;
 }
 
 export function renderLoginPage(props: LoginPageProps): RawHtml {
@@ -77,10 +85,16 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
         name="email"
         placeholder="Email"
         required
-        autofocus
+        ${props.lockEmail ? html`readonly` : html`autofocus`}
         value="${props.email ?? ""}"
       />
-      <input type="password" name="password" placeholder="Mot de passe" required />
+      <input
+        type="password"
+        name="password"
+        placeholder="Mot de passe"
+        required
+        ${props.lockEmail ? html`autofocus` : null}
+      />
       <button type="submit">Se connecter</button>
     </form>
     ${renderSocialButtons({

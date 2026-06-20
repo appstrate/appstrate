@@ -152,6 +152,8 @@ export const oidcPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
     get: {
@@ -167,6 +169,7 @@ export const oidcPaths = {
           headers: commonHeaders,
           content: { "application/json": { schema: clientListResponse } },
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -189,6 +192,7 @@ export const oidcPaths = {
             },
           },
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Client not found." },
       },
     },
@@ -216,6 +220,8 @@ export const oidcPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Client not found." },
       },
     },
@@ -229,6 +235,7 @@ export const oidcPaths = {
       ],
       responses: {
         "204": { description: "Client deleted." },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Client not found." },
       },
     },
@@ -255,6 +262,7 @@ export const oidcPaths = {
             },
           },
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -277,6 +285,7 @@ export const oidcPaths = {
             },
           },
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Client not found." },
       },
     },
@@ -527,6 +536,26 @@ export const oidcPaths = {
       responses: { "200": { description: "Authorization server metadata document." } },
     },
   },
+  "/.well-known/openid-configuration/api/auth": {
+    get: {
+      operationId: "oidcDiscoveryPathInserted",
+      tags: ["OAuth Clients"],
+      summary: "OpenID Connect discovery document (RFC 8414 path-inserted)",
+      description:
+        "Same document as `/.well-known/openid-configuration`. The advertised issuer is `${APP_URL}/api/auth`, so RFC 8414 path-aware clients insert the issuer path after `.well-known` and request the discovery document here.",
+      responses: { "200": { description: "OpenID Configuration document." } },
+    },
+  },
+  "/.well-known/oauth-authorization-server/api/auth": {
+    get: {
+      operationId: "oauthServerMetadataPathInserted",
+      tags: ["OAuth Clients"],
+      summary: "OAuth 2.0 Authorization Server Metadata (RFC 8414 path-inserted)",
+      description:
+        "Same document as `/.well-known/oauth-authorization-server`. The advertised issuer is `${APP_URL}/api/auth`, so RFC 8414 path-aware clients insert the issuer path after `.well-known` and request the metadata document here.",
+      responses: { "200": { description: "Authorization server metadata document." } },
+    },
+  },
 
   // ─── Logout ─────────────────────────────────────────────────────────────
 
@@ -570,6 +599,7 @@ export const oidcPaths = {
             },
           },
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Application or configuration not found" },
       },
     },
@@ -617,6 +647,7 @@ export const oidcPaths = {
           },
         },
         "400": { description: "Validation error (invalid host / SSRF block)" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Application or configuration not found" },
       },
     },
@@ -628,6 +659,7 @@ export const oidcPaths = {
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
         "204": { description: "Deleted" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Application or configuration not found" },
       },
     },
@@ -669,6 +701,8 @@ export const oidcPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Application or configuration not found" },
       },
     },
@@ -699,6 +733,7 @@ export const oidcPaths = {
             },
           },
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Application or configuration not found" },
       },
     },
@@ -753,6 +788,7 @@ export const oidcPaths = {
           },
         },
         "400": { description: "Validation error" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Application or configuration not found" },
       },
     },
@@ -772,6 +808,7 @@ export const oidcPaths = {
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
         "204": { description: "Deleted" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Application or configuration not found" },
       },
     },
@@ -1145,6 +1182,7 @@ export const oidcPaths = {
       summary: "Deny a pending device authorization",
       responses: {
         "200": { description: "Denied — renders the refusal page." },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "403": { description: "CSRF check failed." },
       },
     },

@@ -7,7 +7,7 @@
   "description": "Video sharing and streaming platform by Google",
   "keywords": ["social-media", "video", "marketing"],
   "license": "Apache-2.0",
-  "icon": "youtube",
+  "icon": "logos:youtube-icon",
   "source": {
     "kind": "none"
   },

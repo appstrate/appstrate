@@ -15,6 +15,7 @@
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
+import { formatZodIssues } from "../lib/zod-format.ts";
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -63,21 +64,13 @@ export function initProxyLimits(): void {
 
   const llmParsed = llmProxyLimitsSchema.safeParse(env.LLM_PROXY_LIMITS);
   if (!llmParsed.success) {
-    throw new Error(
-      `LLM_PROXY_LIMITS invalid: ${llmParsed.error.issues
-        .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
-        .join("; ")}`,
-    );
+    throw new Error(`LLM_PROXY_LIMITS invalid: ${formatZodIssues(llmParsed.error)}`);
   }
   llmLimits = llmParsed.data;
 
   const credentialParsed = credentialProxyLimitsSchema.safeParse(env.CREDENTIAL_PROXY_LIMITS);
   if (!credentialParsed.success) {
-    throw new Error(
-      `CREDENTIAL_PROXY_LIMITS invalid: ${credentialParsed.error.issues
-        .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
-        .join("; ")}`,
-    );
+    throw new Error(`CREDENTIAL_PROXY_LIMITS invalid: ${formatZodIssues(credentialParsed.error)}`);
   }
   credentialLimits = credentialParsed.data;
 
@@ -99,19 +92,4 @@ export function getCredentialProxyLimits(): CredentialProxyLimits {
     throw new Error("Proxy limits not initialized. Call initProxyLimits() at boot.");
   }
   return credentialLimits;
-}
-
-/** Test-only: reset the cache so successive tests can install their own limits. */
-export function _resetProxyLimitsForTesting(): void {
-  llmLimits = null;
-  credentialLimits = null;
-}
-
-/** Test-only: override with concrete values without going through env. */
-export function _setProxyLimitsForTesting(
-  llm?: Partial<LlmProxyLimits>,
-  credential?: Partial<CredentialProxyLimits>,
-): void {
-  llmLimits = llmProxyLimitsSchema.parse({ ...llm });
-  credentialLimits = credentialProxyLimitsSchema.parse({ ...credential });
 }

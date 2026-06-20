@@ -121,6 +121,7 @@ export const modelProvidersOAuthPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -143,6 +144,7 @@ export const modelProvidersOAuthPaths = {
       ],
       responses: {
         "204": { description: "Pairing cancelled (or no-op if absent)." },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

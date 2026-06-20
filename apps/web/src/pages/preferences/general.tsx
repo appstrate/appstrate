@@ -7,9 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useUpdateDisplayName } from "../../hooks/use-profile";
-import { useAuth, refreshAuth } from "../../hooks/use-auth";
+import { useAuth, refreshAuth, EmailChangeError } from "../../hooks/use-auth";
 import { useAppConfig } from "../../hooks/use-app-config";
-import { authClient } from "../../lib/auth-client";
 import { CheckCircle2, AlertCircle } from "lucide-react";
 
 function EmailVerificationBadge() {
@@ -64,7 +63,7 @@ function EmailVerificationBadge() {
 
 function EmailChangeForm() {
   const { t } = useTranslation(["settings", "common"]);
-  const { user } = useAuth();
+  const { user, changeEmail } = useAuth();
   const { features } = useAppConfig();
   const [success, setSuccess] = useState("");
   const [verificationPendingEmail, setVerificationPendingEmail] = useState("");
@@ -89,24 +88,21 @@ function EmailChangeForm() {
     setSuccess("");
     setVerificationPendingEmail("");
     try {
-      const result = await authClient.changeEmail({ newEmail: data.newEmail.trim() });
-      if (result.error) {
-        if (result.error.status === 409) {
-          setError("root", { message: t("preferences.emailConflict") });
-        } else {
-          setError("root", { message: result.error.message || t("login.error") });
-        }
+      await changeEmail(data.newEmail.trim());
+      reset();
+      if (features.smtp) {
+        setVerificationPendingEmail(data.newEmail.trim());
       } else {
-        reset();
-        if (features.smtp) {
-          setVerificationPendingEmail(data.newEmail.trim());
-        } else {
-          setSuccess(t("preferences.emailChanged"));
-          await refreshAuth();
-        }
+        setSuccess(t("preferences.emailChanged"));
+        await refreshAuth();
       }
-    } catch {
-      setError("root", { message: t("login.error") });
+    } catch (err) {
+      if (err instanceof EmailChangeError && err.conflict) {
+        setError("root", { message: t("preferences.emailConflict") });
+      } else {
+        const message = err instanceof Error && err.message ? err.message : t("login.error");
+        setError("root", { message });
+      }
     }
   };
 

@@ -105,6 +105,22 @@ export class AuthRefreshError extends Error {
 }
 
 /**
+ * Thrown by `changeEmail()` so the caller can distinguish a 409 address
+ * collision (a dedicated "email already in use" message) from any other
+ * failure without reaching into the raw Better Auth result shape — the
+ * seam is the only place that touches `authClient`.
+ */
+export class EmailChangeError extends Error {
+  constructor(
+    public conflict: boolean,
+    message: string,
+  ) {
+    super(message);
+    this.name = "EmailChangeError";
+  }
+}
+
+/**
  * Resync auth state from the server cookie and assert that a user was
  * established. Use after any flow that should have left a valid session
  * behind (OIDC callback, invite accept, email change). On the no-user
@@ -128,33 +144,12 @@ export function useAuth() {
   const state = useStore(authStore);
 
   /**
-   * Login — redirects to the OIDC authorize endpoint which shows the
-   * shared server-rendered login page. After authentication, the browser
-   * is redirected back to /auth/callback with an authorization code.
-   *
-   * The optional `redirectTo` is saved for after the callback completes.
-   *
-   * The single-argument shape (vs. the old `(email, password)`) is
-   * deliberate — any remaining inline email/password caller must use
-   * `loginDirect` explicitly and the compiler flags the miswire rather
-   * than silently coercing an email into `redirectTo`.
+   * Email/password login — used by the OSS login form and the invite
+   * acceptance flow, which authenticate inline without redirecting. In OIDC
+   * mode these forms never render (`HostedAuthGate` redirects first), so
+   * there is no redirect variant here — the gate owns that path.
    */
-  const login = useCallback((redirectTo?: string): Promise<void> => {
-    const oidcConfig = (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
-    if (oidcConfig) {
-      return import("../modules/oidc/lib/oidc").then(({ startOidcLogin }) =>
-        startOidcLogin(redirectTo),
-      );
-    }
-    window.location.assign("/login");
-    return Promise.resolve();
-  }, []);
-
-  /**
-   * Direct email/password login — used by invite acceptance flow
-   * where the user must authenticate inline without redirecting.
-   */
-  const loginDirect = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string) => {
     const result = await authClient.signIn.email({ email, password });
     if (result.error) throw new Error(result.error.message);
     const profile = await fetchProfile();
@@ -169,22 +164,9 @@ export function useAuth() {
       password: string,
       displayName?: string,
     ): Promise<{ emailVerificationRequired: boolean }> => {
-      // When OIDC is loaded, signup must traverse the same server-rendered
-      // flow as login so that (a) both events go through the centralized
-      // branded page and (b) the resulting BA session is established under
-      // the same cookie domain as the authorize callback. The server-side
-      // `/api/oauth/register` handler forwards to `/oauth2/authorize` on
-      // success, so the callback lands on `/auth/callback` like any login.
-      const oidcConfig = (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
-      if (oidcConfig) {
-        const { startOidcSignup } = await import("../modules/oidc/lib/oidc");
-        await startOidcSignup();
-        // Page is navigating away — return a never-resolving promise so
-        // callers (`onSuccess` handlers, route navigations) cannot fire
-        // mid-unload and trigger a no-op state update on a detached tree.
-        return new Promise<never>(() => {});
-      }
-
+      // Native email/password signup (OSS). In OIDC mode the register form
+      // never renders — `HostedAuthGate` redirects to the hosted register
+      // page first — so signup has no OIDC branch; the gate owns that path.
       const result = await authClient.signUp.email({
         email,
         password,
@@ -202,7 +184,15 @@ export function useAuth() {
     [],
   );
 
-  const logout = useCallback(async () => {
+  /**
+   * Log out. `redirectTo`, when given, is where the user should land after
+   * they sign in again — used by the invite "log out and retry" flow so a
+   * wrong-account user returns to the invitation. In OIDC mode it is stashed
+   * for the post-re-login callback (see `startOidcLogout`); in OSS mode the
+   * page that called logout stays mounted (e.g. /invite re-renders into its
+   * login form), so no explicit navigation is needed.
+   */
+  const logout = useCallback(async (redirectTo?: string) => {
     const oidcConfig = (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
     if (oidcConfig) {
       // Navigate to the server-side logout endpoint FIRST — it clears the
@@ -212,7 +202,7 @@ export function useAuth() {
       // which starts a new OIDC login flow before the browser can follow
       // the logout redirect — effectively re-logging the user in.
       const { startOidcLogout } = await import("../modules/oidc/lib/oidc");
-      startOidcLogout();
+      startOidcLogout(redirectTo);
     } else {
       await authClient.signOut();
       clearAuth();
@@ -258,12 +248,57 @@ export function useAuth() {
     if (result.error) throw new Error(result.error.message);
   }, []);
 
+  // ─── Password recovery / passwordless (OSS-only at runtime) ─────────────
+  //
+  // These recovery flows have no OIDC branch on purpose: when the OIDC module
+  // is configured, `HostedAuthGate` / `useHostedAuthRedirect` redirect the
+  // forgot-password / reset-password / magic-link routes to the hosted IdP
+  // *before* their forms ever render, so these methods are only reachable in
+  // OSS mode. They live on the seam (not inline in the pages) solely so the
+  // ESLint `auth-client` ban can guarantee no page bypasses that redirect.
+
+  const requestPasswordReset = useCallback(async (email: string) => {
+    const result = await authClient.requestPasswordReset({
+      email,
+      redirectTo: "/reset-password",
+    });
+    if (result.error) throw new Error(result.error.message);
+  }, []);
+
+  const resetPassword = useCallback(async (token: string, newPassword: string) => {
+    const result = await authClient.resetPassword({ newPassword, token });
+    if (result.error) throw new Error(result.error.message);
+  }, []);
+
+  const startMagicLink = useCallback(async (email: string) => {
+    const result = await authClient.signIn.magicLink({ email, callbackURL: "/" });
+    if (result.error) throw new Error(result.error.message);
+  }, []);
+
+  // ─── Authenticated account management (no OIDC entry redirect) ───────────
+  //
+  // changeEmail / listLinkedAccounts operate on the *existing* session from
+  // inside the dashboard — they are not unauthenticated entry points, so they
+  // run natively in both modes. Routed through the seam only for the ban.
+
+  const changeEmail = useCallback(async (newEmail: string) => {
+    const result = await authClient.changeEmail({ newEmail });
+    if (result.error) {
+      throw new EmailChangeError(result.error.status === 409, result.error.message ?? "");
+    }
+  }, []);
+
+  const listLinkedAccounts = useCallback(async () => {
+    const result = await authClient.listAccounts();
+    if (result.error) throw new Error(result.error.message);
+    return result.data ?? [];
+  }, []);
+
   return {
     user: state.user,
     profile: state.profile,
     loading: state.loading,
     login,
-    loginDirect,
     signup,
     logout,
     updatePassword,
@@ -273,5 +308,10 @@ export function useAuth() {
     linkGithub,
     unlinkAccount,
     resendVerificationEmail,
+    requestPasswordReset,
+    resetPassword,
+    startMagicLink,
+    changeEmail,
+    listLinkedAccounts,
   };
 }

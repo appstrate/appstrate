@@ -3,10 +3,17 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BrainCircuit, KeyRound } from "lucide-react";
+import { BrainCircuit, KeyRound, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
@@ -31,82 +38,16 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
-import { cn } from "@/lib/utils";
 import { getProviderIcon } from "../../components/icons";
 import { findProviderByApiShapeAndBaseUrl } from "../../lib/provider-registry-helpers";
 import { formatDateField } from "../../lib/markdown";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
-import type { TestResult } from "@appstrate/shared-types";
-
-function TestResultSpan({
-  result,
-  successKey,
-  failedKey,
-}: {
-  result: TestResult;
-  successKey: string;
-  failedKey: string;
-}) {
-  const { t } = useTranslation(["settings"]);
-  return (
-    <span className={`text-sm ${result.ok ? "text-green-500" : "text-destructive"}`}>
-      {result.ok
-        ? t(successKey, { latency: result.latency })
-        : t(failedKey, { message: result.message })}
-    </span>
-  );
-}
-
-function InlineEditableLabel({
-  value,
-  editable,
-  onSave,
-}: {
-  value: string;
-  editable: boolean;
-  onSave: (newValue: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-
-  if (!editable || !editing) {
-    return (
-      <span
-        className={cn("text-sm font-medium", editable && "cursor-pointer hover:underline")}
-        onClick={() => {
-          if (editable) {
-            setDraft(value);
-            setEditing(true);
-          }
-        }}
-      >
-        {value}
-      </span>
-    );
-  }
-
-  return (
-    <Input
-      autoFocus
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => {
-        if (draft.trim() && draft.trim() !== value) onSave(draft.trim());
-        setEditing(false);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          if (draft.trim() && draft.trim() !== value) onSave(draft.trim());
-          setEditing(false);
-        }
-        if (e.key === "Escape") setEditing(false);
-      }}
-      className="h-7 w-auto min-w-40 text-sm font-medium"
-    />
-  );
-}
+import { TestResultSpan } from "../../components/test-result-span";
+import { InlineEditableLabel } from "../../components/inline-editable-label";
+import { SourceBadge } from "../../components/source-badge";
+import { DefaultCell } from "../../components/default-cell";
 
 function ModelsList({
   models,
@@ -116,7 +57,6 @@ function ModelsList({
   onEdit,
   onDelete,
   onSetDefault,
-  onRemoveDefault,
 }: {
   models: OrgModelInfo[] | undefined;
   isLoading: boolean;
@@ -125,7 +65,6 @@ function ModelsList({
   onEdit: (m: OrgModelInfo) => void;
   onDelete: (m: OrgModelInfo) => void;
   onSetDefault: (m: OrgModelInfo) => void;
-  onRemoveDefault: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModel();
@@ -142,79 +81,112 @@ function ModelsList({
       </div>
 
       {models && models.length > 0 ? (
-        <div className="flex flex-col gap-3">
-          {models.map((m) => {
-            const isBuiltIn = m.source === "built-in";
-            const provider = findProviderByApiShapeAndBaseUrl(
-              m.apiShape,
-              m.baseUrl,
-              registry ?? [],
-            );
-            const ProviderIcon = getProviderIcon(provider);
-            return (
-              <div key={m.id} className="border-border bg-card rounded-lg border p-5">
-                <div className="mb-3 flex items-center gap-3">
-                  {ProviderIcon && <ProviderIcon className="size-5" />}
-                  <div className="flex-1">
-                    <h3 className="text-[0.95rem] font-semibold">{m.label}</h3>
-                    <span className="text-muted-foreground text-sm">
-                      {m.apiShape} / {m.modelId}
-                    </span>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      {m.isDefault && <Badge variant="success">{t("models.default")}</Badge>}
-                      {isBuiltIn && (
-                        <Badge variant="secondary" className="opacity-60">
-                          {t("models.builtIn")}
-                        </Badge>
-                      )}
-                      {!isBuiltIn && (
-                        <Badge variant="secondary" className="opacity-60">
-                          {m.enabled ? t("models.enabled") : t("models.disabled")}
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="border-border mt-3 flex items-center justify-end gap-2 border-t pt-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleTest(m.id)}
-                    disabled={testingId === m.id}
-                  >
-                    {testingId === m.id ? <Spinner /> : t("models.test")}
-                  </Button>
-                  {testResults[m.id] && (
-                    <TestResultSpan
-                      result={testResults[m.id]!}
-                      successKey="models.testSuccess"
-                      failedKey="models.testFailed"
-                    />
-                  )}
-                  {m.isDefault && !isBuiltIn && (
-                    <Button variant="outline" size="sm" onClick={onRemoveDefault}>
-                      {t("models.removeDefault")}
-                    </Button>
-                  )}
-                  {!m.isDefault && !isBuiltIn && (
-                    <Button variant="outline" size="sm" onClick={() => onSetDefault(m)}>
-                      {t("models.setDefault")}
-                    </Button>
-                  )}
-                  {!isBuiltIn && (
-                    <>
-                      <Button variant="ghost" size="sm" onClick={() => onEdit(m)}>
-                        {t("models.edit")}
-                      </Button>
-                      <Button variant="destructive" size="sm" onClick={() => onDelete(m)}>
-                        {t("models.delete")}
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+        <div className="overflow-hidden rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs">{t("models.col.source")}</TableHead>
+                <TableHead className="text-xs">{t("models.col.model")}</TableHead>
+                <TableHead className="text-xs">{t("models.col.default")}</TableHead>
+                <TableHead className="w-px text-right text-xs">{t("models.col.actions")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {models.map((m) => {
+                const isBuiltIn = m.source === "built-in";
+                const provider = findProviderByApiShapeAndBaseUrl(
+                  m.apiShape,
+                  m.baseUrl,
+                  registry ?? [],
+                );
+                const ProviderIcon = getProviderIcon(provider);
+                return (
+                  <TableRow key={m.id} data-testid={`model-row-${m.id}`}>
+                    <TableCell>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <SourceBadge source={m.source} />
+                        {m.aliased && <Badge variant="secondary">{t("models.alias")}</Badge>}
+                        {!isBuiltIn && !m.enabled && (
+                          <Badge variant="secondary" className="opacity-60">
+                            {t("models.disabled")}
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {ProviderIcon && <ProviderIcon className="size-4 shrink-0" />}
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium">{m.label}</div>
+                          <div className="text-muted-foreground font-mono text-[0.65rem]">
+                            {m.aliased ? t("models.aliasHidden") : `${m.apiShape} / ${m.modelId}`}
+                          </div>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <DefaultCell
+                        isDefault={m.is_default}
+                        defaultLabel={t("models.default")}
+                        setLabel={t("models.setDefault")}
+                        onSetDefault={() => onSetDefault(m)}
+                        testId={`set-default-model-${m.id}`}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        {testResults[m.id] && (
+                          <TestResultSpan
+                            result={testResults[m.id]!}
+                            successKey="models.testSuccess"
+                            failedKey="models.testFailed"
+                          />
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() => handleTest(m.id)}
+                          disabled={testingId === m.id}
+                        >
+                          {testingId === m.id ? <Spinner /> : t("models.test")}
+                        </Button>
+                        {!isBuiltIn && (
+                          <>
+                            {/* Aliases hide their real binding (modelId etc.),
+                                so the edit form can't round-trip them — the
+                                projected modelId is null and would fail
+                                validation. Edit env/API-side; delete still
+                                works (by id). */}
+                            {!m.aliased && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                onClick={() => onEdit(m)}
+                                aria-label={t("models.edit")}
+                              >
+                                <Pencil size={14} />
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0"
+                              onClick={() => onDelete(m)}
+                              aria-label={t("models.delete")}
+                            >
+                              <Trash2 size={14} className="text-destructive" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </div>
       ) : (
         <EmptyState message={t("models.empty")} icon={BrainCircuit} compact>
@@ -262,103 +234,142 @@ function CredentialsSection({
       <div className="mb-4 flex items-center justify-end gap-2">{addButton}</div>
 
       {credentials && credentials.length > 0 ? (
-        <div className="border-border divide-border divide-y rounded-lg border">
-          {credentials.map((pk) => {
-            const provider = findProviderByApiShapeAndBaseUrl(
-              pk.apiShape,
-              pk.baseUrl,
-              registry ?? [],
-            );
-            const ProviderIcon = getProviderIcon(provider);
-            const isOauth = pk.authMode === "oauth2";
-            return (
-              <div key={pk.id} className="flex items-center gap-3 px-4 py-3">
-                {ProviderIcon && <ProviderIcon className="text-muted-foreground size-4 shrink-0" />}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <InlineEditableLabel
-                      value={pk.label}
-                      editable={pk.source === "custom" && !isOauth}
-                      onSave={(newLabel) => onRename(pk, newLabel)}
-                    />
-                    {isOauth && (
-                      <Badge variant="secondary" className="text-[0.65rem]">
-                        {t("credentials.oauth.badgeOauth")}
-                      </Badge>
-                    )}
-                    {pk.needs_reconnection && (
-                      <Badge variant="destructive" className="text-[0.65rem]">
-                        {t("credentials.oauth.needsReconnection")}
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-xs">
-                    <span>{pk.apiShape}</span>
-                    {pk.createdAt && (
-                      <>
-                        <span>&middot;</span>
-                        <span>{formatDateField(pk.createdAt)}</span>
-                      </>
-                    )}
-                    {isOauth && pk.oauth_email && (
-                      <>
-                        <span>&middot;</span>
-                        <span>{t("credentials.oauth.connectedAs", { email: pk.oauth_email })}</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {!isOauth && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleTest(pk.id)}
-                      disabled={testingId === pk.id}
-                    >
-                      {testingId === pk.id ? <Spinner /> : t("credentials.test")}
-                    </Button>
-                  )}
-                  {testResults[pk.id] && (
-                    <TestResultSpan
-                      result={testResults[pk.id]!}
-                      successKey="credentials.testSuccess"
-                      failedKey="credentials.testFailed"
-                    />
-                  )}
-                  {pk.source === "custom" && !isOauth && (
-                    <>
-                      <Button variant="ghost" size="sm" onClick={() => onEdit(pk)}>
-                        {t("credentials.edit")}
-                      </Button>
-                      <Button variant="destructive" size="sm" onClick={() => onDelete(pk)}>
-                        {t("credentials.delete")}
-                      </Button>
-                    </>
-                  )}
-                  {isOauth && (
-                    <>
-                      {pk.needs_reconnection && pk.providerId && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => onConnectOAuth(pk.providerId!)}
-                        >
-                          {t("credentials.oauth.reconnect")}
-                        </Button>
+        <div className="overflow-hidden rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs">{t("credentials.col.provider")}</TableHead>
+                <TableHead className="text-xs">{t("credentials.col.auth")}</TableHead>
+                <TableHead className="text-xs">{t("credentials.col.created")}</TableHead>
+                <TableHead className="text-xs">{t("credentials.col.status")}</TableHead>
+                <TableHead className="w-px text-right text-xs">
+                  {t("credentials.col.actions")}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {credentials.map((pk) => {
+                const provider = findProviderByApiShapeAndBaseUrl(
+                  pk.apiShape,
+                  pk.baseUrl,
+                  registry ?? [],
+                );
+                const ProviderIcon = getProviderIcon(provider);
+                const isOauth = pk.authMode === "oauth2";
+                return (
+                  <TableRow key={pk.id} data-testid={`credential-row-${pk.id}`}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {ProviderIcon && (
+                          <ProviderIcon className="text-muted-foreground size-4 shrink-0" />
+                        )}
+                        <div className="min-w-0">
+                          <InlineEditableLabel
+                            value={pk.label}
+                            editable={pk.source === "custom" && !isOauth}
+                            onSave={(newLabel) => onRename(pk, newLabel)}
+                          />
+                          {isOauth && pk.oauth_email && (
+                            <div className="text-muted-foreground truncate text-[0.65rem]">
+                              {t("credentials.oauth.connectedAs", { email: pk.oauth_email })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {isOauth ? (
+                        <Badge variant="secondary">{t("credentials.oauth.badgeOauth")}</Badge>
+                      ) : (
+                        <SourceBadge source={pk.source} />
                       )}
-                      <Button variant="destructive" size="sm" onClick={() => onDelete(pk)}>
-                        {t("credentials.oauth.disconnect")}
-                      </Button>
-                    </>
-                  )}
-                  {pk.source === "built-in" && (
-                    <span className="text-muted-foreground text-xs">{t("models.builtIn")}</span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs">
+                      {pk.createdAt ? formatDateField(pk.createdAt) : "—"}
+                    </TableCell>
+                    <TableCell>
+                      {pk.needs_reconnection ? (
+                        <Badge variant="destructive">
+                          {t("credentials.oauth.needsReconnection")}
+                        </Badge>
+                      ) : pk.source === "built-in" ? (
+                        <span className="text-muted-foreground text-xs">{t("source.builtIn")}</span>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        {testResults[pk.id] && (
+                          <TestResultSpan
+                            result={testResults[pk.id]!}
+                            successKey="credentials.testSuccess"
+                            failedKey="credentials.testFailed"
+                          />
+                        )}
+                        {!isOauth && pk.source === "custom" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => handleTest(pk.id)}
+                            disabled={testingId === pk.id}
+                          >
+                            {testingId === pk.id ? <Spinner /> : t("credentials.test")}
+                          </Button>
+                        )}
+                        {pk.source === "custom" && !isOauth && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0"
+                              onClick={() => onEdit(pk)}
+                              aria-label={t("credentials.edit")}
+                            >
+                              <Pencil size={14} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0"
+                              onClick={() => onDelete(pk)}
+                              aria-label={t("credentials.delete")}
+                            >
+                              <Trash2 size={14} className="text-destructive" />
+                            </Button>
+                          </>
+                        )}
+                        {isOauth && (
+                          <>
+                            {pk.needs_reconnection && pk.providerId && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => onConnectOAuth(pk.providerId!)}
+                              >
+                                {t("credentials.oauth.reconnect")}
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0"
+                              onClick={() => onDelete(pk)}
+                              aria-label={t("credentials.oauth.disconnect")}
+                            >
+                              <Trash2 size={14} className="text-destructive" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </div>
       ) : (
         <EmptyState
@@ -431,7 +442,6 @@ export function OrgSettingsModelsPage() {
           }}
           onDelete={(m) => setConfirmState({ type: "deleteModel", label: m.label, id: m.id })}
           onSetDefault={(m) => setDefaultModelMutation.mutate({ body: { modelId: m.id } })}
-          onRemoveDefault={() => setDefaultModelMutation.mutate({ body: { modelId: null } })}
         />
       )}
 

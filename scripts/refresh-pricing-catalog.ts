@@ -236,10 +236,24 @@ function projectEntry(id: string, entry: LiteLLMEntry): CompactEntry | null {
     cost.cacheWrite = round(entry.cache_creation_input_token_cost * PER_MILLION);
   }
 
+  // Canonical model invariant: a request spends `input + output` from the
+  // same window, so `max_output_tokens < context_window` always holds.
+  // LiteLLM reports `max_output_tokens == max_input_tokens` for a class of
+  // models (devstral, kimi-k2.5, several grok/mistral entries) — a known
+  // upstream data bug (LiteLLM #22478). Drop the impossible value to null
+  // so the runtime derives a sane response reserve instead of inheriting a
+  // cap that swallows the whole window (which crashes the sidecar at boot
+  // and pins the compaction threshold at zero). See `@appstrate/core/token-budget`.
+  const contextWindow = entry.max_input_tokens;
+  const maxTokens =
+    typeof entry.max_output_tokens === "number" && entry.max_output_tokens < contextWindow
+      ? entry.max_output_tokens
+      : null;
+
   return {
     label: deriveLabel(id),
-    contextWindow: entry.max_input_tokens,
-    maxTokens: typeof entry.max_output_tokens === "number" ? entry.max_output_tokens : null,
+    contextWindow,
+    maxTokens,
     capabilities: caps,
     cost,
   };
@@ -296,22 +310,71 @@ async function fetchModelsDev(): Promise<Record<string, ModelsDevProvider>> {
 }
 
 /**
+ * Real upstream model ids that must NEVER surface in the featured picker —
+ * the hidden backings of model aliases (#727). Two sources, unioned:
+ *   - `FEATURED_MODELS_EXCLUDE` (comma-separated) — covers backings configured
+ *     as DB `org_models` rows, which this offline script can't see, and any
+ *     manual additions.
+ *   - `SYSTEM_PROVIDER_KEYS` aliased entries — best-effort JSON walk (no Zod, so
+ *     a malformed env never breaks the catalog refresh; the explicit list still
+ *     applies).
+ * Lives here (not baked into the JSON) so the weekly auto-regen keeps excluding
+ * them — `featured-models.json` is overwritten every run.
+ */
+function aliasedBackings(): Set<string> {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+    ?.env;
+  const out = new Set<string>();
+  for (const id of (env?.FEATURED_MODELS_EXCLUDE ?? "").split(",").map((s) => s.trim())) {
+    if (id) out.add(id);
+  }
+  const raw = env?.SYSTEM_PROVIDER_KEYS;
+  if (raw) {
+    try {
+      const entries: unknown = JSON.parse(raw);
+      if (Array.isArray(entries)) {
+        for (const e of entries) {
+          const models = (e as { models?: unknown })?.models;
+          if (!Array.isArray(models)) continue;
+          for (const m of models) {
+            const mm = m as { aliased?: unknown; modelId?: unknown };
+            if (mm?.aliased === true && typeof mm.modelId === "string") out.add(mm.modelId);
+          }
+        }
+      }
+    } catch {
+      // Malformed SYSTEM_PROVIDER_KEYS — ignore; the explicit list still applies.
+    }
+  }
+  return out;
+}
+
+/**
  * Newest {@link FEATURED_COUNT} tool-calling models for one provider:
  * vendored snapshot ∩ models.dev, sorted by `release_date` desc (id asc
- * as deterministic tie-break).
+ * as deterministic tie-break). Model-alias backings ({@link aliasedBackings})
+ * are excluded so the picker never reveals what's behind an alias.
  */
 function buildFeatured(
+  provider: string,
   snapshot: Record<string, CompactEntry>,
   modelsDevModels: Record<string, ModelsDevModel>,
+  excluded: ReadonlySet<string>,
 ): string[] {
-  return Object.entries(modelsDevModels)
+  const ranked = Object.entries(modelsDevModels)
     .filter(([id, m]) => snapshot[id] && m.tool_call === true && typeof m.release_date === "string")
     .sort(([idA, a], [idB, b]) => {
       if (a.release_date !== b.release_date) return a.release_date! < b.release_date! ? 1 : -1;
       return idA < idB ? -1 : 1;
     })
-    .slice(0, FEATURED_COUNT)
     .map(([id]) => id);
+  const dropped = ranked.filter((id) => excluded.has(id));
+  if (dropped.length > 0) {
+    console.log(
+      `    → featured: excluding alias backing(s) for ${provider}: ${dropped.join(", ")}`,
+    );
+  }
+  return ranked.filter((id) => !excluded.has(id)).slice(0, FEATURED_COUNT);
 }
 
 async function fetchUpstream(): Promise<Record<string, LiteLLMEntry>> {
@@ -422,9 +485,18 @@ async function main(): Promise<void> {
   // its provider's vendored file (the boot-time check relies on this).
   {
     const upstreamFeatured: Record<string, string[]> = {};
+    const excludedBackings = aliasedBackings();
+    if (excludedBackings.size > 0) {
+      console.log(`  Excluding ${excludedBackings.size} model-alias backing(s) from featured\n`);
+    }
     for (const ourName of Object.keys(OURS_TO_MODELSDEV).sort()) {
       const mdModels = modelsDev[OURS_TO_MODELSDEV[ourName]]?.models ?? {};
-      upstreamFeatured[ourName] = buildFeatured(snapshots[ourName] ?? {}, mdModels);
+      upstreamFeatured[ourName] = buildFeatured(
+        ourName,
+        snapshots[ourName] ?? {},
+        mdModels,
+        excludedBackings,
+      );
       if (upstreamFeatured[ourName].length === 0) {
         console.log(`    ⚠ featured: empty intersection for ${ourName} (models.dev coverage gap)`);
       }
@@ -505,4 +577,10 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+// Guard the import-time side effect (network fetch + file writes) so the pure
+// helpers below can be unit-tested without running the whole refresh.
+if (import.meta.main) {
+  await main();
+}
+
+export { aliasedBackings, buildFeatured };

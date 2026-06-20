@@ -6,7 +6,7 @@ import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { isSystemModel, getSystemModelProviderKeys } from "../services/model-registry.ts";
+import { isSystemModel, getSystemModelProviderCredentials } from "../services/model-registry.ts";
 import { modelCostSchema } from "@appstrate/core/module";
 import {
   listOrgModels,
@@ -20,8 +20,10 @@ import {
   testModelConfig,
   loadModel,
   deriveModelLabel,
+  projectAliasedModel,
 } from "../services/org-models.ts";
 import { getModelProvider } from "../services/model-providers/registry.ts";
+import { isAliasableApiShape } from "@appstrate/core/model-swap";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
@@ -40,46 +42,68 @@ import {
 } from "../lib/errors.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 
-export const createModelSchema = z.object({
-  /**
-   * Optional. When omitted, the server derives the label from the catalog
-   * (`<catalog>.label`) and dedupes against existing org rows. See
-   * {@link deriveModelLabel}.
-   */
-  label: z.string().min(1).optional(),
-  modelId: z.string().min(1, "modelId is required"),
-  // `org_models.credential_id` is a strict UUID FK to
-  // `model_provider_credentials.id` — built-in (system) credentials live
-  // in `SYSTEM_PROVIDER_KEYS` env, NOT in that table, and identify as
-  // slugs (e.g. "anthropic"). Validating as UUID here turns the
-  // legacy 500 ("invalid input syntax for type uuid") into a clean 400
-  // and lets the route handler emit a hint that points operators at the
-  // right knob (either update SYSTEM_PROVIDER_KEYS or create a custom
-  // credential).
-  credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
-  /**
-   * Catalog-derivable overrides. Omit (or send null on update) to let the
-   * read path fall back to the live catalog — keeps existing rows in sync
-   * with the weekly `refresh-pricing-catalog.ts` bump.
-   */
-  input: z.array(z.string()).optional(),
-  contextWindow: z.number().int().positive().optional(),
-  maxTokens: z.number().int().positive().optional(),
-  reasoning: z.boolean().optional(),
-  cost: modelCostSchema.optional(),
-});
+export const createModelSchema = z
+  .object({
+    /**
+     * Optional. When omitted, the server derives the label from the catalog
+     * (`<catalog>.label`) and dedupes against existing org rows. See
+     * {@link deriveModelLabel}.
+     */
+    label: z.string().min(1).optional(),
+    modelId: z.string().min(1, "modelId is required"),
+    // `org_models.credential_id` is a strict UUID FK to
+    // `model_provider_credentials.id` — built-in (system) credentials live
+    // in `SYSTEM_PROVIDER_KEYS` env, NOT in that table, and identify as
+    // slugs (e.g. "anthropic"). Validating as UUID here turns the
+    // legacy 500 ("invalid input syntax for type uuid") into a clean 400
+    // and lets the route handler emit a hint that points operators at the
+    // right knob (either update SYSTEM_PROVIDER_KEYS or create a custom
+    // credential).
+    credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
+    /**
+     * Catalog-derivable overrides. Omit (or send null on update) to let the
+     * read path fall back to the live catalog — keeps existing rows in sync
+     * with the weekly `refresh-pricing-catalog.ts` bump.
+     */
+    input: z.array(z.string()).optional(),
+    contextWindow: z.number().int().positive().optional(),
+    maxTokens: z.number().int().positive().optional(),
+    reasoning: z.boolean().optional(),
+    cost: modelCostSchema.optional(),
+    /**
+     * Model-alias flag (LLM-gateway alias pattern). When true, this model's
+     * `id` becomes a public alias and its real binding (modelId, provider,
+     * baseUrl, capabilities/cost) is stripped from user-facing surfaces; the
+     * sidecar rewrites the `model` field on every inference call.
+     */
+    aliased: z.boolean().optional(),
+  })
+  .refine(
+    // Canonical model invariant: `input + output <= context`, so a response
+    // cap can never reach the full window. Reject impossible overrides at the
+    // edge so the runtime never derives a reserve that swallows the window.
+    (d) => d.maxTokens == null || d.contextWindow == null || d.maxTokens < d.contextWindow,
+    { message: "maxTokens must be strictly less than contextWindow", path: ["maxTokens"] },
+  );
 
-export const updateModelSchema = z.object({
-  label: z.string().min(1).optional(),
-  modelId: z.string().min(1).optional(),
-  credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).optional(),
-  enabled: z.boolean().optional(),
-  input: z.array(z.string()).nullable().optional(),
-  contextWindow: z.number().int().positive().nullable().optional(),
-  maxTokens: z.number().int().positive().nullable().optional(),
-  reasoning: z.boolean().nullable().optional(),
-  cost: modelCostSchema.nullable().optional(),
-});
+export const updateModelSchema = z
+  .object({
+    label: z.string().min(1).optional(),
+    modelId: z.string().min(1).optional(),
+    credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).optional(),
+    enabled: z.boolean().optional(),
+    input: z.array(z.string()).nullable().optional(),
+    contextWindow: z.number().int().positive().nullable().optional(),
+    maxTokens: z.number().int().positive().nullable().optional(),
+    reasoning: z.boolean().nullable().optional(),
+    cost: modelCostSchema.nullable().optional(),
+    aliased: z.boolean().optional(),
+  })
+  .refine(
+    // See createModelSchema: `max_output_tokens < context_window` always holds.
+    (d) => d.maxTokens == null || d.contextWindow == null || d.maxTokens < d.contextWindow,
+    { message: "maxTokens must be strictly less than contextWindow", path: ["maxTokens"] },
+  );
 
 export const setDefaultSchema = z.object({
   modelId: z.string().nullable(),
@@ -107,7 +131,9 @@ export function createModelsRouter() {
   router.get("/", requirePermission("models", "read"), async (c) => {
     const orgId = c.get("orgId");
     const models = await listOrgModels(orgId);
-    return c.json(listResponse(models));
+    // Strip the backing of any model alias before it reaches the dashboard user
+    // (Threat A) — see projectAliasedModel. Non-aliased models pass through.
+    return c.json(listResponse(models.map(projectAliasedModel)));
   });
 
   // POST /api/models — create a custom model
@@ -118,7 +144,8 @@ export function createModelsRouter() {
     const data = parseBody(createModelSchema, body);
 
     try {
-      const { modelId, credentialId, input, contextWindow, maxTokens, reasoning, cost } = data;
+      const { modelId, credentialId, input, contextWindow, maxTokens, reasoning, cost, aliased } =
+        data;
       // Block built-in (env-driven) credentials at the route boundary.
       // `org_models.credential_id` is a UUID FK to `model_provider_credentials.id`;
       // system keys live in `SYSTEM_PROVIDER_KEYS` env and are never present in
@@ -126,7 +153,7 @@ export function createModelsRouter() {
       // (the operator can declare a UUID in env if they want), then fails at
       // the Postgres FK with a 500 the caller can't act on. Pointing them at
       // the env var instead is the actionable fix.
-      if (getSystemModelProviderKeys().has(credentialId)) {
+      if (getSystemModelProviderCredentials().has(credentialId)) {
         throw invalidRequest(
           "Cannot add custom models against a built-in credential — declare the model in the " +
             "SYSTEM_PROVIDER_KEYS env var (models[] field), or create a custom credential via " +
@@ -148,6 +175,29 @@ export function createModelsRouter() {
           "credentialId",
         );
       }
+      // Model-alias guards (issue #727, Threat A):
+      if (aliased) {
+        // 1. Require an explicit label. The derive-from-catalog fallback below
+        //    would name the alias after its REAL backing ("DeepSeek Chat"),
+        //    and `label` survives the projection — leaking the backing on
+        //    /api/models and run.model_label.
+        if (!data.label) {
+          throw invalidRequest(
+            "An aliased model requires an explicit label — the derived label would name the backing model.",
+            "label",
+          );
+        }
+        // 2. The swap only rewrites the body `model` field, which exists for
+        //    openai/anthropic/mistral shapes; google/azure/bedrock carry the
+        //    model id in the URL path, so an alias there forwards verbatim and
+        //    404s upstream (and never gets swapped). Reject up front.
+        if (!isAliasableApiShape(creds.apiShape)) {
+          throw invalidRequest(
+            `Model aliases are not supported for the "${creds.apiShape}" protocol (the model id is carried in the URL, not the request body).`,
+            "aliased",
+          );
+        }
+      }
       // Label is optional on the wire — derive from the catalog when the
       // caller omits it. Needs the credential's providerId to pick the
       // right catalog (handles `catalogProviderId` for OAuth wrappers).
@@ -161,6 +211,7 @@ export function createModelsRouter() {
         maxTokens,
         reasoning,
         cost,
+        aliased,
       });
       await recordAuditFromContext(c, {
         action: "model.created",
@@ -197,7 +248,7 @@ export function createModelsRouter() {
     // Same constraint as POST /api/models — seeding a built-in credential
     // would FK-fail the org_models insert. Block early with an actionable
     // hint instead of cascading to a 500.
-    if (getSystemModelProviderKeys().has(data.credentialId)) {
+    if (getSystemModelProviderCredentials().has(data.credentialId)) {
       throw invalidRequest(
         "Cannot seed models against a built-in credential — declare them in the " +
           "SYSTEM_PROVIDER_KEYS env var (models[] field), or create a custom credential.",
@@ -282,15 +333,19 @@ export function createModelsRouter() {
         resourceType: "model",
         resourceId: data.modelId,
       });
-      // Return the bare *effective* default model resource — `isDefault` is
+      // Return the bare *effective* default model resource — `is_default` is
       // recomputed by listOrgModels (DB flag, or the system-default fallback
       // when no DB row is flagged) — so callers see the resulting state
       // without a follow-up GET (#657). When no default remains in effect
       // (cleared with no system fallback) there is no resource: 204.
       const all = await listOrgModels(orgId);
-      const def = all.find((m) => m.isDefault);
-      return def ? c.json(def) : c.body(null, 204);
+      const def = all.find((m) => m.is_default);
+      // Project in case the effective default is a model alias (Threat A).
+      return def ? c.json(projectAliasedModel(def)) : c.body(null, 204);
     } catch (err) {
+      // A deliberate client error (e.g. unknown model ref → 404) must surface as
+      // itself, not be masked as a 500 by the catch-all.
+      if (err instanceof ApiError) throw err;
       logger.error("Set default model failed", {
         error: getErrorMessage(err),
       });
@@ -466,7 +521,7 @@ export function createModelsRouter() {
     }
     // Same FK constraint applies to updates that re-point a model to a
     // different credential. Catch the same case here.
-    if (data.credentialId && getSystemModelProviderKeys().has(data.credentialId)) {
+    if (data.credentialId && getSystemModelProviderCredentials().has(data.credentialId)) {
       throw invalidRequest(
         "Cannot bind a custom model to a built-in credential — declare it in the " +
           "SYSTEM_PROVIDER_KEYS env var instead.",

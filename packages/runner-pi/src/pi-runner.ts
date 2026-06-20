@@ -39,10 +39,12 @@ import {
   type Model,
 } from "./pi-sdk.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   emptyRunResult,
   reduceEvents,
+  type RunError,
   type RunOptions,
   type Runner,
   type RunResult,
@@ -105,14 +107,6 @@ export interface PiRunnerOptions {
 }
 
 /**
- * Default response budget when the model carries no `maxTokens`.
- * 16384 covers the common "no thinking" Claude / GPT response shape;
- * larger budgets (Sonnet thinking @ 64 k) override via `model.maxTokens`.
- * Keep in sync with `runtime-pi/sidecar/token-budget.ts` — both surfaces
- * must agree so the spill guard and the compaction threshold do not drift.
- */
-const DEFAULT_RESERVE_TOKENS = 16_384;
-/**
  * Fallback context window when the model omits it. Matches the Claude
  * family's standard 200 k window — the most common runtime target.
  */
@@ -135,7 +129,7 @@ const KEEP_RECENT_FRACTION = 0.1;
  *
  * | Knob               | Mapping                                | Why                                                                                                                                                                              |
  * |--------------------|----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
- * | `reserveTokens`    | `model.maxTokens ?? 16384`             | Response budget. MUST be ≥ `max_tokens` or the first call post-compaction underflows and the upstream 400 ("prompt is too long") reappears. Critical for Claude Sonnet thinking mode (`maxTokens: 64000`). |
+ * | `reserveTokens`    | `deriveResponseReserveTokens(ctx, max)`| Response budget. Honours `max_tokens` so the first call post-compaction does not underflow into the upstream 400 ("prompt is too long") — critical for Claude Sonnet thinking mode (`maxTokens: 64000`). An impossible `max_tokens >= contextWindow` (corrupt catalog data) is clamped to a derived default instead of pinning the threshold at ≤0. |
  * | `keepRecentTokens` | `max(20000, 10% × contextWindow)`      | Preserves the ratio across model sizes: 20k on Claude 200k, ~100k on GPT-4.1 1M, ~200k on Gemini 2M. The floor stops small windows from over-compacting away recent context.    |
  *
  * Operators can disable compaction entirely with
@@ -149,7 +143,12 @@ export function derivePiCompactionSettings(
 ): { enabled: false } | { enabled: true; reserveTokens: number; keepRecentTokens: number } {
   if (env["MODEL_COMPACTION_ENABLED"] === "false") return { enabled: false };
   const contextWindow = model.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
-  const reserveTokens = model.maxTokens ?? DEFAULT_RESERVE_TOKENS;
+  // Shared clamp (see `@appstrate/core/token-budget`): honours a usable
+  // `maxTokens`, but treats an impossible `maxTokens >= contextWindow`
+  // (corrupt catalog/override data) as unset and derives a sane reserve —
+  // otherwise the compaction threshold `contextWindow - reserveTokens`
+  // collapses to ≤0 and the agent compacts on every turn.
+  const reserveTokens = deriveResponseReserveTokens(contextWindow, model.maxTokens);
   const keepRecentTokens = Math.max(
     MIN_KEEP_RECENT_TOKENS,
     Math.floor(contextWindow * KEEP_RECENT_FRACTION),
@@ -266,7 +265,23 @@ export class PiRunner implements Runner {
       return;
     }
 
+    // Authoritative terminal verdict, captured by the bridge while it
+    // streamed `message_end` events. When the agent loop ended on an
+    // errored/aborted FINAL assistant turn, this is the RunError to stamp;
+    // a transient error mid-loop that the agent recovered from leaves a
+    // clean final assistant turn → undefined → success. Read from the
+    // bridge (not `session.state.messages`) so trailing non-assistant
+    // entries — toolResults, compaction summaries appended after an
+    // overflow error (#464) — cannot mask the real terminal turn. This
+    // makes the runner the single source of truth for the run's outcome
+    // instead of having the platform reconstruct it from the `run_logs`
+    // adapter-error trail post-hoc (issue: run_fd977eb6).
     const result: RunResult = events.length === 0 ? emptyRunResult() : reduceEvents(events);
+    const terminalError = bridgeRef.current?.getTerminalError();
+    if (terminalError) {
+      result.status = "failed";
+      result.error = terminalError;
+    }
     attachAccumulators(result);
     // Drain pending bridge fires BEFORE finalize. Finalize closes the
     // server-side sink via CAS — any POST in flight after that lands
@@ -277,6 +292,13 @@ export class PiRunner implements Runner {
     await eventSink.finalize(result);
   }
 
+  /**
+   * Drive one Pi SDK session to completion. The terminal success/failure
+   * verdict is NOT returned here — it is captured by the bridge as it
+   * streams (`SessionBridgeHandle.getTerminalError`) and read by `run()`
+   * after this resolves, so trailing non-assistant messages cannot mask
+   * the final assistant turn's outcome.
+   */
   protected async executeSession(
     context: ExecutionContext,
     internalSink: InternalSink,
@@ -336,14 +358,18 @@ export class PiRunner implements Runner {
       sessionManager: SessionManager.inMemory(),
       settingsManager: SettingsManager.inMemory({
         compaction: derivePiCompactionSettings(model, process.env),
-        // Pi SDK's built-in retry (Retry-After honoring + jitter, max 2
-        // attempts) covers transient 429/5xx upstream. Operators can
-        // opt out by setting `MODEL_RETRY_ENABLED=false` on the runtime
-        // env when stacking external retry middleware.
+        // Pi SDK's built-in retry (Retry-After honoring + jitter) covers
+        // transient 429/5xx upstream — including OpenAI's mid-stream 5xx
+        // `server_error`, which the Codex/Responses adapter surfaces as a
+        // failed turn. 4 attempts (was 2) rides out the short upstream
+        // blips that 2 retries occasionally exhausted, before the agent
+        // loop has to self-recover. Operators can opt out by setting
+        // `MODEL_RETRY_ENABLED=false` on the runtime env when stacking
+        // external retry middleware.
         retry:
           process.env.MODEL_RETRY_ENABLED === "false"
             ? { enabled: false }
-            : { enabled: true, maxRetries: 2 },
+            : { enabled: true, maxRetries: 4 },
       }),
     });
 
@@ -467,6 +493,18 @@ export interface SessionBridgeHandle {
    * and is silently dropped by the bridge's catch handler.
    */
   drainPending(): Promise<void>;
+  /**
+   * Terminal run verdict, derived from the LAST assistant turn the bridge
+   * observed. Returns a {@link RunError} when that turn ended with
+   * `stopReason` `"error"` or `"aborted"`; `undefined` otherwise (clean
+   * stop, or a transient error the agent recovered from before a later
+   * clean turn). Tracked from the `message_end` event stream — NOT read
+   * from `session.state.messages` — so trailing non-assistant entries
+   * (toolResults, compaction summaries appended after an overflow error,
+   * #464) cannot mask the real terminal turn. `run()` reads this to stamp
+   * `RunResult.status`.
+   */
+  getTerminalError(): RunError | undefined;
 }
 
 /**
@@ -634,6 +672,31 @@ function truncateString(s: string, limitBytes: number): string {
   return `${head}…(truncated, ${byteLength} bytes)`;
 }
 
+/**
+ * True when a settled assistant turn's `stopReason` represents a terminal
+ * failure — `"error"` (provider/stream failure, incl. overflow, which the
+ * SDK surfaces as a stopReason="error" turn) or `"aborted"` (a provider-side
+ * abort that did not propagate as a thrown cancellation; a user cancel
+ * travels the abort-signal throw path in `run()` instead, so it never
+ * reaches here). Shared by the live `appstrate.error` emit and
+ * `getTerminalError()` so the `run_logs` visibility row always matches the
+ * stamped terminal verdict.
+ */
+function isTerminalErrorStop(stopReason: string | undefined): boolean {
+  return stopReason === "error" || stopReason === "aborted";
+}
+
+/**
+ * Human-facing message for a terminal-error turn: the SDK's `errorMessage`
+ * when present, else a generic fallback. Both stop reasons carry an
+ * `errorMessage` by SDK contract; the fallback guards the rare empty case.
+ */
+function terminalErrorMessage(errorMessage: string | undefined): string {
+  return typeof errorMessage === "string" && errorMessage.length > 0
+    ? errorMessage
+    : "The agent's final model turn ended in an error";
+}
+
 export function installSessionBridge(
   session: BridgeableSession,
   sink: InternalSink,
@@ -648,6 +711,14 @@ export function installSessionBridge(
     cache_read_input_tokens: 0,
   };
   let totalCost = 0;
+
+  // Terminal verdict tracking. Updated on every assistant `message_end`,
+  // so after the loop settles these hold the LAST assistant turn's outcome
+  // — robust against trailing non-assistant messages (toolResults,
+  // compaction summaries) that `session.state.messages.at(-1)` would
+  // surface instead. Read via `getTerminalError()`.
+  let lastAssistantStopReason: string | undefined;
+  let lastAssistantErrorMessage: string | undefined;
 
   // Pending fire-and-forget emits. `fire()` dispatches each sink.emit
   // call without awaiting (the Pi SDK callback is synchronous), and
@@ -678,6 +749,12 @@ export function installSessionBridge(
         if (!entries.length) break;
         const last = entries[entries.length - 1] as PiAssistantMessage | undefined;
         if (last?.role !== "assistant") break;
+
+        // Record this assistant turn's terminal outcome. Overwritten each
+        // turn → ends as the FINAL assistant turn's stopReason once the
+        // loop settles (mirrors the SDK's own `_lastAssistantMessage`).
+        lastAssistantStopReason = last.stopReason;
+        lastAssistantErrorMessage = last.errorMessage;
 
         // Accumulate token usage. Pi SDK exposes the legacy
         // `{ input, output, cacheRead, cacheWrite }` shape on
@@ -715,13 +792,19 @@ export function installSessionBridge(
           }
         }
 
-        // SDK error (e.g. LLM API unreachable, auth failures)
-        if (last.stopReason === "error" && last.errorMessage) {
+        // SDK error (e.g. LLM API unreachable, auth failures) or a
+        // provider-side abort. Mirror `getTerminalError()`'s verdict so a
+        // terminal `aborted` turn — or an `error` turn the SDK left without
+        // an `errorMessage` — still lands a `run_logs` row, not just a
+        // bare `runs.error`. A transient error turn the agent later
+        // recovers from also logs here (harmless — the trail no longer
+        // drives status).
+        if (isTerminalErrorStop(last.stopReason)) {
           fire({
             type: "appstrate.error",
             timestamp: Date.now(),
             runId,
-            message: String(last.errorMessage),
+            message: terminalErrorMessage(last.errorMessage),
           });
         }
 
@@ -815,6 +898,16 @@ export function installSessionBridge(
     },
     getCost(): number {
       return totalCost;
+    },
+    getTerminalError(): RunError | undefined {
+      // Verdict on the LAST assistant turn. `isTerminalErrorStop` /
+      // `terminalErrorMessage` are shared with the live `appstrate.error`
+      // emit above, so the stamped status and the `run_logs` trail can
+      // never disagree on what counts as a terminal failure.
+      if (!isTerminalErrorStop(lastAssistantStopReason)) {
+        return undefined;
+      }
+      return { code: "adapter_error", message: terminalErrorMessage(lastAssistantErrorMessage) };
     },
     async drainPending(): Promise<void> {
       // Snapshot the current pending set: events fired AFTER drainPending

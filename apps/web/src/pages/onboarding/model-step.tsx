@@ -76,7 +76,7 @@ export function OnboardingModelStep() {
                       <div className="truncate text-sm font-medium">{m.label}</div>
                       <div className="text-muted-foreground truncate text-xs">{m.modelId}</div>
                     </div>
-                    {m.isDefault && (
+                    {m.is_default && (
                       <Badge variant="success" className="shrink-0 text-[0.65rem]">
                         {t("models.default")}
                       </Badge>

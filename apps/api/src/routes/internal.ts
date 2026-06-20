@@ -5,17 +5,13 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  applicationPackages,
-  modelProviderCredentials,
-  packageVersions,
-  runs,
-} from "@appstrate/db/schema";
+import { modelProviderCredentials, packageVersions, runs } from "@appstrate/db/schema";
 import { sql } from "drizzle-orm";
 import { asRecord } from "@appstrate/core/safe-json";
 import { downloadVersionZip } from "../services/package-storage.ts";
 import { getSystemPackages } from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
+import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
@@ -51,8 +47,9 @@ import {
   resolveLiveIntegrationCredentials,
   serializeIntegrationCredentialsWire,
 } from "../services/integration-credentials-resolver.ts";
-import { fetchIntegrationManifest } from "../services/integration-service.ts";
+import { readIntegrationManifestForRun } from "../services/integration-service.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
+import { isIntegrationActive } from "../services/integration-connections.ts";
 
 /**
  * Verify the run token from the Authorization header.
@@ -75,6 +72,16 @@ async function verifyRunToken(c: Context): Promise<{
      * per-run overrides past the kickoff handoff.
      */
     resolvedConnections: Record<string, { connectionId: string; source: string }> | null;
+    /**
+     * Snapshot of each declared integration's resolved manifest version frozen
+     * at run kickoff (#686). The credentials resolver reads the integration
+     * manifest AT this version so a mid-run MITM refresh sees the same
+     * delivery/auth plan the spawn used.
+     */
+    resolvedIntegrationVersions: Record<
+      string,
+      { version: string | null; source: "version" | "draft" | "system" }
+    > | null;
   };
 }> {
   const authHeader = c.req.header("Authorization");
@@ -104,6 +111,7 @@ async function verifyRunToken(c: Context): Promise<{
       modelCredentialId: runs.modelCredentialId,
       runOrigin: runs.runOrigin,
       resolvedConnections: runs.resolvedConnections,
+      resolvedIntegrationVersions: runs.resolvedIntegrationVersions,
     })
     .from(runs)
     .where(eq(runs.id, runId))
@@ -130,6 +138,7 @@ async function verifyRunToken(c: Context): Promise<{
       modelCredentialId: run.modelCredentialId ?? null,
       runOrigin: run.runOrigin,
       resolvedConnections: run.resolvedConnections ?? null,
+      resolvedIntegrationVersions: run.resolvedIntegrationVersions ?? null,
     },
   };
 }
@@ -308,17 +317,10 @@ export function createInternalRouter() {
       });
       throw notFound(`Integration '${packageId}' is not a dependency of the running agent`);
     }
-    const [installRow] = await db
-      .select({ packageId: applicationPackages.packageId })
-      .from(applicationPackages)
-      .where(
-        and(
-          eq(applicationPackages.applicationId, run.applicationId),
-          eq(applicationPackages.packageId, packageId),
-        ),
-      )
-      .limit(1);
-    if (!installRow) {
+    // Same activation rule as the spawn resolver / agent readiness (single
+    // source of truth): an installed-and-enabled row OR a system integration
+    // auto-active with no row. A disabled row stays inactive.
+    if (!(await isIntegrationActive(packageId, run.applicationId))) {
       throw notFound(`Integration '${packageId}' is not installed in this application`);
     }
   }
@@ -340,6 +342,7 @@ export function createInternalRouter() {
       agentPackageId: run.packageId,
       actor,
       resolvedConnections: run.resolvedConnections,
+      resolvedIntegrationVersions: run.resolvedIntegrationVersions,
     });
     logger.info("Integration credentials delivered", {
       runId,
@@ -378,6 +381,7 @@ export function createInternalRouter() {
           agentPackageId: run.packageId,
           actor,
           resolvedConnections: run.resolvedConnections,
+          resolvedIntegrationVersions: run.resolvedIntegrationVersions,
         },
         { forceRefresh: true },
       );
@@ -454,7 +458,11 @@ export function createInternalRouter() {
         .where(
           and(eq(packageVersions.packageId, mcpServerId), sql`${packageVersions.yanked} = false`),
         )
-        .orderBy(sql`${packageVersions.createdAt} DESC`)
+        // Tiebreak by the serial `id` (insertion order) so two versions
+        // published in the same `createdAt` tick still resolve "latest"
+        // deterministically — without it the ORDER BY is non-deterministic on
+        // a tie and the most-recently-inserted version is not guaranteed.
+        .orderBy(sql`${packageVersions.createdAt} DESC, ${packageVersions.id} DESC`)
         .limit(1);
       if (!resolved) throw notFound(`No published version for '${mcpServerId}'`);
     }
@@ -479,7 +487,15 @@ export function createInternalRouter() {
    */
   async function assertAgentReferencesMcpServer(
     mcpServerId: string,
-    run: { packageId: string; orgId: string; applicationId: string },
+    run: {
+      packageId: string;
+      orgId: string;
+      applicationId: string;
+      resolvedIntegrationVersions: Record<
+        string,
+        { version: string | null; source: "version" | "draft" | "system" }
+      > | null;
+    },
     runId: string,
   ): Promise<void> {
     const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
@@ -487,18 +503,16 @@ export function createInternalRouter() {
     const deps = asRecord(asRecord(agent.manifest).dependencies);
     const integrations = asRecord(deps.integrations);
     for (const integrationId of Object.keys(integrations)) {
-      const [installRow] = await db
-        .select({ packageId: applicationPackages.packageId })
-        .from(applicationPackages)
-        .where(
-          and(
-            eq(applicationPackages.applicationId, run.applicationId),
-            eq(applicationPackages.packageId, integrationId),
-          ),
-        )
-        .limit(1);
-      if (!installRow) continue;
-      const res = await fetchIntegrationManifest(integrationId);
+      // Same activation rule as everywhere else (installed-and-enabled row, or
+      // system integration auto-active with no row); skip inactive ones.
+      if (!(await isIntegrationActive(integrationId, run.applicationId))) continue;
+      // Read the integration manifest AT the version frozen for this run
+      // (#686) so the authz check sees the same `source.server.name` the spawn
+      // resolver did. No frozen entry (soft-resolved / legacy run) → draft.
+      const res = await readIntegrationManifestForRun(
+        integrationId,
+        run.resolvedIntegrationVersions?.[integrationId],
+      );
       if (!res.ok) continue;
       const ref = getLocalServerRef(res.manifest);
       if (ref?.name === mcpServerId) return;
@@ -562,10 +576,9 @@ async function assertOAuthModelCredential(
   } catch (err) {
     // PG `invalid_text_representation` (22P02) when the path param is not
     // a valid UUID — treat as not-found rather than leaking a 500. Drizzle
-    // wraps the underlying postgres.js error via `new Error(…, { cause })`.
-    const code =
-      (err as { code?: string })?.code ?? (err as { cause?: { code?: string } })?.cause?.code;
-    if (code === "22P02") {
+    // wraps the underlying postgres.js error via `new Error(…, { cause })`,
+    // so walk the cause chain via the shared detector.
+    if (isInvalidTextRepresentation(err)) {
       throw notFound(`OAuth model provider credential ${credentialId} not found`);
     }
     throw err;

@@ -21,7 +21,7 @@ import { getEnv } from "@appstrate/env";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { initiateIntegrationOAuth, resolveOAuthEndpoints } from "@appstrate/connect";
-import { forbidden, invalidRequest } from "../../lib/errors.ts";
+import { invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
 import { toSupportedTokenEndpointAuthMethod } from "../integration-manifest-helpers.ts";
@@ -31,8 +31,8 @@ import {
   extractIdentity,
   getIntegrationConnectionCredentialFields,
   readIntegrationAuth,
+  resolveConnectClient,
   saveIntegrationConnection,
-  usesAutoProvisionedClient,
   type IntegrationConnectionSummary,
 } from "../integration-connections.ts";
 import type {
@@ -85,28 +85,19 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       auth,
       redirectUri,
     );
-    const client = resolved.client;
-    if (!client) {
-      // Two families of "no client":
-      //   - auto-provisioning auth (public client on a remote MCP integration):
-      //     client acquisition failed. `resolved.provisioningFailure` carries
-      //     the complete reason + remedy, authored by whichever step failed (no
-      //     registration endpoint, blocked endpoint, AS rejection, network, …).
-      //     Render it verbatim — no per-cause branch.
-      //   - confidential/classic auth: an admin must pre-register a client.
-      if (usesAutoProvisionedClient(manifest, auth)) {
-        const failure = resolved.provisioningFailure;
-        const detail = failure?.message ?? "discovery or client registration failed";
-        const statusPart = failure?.status ? ` (HTTP ${failure.status})` : "";
-        throw forbidden(
-          `Could not automatically provision an OAuth client for '${ctx.integrationId}' auth '${ctx.authKey}'${statusPart}: ${detail}`,
-        );
-      }
-      throw forbidden(
-        `Administrator must register OAuth client credentials for '${ctx.integrationId}' auth '${ctx.authKey}' before connection`,
-      );
-    }
-    const effectiveRedirectUri = client.redirect_uri ?? redirectUri;
+    // Client selection (multi-client) — full precedence lives in
+    // `resolveConnectClient`. New connections always use the default: the org's
+    // custom client when flagged `is_default`, else the system client (the
+    // model-provider cascade). There is no per-connect picker. The chosen
+    // `clientRef` is pinned on the connection so token refresh resolves the
+    // same credentials.
+    const {
+      clientId,
+      clientSecret,
+      redirectUri: clientRedirectUri,
+      clientRef,
+    } = resolveConnectClient(ctx.integrationId, ctx.authKey, manifest, auth, resolved);
+    const effectiveRedirectUri = clientRedirectUri ?? redirectUri;
     // Threaded endpoints/resource: discovery result wins, manifest is the
     // fallback (classic integrations have no resolved.* fields).
     const issuer = resolved.issuer ?? auth.issuer;
@@ -120,8 +111,9 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       ...(issuer ? { issuer } : {}),
       ...(authorizationEndpoint ? { authorizationEndpoint } : {}),
       ...(tokenEndpoint ? { tokenEndpoint } : {}),
-      clientId: client.client_id,
-      clientSecret: client.clientSecret,
+      clientId,
+      clientSecret,
+      clientRef,
       ...(tokenAuthMethod ? { tokenEndpointAuthMethod: tokenAuthMethod } : {}),
       scopes: opts.scopes,
       ...(oauthMeta?.scope_separator ? { scopeSeparator: oauthMeta.scope_separator } : {}),
@@ -255,23 +247,63 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       if (existing?.refresh_token) refreshToken = existing.refresh_token;
     }
 
-    // Fail-fast: a short-lived token (`expires_at` set) with no `refresh_token`
-    // is unrenewable — it 401s within the hour and can never self-refresh,
-    // silently bricking the connection and every schedule on it. Refuse BEFORE
-    // persistence so a born-dead row never lands in `integration_connections`.
-    // Provider-agnostic: catches any OAuth integration missing offline-access
-    // config, not a hard-coded IdP (same posture as the identity-claims gate).
+    // A short-lived token (`expires_at` set) with no `refresh_token` is only a
+    // misconfig when the authorization server CAN issue refresh tokens. Many MCP
+    // servers (e.g. ClickUp MCP) advertise no `refresh_token` grant at all (RFC
+    // 8414 `grant_types_supported`) — for them an access-only token is expected,
+    // and the connection should persist and re-authorise at expiry
+    // (needs_reconnection), not be refused outright. Keep the hard refusal for
+    // servers that DO support refresh yet returned none — a real offline-access
+    // misconfig (e.g. the original `@appstrate/gmail` self-disconnect: Google
+    // without `access_type=offline` + `prompt=consent`).
     if (result.expiresAt && !refreshToken) {
-      logger.warn("Integration OAuth returned short-lived token with no refresh_token", {
-        packageId: result.packageId,
-        authKey: result.authKey,
-        ...(result.connectionId ? { connectionId: result.connectionId } : {}),
-      });
-      throw invalidRequest(
-        `'${result.packageId}' returned a short-lived access token but no refresh token, so ` +
-          `the connection cannot be kept alive. The integration's OAuth configuration is missing ` +
-          `offline access (for Google: access_type=offline + prompt=consent), or a prior grant ` +
-          `must be revoked in your account settings and re-authorised.`,
+      let refreshGrantSupported = true; // strict default when capability is unknown
+      if (auth.issuer) {
+        try {
+          const disc = await resolveOAuthEndpoints({
+            issuer: auth.issuer,
+            ...(auth.authorization_endpoint
+              ? { authorizationEndpoint: auth.authorization_endpoint }
+              : {}),
+            ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
+          });
+          if (disc.grantTypesSupported) {
+            refreshGrantSupported = disc.grantTypesSupported.includes("refresh_token");
+          }
+        } catch (err) {
+          // Discovery failure → keep the strict default (refuse). Logged for triage.
+          logger.warn("Integration refresh-grant capability discovery failed", {
+            packageId: result.packageId,
+            authKey: result.authKey,
+            err: String(err),
+          });
+        }
+      }
+      if (refreshGrantSupported) {
+        // Refuse BEFORE persistence so a born-dead row never lands in
+        // `integration_connections`.
+        logger.warn("Integration OAuth returned short-lived token with no refresh_token", {
+          packageId: result.packageId,
+          authKey: result.authKey,
+          ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+        });
+        throw invalidRequest(
+          `'${result.packageId}' returned a short-lived access token but no refresh token, so ` +
+            `the connection cannot be kept alive. The integration's OAuth configuration is missing ` +
+            `offline access (for Google: access_type=offline + prompt=consent), or a prior grant ` +
+            `must be revoked in your account settings and re-authorised.`,
+        );
+      }
+      // AS issues access-only tokens (no `refresh_token` grant advertised).
+      // Persist; the connection surfaces needs_reconnection at expiry for a
+      // manual re-auth — the only renewal path such a server supports.
+      logger.info(
+        "Integration OAuth connection persisted without a refresh token — authorization server advertises no refresh_token grant; re-authorisation required at expiry",
+        {
+          packageId: result.packageId,
+          authKey: result.authKey,
+          ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+        },
       );
     }
 
@@ -294,6 +326,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       expiresAt: result.expiresAt ? new Date(result.expiresAt) : null,
       actor: ctx.actor,
       ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+      ...(result.clientRef ? { clientRef: result.clientRef } : {}),
     });
   }
 }

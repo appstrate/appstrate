@@ -78,6 +78,35 @@ describe("Platform signup gate — issue #228", () => {
     });
   });
 
+  describe("invitation never auto-verifies the email", () => {
+    // SECURITY: a pending invitation is matched on email ALONE (the invite
+    // token is not available at signup), so it is NOT proof of inbox ownership.
+    // It overrides the signup GATE (so an invited user can register when signup
+    // is locked down) but must NEVER grant emailVerified — otherwise anyone
+    // could mint a verified account for any unclaimed address, and the OIDC
+    // end-user adopter's `emailVerified === true` takeover guard would fall.
+    it("leaves the email unverified even when a pending invitation exists", async () => {
+      const ctx: TestContext = await createTestContext({ orgSlug: "verifyorg" });
+      await seedInvitation({
+        orgId: ctx.orgId,
+        email: "invited-verify@example.com",
+        invitedBy: ctx.user.id,
+      });
+
+      const res = await attemptSignup("invited-verify@example.com");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { user?: { emailVerified?: boolean } };
+      expect(body.user?.emailVerified).toBe(false);
+    });
+
+    it("leaves the email unverified for a non-invited signup", async () => {
+      const res = await attemptSignup("solo-unverified@example.com");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { user?: { emailVerified?: boolean } };
+      expect(body.user?.emailVerified).toBe(false);
+    });
+  });
+
   describe("AUTH_DISABLE_SIGNUP=true", () => {
     beforeEach(() => {
       setAuthEnv({ AUTH_DISABLE_SIGNUP: "true" });

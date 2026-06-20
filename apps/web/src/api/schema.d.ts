@@ -21,6 +21,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/.well-known/oauth-authorization-server/api/auth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * OAuth 2.0 Authorization Server Metadata (RFC 8414 path-inserted)
+         * @description Same document as `/.well-known/oauth-authorization-server`. The advertised issuer is `${APP_URL}/api/auth`, so RFC 8414 path-aware clients insert the issuer path after `.well-known` and request the metadata document here.
+         */
+        get: operations["oauthServerMetadataPathInserted"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/.well-known/oauth-protected-resource/api/mcp/o/{org}": {
         parameters: {
             query?: never;
@@ -53,6 +73,26 @@ export interface paths {
          * @description RFC-compliant discovery endpoint. Mounted at the HTTP origin root (NOT under `/api`) per OIDC Discovery 1.0 §4.
          */
         get: operations["oidcDiscovery"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/.well-known/openid-configuration/api/auth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * OpenID Connect discovery document (RFC 8414 path-inserted)
+         * @description Same document as `/.well-known/openid-configuration`. The advertised issuer is `${APP_URL}/api/auth`, so RFC 8414 path-aware clients insert the issuer path after `.well-known` and request the discovery document here.
+         */
+        get: operations["oidcDiscoveryPathInserted"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1205,6 +1245,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/{packageId}/auths/{authKey}/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the OAuth clients registered for an integration auth
+         * @description Returns the org's custom (BYO-app) clients plus any platform-provided system clients, with `source` and which is the default. Secrets are never returned. Drives the admin clients CRUD table; new connections always use the default (no per-connect picker).
+         */
+        get: operations["listIntegrationClients"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/{packageId}/auths/{authKey}/connect/fields": {
         parameters: {
             query?: never;
@@ -1233,6 +1293,46 @@ export interface paths {
         put?: never;
         /** Initiate the OAuth2 PKCE flow for an integration auth */
         post: operations["initiateIntegrationOAuth"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/auths/{authKey}/default-client": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set the default OAuth client for an integration auth
+         * @description Choose which client mints NEW connections when none is picked explicitly (the model-provider `setDefaultModel` analogue). Selecting the org's custom client flags it default; selecting a system client un-flags the custom one so the cascade falls to the system client. Existing connections are bound to the client that minted them and are unaffected. Returns the refreshed clients list. Admin only.
+         */
+        put: operations["setDefaultIntegrationClient"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/auths/{authKey}/oauth-clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register a custom OAuth client for an integration auth
+         * @description Registers a NEW custom (BYO-app) client for this auth. Repeatable — an org may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR/CIMD) auths. Admin only.
+         */
+        post: operations["createIntegrationOAuthClient"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1332,19 +1432,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/integrations/{packageId}/oauth-clients/{authKey}": {
+    "/api/integrations/{packageId}/oauth-clients/{clientId}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Read the registered OAuth client for an integration auth */
-        get: operations["getIntegrationOAuthClient"];
-        /** Register or rotate the OAuth client for an integration auth */
-        put: operations["upsertIntegrationOAuthClient"];
+        get?: never;
+        /**
+         * Rotate a custom OAuth client's credentials
+         * @description Rotates one custom client in place, by its id. Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Admin only.
+         */
+        put: operations["rotateIntegrationOAuthClient"];
         post?: never;
-        /** Delete the OAuth client for an integration auth */
+        /**
+         * Delete a custom OAuth client
+         * @description Deletes one custom client by id. If it was the default, the cascade falls to the system client (no auto-promotion). Admin only.
+         */
         delete: operations["deleteIntegrationOAuthClient"];
         options?: never;
         head?: never;
@@ -1967,6 +2072,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List notifications
+         * @description Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only.
+         */
+        get: operations["listNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/notifications/read-all": {
         parameters: {
             query?: never;
@@ -1996,8 +2121,8 @@ export interface paths {
         };
         get?: never;
         /**
-         * Mark a notification as read
-         * @description Marks the notification for a specific run as read.
+         * Mark a run's notification as read
+         * @description Mark the caller's notification for a run read, keyed by run id — complements `PUT /api/notifications/{id}/read` for callers that hold a run id but not the notification id. Idempotent: a missing run or non-recipient is a no-op, always 204.
          */
         put: operations["markNotificationRead"];
         post?: never;
@@ -2040,6 +2165,26 @@ export interface paths {
          */
         get: operations["getUnreadCountsByAgent"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/{id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Mark a notification as read
+         * @description Marks a single notification read for the current recipient. Idempotent (204 even if already read); returns 404 when the notification does not belong to the caller.
+         */
+        put: operations["markNotificationReadById"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2295,10 +2440,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Add or invite a member
-         * @description Add a user to the org (if they exist) or create an invitation with a magic link token.
+         * Invite a member
+         * @description Create a pending invitation for the given email (new and existing users alike). The invitee joins by opening the invite link, authenticating through the standard login/signup flow, then explicitly accepting. When SMTP is configured an invitation email is sent; otherwise the admin shares the returned token out of band.
          */
-        post: operations["addOrInviteMember"];
+        post: operations["inviteMember"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4028,7 +4173,7 @@ export interface paths {
         put?: never;
         /**
          * Accept invitation
-         * @description Accept an invitation. Creates user account if new, adds to org, sets session cookie.
+         * @description Accept an invitation. Requires an authenticated Better Auth session whose email matches the invitation; adds the user to the org and returns the joined organization. Account creation happens beforehand through the standard login/signup flow, never here.
          */
         post: operations["acceptInvitation"];
         delete?: never;
@@ -4362,8 +4507,10 @@ export interface components {
         ModelProviderCredential: {
             id: string;
             label: string;
-            apiShape: string;
-            baseUrl: string;
+            /** @description Protocol family. `null` for a built-in credential whose every backing model is an alias (#727) — binding hidden so the endpoint doesn't reveal the provider. */
+            apiShape: string | null;
+            /** @description Endpoint base URL. `null` for an alias-only built-in credential (see apiShape). */
+            baseUrl: string | null;
             /** @enum {string} */
             source: "built-in" | "custom";
             /** @enum {string} */
@@ -4459,21 +4606,26 @@ export interface components {
         OrgModel: {
             id: string;
             label: string;
-            apiShape: string;
-            /** @description The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. */
-            providerId: string;
-            baseUrl: string;
-            modelId: string;
+            /** @description Protocol family. `null` for model aliases (`aliased: true`) — binding hidden. */
+            apiShape: string | null;
+            /** @description The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for model aliases — binding hidden. */
+            providerId: string | null;
+            /** @description Provider endpoint. `null` for model aliases — binding hidden. */
+            baseUrl: string | null;
+            /** @description Upstream model id. `null` for model aliases — the real backing is hidden. */
+            modelId: string | null;
             input?: string[] | null;
             contextWindow?: number | null;
             maxTokens?: number | null;
             reasoning?: boolean | null;
             enabled: boolean;
-            isDefault: boolean;
+            is_default: boolean;
+            /** @description Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a public alias and the real binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is stripped from this projection — render an alias badge; the backing model is hidden. */
+            aliased: boolean;
             /** @enum {string} */
             source: "built-in" | "custom";
-            /** @description ID of the backing `model_provider_credentials` row. */
-            credentialId: string;
+            /** @description ID of the backing `model_provider_credentials` row. `null` for model aliases — binding hidden. */
+            credentialId: string | null;
             /** @description Cost per million tokens */
             cost?: {
                 input?: number;
@@ -4551,7 +4703,7 @@ export interface components {
             /** @description Masked proxy URL for display */
             urlPrefix: string;
             enabled: boolean;
-            isDefault: boolean;
+            is_default: boolean;
             /** @enum {string} */
             source: "built-in" | "custom";
             created_by: string | null;
@@ -4746,16 +4898,8 @@ export interface components {
             } | null;
             /** @description Inline runs only. Snapshot of the prompt submitted at run time. Null once the shadow has been compacted. */
             inline_prompt?: string | null;
-            /**
-             * Format: date-time
-             * @description When the user was notified of run completion (in-app notification). Null until notification fires.
-             */
-            notifiedAt: string | null;
-            /**
-             * Format: date-time
-             * @description When the user marked the run notification as read. Null until acknowledged.
-             */
-            readAt: string | null;
+            /** @description True when the requesting recipient has an unread notification for this run (issue #667). Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count. */
+            unread: boolean;
             /** @description Per-(app, package) monotonic counter assigned at run creation. Stable identifier for UI display. */
             runNumber: number | null;
             /**
@@ -4771,6 +4915,10 @@ export interface components {
             modelCredentialId: string | null;
             /** @description Per-integration connection picks for this run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (#1). */
             connection_overrides: {
+                [key: string]: string;
+            } | null;
+            /** @description Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. A `"draft"` value means the run consumed a dependency's mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions. */
+            dependency_overrides: {
                 [key: string]: string;
             } | null;
             /** @description Connections resolved for this run, projected from the internal snapshot for display. Null when the agent declares no integrations. */
@@ -4822,6 +4970,10 @@ export interface components {
             version_override: string | null;
             /** @description Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Flat map: `{ "@scope/integration": "<connection_id>" }`. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4). */
             connection_overrides: {
+                [key: string]: string;
+            } | null;
+            /** @description Per-dependency version overrides frozen on the schedule row (#666/#686). Flat map: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run's `dependency_overrides` so a scheduled run resolves its dependencies exactly as the schedule froze them. */
+            dependency_overrides: {
                 [key: string]: string;
             } | null;
             /** Format: date-time */
@@ -5337,6 +5489,24 @@ export interface operations {
             };
         };
     };
+    oauthServerMetadataPathInserted: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorization server metadata document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     mcpProtectedResourceMetadata: {
         parameters: {
             query?: never;
@@ -5369,6 +5539,24 @@ export interface operations {
         };
     };
     oidcDiscovery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OpenID Configuration document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    oidcDiscoveryPathInserted: {
         parameters: {
             query?: never;
             header?: never;
@@ -5507,6 +5695,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationError"];
             /** @description CSRF check failed. */
             403: {
                 headers: {
@@ -5772,6 +5961,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -6035,6 +6225,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -6043,7 +6234,7 @@ export interface operations {
     runAgent: {
         parameters: {
             query?: {
-                /** @description Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version — 404 `no_published_version` if nothing is published), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Default when omitted: the latest published version when one exists, the draft otherwise** — programmatic callers (API, MCP, CLI, CI) run what was published unless they explicitly ask for the draft. The editor UI passes `version=draft` for test-runs. The run object's `version_ref` states which definition executed. Ignored for system agents. */
+                /** @description Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Omitting the parameter is strictly identical to `published`** — the latest published version, or `404 no_published_version` when nothing is published. The working copy is NEVER an implicit default: run it by passing `version=draft` explicitly (the editor UI does this for test-runs). This unified default keeps every caller — API, MCP, CLI, CI, schedules and the dashboard — coherent on every selector. The run object's `version_ref` states which definition executed. Ignored for system agents. */
                 version?: string;
             };
             header?: {
@@ -6075,6 +6266,9 @@ export interface operations {
                  *       },
                  *       "config": {
                  *         "dryRun": true
+                 *       },
+                 *       "dependency_overrides": {
+                 *         "@test/test-skill": "draft"
                  *       }
                  *     }
                  */
@@ -6088,9 +6282,15 @@ export interface operations {
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
                     proxyId?: string;
                     /** @description Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair. */
-                    config?: Record<string, never>;
+                    config?: {
+                        [key: string]: unknown;
+                    };
                     /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
                     connection_overrides?: {
+                        [key: string]: string;
+                    };
+                    /** @description Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. By default every skill in the agent's closure resolves against PUBLISHED versions honoring its manifest pin; an entry here overrides that for a single run — `"draft"` pulls the dependency's mutable working copy (the skill edit loop: edit → run → observe, no republish), any other value replaces the pin with that spec. Run-scoped only (never stored in the manifest) and recorded on the run object so a run that consumed draft bytes is never mistaken for a reproducible one. An unsatisfiable pin (including a never-published dependency) returns 422 `dependency_unresolved` before the run starts — pass an override or publish the dependency to fix it. */
+                    dependency_overrides?: {
                         [key: string]: string;
                     };
                 };
@@ -6136,8 +6336,7 @@ export interface operations {
                      *       "completed_at": null,
                      *       "duration": null,
                      *       "cost": null,
-                     *       "notifiedAt": null,
-                     *       "readAt": null,
+                     *       "unread": false,
                      *       "runNumber": 17,
                      *       "token_usage": null,
                      *       "version_label": "1.2.0",
@@ -6154,6 +6353,7 @@ export interface operations {
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": "mpc_8h2k4m6n",
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "user_name": null,
                      *       "end_user_name": null,
                      *       "api_key_name": null,
@@ -6184,6 +6384,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Concurrent request with the same Idempotency-Key still in flight, the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference) */
             409: {
@@ -6387,10 +6588,14 @@ export interface operations {
                     model_id_override?: string;
                     /** @description Override the persisted proxy on every run triggered by this schedule. */
                     proxy_id_override?: string;
-                    /** @description Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Default when omitted: the latest published version when one exists, the draft otherwise. The pinned definition (manifest + prompt) is resolved at each fire. */
+                    /** @description Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitting it is identical to `published` (latest published version; the working copy is opt-in via `draft` only). The pinned definition (manifest + prompt) is resolved at each fire — a schedule inheriting (`published`) on a never-published agent skips the fire and logs a warning until a version is published or `draft` is pinned. */
                     version_override?: string;
                     /** @description Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ "@scope/integration": "<connection_id>" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire. */
                     connection_overrides?: {
+                        [key: string]: string;
+                    };
+                    /** @description Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them. */
+                    dependency_overrides?: {
                         [key: string]: string;
                     };
                 };
@@ -6426,6 +6631,7 @@ export interface operations {
                      *       "proxy_id_override": null,
                      *       "version_override": null,
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "last_run_at": null,
                      *       "next_run_at": "2026-01-16T09:00:00Z",
                      *       "createdAt": "2026-01-15T10:30:00Z",
@@ -6983,6 +7189,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApplicationPackage"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -7187,6 +7394,7 @@ export interface operations {
                     "application/json": components["schemas"]["SmtpConfigView"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7238,6 +7446,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7265,6 +7474,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7304,6 +7514,8 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7334,6 +7546,7 @@ export interface operations {
                     "application/json": components["schemas"]["SocialProviderView"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7379,6 +7592,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -7407,6 +7621,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Application or configuration not found */
             404: {
                 headers: {
@@ -9049,12 +9264,16 @@ export interface operations {
                                 owner_id: string;
                                 label?: string | null;
                                 shared_with_org?: boolean;
+                                /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                                client_ref: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
                             has_oauth_client: boolean;
+                            /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
+                            has_system_client: boolean;
                             /** @description True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
                         }[];
@@ -9073,6 +9292,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Wrong package type */
             409: {
@@ -9147,12 +9367,16 @@ export interface operations {
                                 owner_id: string;
                                 label?: string | null;
                                 shared_with_org?: boolean;
+                                /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                                client_ref: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
                             has_oauth_client: boolean;
+                            /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
+                            has_system_client: boolean;
                             /** @description True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
                         }[];
@@ -9171,8 +9395,9 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Already active or wrong package type */
+            /** @description Wrong package type (not an integration) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9239,6 +9464,56 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listIntegrationClients: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Auth key as declared in the manifest's `auths` map. */
+                authKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Available OAuth clients */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        hasMore: boolean;
+                        data: {
+                            client_ref: string;
+                            /** @enum {string} */
+                            source: "built-in" | "custom";
+                            /** @description For `custom` clients, the org's OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            client_id: string;
+                            is_default: boolean;
+                            auto_provisioned: boolean;
+                            has_client_secret: boolean;
+                            redirect_uri: string | null;
+                        }[];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     connectIntegrationFields: {
@@ -9299,6 +9574,8 @@ export interface operations {
                         owner_id: string;
                         label?: string | null;
                         shared_with_org?: boolean;
+                        /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                        client_ref: string | null;
                         /** Format: date-time */
                         createdAt: string;
                         /** Format: date-time */
@@ -9359,6 +9636,124 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    setDefaultIntegrationClient: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Auth key as declared in the manifest's `auths` map. */
+                authKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Client to make default — a `client_ref` from GET .../clients. */
+                    client_ref: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Default set; available OAuth clients (re-badged) */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        hasMore: boolean;
+                        data: {
+                            client_ref: string;
+                            /** @enum {string} */
+                            source: "built-in" | "custom";
+                            /** @description For `custom` clients, the org's OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            client_id: string;
+                            is_default: boolean;
+                            auto_provisioned: boolean;
+                            has_client_secret: boolean;
+                            redirect_uri: string | null;
+                        }[];
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createIntegrationOAuthClient: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Auth key as declared in the manifest's `auths` map. */
+                authKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    client_id: string;
+                    /** @default  */
+                    client_secret: string;
+                    /** Format: uri */
+                    redirect_uri?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
+                         */
+                        id: string;
+                        applicationId: string;
+                        integration_package_id: string;
+                        auth_key: string;
+                        client_id: string;
+                        has_client_secret: boolean;
+                        redirect_uri: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                        /** Format: date-time */
+                        updatedAt: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listIntegrationConnections: {
         parameters: {
             query?: never;
@@ -9405,6 +9800,8 @@ export interface operations {
                             owner_id: string;
                             label?: string | null;
                             shared_with_org?: boolean;
+                            /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                            client_ref: string | null;
                             /** Format: date-time */
                             createdAt: string;
                             /** Format: date-time */
@@ -9414,6 +9811,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     updateIntegrationConnectionMetadata: {
@@ -9468,6 +9866,8 @@ export interface operations {
                         owner_id: string;
                         label?: string | null;
                         shared_with_org?: boolean;
+                        /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                        client_ref: string | null;
                         /** Format: date-time */
                         createdAt: string;
                         /** Format: date-time */
@@ -9527,6 +9927,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     deactivateIntegration: {
@@ -9555,6 +9956,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Wrong package type */
             409: {
@@ -9614,6 +10016,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     upsertIntegrationOrgDefault: {
@@ -9697,7 +10100,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    getIntegrationOAuthClient: {
+    rotateIntegrationOAuthClient: {
         parameters: {
             query?: never;
             header?: {
@@ -9709,52 +10112,8 @@ export interface operations {
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
                 packageId: string;
-                /** @description Auth key as declared in the manifest's `auths` map. */
-                authKey: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OAuth client */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        applicationId: string;
-                        integration_package_id: string;
-                        auth_key: string;
-                        client_id: string;
-                        has_client_secret: boolean;
-                        redirect_uri: string | null;
-                        /** Format: date-time */
-                        createdAt: string;
-                        /** Format: date-time */
-                        updatedAt: string;
-                    };
-                };
-            };
-            404: components["responses"]["NotFound"];
-        };
-    };
-    upsertIntegrationOAuthClient: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Integration package id (e.g. `@official/gmail`). */
-                packageId: string;
-                /** @description Auth key as declared in the manifest's `auths` map. */
-                authKey: string;
+                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
+                clientId: string;
             };
             cookie?: never;
         };
@@ -9770,7 +10129,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upserted */
+            /** @description Rotated */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -9779,6 +10138,11 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
+                         */
+                        id: string;
                         applicationId: string;
                         integration_package_id: string;
                         auth_key: string;
@@ -9793,6 +10157,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -9808,8 +10173,8 @@ export interface operations {
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
                 packageId: string;
-                /** @description Auth key as declared in the manifest's `auths` map. */
-                authKey: string;
+                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
+                clientId: string;
             };
             cookie?: never;
         };
@@ -9824,6 +10189,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -9860,6 +10226,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     upsertIntegrationPin: {
@@ -9999,12 +10366,16 @@ export interface operations {
                                 owner_id: string;
                                 label?: string | null;
                                 shared_with_org?: boolean;
+                                /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                                client_ref: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
                             has_oauth_client: boolean;
+                            /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
+                            has_system_client: boolean;
                             /** @description True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
                         }[];
@@ -10023,6 +10394,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
@@ -11216,6 +11588,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -11242,6 +11615,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
@@ -11279,7 +11653,8 @@ export interface operations {
                      *           "modelId": "gpt-4o",
                      *           "source": "built-in",
                      *           "enabled": true,
-                     *           "isDefault": false,
+                     *           "is_default": false,
+                     *           "aliased": false,
                      *           "credentialId": "pk_abc123",
                      *           "contextWindow": 128000,
                      *           "maxTokens": 16384,
@@ -11337,6 +11712,8 @@ export interface operations {
                         cacheRead?: number;
                         cacheWrite?: number;
                     };
+                    /** @description Model-alias flag. When true, this model's `id` becomes a public alias and its real binding (modelId, provider, baseUrl, capabilities/cost) is hidden from user-facing surfaces; the sidecar rewrites the `model` field on every inference call. */
+                    aliased?: boolean;
                 };
             };
         };
@@ -11395,8 +11772,10 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     searchOpenRouterModels: {
@@ -11632,6 +12011,8 @@ export interface operations {
                         cacheRead?: number;
                         cacheWrite?: number;
                     } | null;
+                    /** @description Model-alias flag. When true, this model's `id` becomes a public alias and its real binding is hidden from user-facing surfaces. */
+                    aliased?: boolean;
                 };
             };
         };
@@ -11647,6 +12028,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgModel"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -11707,6 +12089,86 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
+        };
+    };
+    listNotifications: {
+        parameters: {
+            query?: {
+                /** @description When true, only unread notifications are returned */
+                unread?: boolean;
+                limit?: number;
+                /** @description Keyset cursor — return notifications after this id (newest-first order). Supplied by the `Link: rel="next"` header. */
+                startingAfter?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notification list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    Link: components["headers"]["Link"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "550e8400-e29b-41d4-a716-446655440000",
+                     *           "type": "run_completed",
+                     *           "run_id": "exec_cm4jkl012",
+                     *           "payload": {
+                     *             "agent_id": "@acme/email-sorter",
+                     *             "status": "success"
+                     *           },
+                     *           "read_at": null,
+                     *           "created_at": "2026-01-15T10:31:12Z"
+                     *         }
+                     *       ],
+                     *       "has_more": false
+                     *     }
+                     */
+                    "application/json": {
+                        data: {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @description Notification kind, e.g. run_completed */
+                            type: string;
+                            /** @description Originating run id, when the notification references one */
+                            run_id: string | null;
+                            /** @description Render-without-join data (agent_id, status) */
+                            payload: {
+                                [key: string]: unknown;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            created_at: string;
+                        }[];
+                        /** @description True when another page follows — page via the Link header cursor */
+                        has_more: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     markAllNotificationsRead: {
@@ -11857,6 +12319,38 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    markNotificationReadById: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Notification id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notification marked as read (idempotent — 204 even if it was already read) */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listOAuthClients: {
         parameters: {
             query?: never;
@@ -11887,6 +12381,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     createOAuthClient: {
@@ -11950,6 +12445,8 @@ export interface operations {
                     "application/json": components["schemas"]["OAuthClientWithSecret"];
                 };
             };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getOAuthClient: {
@@ -11979,6 +12476,7 @@ export interface operations {
                     "application/json": components["schemas"]["OAuthClientObject"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             /** @description Client not found. */
             404: {
                 headers: {
@@ -12009,6 +12507,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Client not found. */
             404: {
                 headers: {
@@ -12064,6 +12563,8 @@ export interface operations {
                     "application/json": components["schemas"]["OAuthClientObject"];
                 };
             };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
             /** @description Client not found. */
             404: {
                 headers: {
@@ -12100,6 +12601,7 @@ export interface operations {
                     "application/json": components["schemas"]["OAuthClientWithSecret"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             /** @description Client not found. */
             404: {
                 headers: {
@@ -12164,6 +12666,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     getOpenApiSpec: {
@@ -12542,6 +13045,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgInvitationInfo"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -12573,7 +13077,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    addOrInviteMember: {
+    inviteMember: {
         parameters: {
             query?: never;
             header?: never;
@@ -12596,7 +13100,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Polymorphic bare resource: when the user already exists (and no invitation flow applies) they are added directly and the created member is returned (OrgMember — discriminate on `userId`); otherwise an invitation is created and returned (OrgInvitationInfo — discriminate on `id` + `token`). Both use the same serializers as the lists in GET /api/orgs/{orgId}. */
+            /** @description Invitation created — bare OrgInvitationInfo (same shape as the items in the invitations list in GET /api/orgs/{orgId}). */
             201: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -12604,7 +13108,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OrgMember"] | components["schemas"]["OrgInvitationInfo"];
+                    /**
+                     * @example {
+                     *       "id": "inv_abc123",
+                     *       "email": "newuser@example.com",
+                     *       "role": "member",
+                     *       "token": "inv_abc123def456",
+                     *       "expiresAt": "2026-02-01T00:00:00Z",
+                     *       "createdAt": "2026-01-25T00:00:00Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["OrgInvitationInfo"];
                 };
             };
             400: components["responses"]["ValidationError"];
@@ -12652,6 +13166,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgMember"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -15391,6 +15906,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserProfile"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -15447,6 +15963,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
         };
     };
@@ -15481,7 +15998,7 @@ export interface operations {
                      *           "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                      *           "source": "custom",
                      *           "enabled": true,
-                     *           "isDefault": false,
+                     *           "is_default": false,
                      *           "created_by": "usr_k7x9m2p4q1",
                      *           "createdAt": "2026-01-10T08:00:00Z",
                      *           "updatedAt": "2026-01-10T08:00:00Z"
@@ -15540,7 +16057,7 @@ export interface operations {
                      *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
-                     *       "isDefault": false,
+                     *       "is_default": false,
                      *       "created_by": "usr_k7x9m2p4q1",
                      *       "createdAt": "2026-01-10T08:00:00Z",
                      *       "updatedAt": "2026-01-10T08:00:00Z"
@@ -15552,7 +16069,6 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalServerError"];
         };
     };
     setDefaultProxy: {
@@ -15589,7 +16105,7 @@ export interface operations {
                      *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
-                     *       "isDefault": true,
+                     *       "is_default": true,
                      *       "created_by": "usr_k7x9m2p4q1",
                      *       "createdAt": "2026-01-10T08:00:00Z",
                      *       "updatedAt": "2026-01-10T08:00:00Z"
@@ -15606,9 +16122,10 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalServerError"];
+            404: components["responses"]["NotFound"];
         };
     };
     updateProxy: {
@@ -15649,7 +16166,7 @@ export interface operations {
                      *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
-                     *       "isDefault": false,
+                     *       "is_default": false,
                      *       "created_by": "usr_k7x9m2p4q1",
                      *       "createdAt": "2026-01-10T08:00:00Z",
                      *       "updatedAt": "2026-01-12T09:00:00Z"
@@ -15662,7 +16179,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
         };
     };
     deleteProxy: {
@@ -15689,7 +16205,6 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalServerError"];
         };
     };
     testProxy: {
@@ -15960,8 +16475,7 @@ export interface operations {
                      *       "completed_at": null,
                      *       "duration": null,
                      *       "cost": null,
-                     *       "notifiedAt": null,
-                     *       "readAt": null,
+                     *       "unread": false,
                      *       "runNumber": 1,
                      *       "token_usage": null,
                      *       "version_label": null,
@@ -15978,6 +16492,7 @@ export interface operations {
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": "mpc_8h2k4m6n",
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "user_name": null,
                      *       "end_user_name": null,
                      *       "api_key_name": null,
@@ -16018,6 +16533,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["IdempotencyInProgress"];
             /** @description Missing integration connection (`missing_integration_connection`) */
             412: {
@@ -16096,6 +16612,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
         };
@@ -16148,6 +16665,10 @@ export interface operations {
                     };
                     applicationId: string;
                     input?: Record<string, never>;
+                    /** @description Per-run dependency version overrides (#666/#686). Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. `"draft"` opts that dependency into its working copy; any other value replaces the manifest pin. An unsatisfiable pin aborts the run with `dependency_unresolved` (422). */
+                    dependency_overrides?: {
+                        [key: string]: string;
+                    };
                     /** @description Caller-provided execution-environment metadata (os, cli version, git sha). Capped at 16 KiB serialised. */
                     contextSnapshot?: Record<string, never>;
                     sink?: {
@@ -16281,8 +16802,7 @@ export interface operations {
                      *       "completed_at": "2026-01-15T10:31:12Z",
                      *       "duration": 72000,
                      *       "cost": 0.0034,
-                     *       "notifiedAt": "2026-01-15T10:31:12Z",
-                     *       "readAt": null,
+                     *       "unread": true,
                      *       "runNumber": 17,
                      *       "token_usage": {
                      *         "input_tokens": 8200,
@@ -16304,6 +16824,7 @@ export interface operations {
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": null,
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "user_name": "Pierre",
                      *       "end_user_name": null,
                      *       "api_key_name": null,
@@ -16387,8 +16908,7 @@ export interface operations {
                      *       "completed_at": "2026-01-15T10:30:45Z",
                      *       "duration": 45000,
                      *       "cost": 0.0012,
-                     *       "notifiedAt": null,
-                     *       "readAt": null,
+                     *       "unread": false,
                      *       "runNumber": 18,
                      *       "token_usage": null,
                      *       "version_label": "1.2.0",
@@ -16405,6 +16925,7 @@ export interface operations {
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": null,
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "user_name": "Pierre",
                      *       "end_user_name": null,
                      *       "api_key_name": null,
@@ -16417,6 +16938,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Run not cancellable (already completed/failed) */
             409: {
@@ -16963,6 +17485,7 @@ export interface operations {
                      *       "proxy_id_override": null,
                      *       "version_override": "1.2.0",
                      *       "connection_overrides": null,
+                     *       "dependency_overrides": null,
                      *       "last_run_at": "2026-01-15T09:00:00Z",
                      *       "next_run_at": "2026-01-16T09:00:00Z",
                      *       "createdAt": "2026-01-14T14:00:00Z",
@@ -17004,10 +17527,14 @@ export interface operations {
                     config_override?: Record<string, never> | null;
                     model_id_override?: string | null;
                     proxy_id_override?: string | null;
-                    /** @description Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default: latest published version when one exists, draft otherwise). */
+                    /** @description Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default `published` — latest published version; the working copy is opt-in via `draft` only). */
                     version_override?: string | null;
                     /** @description Per-integration connection picks frozen on the schedule. Pass `null` to clear. */
                     connection_overrides?: {
+                        [key: string]: string;
+                    } | null;
+                    /** @description Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear. */
+                    dependency_overrides?: {
                         [key: string]: string;
                     } | null;
                 };
@@ -17484,6 +18011,7 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookObject"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -17634,6 +18162,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -18104,17 +18633,9 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    /** @description Password (required for new users, minimum 8 characters) */
-                    password?: string;
-                    displayName?: string;
-                };
-            };
-        };
+        requestBody?: never;
         responses: {
-            /** @description Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs, with `role` set to the invitation role). For new users a session cookie is set via Set-Cookie. */
+            /** @description Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs, with `role` set to the invitation role). */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -18134,7 +18655,7 @@ export interface operations {
                     "application/json": components["schemas"]["Organization"];
                 };
             };
-            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
             /** @description Invitation email does not match the authenticated session */
             403: {
                 headers: {

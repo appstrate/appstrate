@@ -9,11 +9,14 @@
  * dropdown. Integrations are import-only — there is no in-app editor.
  *
  * Tabs:
- *   - Connexions — per-auth cards grouped by authKey. Each card carries its
- *     own setup: for oauth2, the admin OAuth client form sits inside the card
- *     (a missing client locks the connection list right below it). A collapsed
- *     admin "Règles d'accès" section at the bottom holds the org-wide policy
- *     (block member connections, default connection, per-agent pin exceptions).
+ *   - Connexions — per-auth connect CTA (always the resolved default client —
+ *     the org's custom client when registered, else the system client) and a
+ *     table of connected accounts with rename / share / reconnect / disconnect.
+ *     Runtime view, visible to members.
+ *   - Configuration (admin) — per-auth metadata (scopes, resource, authorized
+ *     URIs), the OAuth clients table (system + custom) and the BYO-app
+ *     registration form, the org-wide access rules (block member connections,
+ *     default connection, per-agent pins), and the publisher setup guide.
  *   - Outils — read-only catalog of tools the integration exposes (resolved
  *     server-side via `resolveIntegrationToolCatalog`: MCPB-canonical from
  *     the referenced mcp-server minus `hidden_tools` and connect.tool
@@ -31,13 +34,21 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Trash2, ShieldCheck, Settings2, Pencil, Check, X, ChevronRight } from "lucide-react";
+import { Trash2, ShieldCheck, Plus, Pencil, Check, X, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { SharedHeader } from "../components/package-detail/shared-header";
@@ -45,14 +56,19 @@ import { PackageActionsDropdown } from "../components/package-detail/package-act
 import { VersionHistory } from "../components/version-history";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
+import { Modal } from "../components/modal";
+import { SourceBadge } from "../components/source-badge";
+import { DefaultCell } from "../components/default-cell";
 import { usePermissions } from "../hooks/use-permissions";
 import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
 import {
   useIntegrationDetail,
   useActivateIntegration,
   useDeactivateIntegration,
-  useIntegrationOAuthClient,
-  useUpsertIntegrationOAuthClient,
+  useIntegrationClients,
+  useSetDefaultIntegrationClient,
+  useCreateIntegrationOAuthClient,
+  useRotateIntegrationOAuthClient,
   useDeleteIntegrationOAuthClient,
   useUpdateIntegrationConnection,
   useUpdateIntegrationSettings,
@@ -66,6 +82,7 @@ import {
   useDeleteIntegrationOrgDefault,
   type IntegrationAuthStatus,
   type IntegrationAuthType,
+  type IntegrationClient,
   type IntegrationConnection,
   type IntegrationManifestView,
   type IntegrationManifestAuth,
@@ -76,263 +93,472 @@ import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
 import { connectionDisplayLabel } from "../components/integration-connect/connection-label";
+import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
+import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
 
 // ─────────────────────────────────────────────
-// OAuth client (admin) form
+// OAuth client (admin) — create / rotate modal
 // ─────────────────────────────────────────────
 
-function OAuthClientForm({
+/**
+ * Register a new custom OAuth client (`mode: "create"`) or rotate an existing
+ * one in place (`mode: "rotate"`, preloaded from its descriptor). The parent
+ * mounts this only while open, keyed by mode+clientRef, so field state resets
+ * cleanly between invocations. The client secret is write-only — never echoed
+ * back, shown as a placeholder when one is already set.
+ */
+function OAuthClientModal({
   packageId,
   authKey,
   authDecl,
-  autoProvisioned = false,
+  mode,
+  existing,
+  onClose,
 }: {
   packageId: string;
   authKey: string;
   authDecl?: IntegrationManifestAuth;
-  // Remote MCP auths register their client at connect time (CIMD/DCR), so a
-  // pre-registered client is optional. Surface that instead of a "to configure"
-  // warning, and keep the form collapsed by default.
-  autoProvisioned?: boolean;
+  mode: "create" | "rotate";
+  existing?: IntegrationClient;
+  onClose: () => void;
 }) {
   const { t } = useTranslation("settings");
-  const { data: client, isLoading } = useIntegrationOAuthClient(packageId, authKey);
-  const upsert = useUpsertIntegrationOAuthClient();
-  const del = useDeleteIntegrationOAuthClient();
-  const [clientId, setClientId] = useState("");
+  const create = useCreateIntegrationOAuthClient();
+  const rotate = useRotateIntegrationOAuthClient();
+  const pending = mode === "create" ? create.isPending : rotate.isPending;
+  const [clientId, setClientId] = useState(existing?.client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
-  const [redirectUri, setRedirectUri] = useState("");
-  const [publicClient, setPublicClient] = useState(false);
-  // Accordion: collapsed once a client is registered, open while it still
-  // needs configuring. `null` = follow that default; a boolean = user toggled.
-  const [open, setOpen] = useState<boolean | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-
-  if (isLoading) return <LoadingState />;
+  const [redirectUri, setRedirectUri] = useState(existing?.redirect_uri ?? "");
+  const [publicClient, setPublicClient] = useState(existing ? !existing.has_client_secret : false);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    upsert.mutate(
-      {
-        params: { path: { packageId, authKey } },
-        body: {
-          client_id: clientId,
-          client_secret: publicClient ? "" : clientSecret,
-          ...(redirectUri ? { redirect_uri: redirectUri } : {}),
-        },
-      },
-      {
-        onSuccess: () => {
-          setClientSecret("");
-        },
-      },
-    );
+    const body = {
+      client_id: clientId,
+      client_secret: publicClient ? "" : clientSecret,
+      ...(redirectUri ? { redirect_uri: redirectUri } : {}),
+    };
+    if (mode === "create") {
+      create.mutate({ params: { path: { packageId, authKey } }, body }, { onSuccess: onClose });
+    } else {
+      rotate.mutate(
+        { params: { path: { packageId, clientId: existing!.client_ref } }, body },
+        { onSuccess: onClose },
+      );
+    }
   };
 
-  const configured = !!client;
-  // Default collapsed when configured OR when the client is auto-provisioned
-  // (manual registration is optional in that case); open otherwise so an admin
-  // who must register a client sees the form straight away.
-  const isOpen = open === null ? !configured && !autoProvisioned : open;
-
   return (
-    <>
-      <Collapsible
-        open={isOpen}
-        onOpenChange={setOpen}
-        className="bg-muted/40 rounded-md border"
-        data-testid={`oauth-client-${authKey}`}
+    <Modal
+      open
+      onClose={onClose}
+      title={
+        mode === "create"
+          ? t("integration.oauthClient.modalCreateTitle")
+          : t("integration.oauthClient.modalRotateTitle")
+      }
+    >
+      <form
+        className="grid gap-3 sm:grid-cols-2"
+        onSubmit={submit}
+        data-testid={`oauth-client-form-${authKey}`}
       >
-        <CollapsibleTrigger className="flex w-full items-center gap-2 p-4 text-left">
-          <ChevronRight
-            size={14}
-            className={`text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}
+        <div className="space-y-1">
+          <Label htmlFor={`cid-${authKey}`} className="text-xs">
+            {t("integration.oauthClient.clientId")}
+          </Label>
+          <Input
+            id={`cid-${authKey}`}
+            value={clientId}
+            onChange={(e) => setClientId(e.target.value)}
+            data-testid={`oauth-clientid-${authKey}`}
           />
-          <Settings2 size={14} className="text-muted-foreground" />
-          <h4 className="text-sm font-semibold">{t("integration.section.oauthClient")}</h4>
-          <span
-            className={
-              configured
-                ? "ml-auto rounded bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] font-medium text-emerald-500"
-                : autoProvisioned
-                  ? "text-muted-foreground bg-muted ml-auto rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
-                  : "bg-warning/10 text-warning ml-auto rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
-            }
-          >
-            {configured
-              ? t("integration.oauthClient.configured")
-              : autoProvisioned
-                ? t("integration.oauthClient.autoProvisioned")
-                : t("integration.oauthClient.notConfigured")}
-          </span>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="px-4 pb-4">
-          {autoProvisioned && !client && (
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`csecret-${authKey}`} className="text-xs">
+            {t("integration.oauthClient.clientSecret")}
+          </Label>
+          <Input
+            id={`csecret-${authKey}`}
+            type="password"
+            value={clientSecret}
+            onChange={(e) => setClientSecret(e.target.value)}
+            disabled={publicClient}
+            placeholder={existing?.has_client_secret ? "••••••••" : ""}
+            data-testid={`oauth-clientsecret-${authKey}`}
+          />
+        </div>
+        <div className="space-y-1 sm:col-span-2">
+          <Label htmlFor={`redir-${authKey}`} className="text-xs">
+            {t("integration.oauthClient.redirectUri")}
+          </Label>
+          <Input
+            id={`redir-${authKey}`}
+            type="url"
+            value={redirectUri}
+            onChange={(e) => setRedirectUri(e.target.value)}
+          />
+          {/* AFPS §7.10 — surface `auths.<key>.callback_url_hint`. Read-only
+              display; the actual redirectUri value lives in the input above. */}
+          {authDecl?.callback_url_hint && (
             <p
-              className="text-muted-foreground mb-3 text-xs"
-              data-testid={`oauth-client-auto-hint-${authKey}`}
+              className="text-muted-foreground text-[0.7rem]"
+              data-testid={`callback-url-hint-${authKey}`}
             >
-              {t("integration.oauthClient.autoProvisionedHint")}
+              <span className="font-semibold">{t("integration.oauthClient.callbackUrlHint")}:</span>{" "}
+              <span className="font-mono">{authDecl.callback_url_hint}</span>
             </p>
           )}
-          {client && (
-            <p className="text-muted-foreground mb-3 text-xs">
-              {t("integration.oauthClient.registered", { clientId: client.client_id })}
-            </p>
-          )}
-          <form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}>
-            <div className="space-y-1">
-              <Label htmlFor={`cid-${authKey}`} className="text-xs">
-                {t("integration.oauthClient.clientId")}
-              </Label>
-              <Input
-                id={`cid-${authKey}`}
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-                placeholder={client?.client_id ?? ""}
-                data-testid={`oauth-clientid-${authKey}`}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor={`csecret-${authKey}`} className="text-xs">
-                {t("integration.oauthClient.clientSecret")}
-              </Label>
-              <Input
-                id={`csecret-${authKey}`}
-                type="password"
-                value={clientSecret}
-                onChange={(e) => setClientSecret(e.target.value)}
-                disabled={publicClient}
-                placeholder={client?.has_client_secret ? "••••••••" : ""}
-                data-testid={`oauth-clientsecret-${authKey}`}
-              />
-            </div>
-            <div className="space-y-1 sm:col-span-2">
-              <Label htmlFor={`redir-${authKey}`} className="text-xs">
-                {t("integration.oauthClient.redirectUri")}
-              </Label>
-              <Input
-                id={`redir-${authKey}`}
-                type="url"
-                value={redirectUri}
-                onChange={(e) => setRedirectUri(e.target.value)}
-                placeholder={client?.redirect_uri ?? ""}
-              />
-              {/* AFPS §7.10 — surface `auths.<key>.callback_url_hint`.
-                  Read-only display; the actual redirectUri value lives in
-                  the input above. */}
-              {authDecl?.callback_url_hint && (
-                <p
-                  className="text-muted-foreground text-[0.7rem]"
-                  data-testid={`callback-url-hint-${authKey}`}
-                >
-                  <span className="font-semibold">
-                    {t("integration.oauthClient.callbackUrlHint")}:
-                  </span>{" "}
-                  <span className="font-mono">{authDecl.callback_url_hint}</span>
-                </p>
-              )}
-            </div>
-            <label className="flex items-center gap-2 text-sm sm:col-span-2">
-              <Checkbox
-                checked={publicClient}
-                onCheckedChange={(c) => setPublicClient(Boolean(c))}
-              />
-              {t("integration.oauthClient.publicClient")}
-            </label>
-            <div className="flex items-center gap-2 sm:col-span-2">
-              <Button
-                type="submit"
-                size="sm"
-                disabled={upsert.isPending || clientId.trim() === ""}
-                data-testid={`oauth-client-save-${authKey}`}
-              >
-                {client
-                  ? t("integration.oauthClient.btnRotate")
-                  : t("integration.oauthClient.btnRegister")}
-              </Button>
-              {client && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setConfirmDelete(true)}
-                  disabled={del.isPending}
-                >
-                  <Trash2 size={14} className="text-destructive" />
-                  {t("integration.oauthClient.btnDelete")}
-                </Button>
-              )}
-            </div>
-          </form>
-        </CollapsibleContent>
-      </Collapsible>
-      <ConfirmModal
-        open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        title={t("btn.confirm", { ns: "common" })}
-        description={t("integration.oauthClient.delete.confirm")}
-        isPending={del.isPending}
-        onConfirm={() =>
-          del.mutate(
-            { params: { path: { packageId, authKey } } },
-            { onSuccess: () => setConfirmDelete(false) },
-          )
-        }
-      />
-    </>
+        </div>
+        <label className="flex items-center gap-2 text-sm sm:col-span-2">
+          <Checkbox checked={publicClient} onCheckedChange={(c) => setPublicClient(Boolean(c))} />
+          {t("integration.oauthClient.publicClient")}
+        </label>
+        <div className="flex items-center justify-end gap-2 sm:col-span-2">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={pending}>
+            {t("integration.connect.btn.cancel")}
+          </Button>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={pending || clientId.trim() === ""}
+            data-testid={`oauth-client-save-${authKey}`}
+          >
+            {mode === "create"
+              ? t("integration.oauthClient.btnRegister")
+              : t("integration.oauthClient.btnRotate")}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
 // ─────────────────────────────────────────────
-// Auth section (per declared auth in manifest)
+// OAuth clients (system + custom) — CRUD hub
 // ─────────────────────────────────────────────
 
 /**
- * Per-auth card, grouped by authKey. Self-contained setup + connections:
- *   - Auth metadata: type, required flag, default scopes, resource
- *     (RFC 8707 — `resource` in AFPS §7.3), authorized URIs.
- *   - For oauth2 + admin: the OAuth client registration form sits INSIDE
- *     the card, directly above the connection list — a missing client
- *     locks connecting, so the cause and the fix are co-located.
- *   - Connection list with "+ Ajouter", rename/share/disconnect per row.
+ * The admin hub for an auth's OAuth clients: every client that can mint a
+ * connection — the platform's system client(s) (`SYSTEM_INTEGRATIONS`,
+ * read-only) plus the org's N custom (BYO-app) clients — with which is the
+ * default. Multi-client: an admin registers as many custom clients as needed,
+ * rotates or deletes each by id, and picks the default (the model-provider
+ * pattern). Auto-provisioned (remote MCP DCR/CIMD) auths keep ONE machine
+ * client, shown read-only with a delete action that re-triggers registration;
+ * a manual escape hatch (opt-in) covers the rare server needing a pre-registered
+ * public client. Secrets are never returned by the endpoint.
+ */
+function ClientsTable({
+  packageId,
+  authKey,
+  authDecl,
+  autoProvisioned,
+}: {
+  packageId: string;
+  authKey: string;
+  authDecl?: IntegrationManifestAuth;
+  autoProvisioned: boolean;
+}) {
+  const { t } = useTranslation("settings");
+  const { data: clients } = useIntegrationClients(packageId, authKey);
+  const setDefault = useSetDefaultIntegrationClient();
+  const del = useDeleteIntegrationOAuthClient();
+  const [modal, setModal] = useState<
+    { mode: "create" } | { mode: "rotate"; client: IntegrationClient } | null
+  >(null);
+  const [confirmDelete, setConfirmDelete] = useState<IntegrationClient | null>(null);
+  // Auto-provisioned auths hide the manual register button by default — their
+  // token endpoint only accepts a DCR/CIMD-acquired client, so a hand-entered
+  // one usually points at the wrong server and disables auto-registration. Keep
+  // an opt-in escape hatch for the rare server needing a pre-registered client.
+  const [showManual, setShowManual] = useState(false);
+
+  const rows = clients ?? [];
+  // Choosing a default only matters when more than one client can mint connections.
+  const canChooseDefault = rows.length > 1;
+  const hasAutoClient = rows.some((c) => c.auto_provisioned);
+  // Classic auths always allow registering more custom clients; auto-provisioned
+  // auths only via the opt-in escape hatch (and only when none is registered yet).
+  const canRegister = !autoProvisioned || (showManual && !hasAutoClient);
+
+  return (
+    <div className="mb-3" data-testid={`oauth-clients-list-${authKey}`}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h4 className="text-muted-foreground text-xs font-semibold">
+          {t("integration.clients.title")}
+        </h4>
+        {canRegister && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={() => setModal({ mode: "create" })}
+            data-testid={`oauth-client-register-${authKey}`}
+          >
+            <Plus size={14} />
+            {t("integration.clients.register")}
+          </Button>
+        )}
+      </div>
+
+      {autoProvisioned && !hasAutoClient && (
+        <p
+          className="text-muted-foreground mb-2 text-xs"
+          data-testid={`oauth-client-auto-hint-${authKey}`}
+        >
+          {t("integration.oauthClient.autoProvisionedHint")}
+        </p>
+      )}
+
+      {rows.length > 0 && (
+        <div className="overflow-hidden rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs">{t("integration.clients.col.source")}</TableHead>
+                <TableHead className="text-xs">{t("integration.clients.col.clientId")}</TableHead>
+                <TableHead className="text-xs">{t("integration.clients.col.default")}</TableHead>
+                <TableHead className="w-px text-right text-xs">
+                  {t("integration.clients.col.actions")}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((client) => {
+                const editable = client.source === "custom" && !client.auto_provisioned;
+                const deletable = client.source === "custom";
+                return (
+                  <TableRow
+                    key={client.client_ref}
+                    data-testid={`oauth-client-row-${client.client_ref}`}
+                  >
+                    <TableCell>
+                      <SourceBadge
+                        source={client.source}
+                        autoProvisioned={client.auto_provisioned}
+                      />
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{client.client_id}</TableCell>
+                    <TableCell>
+                      <DefaultCell
+                        isDefault={client.is_default}
+                        defaultLabel={t("integration.clients.default")}
+                        setLabel={t("integration.clients.setDefault.action")}
+                        canSetDefault={canChooseDefault}
+                        disabled={setDefault.isPending}
+                        onSetDefault={() =>
+                          setDefault.mutate({
+                            params: { path: { packageId, authKey } },
+                            body: { client_ref: client.client_ref },
+                          })
+                        }
+                        testId={`set-default-client-${client.client_ref}`}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        {editable && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0"
+                            onClick={() => setModal({ mode: "rotate", client })}
+                            data-testid={`oauth-client-rotate-${client.client_ref}`}
+                            aria-label={t("integration.oauthClient.btnRotate")}
+                          >
+                            <Pencil size={14} />
+                          </Button>
+                        )}
+                        {deletable && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0"
+                            onClick={() => setConfirmDelete(client)}
+                            disabled={del.isPending}
+                            data-testid={`oauth-client-delete-${client.client_ref}`}
+                            aria-label={t("integration.oauthClient.btnDelete")}
+                          >
+                            <Trash2 size={14} className="text-destructive" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {autoProvisioned && !showManual && !hasAutoClient && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="mt-2"
+          onClick={() => setShowManual(true)}
+          data-testid={`oauth-client-manual-toggle-${authKey}`}
+        >
+          {t("integration.oauthClient.registerManually")}
+        </Button>
+      )}
+
+      {modal && (
+        <OAuthClientModal
+          key={modal.mode === "rotate" ? modal.client.client_ref : "create"}
+          packageId={packageId}
+          authKey={authKey}
+          authDecl={authDecl}
+          mode={modal.mode}
+          existing={modal.mode === "rotate" ? modal.client : undefined}
+          onClose={() => setModal(null)}
+        />
+      )}
+      <ConfirmModal
+        open={confirmDelete !== null}
+        onClose={() => setConfirmDelete(null)}
+        title={t("btn.confirm", { ns: "common" })}
+        description={t("integration.oauthClient.delete.confirm")}
+        isPending={del.isPending}
+        onConfirm={() => {
+          if (!confirmDelete) return;
+          del.mutate(
+            { params: { path: { packageId, clientId: confirmDelete.client_ref } } },
+            { onSuccess: () => setConfirmDelete(null) },
+          );
+        }}
+      />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Auth header (shared chrome for both tabs)
+// ─────────────────────────────────────────────
+
+/** Auth identity row reused by the Connexions and Configuration blocks. */
+function AuthHeader({ status }: { status: IntegrationAuthStatus }) {
+  const { t } = useTranslation("settings");
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2">
+      <ShieldCheck size={16} className="text-muted-foreground" />
+      <span className="font-mono text-sm font-semibold">{status.auth_key}</span>
+      <Badge variant="outline">{status.type}</Badge>
+      {status.required ? (
+        <Badge variant="default">{t("integration.auth.required")}</Badge>
+      ) : (
+        <Badge variant="secondary">{t("integration.auth.optional")}</Badge>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Connexions tab — per-auth connect CTA + accounts table
+// ─────────────────────────────────────────────
+
+/**
+ * Per-auth connect surface: the "+ Ajouter" CTA (admin) — which always connects
+ * via the resolved default client (no per-connect picker) — and the table of
+ * connected accounts with rename/share/reconnect/disconnect. Runtime view — the
+ * OAuth client setup lives in the Configuration tab (see {@link ConfigAuthBlock}).
  *
  * Scope-aware connect/upgrade still also lives on the agent surfaces
- * (AgentIntegrationsBlock + MissingConnectionsModal) where the per-agent
- * scope context is known; the "+ Ajouter" here connects with default scopes.
+ * (AgentIntegrationsBlock + MissingConnectionsModal) where the per-agent scope
+ * context is known; the "+ Ajouter" here connects with default scopes.
  */
-function AuthSection({
+function ConnectAuthBlock({
   packageId,
   status,
-  authDecl,
   isAdmin,
 }: {
   packageId: string;
   status: IntegrationAuthStatus;
-  authDecl: IntegrationManifestAuth;
   isAdmin: boolean;
 }) {
   const { t } = useTranslation("settings");
   const isOAuth = status.type === "oauth2";
-  // Remote MCP auths provision a client at connect time (CIMD/DCR), so a
-  // missing pre-registered client is not a blocker for them.
-  const clientMissing = isOAuth && !status.has_oauth_client && !status.client_auto_provisioned;
+  // Connectable when a client is usable: org-registered, shared system client,
+  // or auto-provisioned at connect time (remote MCP CIMD/DCR). Shared gate.
+  const clientMissing = isOAuth && !isOauthAuthConnectable(status);
 
   return (
     <div className="bg-card rounded-lg border p-4" data-testid={`auth-section-${status.auth_key}`}>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <ShieldCheck size={16} className="text-muted-foreground" />
-        <span className="font-mono text-sm font-semibold">{status.auth_key}</span>
-        <Badge variant="outline">{status.type}</Badge>
-        {status.required ? (
-          <Badge variant="default">{t("integration.auth.required")}</Badge>
-        ) : (
-          <Badge variant="secondary">{t("integration.auth.optional")}</Badge>
-        )}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <AuthHeader status={status} />
+        {/* Connect CTA / locked state. A missing oauth2 client blocks connecting:
+            admins are pointed at the Configuration tab, members get a hint. User-
+            facing connect also lives on agent surfaces where the agent's scope
+            context is known; here the "+ Ajouter" connects with default scopes. */}
+        {clientMissing ? (
+          <p
+            className="text-muted-foreground text-xs"
+            data-testid={`no-oauth-client-hint-${status.auth_key}`}
+          >
+            {isAdmin ? t("integration.auth.noClientHintAdmin") : t("integration.auth.noClientHint")}
+          </p>
+        ) : isAdmin ? (
+          <InlineConnectButton
+            packageId={packageId}
+            authKey={status.auth_key}
+            intent="connect"
+            label={t("integration.auth.addAccount")}
+            forceAccountSelect={status.connections.length > 0}
+            lockToAuthKey
+          />
+        ) : null}
       </div>
 
+      <ConnectionsTable
+        packageId={packageId}
+        authKey={status.auth_key}
+        authType={status.type}
+        connections={status.connections}
+        // Renew via OAuth needs a usable client; when none is available the
+        // connect CTA is already hidden, so gate the per-row renew button the
+        // same way to avoid a guaranteed 403.
+        canRenew={isOAuth && !clientMissing}
+      />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Configuration tab — per-auth metadata + OAuth clients
+// ─────────────────────────────────────────────
+
+/**
+ * Per-auth admin configuration: the declared auth metadata (scopes, resource,
+ * authorized URIs) plus the OAuth clients table (system + custom) and the
+ * registration form to add/rotate/delete the org's own (BYO-app) client.
+ * Separated from the runtime connections view (see {@link ConnectAuthBlock}).
+ */
+function ConfigAuthBlock({
+  packageId,
+  status,
+  authDecl,
+}: {
+  packageId: string;
+  status: IntegrationAuthStatus;
+  authDecl: IntegrationManifestAuth;
+}) {
+  const { t } = useTranslation("settings");
+  const isOAuth = status.type === "oauth2";
+
+  return (
+    <div className="bg-card rounded-lg border p-4" data-testid={`auth-config-${status.auth_key}`}>
+      <AuthHeader status={status} />
+
       {/* Scopes / resource (RFC 8707 — `resource` in AFPS §7.3) */}
-      {(status.scopes.length > 0 || status.resource) && (
+      {(status.scopes.length > 0 ||
+        status.resource ||
+        (authDecl.authorized_uris?.length ?? 0) > 0) && (
         <div className="text-muted-foreground mb-3 grid gap-1 text-xs">
           {status.scopes.length > 0 && (
             <p>
@@ -359,66 +585,17 @@ function AuthSection({
         </div>
       )}
 
-      {/* OAuth client setup (admin only) — the precondition for any oauth2
-          connection. Lives inside the card so the lock state below points at
-          a fix that's right here, not in another tab. */}
-      {isOAuth && isAdmin && (
-        <div className="mb-3">
-          <OAuthClientForm
-            packageId={packageId}
-            authKey={status.auth_key}
-            authDecl={authDecl}
-            autoProvisioned={status.client_auto_provisioned}
-          />
-        </div>
+      {/* OAuth clients (system + custom) — list, register, rotate, delete, default. */}
+      {isOAuth && (
+        <ClientsTable
+          packageId={packageId}
+          authKey={status.auth_key}
+          authDecl={authDecl}
+          autoProvisioned={status.client_auto_provisioned}
+        />
       )}
-
-      {/* Connect button / locked state. A missing oauth2 client blocks
-          connecting: admins see the form above, members get a pointer.
-          The integration detail page is admin-leaning per CLAUDE.md
-          "Integrations — connection model". User-facing connect lives on
-          agent surfaces (`AgentIntegrationsBlock` + `MissingConnectionsModal`)
-          where the per-agent scope context is known; here we only show the
-          "+ Ajouter" CTA to admins. Non-admins still see the auth metadata
-          (label, scopes, authorized_uris) as read-only context. */}
-      {clientMissing ? (
-        <p
-          className="text-muted-foreground mb-2 text-xs"
-          data-testid={`no-oauth-client-hint-${status.auth_key}`}
-        >
-          {isAdmin ? t("integration.auth.noClientHintAdmin") : t("integration.auth.noClientHint")}
-        </p>
-      ) : isAdmin ? (
-        <div className="mb-2 flex items-center justify-end">
-          <InlineConnectButton
-            packageId={packageId}
-            authKey={status.auth_key}
-            intent="connect"
-            label={t("integration.auth.addAccount")}
-            forceAccountSelect={status.connections.length > 0}
-            lockToAuthKey
-          />
-        </div>
-      ) : null}
-      {status.connections.length === 0 ? (
-        <p className="text-muted-foreground text-sm">{t("integration.auth.noConnection")}</p>
-      ) : (
-        <div className="space-y-2">
-          {status.connections.map((c) => (
-            <ConnectionRow
-              key={c.id}
-              connection={c}
-              packageId={packageId}
-              authKey={status.auth_key}
-              authType={status.type}
-              // Renew via OAuth needs an admin-registered client; a
-              // member-facing card with `clientMissing` already hides the
-              // connect CTA — pass the same gate to ConnectionRow so the
-              // renew button isn't a guaranteed 403.
-              canRenew={isOAuth && !clientMissing}
-            />
-          ))}
-        </div>
+      {!isOAuth && (
+        <p className="text-muted-foreground text-xs">{t("integration.config.noOAuthClient")}</p>
       )}
     </div>
   );
@@ -802,7 +979,60 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   );
 }
 
-function ConnectionRow({
+/**
+ * Connected accounts for one auth, as a table. Empty → a muted line. Columns:
+ * account (with inline rename), status (+ reconnect when stale), granted scopes,
+ * org-share toggle, and a disconnect action. All mutations are unchanged from
+ * the previous card layout — only the presentation moved to a table.
+ */
+function ConnectionsTable({
+  packageId,
+  authKey,
+  authType,
+  connections,
+  canRenew,
+}: {
+  packageId: string;
+  authKey: string;
+  authType: IntegrationAuthType;
+  connections: IntegrationConnection[];
+  canRenew: boolean;
+}) {
+  const { t } = useTranslation("settings");
+  if (connections.length === 0)
+    return <p className="text-muted-foreground text-sm">{t("integration.auth.noConnection")}</p>;
+  return (
+    <div className="overflow-hidden rounded-md border" data-testid={`connections-table-${authKey}`}>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="text-xs">{t("integration.connection.col.account")}</TableHead>
+            <TableHead className="text-xs">{t("integration.connection.col.status")}</TableHead>
+            <TableHead className="text-xs">{t("integration.connection.col.scopes")}</TableHead>
+            <TableHead className="text-xs">{t("integration.connection.col.shared")}</TableHead>
+            <TableHead className="w-px text-right text-xs">
+              {t("integration.connection.col.actions")}
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {connections.map((c) => (
+            <ConnectionTableRow
+              key={c.id}
+              connection={c}
+              packageId={packageId}
+              authKey={authKey}
+              authType={authType}
+              canRenew={canRenew}
+            />
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function ConnectionTableRow({
   connection,
   packageId,
   authKey,
@@ -815,7 +1045,7 @@ function ConnectionRow({
   authKey: string;
   /** Auth type from the manifest — gates the renew CTA to oauth2 only. */
   authType: IntegrationAuthType;
-  /** False when no OAuth client is registered yet — admin must set one up first. */
+  /** False when no OAuth client is usable yet — admin must set one up first. */
   canRenew: boolean;
 }) {
   const { t } = useTranslation("settings");
@@ -858,72 +1088,71 @@ function ConnectionRow({
   };
   return (
     <>
-      <div
-        className="bg-muted/30 flex flex-col gap-2 rounded-md border px-3 py-2 text-sm"
-        data-testid={`connection-row-${connection.id}`}
-      >
-        <div className="flex items-center gap-3">
-          <div className="min-w-0 flex-1">
+      <TableRow data-testid={`connection-row-${connection.id}`}>
+        {/* Account — inline rename */}
+        <TableCell>
+          {editing ? (
+            <div className="flex items-center gap-1">
+              <Input
+                value={draftLabel}
+                onChange={(e) => setDraftLabel(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") submitLabel();
+                  if (e.key === "Escape") cancelEdit();
+                }}
+                placeholder={t("integration.connection.labelPlaceholder")}
+                className="h-7 max-w-xs text-sm"
+                autoFocus
+                data-testid={`label-input-${connection.id}`}
+              />
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7"
+                onClick={submitLabel}
+                disabled={updateConnection.isPending}
+                title={t("integration.connection.labelSave")}
+                data-testid={`label-save-${connection.id}`}
+              >
+                <Check className="size-3.5" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7"
+                onClick={cancelEdit}
+                disabled={updateConnection.isPending}
+                title={t("integration.connection.labelCancel")}
+              >
+                <X className="size-3.5" />
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1">
+              <span className="truncate font-medium">{name}</span>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-6"
+                onClick={startEdit}
+                title={t("integration.connection.labelEdit")}
+                data-testid={`label-edit-${connection.id}`}
+              >
+                <Pencil className="size-3" />
+              </Button>
+            </div>
+          )}
+        </TableCell>
+
+        {/* Status — connected / needs reconnection (+ renew) + expiry */}
+        <TableCell>
+          <div className="flex flex-col gap-1">
             <div className="flex flex-wrap items-center gap-2">
-              {editing ? (
+              {connection.needs_reconnection ? (
                 <>
-                  <Input
-                    value={draftLabel}
-                    onChange={(e) => setDraftLabel(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") submitLabel();
-                      if (e.key === "Escape") cancelEdit();
-                    }}
-                    placeholder={t("integration.connection.labelPlaceholder")}
-                    className="h-7 max-w-xs text-sm"
-                    autoFocus
-                    data-testid={`label-input-${connection.id}`}
-                  />
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-7"
-                    onClick={submitLabel}
-                    disabled={updateConnection.isPending}
-                    title={t("integration.connection.labelSave")}
-                    data-testid={`label-save-${connection.id}`}
-                  >
-                    <Check className="size-3.5" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-7"
-                    onClick={cancelEdit}
-                    disabled={updateConnection.isPending}
-                    title={t("integration.connection.labelCancel")}
-                  >
-                    <X className="size-3.5" />
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <span className="truncate font-medium">{name}</span>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-6"
-                    onClick={startEdit}
-                    title={t("integration.connection.labelEdit")}
-                    data-testid={`label-edit-${connection.id}`}
-                  >
-                    <Pencil className="size-3" />
-                  </Button>
-                </>
-              )}
-              {isShared && (
-                <Badge variant="secondary" data-testid={`shared-badge-${connection.id}`}>
-                  {t("integration.connection.sharedBadge")}
-                </Badge>
-              )}
-              {connection.needs_reconnection && (
-                <>
-                  <Badge variant="destructive">{t("integration.auth.needsReconnection")}</Badge>
+                  <ConnectionStatusBadge tone="needsReconnection">
+                    {t("integration.auth.needsReconnection")}
+                  </ConnectionStatusBadge>
                   {canRenew && authType === "oauth2" && (
                     <InlineConnectButton
                       packageId={packageId}
@@ -939,13 +1168,12 @@ function ConnectionRow({
                     />
                   )}
                 </>
+              ) : (
+                <ConnectionStatusBadge tone="connected">
+                  {t("integration.connection.statusConnected")}
+                </ConnectionStatusBadge>
               )}
             </div>
-            {connection.scopes_granted.length > 0 && (
-              <p className="text-muted-foreground truncate font-mono text-[0.65rem]">
-                {connection.scopes_granted.join(" ")}
-              </p>
-            )}
             {connection.expiresAt && (
               <p className="text-muted-foreground text-[0.65rem]">
                 {t("integration.auth.expiresAt", {
@@ -954,9 +1182,28 @@ function ConnectionRow({
               </p>
             )}
           </div>
-        </div>
-        <div className="flex items-center gap-2 pt-1">
-          <label className="flex items-center gap-1.5 text-xs">
+        </TableCell>
+
+        {/* Granted scopes */}
+        <TableCell className="max-w-[16rem]">
+          {connection.scopes_granted.length > 0 ? (
+            <span
+              className="text-muted-foreground block truncate font-mono text-[0.65rem]"
+              title={connection.scopes_granted.join(" ")}
+            >
+              {connection.scopes_granted.join(" ")}
+            </span>
+          ) : (
+            <span className="text-muted-foreground text-xs">—</span>
+          )}
+        </TableCell>
+
+        {/* Org-share toggle */}
+        <TableCell>
+          <label
+            className="flex items-center gap-1.5 text-xs"
+            title={t("integration.connection.shareWithOrg.help")}
+          >
             <input
               type="checkbox"
               checked={isShared}
@@ -971,13 +1218,14 @@ function ConnectionRow({
             />
             {t("integration.connection.shareWithOrg.label")}
           </label>
-          <span className="text-muted-foreground text-[0.65rem]">
-            {t("integration.connection.shareWithOrg.help")}
-          </span>
+        </TableCell>
+
+        {/* Disconnect */}
+        <TableCell className="text-right">
           <Button
             size="icon"
             variant="ghost"
-            className="ml-auto size-7"
+            className="size-7"
             onClick={onDelete}
             disabled={disconnect.isPending}
             title={t("integration.connection.delete")}
@@ -985,8 +1233,8 @@ function ConnectionRow({
           >
             <Trash2 className="text-destructive size-3.5" />
           </Button>
-        </div>
-      </div>
+        </TableCell>
+      </TableRow>
       <ConfirmModal
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}
@@ -1176,6 +1424,7 @@ export function IntegrationDetailPage() {
           source,
           type: "integration",
           version,
+          icon: typeof m.icon === "string" ? m.icon : undefined,
         }}
         isHistoricalVersion={false}
         actionsLeft={
@@ -1226,6 +1475,11 @@ export function IntegrationDetailPage() {
           <TabsTrigger value="connections" data-testid="tab-connections">
             {t("integration.tabs.connections")}
           </TabsTrigger>
+          {isAdmin && (
+            <TabsTrigger value="configuration" data-testid="tab-configuration">
+              {t("integration.tabs.configuration")}
+            </TabsTrigger>
+          )}
           <TabsTrigger value="tools" data-testid="tab-tools">
             {t("integration.tabs.tools")}
             {detail.tool_catalog && detail.tool_catalog.length > 0 && (
@@ -1256,56 +1510,75 @@ export function IntegrationDetailPage() {
           )}
         </TabsList>
 
-        {/* ─── Connexions (per-auth cards + admin access rules) ─── */}
+        {/* ─── Connexions (per-auth connect CTA + accounts table) ─── */}
         <TabsContent value="connections" className="mt-4 space-y-4">
           {!active ? (
             <ActivationHint onActivate={onActivate} pending={activate.isPending} />
+          ) : detail.auths.length === 0 ? (
+            <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
           ) : (
-            <>
-              {/* AFPS §7.10 — admin-only setup_guide rendering. Surfaces
-                  publisher-authored prerequisites (OAuth app creation,
-                  redirect URI registration, …) next to the auth cards. */}
-              {isAdmin &&
-                (m as { setup_guide?: { steps?: Array<{ label: string; url?: string }> } })
+            detail.auths.map((authStatus) => (
+              <ConnectAuthBlock
+                key={authStatus.auth_key}
+                packageId={packageId}
+                status={authStatus}
+                isAdmin={isAdmin}
+              />
+            ))
+          )}
+        </TabsContent>
+
+        {/* ─── Configuration (admin: OAuth clients, auth metadata, access
+            rules, publisher setup guide). Separated from the runtime
+            Connexions view so client setup and connected accounts no longer
+            share one crowded card. ─── */}
+        {isAdmin && (
+          <TabsContent value="configuration" className="mt-4 space-y-4">
+            {!active ? (
+              <ActivationHint onActivate={onActivate} pending={activate.isPending} />
+            ) : (
+              <>
+                {/* AFPS §7.10 — publisher-authored prerequisites (OAuth app
+                    creation, redirect URI registration, …): admin setup, so it
+                    belongs with the client configuration. */}
+                {(m as { setup_guide?: { steps?: Array<{ label: string; url?: string }> } })
                   .setup_guide?.steps &&
-                (m as { setup_guide?: { steps?: Array<{ label: string; url?: string }> } })
-                  .setup_guide!.steps!.length > 0 && (
-                  <SetupGuideSteps
-                    steps={
-                      (
-                        m as {
-                          setup_guide?: { steps?: Array<{ label: string; url?: string }> };
-                        }
-                      ).setup_guide!.steps!
-                    }
-                  />
-                )}
-              {detail.auths.length === 0 ? (
-                <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
-              ) : (
-                detail.auths.map((authStatus) => {
-                  const declared = (m.auths ?? {})[authStatus.auth_key];
-                  if (!declared) return null;
-                  return (
-                    <AuthSection
-                      key={authStatus.auth_key}
-                      packageId={packageId}
-                      status={authStatus}
-                      authDecl={declared}
-                      isAdmin={isAdmin}
+                  (m as { setup_guide?: { steps?: Array<{ label: string; url?: string }> } })
+                    .setup_guide!.steps!.length > 0 && (
+                    <SetupGuideSteps
+                      steps={
+                        (
+                          m as {
+                            setup_guide?: { steps?: Array<{ label: string; url?: string }> };
+                          }
+                        ).setup_guide!.steps!
+                      }
                     />
-                  );
-                })
-              )}
-              {isAdmin && (
+                  )}
+                {detail.auths.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
+                ) : (
+                  detail.auths.map((authStatus) => {
+                    const declared = (m.auths ?? {})[authStatus.auth_key];
+                    if (!declared) return null;
+                    return (
+                      <ConfigAuthBlock
+                        key={authStatus.auth_key}
+                        packageId={packageId}
+                        status={authStatus}
+                        authDecl={declared}
+                      />
+                    );
+                  })
+                )}
                 <AccessRulesSection
                   packageId={packageId}
                   blockUserConnections={summary?.block_user_connections ?? false}
                 />
-              )}
-            </>
-          )}
-        </TabsContent>
+              </>
+            )}
+          </TabsContent>
+        )}
 
         {/* ─── Outils (effective tool catalog — read-only) ─── */}
         <TabsContent value="tools" className="mt-4">

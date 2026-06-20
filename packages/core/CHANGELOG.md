@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`@appstrate/core/model-swap`** — the model-alias swap (LLM-gateway alias
+  pattern, appstrate#727). Exports `swapRequestModel`, `swapResponseModelJson`,
+  `createSseModelSwapStream`, `scrubModelText`, `isAliasableApiShape`, and
+  `ALIASABLE_API_SHAPES`. Single source of truth shared by both inference data
+  paths — the in-container sidecar proxy and the platform LLM gateway — so a
+  public alias id is rewritten to/from its real backing id at exactly one
+  implementation. The `ModelSwap` interface remains in
+  `@appstrate/core/sidecar-types`.
+
 ### Removed
 
 - **BREAKING: `RealtimeEvent` removed from `@appstrate/core/platform-types`.**

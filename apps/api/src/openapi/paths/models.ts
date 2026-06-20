@@ -41,7 +41,8 @@ export const modelsPaths = {
                     modelId: "gpt-4o",
                     source: "built-in",
                     enabled: true,
-                    isDefault: false,
+                    is_default: false,
+                    aliased: false,
                     credentialId: "pk_abc123",
                     contextWindow: 128000,
                     maxTokens: 16384,
@@ -107,6 +108,11 @@ export const modelsPaths = {
                     cacheRead: { type: "number" },
                     cacheWrite: { type: "number" },
                   },
+                },
+                aliased: {
+                  type: "boolean",
+                  description:
+                    "Model-alias flag. When true, this model's `id` becomes a public alias and its real binding (modelId, provider, baseUrl, capabilities/cost) is hidden from user-facing surfaces; the sidecar rewrites the `model` field on every inference call.",
                 },
               },
             },
@@ -179,8 +185,13 @@ export const modelsPaths = {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        // Unknown custom `modelId` (not a system id and no org-owned row) →
+        // `setDefaultModel` throws `notFound`. The pointer never silently keeps
+        // a stale/absent default.
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -464,6 +475,11 @@ export const modelsPaths = {
                     cacheWrite: { type: "number" },
                   },
                 },
+                aliased: {
+                  type: "boolean",
+                  description:
+                    "Model-alias flag. When true, this model's `id` becomes a public alias and its real binding is hidden from user-facing surfaces.",
+                },
               },
             },
           },
@@ -483,6 +499,7 @@ export const modelsPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

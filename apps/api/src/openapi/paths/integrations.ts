@@ -31,6 +31,14 @@ const connectionIdParam = {
   schema: { type: "string", format: "uuid" },
 } as const;
 
+const clientIdParam = {
+  name: "clientId",
+  in: "path",
+  required: true,
+  description: "Custom OAuth client id (`integration_oauth_clients.id`, UUID).",
+  schema: { type: "string", format: "uuid" },
+} as const;
+
 const agentPackageIdParam = {
   name: "agentPackageId",
   in: "path",
@@ -87,6 +95,7 @@ const integrationConnectionSchema = {
     "expiresAt",
     "owner_type",
     "owner_id",
+    "client_ref",
     "createdAt",
     "updatedAt",
   ],
@@ -103,14 +112,59 @@ const integrationConnectionSchema = {
     owner_id: { type: "string" },
     label: { type: ["string", "null"] },
     shared_with_org: { type: "boolean" },
+    client_ref: {
+      type: ["string", "null"],
+      description:
+        "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting.",
+    },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
+  },
+} as const;
+
+// Shared by GET .../clients and PUT .../default-client — both return the
+// available-clients list so the UI re-badges the default in one round-trip.
+const integrationClientsListSchema = {
+  type: "object",
+  required: ["object", "data", "hasMore"],
+  properties: {
+    object: { type: "string", enum: ["list"] },
+    hasMore: { type: "boolean" },
+    data: {
+      type: "array",
+      items: {
+        type: "object",
+        required: [
+          "client_ref",
+          "source",
+          "client_id",
+          "is_default",
+          "auto_provisioned",
+          "has_client_secret",
+          "redirect_uri",
+        ],
+        properties: {
+          client_ref: { type: "string" },
+          source: { type: "string", enum: ["built-in", "custom"] },
+          client_id: {
+            type: "string",
+            description:
+              "For `custom` clients, the org's OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`.",
+          },
+          is_default: { type: "boolean" },
+          auto_provisioned: { type: "boolean" },
+          has_client_secret: { type: "boolean" },
+          redirect_uri: { type: ["string", "null"] },
+        },
+      },
+    },
   },
 } as const;
 
 const oauthClientSchema = {
   type: "object",
   required: [
+    "id",
     "applicationId",
     "integration_package_id",
     "auth_key",
@@ -121,6 +175,12 @@ const oauthClientSchema = {
     "updatedAt",
   ],
   properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      description:
+        "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.",
+    },
     applicationId: { type: "string" },
     integration_package_id: { type: "string" },
     auth_key: { type: "string" },
@@ -142,6 +202,7 @@ const authStatusSchema = {
     "resource",
     "connections",
     "has_oauth_client",
+    "has_system_client",
     "client_auto_provisioned",
   ],
   properties: {
@@ -161,6 +222,11 @@ const authStatusSchema = {
     },
     connections: { type: "array", items: integrationConnectionSchema },
     has_oauth_client: { type: "boolean" },
+    has_system_client: {
+      type: "boolean",
+      description:
+        "True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client.",
+    },
     client_auto_provisioned: {
       type: "boolean",
       description:
@@ -332,6 +398,7 @@ export const integrationsPaths = {
           headers: baseResponseHeaders,
           content: { "application/json": { schema: integrationDetailSchema } },
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description: "Wrong package type",
@@ -364,6 +431,9 @@ export const integrationsPaths = {
       },
       responses: {
         "201": {
+          // Activation is a flag upsert (enabled=true) — idempotent: repeat
+          // activation of an already-active integration succeeds (201), it is
+          // not a 409.
           description: "Activated — returns the bare integration detail resource",
           headers: baseResponseHeaders,
           content: {
@@ -375,9 +445,10 @@ export const integrationsPaths = {
             },
           },
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Already active or wrong package type",
+          description: "Wrong package type (not an integration)",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -399,14 +470,16 @@ export const integrationsPaths = {
       ],
       responses: {
         "204": {
-          // Deactivation DELETEs the application_packages row (not a flag
-          // flip), so the strict mutation convention applies: DELETE → 204
-          // empty (#657). The integration detail stays GET-able afterwards
-          // (connections, OAuth clients, pins and org defaults survive) and
-          // serves `active: false`.
+          // Deactivation flips `enabled` to false (an upsert — the row is the
+          // explicit opt-out, persisted, not deleted: deleting it would let a
+          // system integration re-trigger its auto-active default). The strict
+          // mutation convention still applies: DELETE → 204 empty (#657). The
+          // integration detail stays GET-able afterwards (connections, OAuth
+          // clients, pins and org defaults survive) and serves `active: false`.
           description: "Deactivated — empty response. The integration detail remains GET-able.",
           headers: baseResponseHeaders,
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description: "Wrong package type",
@@ -419,30 +492,17 @@ export const integrationsPaths = {
       },
     },
   },
-  "/api/integrations/{packageId}/oauth-clients/{authKey}": {
-    get: {
-      operationId: "getIntegrationOAuthClient",
+  "/api/integrations/{packageId}/auths/{authKey}/oauth-clients": {
+    post: {
+      operationId: "createIntegrationOAuthClient",
       tags: ["Integrations"],
-      summary: "Read the registered OAuth client for an integration auth",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        packageIdParam,
-        authKeyParam,
-      ],
-      responses: {
-        "200": {
-          description: "OAuth client",
-          headers: baseResponseHeaders,
-          content: { "application/json": { schema: oauthClientSchema } },
-        },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    put: {
-      operationId: "upsertIntegrationOAuthClient",
-      tags: ["Integrations"],
-      summary: "Register or rotate the OAuth client for an integration auth",
+      summary: "Register a custom OAuth client for an integration auth",
+      description:
+        "Registers a NEW custom (BYO-app) client for this auth. Repeatable — an " +
+        "org may hold N clients per auth (model-provider pattern). The first " +
+        "registered client becomes the default; later ones are non-default until " +
+        "promoted via PUT .../default-client. Rejected for auto-provisioned " +
+        "(DCR/CIMD) auths. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -466,19 +526,91 @@ export const integrationsPaths = {
         },
       },
       responses: {
-        "200": {
-          description: "Upserted",
+        "201": {
+          description: "Created",
           headers: baseResponseHeaders,
           content: { "application/json": { schema: oauthClientSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/oauth-clients/{clientId}": {
+    put: {
+      operationId: "rotateIntegrationOAuthClient",
+      tags: ["Integrations"],
+      summary: "Rotate a custom OAuth client's credentials",
+      description:
+        "Rotates one custom client in place, by its id. Auto-provisioned " +
+        "(DCR/CIMD) clients are machine-managed and rejected. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        packageIdParam,
+        clientIdParam,
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["client_id", "client_secret"],
+              properties: {
+                client_id: { type: "string", minLength: 1 },
+                client_secret: { type: "string", default: "" },
+                redirect_uri: { type: "string", format: "uri" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Rotated",
+          headers: baseResponseHeaders,
+          content: { "application/json": { schema: oauthClientSchema } },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
     delete: {
       operationId: "deleteIntegrationOAuthClient",
       tags: ["Integrations"],
-      summary: "Delete the OAuth client for an integration auth",
+      summary: "Delete a custom OAuth client",
+      description:
+        "Deletes one custom client by id. If it was the default, the cascade " +
+        "falls to the system client (no auto-promotion). Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        packageIdParam,
+        clientIdParam,
+      ],
+      responses: {
+        "204": {
+          description: "OAuth client deleted",
+          headers: baseResponseHeaders,
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/auths/{authKey}/clients": {
+    get: {
+      operationId: "listIntegrationClients",
+      tags: ["Integrations"],
+      summary: "List the OAuth clients registered for an integration auth",
+      description:
+        "Returns the org's custom (BYO-app) clients plus any platform-provided " +
+        "system clients, with `source` and which is the default. Secrets are " +
+        "never returned. Drives the admin clients CRUD table; new connections " +
+        "always use the default (no per-connect picker).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -486,10 +618,59 @@ export const integrationsPaths = {
         authKeyParam,
       ],
       responses: {
-        "204": {
-          description: "OAuth client deleted",
+        "200": {
+          description: "Available OAuth clients",
           headers: baseResponseHeaders,
+          content: { "application/json": { schema: integrationClientsListSchema } },
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/auths/{authKey}/default-client": {
+    put: {
+      operationId: "setDefaultIntegrationClient",
+      tags: ["Integrations"],
+      summary: "Set the default OAuth client for an integration auth",
+      description:
+        "Choose which client mints NEW connections when none is picked explicitly " +
+        "(the model-provider `setDefaultModel` analogue). Selecting the org's custom " +
+        "client flags it default; selecting a system client un-flags the custom one " +
+        "so the cascade falls to the system client. Existing connections are bound " +
+        "to the client that minted them and are unaffected. Returns the refreshed " +
+        "clients list. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        packageIdParam,
+        authKeyParam,
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["client_ref"],
+              properties: {
+                client_ref: {
+                  type: "string",
+                  description: "Client to make default — a `client_ref` from GET .../clients.",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Default set; available OAuth clients (re-badged)",
+          headers: baseResponseHeaders,
+          content: { "application/json": { schema: integrationClientsListSchema } },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -617,6 +798,7 @@ export const integrationsPaths = {
             },
           },
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -718,6 +900,7 @@ export const integrationsPaths = {
             },
           },
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -809,6 +992,7 @@ export const integrationsPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -845,6 +1029,7 @@ export const integrationsPaths = {
             },
           },
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -889,6 +1074,7 @@ export const integrationsPaths = {
             },
           },
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -975,6 +1161,7 @@ export const integrationsPaths = {
           description: "No org default is set for this integration",
           headers: baseResponseHeaders,
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
     put: {

@@ -8,8 +8,9 @@
  * semver (+ a `version_dirty` boolean). The resolver makes the choice
  * explicit and deterministic:
  *
- *   - omitted  → latest published version when one exists, draft otherwise
- *   - "draft"  → the live draft
+ *   - omitted  → strictly identical to "published" (latest published; 404
+ *               `no_published_version` when none — never a silent draft)
+ *   - "draft"  → the live draft (the one editor-only, opt-in selector)
  *   - "published" → latest published version (404 when none)
  *   - "<spec>" → exact / dist-tag / semver-range resolution (404 when none)
  *
@@ -144,7 +145,11 @@ describe("resolveAgentRunVersion", () => {
     }
   });
 
-  it("default on a never-published agent executes the draft", async () => {
+  // CRITICAL behavior (unified version model): the omitted selector is now
+  // strictly identical to "published" — a never-published agent run WITHOUT a
+  // selector throws 404 `no_published_version` rather than silently executing
+  // the working copy. Running the draft is opt-in via `version=draft` only.
+  it("default (omitted) on a never-published agent throws 404 no_published_version", async () => {
     await seedAgent({
       id: "@verorg/never-published",
       orgId: ctx.orgId,
@@ -153,10 +158,26 @@ describe("resolveAgentRunVersion", () => {
     });
     const agent = await getPackage("@verorg/never-published", ctx.orgId);
 
-    const resolved = await resolveAgentRunVersion(agent!, undefined);
+    try {
+      await resolveAgentRunVersion(agent!, undefined);
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).status).toBe(404);
+      expect((err as ApiError).code).toBe("no_published_version");
+    }
+  });
 
-    expect(resolved.overrideVersionLabel).toBeUndefined();
-    expect(resolved.agent.prompt).toBe(DIRTY_PROMPT);
+  it("empty selector on a never-published agent also throws 404 (== omitted)", async () => {
+    await seedAgent({
+      id: "@verorg/never-published",
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftContent: DIRTY_PROMPT,
+    });
+    const agent = await getPackage("@verorg/never-published", ctx.orgId);
+
+    expect(resolveAgentRunVersion(agent!, "")).rejects.toThrow(ApiError);
   });
 
   it("'published' on a never-published agent throws 404 no_published_version", async () => {
@@ -175,6 +196,21 @@ describe("resolveAgentRunVersion", () => {
       expect((err as ApiError).status).toBe(404);
       expect((err as ApiError).code).toBe("no_published_version");
     }
+  });
+
+  it("'draft' STILL runs the working copy on a never-published agent (the opt-in escape hatch)", async () => {
+    await seedAgent({
+      id: "@verorg/never-published",
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftContent: DIRTY_PROMPT,
+    });
+    const agent = await getPackage("@verorg/never-published", ctx.orgId);
+
+    const resolved = await resolveAgentRunVersion(agent!, "draft");
+
+    expect(resolved.overrideVersionLabel).toBeUndefined();
+    expect(resolved.agent.prompt).toBe(DIRTY_PROMPT);
   });
 
   it("ignores the selector for system agents (definition ships with the platform)", async () => {

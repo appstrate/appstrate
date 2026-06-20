@@ -2,8 +2,30 @@ import js from "@eslint/js";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
+import react from "eslint-plugin-react";
 import tseslint from "typescript-eslint";
 import eslintConfigPrettier from "eslint-config-prettier";
+
+// Shared web import-ban patterns (single source of truth). The general web
+// block bans both; the seam exemption (hooks/use-auth.ts) re-uses
+// API_BARREL_BAN alone. Defined here so the api.ts regex can never drift
+// between the two blocks — ESLint flat config replaces (not merges) a rule
+// across blocks, so the exemption must re-declare it.
+const API_BARREL_BAN = {
+  // Matches "./api", "../api" (any depth) and "@/api" — but not the
+  // typed-client modules ("./api/client", "@/api/errors", …). gitignore-style
+  // `group` can't re-include children of an excluded directory, so use a regex.
+  regex: "^(?:(?:\\.{1,2}/)+|@/)api$",
+  message:
+    "Use the typed OpenAPI client from src/api/client.ts ($api / client) — the legacy fetch helpers are gone.",
+};
+const AUTH_CLIENT_BAN = {
+  // Matches "../lib/auth-client", "../../lib/auth-client" and
+  // "@/lib/auth-client". Only hooks/use-auth.ts (the seam) may import it.
+  regex: "(?:^|/)lib/auth-client$",
+  message:
+    "Auth flows must go through useAuth() (hooks/use-auth.ts) — the single seam that routes login/recovery/account actions through the OIDC hosted-login redirect when configured. Never import auth-client directly.",
+};
 
 export default tseslint.config(
   {
@@ -139,28 +161,34 @@ export default tseslint.config(
     },
   },
   {
-    // Typed-client guard: all web API calls go through the typed OpenAPI
-    // client (src/api/client.ts — `$api`/`client`). The legacy fetch barrel
-    // (src/api.ts) is deleted; this rule keeps it from coming back under the
-    // old import specifiers (relative or aliased).
+    // Two web import guards live in one rule on purpose: ESLint flat config
+    // does NOT merge the options of the same rule id across blocks — a later
+    // block setting `no-restricted-imports` for the same files fully replaces
+    // this one. So both patterns must sit together here, and the seam
+    // exemption below re-declares the rule rather than adding to it.
+    //
+    //   1. Typed-client guard: all web API calls go through the typed OpenAPI
+    //      client (src/api/client.ts — `$api`/`client`). The legacy fetch
+    //      barrel (src/api.ts) is deleted; this keeps it from coming back
+    //      under the old import specifiers (relative or aliased).
+    //   2. Auth seam guard: every Better Auth call funnels through the single
+    //      seam (hooks/use-auth.ts) so a page can't bypass the OIDC hosted-
+    //      login redirect (`HostedAuthGate` / `useHostedAuthRedirect`) by
+    //      calling `auth-client` directly — the bug class this exists to kill.
+    //      Exempted for the seam file itself in the next block.
     files: ["apps/web/src/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              // Matches "./api", "../api" (any depth) and "@/api" — but not
-              // the typed-client modules ("./api/client", "@/api/errors", …).
-              // gitignore-style `group` can't re-include children of an
-              // excluded directory, so use a regex on the specifier instead.
-              regex: "^(?:(?:\\.{1,2}/)+|@/)api$",
-              message:
-                "Use the typed OpenAPI client from src/api/client.ts ($api / client) — the legacy fetch helpers are gone.",
-            },
-          ],
-        },
-      ],
+      "no-restricted-imports": ["error", { patterns: [API_BARREL_BAN, AUTH_CLIENT_BAN] }],
+    },
+  },
+  {
+    // Seam exemption: hooks/use-auth.ts is the one sanctioned importer of
+    // `auth-client`. Re-declare the web ban here WITHOUT the auth-client
+    // pattern (the api.ts guard still applies) — a later, narrower flat-config
+    // block fully replaces the rule for this file.
+    files: ["apps/web/src/hooks/use-auth.ts"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [API_BARREL_BAN] }],
     },
   },
   {
@@ -171,10 +199,35 @@ export default tseslint.config(
     plugins: {
       "react-hooks": reactHooks,
       "react-refresh": reactRefresh,
+      react,
     },
+    // Explicit version, NOT "detect": eslint-plugin-react 7.x's version
+    // auto-detection crashes under ESLint 10's flat-config context API
+    // (resolveBasedir → getFilename is not a function).
+    settings: { react: { version: "19.2" } },
     rules: {
-      ...reactHooks.configs.recommended.rules,
+      // recommended-latest layers the React Compiler static rules (purity,
+      // set-state-in-render/effect, immutability, refs, static-components,
+      // preserve-manual-memoization, …) on top of the core hooks rules. These
+      // catch the Rules-of-React violations that cause unnecessary re-renders
+      // and fragile components — a static cleanliness/robustness gate that
+      // runs in `bun run check` (local + CI), no runtime harness needed.
+      ...reactHooks.configs["recommended-latest"].rules,
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      // Re-render robustness: the React Compiler rules above check Rules-of-React
+      // correctness but NOT re-render efficiency. These three catch the structural
+      // causes of avoidable re-renders / remounts that a runtime tool (react-scan)
+      // would only surface in the browser — caught statically here instead.
+      //  - constructed context values: new ref every render → all consumers re-render
+      //  - unstable nested components: component defined in render → full remount each render
+      //  - object/array literal as default prop: new ref every render
+      // (react/no-array-index-key deliberately omitted: in this codebase its hits
+      // are all controlled-input lists or append-only logs where an index key is
+      // correct — it's a reconciliation lint, not a re-render one, and produced
+      // only false positives here.)
+      "react/jsx-no-constructed-context-values": "error",
+      "react/no-unstable-nested-components": ["error", { allowAsProps: true }],
+      "react/no-object-type-as-default-prop": "error",
     },
   },
   {

@@ -2,7 +2,7 @@
   "gemma-7b-it": {
     "label": "Gemma 7b It",
     "contextWindow": 8192,
-    "maxTokens": 8192,
+    "maxTokens": null,
     "capabilities": [
       "text"
     ],
@@ -64,7 +64,7 @@
   "meta-llama/llama-guard-4-12b": {
     "label": "Meta Llama/llama Guard 4 12b",
     "contextWindow": 8192,
-    "maxTokens": 8192,
+    "maxTokens": null,
     "capabilities": [
       "text"
     ],
@@ -131,7 +131,7 @@
   "qwen/qwen3-32b": {
     "label": "Qwen/qwen3 32b",
     "contextWindow": 131000,
-    "maxTokens": 131000,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "reasoning"

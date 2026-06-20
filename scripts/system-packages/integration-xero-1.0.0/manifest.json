@@ -7,7 +7,7 @@
   "description": "Cloud-based accounting and bookkeeping platform for small businesses",
   "keywords": ["accounting", "finance"],
   "license": "Apache-2.0",
-  "icon": "xero",
+  "icon": "logos:xero",
   "source": {
     "kind": "none"
   },

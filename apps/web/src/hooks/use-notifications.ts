@@ -22,6 +22,23 @@ export function useUnreadCount() {
   );
 }
 
+/** Recipient's notifications (newest first). `unread` filters to unread only. */
+export function useNotifications(opts: { unread?: boolean; limit?: number } = {}) {
+  const scope = useOrgScope();
+  const applicationId = useCurrentApplicationId();
+  const { unread = true, limit = 50 } = opts;
+  return $api.useQuery(
+    "get",
+    "/api/notifications",
+    { params: { header: scope.header, query: { unread, limit } } },
+    {
+      refetchInterval: 30_000,
+      enabled: !!applicationId,
+      select: (d) => d.data,
+    },
+  );
+}
+
 export function useUnreadCountsByAgent() {
   const scope = useOrgScope();
   // Badge counters only need an application context (legacy behavior).
@@ -38,8 +55,9 @@ export function useUnreadCountsByAgent() {
   );
 }
 
-/** Notification badge counters only — no run-list invalidation. */
+/** Notification list + badge counters — no run-list invalidation. */
 export function invalidateNotificationQueries(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ["get", "/api/notifications"] });
   qc.invalidateQueries({ queryKey: ["get", "/api/notifications/unread-count"] });
   qc.invalidateQueries({ queryKey: ["get", "/api/notifications/unread-counts-by-agent"] });
 }
@@ -53,6 +71,18 @@ export function invalidateRunAndNotificationQueries(qc: ReturnType<typeof useQue
 }
 
 export function useMarkRead() {
+  const qc = useQueryClient();
+  return $api.useMutation("put", "/api/notifications/{id}/read", {
+    onSuccess: () => invalidateRunAndNotificationQueries(qc),
+  });
+}
+
+/**
+ * Mark the caller's notification for a run read, keyed by run id — used by the
+ * run-detail page, which holds the run id but not the notification id.
+ * Backed by `PUT /api/notifications/read/{runId}`.
+ */
+export function useMarkReadByRun() {
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/notifications/read/{runId}", {
     onSuccess: () => invalidateRunAndNotificationQueries(qc),

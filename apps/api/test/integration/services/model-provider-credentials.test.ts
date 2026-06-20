@@ -21,7 +21,7 @@
  * Phase 4 wires it into the OAuth flow and Phase 6 wires it into the routes.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -43,6 +43,7 @@ import {
   resetModelProviders,
 } from "../../../src/services/model-providers/registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
+import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 
 const PLAINTEXT = "sk-test-plaintext-do-not-leak-12345";
 
@@ -537,5 +538,76 @@ describe("model-provider-credentials service — aggregator + inference loader",
       );
       expect(creds).toBeNull();
     });
+  });
+});
+
+/**
+ * Model-alias leak hardening (#727, Threat A): a BUILT-IN credential
+ * (`SYSTEM_PROVIDER_KEYS`) whose every backing model is an alias must hide its
+ * binding (`apiShape`/`baseUrl`) in the aggregated list — exposing the endpoint
+ * host would reveal the hidden provider to an org admin who can read
+ * credentials but never configured the env key. A built-in key backing any
+ * non-aliased model keeps its binding (that model exposes it anyway). Custom
+ * credentials are out of scope — the admin configured the binding themselves.
+ */
+describe("listOrgModelProviderCredentials — built-in alias-only binding mask", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    seedTestModelProviders();
+  });
+
+  // Restore an empty system-keys state so later files in the same process
+  // aren't poisoned (this suite mutates the module-static registry).
+  afterEach(() => {
+    initSystemModelProviderKeys([]);
+  });
+
+  it("nulls apiShape/baseUrl for a built-in key whose models are ALL aliases", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-alias-only" });
+    initSystemModelProviderKeys([
+      {
+        id: "sys-alias-only",
+        providerId: "anthropic",
+        apiKey: "sk-ant-secret",
+        models: [
+          { id: "appstrate-medium", modelId: "claude-sonnet-4-6", label: "Medium", aliased: true },
+          { id: "appstrate-large", modelId: "claude-opus-4-8", label: "Large", aliased: true },
+        ],
+      },
+    ]);
+
+    const list = await listOrgModelProviderCredentials(ctx.orgId);
+    const entry = list.find((c) => c.id === "sys-alias-only");
+    expect(entry).toBeDefined();
+    expect(entry!.source).toBe("built-in");
+    expect(entry!.apiShape).toBeNull();
+    expect(entry!.baseUrl).toBeNull();
+    // The backing host/model id must not appear anywhere in the serialized view.
+    expect(JSON.stringify(entry)).not.toContain("anthropic.com");
+    expect(JSON.stringify(entry)).not.toContain("anthropic-messages");
+    expect(JSON.stringify(entry)).not.toContain("claude-");
+  });
+
+  it("keeps apiShape/baseUrl for a built-in key backing any non-aliased model", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-mixed" });
+    initSystemModelProviderKeys([
+      {
+        id: "sys-mixed",
+        providerId: "anthropic",
+        apiKey: "sk-ant-secret",
+        models: [
+          { id: "appstrate-medium", modelId: "claude-sonnet-4-6", label: "Medium", aliased: true },
+          // A plain, non-aliased model under the same key — its binding is
+          // visible via /api/models anyway, so the credential stays unmasked.
+          { id: "plain-haiku", modelId: "claude-haiku-4-5", aliased: false },
+        ],
+      },
+    ]);
+
+    const list = await listOrgModelProviderCredentials(ctx.orgId);
+    const entry = list.find((c) => c.id === "sys-mixed");
+    expect(entry).toBeDefined();
+    expect(entry!.apiShape).toBe("anthropic-messages");
+    expect(entry!.baseUrl).toBe("https://api.anthropic.com");
   });
 });

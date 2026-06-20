@@ -52,6 +52,12 @@ export function RunAgentButton({
 }: RunAgentButtonProps) {
   const { t } = useTranslation(["agents"]);
   const { isMember } = usePermissions();
+  // The inline run button is an editor affordance: absent a pinned historical
+  // version (current/editor view → `version` undefined), it runs the working
+  // copy. That intent is made EXPLICIT here as `draft` — the transport hook no
+  // longer defaults, so this is the single place the editor's draft choice
+  // lives. A historical-version view passes its exact version through verbatim.
+  const runVersion = version ?? "draft";
   const runAgent = useRunAgent(packageId);
   const [inputOpen, setInputOpen] = useState(false);
   const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
@@ -98,7 +104,7 @@ export function RunAgentButton({
       !!agentDetail.input?.schema?.properties &&
       Object.keys(agentDetail.input.schema.properties).length > 0;
     if (!agentHasInput) {
-      runAgent.mutate({ version }, { onError: onRunError });
+      runAgent.mutate({ version: runVersion }, { onError: onRunError });
       return;
     }
     setInputOpen(true);
@@ -173,7 +179,9 @@ export function RunAgentButton({
           open={inputOpen}
           onClose={() => setInputOpen(false)}
           agent={detail}
-          onSubmit={(input) => runAgent.mutate({ input, version }, { onError: onRunError })}
+          onSubmit={(input) =>
+            runAgent.mutate({ input, version: runVersion }, { onError: onRunError })
+          }
           isPending={runAgent.isPending}
         />
       )}
@@ -195,7 +203,7 @@ export function RunAgentButton({
           // until the response lands so the picker stays visible if the
           // server returns a fresh 412 (e.g. picks disappeared mid-flight).
           runAgent.mutate(
-            { version, connectionOverrides: overrides },
+            { version: runVersion, connectionOverrides: overrides },
             {
               onSuccess: () => setMissingErrors(null),
               onError: onRunError,

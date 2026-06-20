@@ -7,7 +7,7 @@
   "description": "Enterprise CRM and ERP platform by Microsoft",
   "keywords": ["crm", "sales", "erp"],
   "license": "Apache-2.0",
-  "icon": "microsoftdynamics",
+  "icon": "mdi:microsoft-dynamics-365",
   "source": {
     "kind": "none"
   },

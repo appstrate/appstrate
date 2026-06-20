@@ -23,6 +23,11 @@ import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { uploadClient } from "../api/uploads";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
+import { AgentVersionField } from "./package-version-select";
+
+// Sentinel for the schedule's "inherit" version choice — no pin stored; the
+// agent's version resolution applies at fire time.
+const VERSION_INHERIT = "__inherit__";
 
 function getCronPresets(t: (key: string) => string) {
   return [
@@ -163,9 +168,27 @@ export function ScheduleForm({
       v.connection_overrides = defaultValues.connection_overrides;
     if (defaultValues?.model_id_override) v.model_id_override = defaultValues.model_id_override;
     if (defaultValues?.proxy_id_override) v.proxy_id_override = defaultValues.proxy_id_override;
-    if (defaultValues?.version_override) v.version_override = defaultValues.version_override;
     return v;
   });
+  // Version override lives outside the model/proxy/config panel: a schedule
+  // "inherits" (no pin → resolve at fire time) or pins a specific version.
+  // `undefined` = inherit (no override stored).
+  const [versionOverride, setVersionOverride] = useState<string | undefined>(
+    defaultValues?.version_override ?? undefined,
+  );
+  // Default to the inherit option (its label surfaces the agent's pinned
+  // version) rather than `persistedVersion` directly — the latter has no
+  // matching item when the agent has no published versions, which would render
+  // the trigger blank.
+  const versionSelectValue = versionOverride ?? VERSION_INHERIT;
+  const setVersion = (next: string) => {
+    // Selecting the inherit option, or re-selecting the agent's own pinned
+    // version, means "no override" — the schedule follows the agent's
+    // resolution at fire time rather than freezing a redundant pin.
+    setVersionOverride(
+      next === VERSION_INHERIT || next === (persistedVersion ?? "latest") ? undefined : next,
+    );
+  };
   const initialOverridesNonEmpty =
     !!(defaultValues?.config_override && Object.keys(defaultValues.config_override).length > 0) ||
     !!defaultValues?.model_id_override ||
@@ -211,7 +234,7 @@ export function ScheduleForm({
           config_override: overrides.config_override ?? null,
           model_id_override: overrides.model_id_override ?? null,
           proxy_id_override: overrides.proxy_id_override ?? null,
-          version_override: overrides.version_override ?? null,
+          version_override: versionOverride ?? null,
           connection_overrides: overrides.connection_overrides ?? null,
         }
       : {
@@ -222,7 +245,7 @@ export function ScheduleForm({
           ...(overrides.proxy_id_override
             ? { proxy_id_override: overrides.proxy_id_override }
             : {}),
-          ...(overrides.version_override ? { version_override: overrides.version_override } : {}),
+          ...(versionOverride ? { version_override: versionOverride } : {}),
           ...(overrides.connection_overrides
             ? { connection_overrides: overrides.connection_overrides }
             : {}),
@@ -396,15 +419,29 @@ export function ScheduleForm({
               />
             </button>
           </CollapsibleTrigger>
-          <CollapsibleContent className="pt-3">
-            <p className="text-muted-foreground mb-3 text-xs">{t("schedule.overridesHint")}</p>
+          <CollapsibleContent className="space-y-4 pt-3">
+            <p className="text-muted-foreground text-xs">{t("schedule.overridesHint")}</p>
+            <AgentVersionField
+              packageId={packageId}
+              label={t("run.overrides.versionLabel")}
+              value={versionSelectValue}
+              onChange={setVersion}
+              leadingOptions={[
+                {
+                  value: VERSION_INHERIT,
+                  label: persistedVersion
+                    ? t("run.overrides.versionInheritPinned", { version: persistedVersion })
+                    : t("run.overrides.versionInheritLatest"),
+                },
+                { value: "draft", label: t("run.overrides.versionDraft") },
+              ]}
+            />
             <RunOverridesPanel
               packageId={packageId}
               configSchema={configSchema}
               persistedConfig={persistedConfig ?? {}}
               persistedModelId={persistedModelId ?? null}
               persistedProxyId={persistedProxyId ?? null}
-              persistedVersion={persistedVersion ?? null}
               {...(agentIntegrations ? { agentIntegrations } : {})}
               value={overrides}
               onChange={setOverrides}

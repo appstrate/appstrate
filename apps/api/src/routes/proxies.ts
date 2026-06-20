@@ -46,7 +46,7 @@ export function createProxiesRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/proxies — list all proxies (system + DB)
-  router.get("/", async (c) => {
+  router.get("/", requirePermission("proxies", "read"), async (c) => {
     const orgId = c.get("orgId");
     const proxies = await listOrgProxies(orgId);
     return c.json(listResponse(proxies));
@@ -103,9 +103,12 @@ export function createProxiesRouter() {
       // follow-up GET (#657). When no default remains in effect (unset with
       // no system fallback) there is no resource: 204.
       const proxies = await listOrgProxies(orgId);
-      const def = proxies.find((p) => p.isDefault);
+      const def = proxies.find((p) => p.is_default);
       return def ? c.json(def) : c.body(null, 204);
     } catch (err) {
+      // A deliberate client error (e.g. unknown proxy ref → 404) must surface as
+      // itself, not be masked as a 500 by the catch-all.
+      if (err instanceof ApiError) throw err;
       logger.error("Set default proxy failed", {
         error: getErrorMessage(err),
       });

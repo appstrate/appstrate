@@ -47,14 +47,13 @@ test.describe("Integration marketplace API surface", () => {
     expect(res.status()).toBe(404);
   });
 
-  test("GET /api/integrations/{packageId}/oauth-clients/{authKey} returns 404 when unconfigured", async ({
+  test("GET /api/integrations/{packageId}/auths/{authKey}/clients 404s for an unknown integration", async ({
     apiClient,
   }) => {
-    // Same shape as the production hot path the UI hits when rendering
-    // the admin OAuth client form on a fresh detail page — 404 is the
-    // documented signal to show the "register" form rather than the
-    // "rotate" form.
-    const res = await apiClient.get("/integrations/@official/some-pkg/oauth-clients/primary");
+    // The clients-list endpoint drives the admin CRUD table on the detail page.
+    // For an integration the org doesn't have, it 404s (manifest lookup) rather
+    // than leaking an empty list.
+    const res = await apiClient.get("/integrations/@official/some-pkg/auths/primary/clients");
     expect(res.status()).toBe(404);
   });
 

@@ -9,9 +9,42 @@
 import { db, closeDb } from "@appstrate/db/client";
 import { sql } from "drizzle-orm";
 import type { Db } from "@appstrate/db/client";
+import { readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 
 export { db, closeDb };
 export type { Db };
+
+/**
+ * Reset the filesystem storage namespace between tests (tier0 / FS mode).
+ *
+ * tier0 points `FS_STORAGE_PATH` at one per-process temp dir shared by every
+ * test FILE (see `test/setup/preload.ts`). `truncateAll` resets the DB but the
+ * storage bucket files (`<bucket>/<pkg>/<version>.afps`, run workspaces, …)
+ * persisted across files — so a stale artifact uploaded by file A under a
+ * fixed package id (e.g. `@mcporg/local-server`) leaked into file B that
+ * reused the same id, making whole-suite runs flaky in a way isolated runs
+ * never showed. Wiping the storage root's contents alongside the DB delete
+ * makes storage isolation match DB isolation.
+ *
+ * No-op when S3 storage is configured (tier3 / MinIO) — there is no FS path to
+ * clear, and the bucket lifecycle is owned by Docker Compose, not the test
+ * harness. Best-effort: a teardown failure must never mask the test outcome.
+ */
+function resetFsStorage(): void {
+  if (process.env.S3_BUCKET) return; // S3 mode — not filesystem-backed.
+  const root = process.env.FS_STORAGE_PATH;
+  if (!root) return;
+  try {
+    // Remove the bucket subtrees but keep the root dir itself (the storage
+    // adapter recreates bucket dirs lazily on the next upload).
+    for (const entry of readdirSync(root)) {
+      rmSync(join(root, entry), { recursive: true, force: true });
+    }
+  } catch {
+    // Root may not exist yet (no upload happened) — nothing to clear.
+  }
+}
 
 /**
  * Core table names in dependency-safe order (children first, parents last).
@@ -24,6 +57,7 @@ export type { Db };
  */
 const CORE_TABLES = [
   // Leaf tables (no dependents)
+  "notifications",
   "audit_events",
   "llm_usage",
   "credential_proxy_usage",
@@ -98,9 +132,13 @@ function buildTruncateSql(): string {
  * Order is children → parents (module tables first, since they reference
  * core tables).
  *
+ * Also resets the filesystem storage namespace (tier0 / FS mode) so storage
+ * isolation between test files matches DB isolation — see {@link resetFsStorage}.
+ *
  * Call this in beforeEach() for full test isolation.
  */
 export async function truncateAll(): Promise<void> {
   cachedTruncateSql ??= buildTruncateSql();
   await db.execute(sql.raw(cachedTruncateSql));
+  resetFsStorage();
 }

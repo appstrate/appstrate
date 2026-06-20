@@ -29,6 +29,12 @@ import type { LlmProxyAdapter, LlmProxyPrincipal } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getModelProvider } from "../model-providers/registry.ts";
 import { buildIdentityHeaders, applyOAuthBodyTransform } from "@appstrate/core/oauth-wire-format";
+import type { ModelSwap } from "@appstrate/core/sidecar-types";
+import {
+  swapResponseModelJson,
+  createSseModelSwapStream,
+  scrubModelText,
+} from "@appstrate/core/model-swap";
 
 /** Maximum request body the proxy will accept before refusing up-front. */
 const DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
@@ -97,6 +103,17 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     );
   }
 
+  // Model-alias swap (issue #727). When the resolved preset is an alias, the
+  // upstream echoes the REAL id in its response `model` field (and may name it
+  // in error prose). Rewrite it back to the alias on every response branch —
+  // and on the cached body — so a caller of `/api/llm-proxy/*` (incl. a
+  // dashboard `jwt_user`) never sees the backing. The request `model` was
+  // already rewritten alias→real by `request.rewriteModel` above. This mirrors
+  // the in-container sidecar path; both share `@appstrate/core/model-swap`.
+  const swap: ModelSwap | null = resolved.aliased
+    ? { alias: presetId, real: resolved.modelId }
+    : null;
+
   // Response-cache lookup. The cache is keyed on `(orgId, presetId,
   // apiShape, modelId, requestBody)` so cross-org / cross-preset
   // requests never collide. Skips streaming (`stream: true`) requests —
@@ -164,7 +181,10 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   if (!upstream.ok) {
     const errorBody = await upstream.text();
     const headers = cloneResponseHeaders(upstream.headers);
-    return new Response(errorBody, { status: upstream.status, headers });
+    // Error bodies are free-form prose that may name the real id ("model
+    // deepseek-chat does not exist") — blind-scrub it back to the alias.
+    const clientBody = swap ? scrubModelText(errorBody, swap) : errorBody;
+    return new Response(clientBody, { status: upstream.status, headers });
   }
 
   if (isSse && upstream.body) {
@@ -180,7 +200,13 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       }),
     );
     const headers = cloneResponseHeaders(upstream.headers);
-    return new Response(clientStream, {
+    // Rewrite the echoed real id back to the alias in every SSE frame. The tap
+    // above reads the untouched `tapStream`, so accounting still sees the real
+    // id; only the client-facing copy is swapped.
+    const clientStream2 = swap
+      ? clientStream.pipeThrough(createSseModelSwapStream(swap))
+      : clientStream;
+    return new Response(clientStream2, {
       status: upstream.status,
       headers,
     });
@@ -195,9 +221,11 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     parsed = JSON.parse(bodyText);
   } catch {
     // Upstream advertised a non-JSON content-type but still returned a
-    // non-SSE body — forward without metering.
+    // non-SSE body — forward without metering. Scrub any real id from the
+    // free-form body for aliases.
     const headers = cloneResponseHeaders(upstream.headers);
-    return new Response(bodyText, { status: upstream.status, headers });
+    const clientBody = swap ? scrubModelText(bodyText, swap) : bodyText;
+    return new Response(clientBody, { status: upstream.status, headers });
   }
 
   const usage = inputs.adapter.parseJsonUsage(parsed);
@@ -219,6 +247,9 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   }
 
   const headers = cloneResponseHeaders(upstream.headers);
+  // Rewrite the echoed real id back to the alias before the body leaves the
+  // server — and BEFORE caching, so a replay returns the alias too.
+  const clientBody = swap ? swapResponseModelJson(bodyText, swap) : bodyText;
   // Persist 2xx replies for future lookups. Tag the MISS so the caller
   // sees a consistent `x-llm-proxy-cache-status` contract whether the
   // cache is enabled or off.
@@ -228,11 +259,11 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       ttlSeconds: cacheConfig.ttlSeconds,
       status: upstream.status,
       headers,
-      body: bodyText,
+      body: clientBody,
     });
     headers.set("x-llm-proxy-cache-status", "MISS");
   }
-  return new Response(bodyText, { status: upstream.status, headers });
+  return new Response(clientBody, { status: upstream.status, headers });
 }
 
 async function resolvePresetForOrg(

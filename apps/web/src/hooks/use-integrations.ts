@@ -17,11 +17,10 @@ import type {
   ConsumingAgentSummary,
   IntegrationConnection,
   IntegrationManifestView,
-  IntegrationOAuthClient,
   IntegrationOrgDefault,
   IntegrationPin,
 } from "@appstrate/shared-types";
-import { $api, client, ApiError, type paths } from "../api/client";
+import { $api, client, type paths } from "../api/client";
 
 // Spec-pinned narrowings for the two integration read endpoints. They take the
 // generated OpenAPI response shape verbatim (so a rename/removal of any
@@ -44,6 +43,14 @@ type RawIntegrationDetail =
 export type IntegrationDetailWire = Omit<RawIntegrationDetail, "manifest"> & {
   manifest: IntegrationManifestView;
 };
+/**
+ * One OAuth client offered for connecting an integration auth — the org's
+ * custom (BYO-app) client or a platform-provided system client. Spec-derived so
+ * a rename/removal of any wire field breaks compilation. Secrets never present.
+ */
+export type IntegrationClient = NonNullable<
+  paths["/api/integrations/{packageId}/auths/{authKey}/clients"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
+>[number];
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { useOrgScope } from "./use-org-scope";
@@ -260,7 +267,11 @@ export function useInitiateIntegrationOAuth() {
   return useMutation({
     mutationFn: async (vars: {
       params: { path: { packageId: string; authKey: string } };
-      body: { scopes?: string[]; force_account_select?: boolean; connection_id?: string };
+      body: {
+        scopes?: string[];
+        force_account_select?: boolean;
+        connection_id?: string;
+      };
     }) => {
       const { data } = await client.POST(
         "/api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
@@ -273,55 +284,85 @@ export function useInitiateIntegrationOAuth() {
   });
 }
 
-export function useIntegrationOAuthClient(
-  packageId: string | undefined,
-  authKey: string | undefined,
-) {
-  const scope = useOrgScope();
-  return useQuery({
-    // Same [method, path, init] shape as the $api hooks so the path-string
-    // invalidations below hit this query too.
-    queryKey: [
-      "get",
-      "/api/integrations/{packageId}/oauth-clients/{authKey}",
-      { params: { path: { packageId, authKey }, header: scope.header } },
-    ] as const,
-    enabled: scope.enabled && !!packageId && !!authKey,
-    queryFn: async (): Promise<IntegrationOAuthClient | null> => {
-      try {
-        const { data } = await client.GET("/api/integrations/{packageId}/oauth-clients/{authKey}", {
-          params: { path: { packageId: packageId!, authKey: authKey! }, header: scope.header },
-        });
-        return data ?? null;
-      } catch (err: unknown) {
-        // 404 = not configured yet; treat as null so the UI can render
-        // the registration form.
-        if (err instanceof ApiError && err.status === 404) return null;
-        throw err;
-      }
+/** Invalidate the clients list + detail after a client mutation. */
+function useInvalidateIntegrationClients() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({
+      queryKey: ["get", "/api/integrations/{packageId}/auths/{authKey}/clients"],
+    });
+    void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
+  };
+}
+
+/**
+ * Register a NEW custom (BYO-app) OAuth client for an auth — repeatable, so an
+ * org can hold N clients. The first becomes the default; later ones stay
+ * non-default until promoted via {@link useSetDefaultIntegrationClient}.
+ */
+export function useCreateIntegrationOAuthClient() {
+  const { t } = useTranslation("settings");
+  const invalidate = useInvalidateIntegrationClients();
+  return $api.useMutation("post", "/api/integrations/{packageId}/auths/{authKey}/oauth-clients", {
+    onSuccess: () => {
+      toast.success(t("integration.oauthClient.save.success"));
+      invalidate();
     },
   });
 }
 
-export function useUpsertIntegrationOAuthClient() {
+/** Rotate one custom client's credentials in place, by its id. */
+export function useRotateIntegrationOAuthClient() {
   const { t } = useTranslation("settings");
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; authKey: string } };
-      body: { client_id: string; client_secret: string; redirect_uri?: string };
-    }) => {
-      const { data } = await client.PUT("/api/integrations/{packageId}/oauth-clients/{authKey}", {
-        ...vars,
-      });
-      return data;
-    },
+  const invalidate = useInvalidateIntegrationClients();
+  return $api.useMutation("put", "/api/integrations/{packageId}/oauth-clients/{clientId}", {
     onSuccess: () => {
       toast.success(t("integration.oauthClient.save.success"));
+      invalidate();
+    },
+  });
+}
+
+/**
+ * OAuth clients available to connect this auth: the org's custom (BYO-app)
+ * client plus any platform-provided system clients, each with `source` and
+ * which is the default. Secrets are never returned. Drives the detail page's
+ * admin clients CRUD table (register/rotate/delete/set-default). New
+ * connections always use the default — there is no per-connect picker.
+ */
+export function useIntegrationClients(packageId: string | undefined, authKey: string | undefined) {
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/integrations/{packageId}/auths/{authKey}/clients",
+    {
+      params: {
+        path: { packageId: packageId ?? "", authKey: authKey ?? "" },
+        header: scope.header,
+      },
+    },
+    {
+      enabled: scope.enabled && !!packageId && !!authKey,
+      select: (envelope): IntegrationClient[] => envelope.data,
+    },
+  );
+}
+
+/**
+ * Choose which OAuth client is the default for new connections on an auth — the
+ * model-provider `setDefaultModel` analogue. Existing connections keep the
+ * client that minted them; only future connects are affected. Refreshes the
+ * clients list so the "default" badge updates.
+ */
+export function useSetDefaultIntegrationClient() {
+  const { t } = useTranslation("settings");
+  const qc = useQueryClient();
+  return $api.useMutation("put", "/api/integrations/{packageId}/auths/{authKey}/default-client", {
+    onSuccess: () => {
+      toast.success(t("integration.clients.setDefault.success"));
       void qc.invalidateQueries({
-        queryKey: ["get", "/api/integrations/{packageId}/oauth-clients/{authKey}"],
+        queryKey: ["get", "/api/integrations/{packageId}/auths/{authKey}/clients"],
       });
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
     },
   });
 }
@@ -508,21 +549,14 @@ export function useUpdateIntegrationConnection() {
   });
 }
 
+/** Delete one custom client by its id. */
 export function useDeleteIntegrationOAuthClient() {
   const { t } = useTranslation("settings");
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: { params: { path: { packageId: string; authKey: string } } }) => {
-      await client.DELETE("/api/integrations/{packageId}/oauth-clients/{authKey}", {
-        ...vars,
-      });
-    },
+  const invalidate = useInvalidateIntegrationClients();
+  return $api.useMutation("delete", "/api/integrations/{packageId}/oauth-clients/{clientId}", {
     onSuccess: () => {
       toast.success(t("integration.oauthClient.delete.success"));
-      void qc.invalidateQueries({
-        queryKey: ["get", "/api/integrations/{packageId}/oauth-clients/{authKey}"],
-      });
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
+      invalidate();
     },
   });
 }

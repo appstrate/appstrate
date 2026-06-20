@@ -67,7 +67,7 @@
     "@rjsf/validator-ajv8": "^6.6.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.0.0",
-    "lucide-react": "^1.18.0",
+    "lucide-react": "^1.21.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-select": "^5.10.2",

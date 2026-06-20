@@ -22,7 +22,7 @@ export function RunRow({
 }) {
   const { t } = useTranslation(["agents"]);
   const isRunning = (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(run.status);
-  const isUnread = run.notifiedAt != null && run.readAt == null;
+  const isUnread = run.unread;
   const date = run.started_at ? formatDateField(run.started_at) : "";
   const isInline = run.package_ephemeral === true;
   const isRemote = run.runOrigin === "remote";

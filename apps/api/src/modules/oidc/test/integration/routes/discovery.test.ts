@@ -138,4 +138,42 @@ describe("OIDC discovery — RFC 8414 + OpenID Connect Discovery", () => {
       expect(headers.get("cache-control") ?? "").toContain("max-age=3600");
     });
   });
+
+  // The advertised authorization-server identifier is `${APP_URL}/api/auth`
+  // (issuer carries the `/api/auth` path). RFC 8414 path-aware clients (the
+  // Claude MCP SDK, reached via the `oauth-protected-resource`
+  // `authorization_servers` entry) build the discovery URL by inserting that
+  // path after `.well-known`. These aliases must return the same JSON document
+  // as the origin-root form — otherwise the request falls through to the SPA
+  // `/*` catch-all and the client's `JSON.parse` chokes on the leading `<` of
+  // `index.html`.
+  describe("RFC 8414 path-inserted discovery URLs", () => {
+    it("serves openid-configuration at the path-inserted URL", async () => {
+      const { status, body } = await fetchJson<OpenIdConfigShape>(
+        "/.well-known/openid-configuration/api/auth",
+      );
+      expect(status).toBe(200);
+      expect(body.authorization_endpoint).toContain("/oauth2/authorize");
+      expect(body.token_endpoint).toContain("/oauth2/token");
+      expect(body.code_challenge_methods_supported).toContain("S256");
+    });
+
+    it("serves oauth-authorization-server at the path-inserted URL", async () => {
+      const { status, body } = await fetchJson<OpenIdConfigShape>(
+        "/.well-known/oauth-authorization-server/api/auth",
+      );
+      expect(status).toBe(200);
+      expect(body.authorization_endpoint).toContain("/oauth2/authorize");
+      expect(body.token_endpoint).toContain("/oauth2/token");
+      expect(body.response_types_supported).toContain("code");
+    });
+
+    it("returns the same document at the path-inserted and origin-root URLs", async () => {
+      const root = await fetchJson<OpenIdConfigShape>("/.well-known/oauth-authorization-server");
+      const inserted = await fetchJson<OpenIdConfigShape>(
+        "/.well-known/oauth-authorization-server/api/auth",
+      );
+      expect(inserted.body).toEqual(root.body);
+    });
+  });
 });

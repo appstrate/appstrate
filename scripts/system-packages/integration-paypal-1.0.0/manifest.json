@@ -7,7 +7,7 @@
   "description": "Online payment processing platform",
   "keywords": ["payments", "finance"],
   "license": "Apache-2.0",
-  "icon": "paypal",
+  "icon": "logos:paypal",
   "source": {
     "kind": "none"
   },

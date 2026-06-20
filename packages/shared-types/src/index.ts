@@ -78,8 +78,6 @@ export interface RunWireDto {
   completed_at: string | null;
   duration: number | null;
   cost: number | null;
-  notifiedAt: string | null;
-  readAt: string | null;
   runNumber: number | null;
   token_usage: unknown;
   version_label: string | null;
@@ -103,6 +101,13 @@ export interface RunWireDto {
   contextSnapshot: unknown;
   modelCredentialId: string | null;
   connection_overrides: unknown;
+  /**
+   * Per-run dependency version overrides (#666) — `{ "@scope/name": "draft" |
+   * "<spec>" }`. Present when the caller opted a dependency out of the
+   * published-only resolution; a non-null map (esp. with a `"draft"` value)
+   * means the run is NOT reproducible from its `version_ref` alone.
+   */
+  dependency_overrides: unknown;
 }
 
 /**
@@ -129,6 +134,13 @@ export type EnrichedRun = RunWireDto & {
   schedule_name: string | null;
   /** Connections resolved for this run, for the "connexions utilisées" panel. Null when the agent declares no integrations. */
   connections_used: RunConnectionUsed[] | null;
+  /**
+   * True when the requesting recipient has an unread notification for this run
+   * (issue #667). Per-recipient: derived from the `notifications` table for the
+   * current actor, so a dashboard user and an end-user see independent state.
+   * Drives the unread dot on run rows and the per-schedule unread count.
+   */
+  unread: boolean;
   /** True if the run's source package is an inline/ephemeral shadow (POST /api/runs/inline). */
   package_ephemeral?: boolean;
   /** For inline runs only — snapshot of the manifest submitted at run time. Null after compaction. */
@@ -263,6 +275,7 @@ export interface ScheduleWireDto {
   proxy_id_override: string | null;
   version_override: string | null;
   connection_overrides: Record<string, string> | null;
+  dependency_overrides: Record<string, string> | null;
   last_run_at: string | null;
   next_run_at: string | null;
   createdAt: string;
@@ -558,7 +571,7 @@ export interface OrgProxyInfo {
   label: string;
   urlPrefix: string;
   enabled: boolean;
-  isDefault: boolean;
+  is_default: boolean;
   source: "built-in" | "custom";
   created_by: string | null;
   createdAt: string;
@@ -594,20 +607,34 @@ export interface OrgModelInfo extends ModelMetadata {
   id: string;
   /** Always set — resolvers fall back to catalog label then modelId. */
   label: string;
-  apiShape: string;
+  /**
+   * Real binding fields. `null` for model aliases ({@link aliased} true) — the
+   * GET projection strips the backing so a dashboard user never learns the
+   * provider/endpoint/upstream id behind the alias. Always set otherwise.
+   */
+  apiShape: string | null;
   /**
    * The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`).
    * Distinguishes subscription providers that share an `apiShape` with an
    * API-key provider (`claude-code` vs `anthropic`, both `anthropic-messages`)
-   * — clients route them to the right proxy path.
+   * — clients route them to the right proxy path. `null` for model aliases
+   * (part of the stripped backing, same as {@link apiShape}).
    */
-  providerId: string;
-  baseUrl: string;
-  modelId: string;
+  providerId: string | null;
+  baseUrl: string | null;
+  modelId: string | null;
   enabled: boolean;
-  isDefault: boolean;
+  is_default: boolean;
+  /**
+   * Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a
+   * public alias; user-facing surfaces strip the real binding (`modelId`,
+   * `apiShape`, `baseUrl`, `credentialId`, capabilities/cost). Clients render
+   * an alias badge and never learn the backing model.
+   */
+  aliased: boolean;
   source: "built-in" | "custom";
-  credentialId: string;
+  /** `null` for model aliases — see {@link apiShape}. */
+  credentialId: string | null;
   created_by: string | null;
   createdAt: string;
   updatedAt: string;
@@ -623,8 +650,16 @@ export interface OrgModelInfo extends ModelMetadata {
 export interface ModelProviderCredentialInfo {
   id: string;
   label: string;
-  apiShape: string;
-  baseUrl: string;
+  /**
+   * Protocol family + endpoint. Both `null` for a **built-in** credential
+   * whose every backing model is a model alias (issue #727): exposing the
+   * endpoint host (e.g. `api.anthropic.com`) would reveal the hidden backing
+   * provider to an org admin who can read credentials but did not configure
+   * the env key. Custom credentials always carry them (the admin configured
+   * the binding themselves).
+   */
+  apiShape: string | null;
+  baseUrl: string | null;
   source: "built-in" | "custom";
   /** Auth mode of the underlying credential (matches the registry vocabulary). */
   authMode: "api_key" | "oauth2";

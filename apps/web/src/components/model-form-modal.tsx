@@ -319,15 +319,19 @@ function ModelFormBody({
       (k) =>
         k.authMode === "api_key" &&
         k.apiShape === apiShape &&
+        // `baseUrl` is null only for alias-only built-in credentials, which are
+        // already excluded by the `customOnly` filter above — guard anyway so
+        // the type narrows (binding-hidden credentials never match a form pick).
+        k.baseUrl != null &&
         k.baseUrl.replace(/\/+$/, "") === normalizedBase,
     );
   }, [credentialsQuery.data, apiShape, baseUrl, isOauthProvider, providerId]);
 
-  const selectedKey = availableCredentials.find((k) => k.id === credentialId);
+  const selectedCredential = availableCredentials.find((k) => k.id === credentialId);
   // For api-key providers, the third state is "no selection + about to type
   // a new key inline". For OAuth providers there's no inline path — the
   // user must either pick or click "Connect".
-  const inlineKeyMode = !isOauthProvider && !selectedKey && !credentialId;
+  const inlineCredentialMode = !isOauthProvider && !selectedCredential && !credentialId;
 
   // OAuth connect dialog — the pairing endpoint now returns the new
   // credentialId directly via `onConnected`, so we auto-select it in the
@@ -380,10 +384,10 @@ function ModelFormBody({
   // models drift over time while the credential doesn't). `probeAttempted`
   // bounds it to one call per credential per form-open.
   useEffect(() => {
-    if (!isOauthProvider || !credentialId || !selectedKey) return;
+    if (!isOauthProvider || !credentialId || !selectedCredential) return;
     probeCredential(credentialId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOauthProvider, credentialId, selectedKey]);
+  }, [isOauthProvider, credentialId, selectedCredential]);
 
   const isOpenRouter = providerId === "openrouter";
   const openRouterSearch = useOpenRouterSearch(isOpenRouter);
@@ -492,8 +496,8 @@ function ModelFormBody({
     // Inline api-key creation only applies to api_key providers — OAuth
     // credentials must exist before the model is saved (they're created via
     // the pairing dialog and auto-selected into `credentialId`).
-    const willCreateNewKey =
-      !isOauthProvider && inlineKeyMode && data.inlineApiKey.trim().length > 0;
+    const willCreateNewCredential =
+      !isOauthProvider && inlineCredentialMode && data.inlineApiKey.trim().length > 0;
 
     // OAuth path requires a selected credential — there's no "type your key
     // inline" affordance, so emptiness is a hard error. The api-key path
@@ -503,7 +507,7 @@ function ModelFormBody({
       setError("credentialId", { message: t("models.form.connectionRequired") });
       return;
     }
-    if (!isOauthProvider && !data.credentialId && !willCreateNewKey) {
+    if (!isOauthProvider && !data.credentialId && !willCreateNewCredential) {
       setError("credentialId", { message: t("models.form.apiKeyRequired") });
       return;
     }
@@ -526,11 +530,11 @@ function ModelFormBody({
     onSubmit({
       ...(labelDirty && data.label.trim() ? { label: data.label.trim() } : {}),
       modelId: data.modelId.trim(),
-      credentialId: willCreateNewKey ? "" : data.credentialId,
+      credentialId: willCreateNewCredential ? "" : data.credentialId,
       // Inline credential creation needs the providerId (and optionally a
       // baseUrlOverride for `openai-compatible`) — the caller wires this up
       // through POST /api/model-provider-credentials before saving the model.
-      ...(willCreateNewKey
+      ...(willCreateNewCredential
         ? {
             newCredential: {
               apiKey: data.inlineApiKey.trim(),
@@ -602,7 +606,7 @@ function ModelFormBody({
         {isOauthProvider ? t("models.form.connectionLabel") : t("credentials.form.apiKey")}
       </Label>
 
-      {selectedKey ? (
+      {selectedCredential ? (
         <div className="flex gap-2">
           <div className="border-input bg-muted flex h-9 flex-1 items-center gap-2 rounded-md border px-3 text-sm">
             {isOauthProvider ? (
@@ -610,10 +614,10 @@ function ModelFormBody({
             ) : (
               <KeyRound className="text-muted-foreground size-3.5 shrink-0" />
             )}
-            <span className="truncate">{selectedKey.label}</span>
-            {isOauthProvider && selectedKey.oauth_email && (
+            <span className="truncate">{selectedCredential.label}</span>
+            {isOauthProvider && selectedCredential.oauth_email && (
               <span className="text-muted-foreground truncate text-xs">
-                ({selectedKey.oauth_email})
+                ({selectedCredential.oauth_email})
               </span>
             )}
           </div>
@@ -717,10 +721,10 @@ function ModelFormBody({
         </div>
       )}
 
-      {!selectedKey && !isOauthProvider && inlineApiKey.trim() && (
+      {!selectedCredential && !isOauthProvider && inlineApiKey.trim() && (
         <div className="text-muted-foreground text-sm">{t("models.form.createCredentialHint")}</div>
       )}
-      {!selectedKey && isOauthProvider && (
+      {!selectedCredential && isOauthProvider && (
         <div className="text-muted-foreground text-sm">{t("models.form.connectProviderHint")}</div>
       )}
       {showError("credentialId") && errors.credentialId?.message && (
@@ -788,7 +792,7 @@ function ModelFormBody({
                 comes from the already-loaded registry catalog). A probe that
                 found nothing shows the empty-state instead of an empty
                 dropdown. */}
-            {selectedKey &&
+            {selectedCredential &&
               (() => {
                 const fresh = probeResult?.id === credentialId ? probeResult : null;
                 // No result yet → call in flight (or, rarely, the registry

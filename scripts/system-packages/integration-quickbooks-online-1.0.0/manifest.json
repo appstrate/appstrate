@@ -7,7 +7,7 @@
   "description": "Cloud accounting software by Intuit — invoicing, expenses, and financial reporting",
   "keywords": ["accounting", "finance"],
   "license": "Apache-2.0",
-  "icon": "quickbooks",
+  "icon": "simple-icons:quickbooks",
   "source": {
     "kind": "none"
   },

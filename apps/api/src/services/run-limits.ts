@@ -15,6 +15,7 @@
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
+import { formatZodIssues } from "../lib/zod-format.ts";
 
 // ---------------------------------------------------------------------------
 // Schemas — reject unknown keys so typos surface at boot.
@@ -57,21 +58,13 @@ export function initRunLimits(): void {
 
   const platformParsed = platformRunLimitsSchema.safeParse(env.PLATFORM_RUN_LIMITS);
   if (!platformParsed.success) {
-    throw new Error(
-      `PLATFORM_RUN_LIMITS invalid: ${platformParsed.error.issues
-        .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
-        .join("; ")}`,
-    );
+    throw new Error(`PLATFORM_RUN_LIMITS invalid: ${formatZodIssues(platformParsed.error)}`);
   }
   platformLimits = platformParsed.data;
 
   const inlineParsed = inlineRunLimitsSchema.safeParse(env.INLINE_RUN_LIMITS);
   if (!inlineParsed.success) {
-    throw new Error(
-      `INLINE_RUN_LIMITS invalid: ${inlineParsed.error.issues
-        .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
-        .join("; ")}`,
-    );
+    throw new Error(`INLINE_RUN_LIMITS invalid: ${formatZodIssues(inlineParsed.error)}`);
   }
   inlineLimits = inlineParsed.data;
 

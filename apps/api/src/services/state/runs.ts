@@ -27,6 +27,7 @@ import {
   apiKeys,
   schedules,
   llmUsage,
+  notifications,
   runStatusValues,
   activeRunStatusValues,
   type RunStatus,
@@ -113,7 +114,7 @@ import { toISO } from "../../lib/date-helpers.ts";
  * `schedules`/`packages` — extracted here to keep the JOIN list inline
  * (Drizzle's query-builder types don't compose well through a helper).
  */
-function enrichedRunSelect() {
+function enrichedRunSelect(actor: Actor | null) {
   return {
     run: runs,
     userName: profiles.displayName,
@@ -121,7 +122,30 @@ function enrichedRunSelect() {
     apiKeyName: apiKeys.name,
     scheduleName: schedules.name,
     packageEphemeral: packages.ephemeral,
+    unread: unreadForActor(actor),
   };
+}
+
+/**
+ * Per-recipient unread flag for the run's notification, computed as a
+ * correlated EXISTS against the `notifications` table (issue #667). The
+ * recipient is matched on the polymorphic `(recipientType, recipientId)`
+ * tuple — the same match the notifications service uses — so a dashboard
+ * user and an end-user never see each other's read-state. Read state lives
+ * ONLY in `notifications`; runs carry no notification flag of their own. When
+ * the read is not actor-scoped (e.g. a system/sidecar read with
+ * `actor === null`), unread is constant `false` — the badge is a
+ * dashboard-recipient concept.
+ */
+function unreadForActor(actor: Actor | null): SQL<boolean> {
+  if (!actor) return sql<boolean>`false`;
+  return sql<boolean>`exists (
+    select 1 from ${notifications}
+    where ${notifications.runId} = ${runs.id}
+      and ${notifications.recipientType} = ${actor.type}
+      and ${notifications.recipientId} = ${actor.id}
+      and ${notifications.readAt} is null
+  )`;
 }
 
 /**
@@ -136,6 +160,7 @@ type EnrichedRunRow = {
   apiKeyName: string | null;
   scheduleName: string | null;
   packageEphemeral: boolean | null;
+  unread: boolean;
 };
 
 /**
@@ -206,8 +231,6 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     completed_at: row.completedAt?.toISOString() ?? null,
     duration: row.duration,
     cost: row.cost,
-    notifiedAt: row.notifiedAt?.toISOString() ?? null,
-    readAt: row.readAt?.toISOString() ?? null,
     runNumber: row.runNumber,
     token_usage: row.tokenUsage,
     version_label: row.versionLabel,
@@ -226,6 +249,7 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     contextSnapshot: row.contextSnapshot,
     modelCredentialId: row.modelCredentialId,
     connection_overrides: row.connectionOverrides,
+    dependency_overrides: row.dependencyOverrides,
   };
 }
 
@@ -258,6 +282,7 @@ function mapEnrichedRun(r: EnrichedRunRow): EnrichedRun {
     schedule_name: r.scheduleName ?? null,
     connections_used: projectConnectionsUsed(r.run.resolvedConnections),
     package_ephemeral: r.packageEphemeral ?? false,
+    unread: r.unread,
   };
 }
 
@@ -304,6 +329,14 @@ interface CreateRunParams {
    */
   configOverride?: Record<string, unknown> | null;
   /**
+   * Per-run dependency version overrides (#666) — the `{ "@scope/name":
+   * "draft" | "<spec>" }` map the caller passed on the run trigger (or a
+   * schedule froze). Persisted verbatim on `runs.dependency_overrides` as the
+   * audit trail so a run that consumed draft bytes is never mistaken for a
+   * reproducible one. Null when the run resolved the manifest pins verbatim.
+   */
+  dependencyOverrides?: Record<string, string> | null;
+  /**
    * Which runner drives this run. Platform-origin runs execute in a
    * server-managed Docker container; remote-origin runs execute on the
    * caller's host. Both speak the same HMAC-signed event protocol.
@@ -346,6 +379,15 @@ interface CreateRunParams {
     { connectionId: string; source: string; label?: string | null; accountId?: string | null }
   > | null;
   /**
+   * Snapshot of each declared integration's resolved manifest version at
+   * kickoff (#686). Persisted on `runs.resolved_integration_versions` so the
+   * runtime credential path reads the SAME version the spawn resolver used.
+   */
+  resolvedIntegrationVersions?: Record<
+    string,
+    { version: string | null; source: "version" | "draft" | "system" }
+  > | null;
+  /**
    * `model_provider_credentials.id` snapshotted at run creation. Pinned
    * here so the OAuth model token resolver can reject any other
    * credentialId requested via the run's signed token. Set only for
@@ -380,6 +422,9 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     agentName: params.agentName ?? null,
     config: parseRunConfig(params.config),
     configOverride: parseRunConfigOverride(params.configOverride),
+    ...(params.dependencyOverrides !== undefined
+      ? { dependencyOverrides: params.dependencyOverrides }
+      : {}),
     runOrigin: params.runOrigin ?? "platform",
     ...(params.sinkSecretEncrypted !== undefined
       ? { sinkSecretEncrypted: params.sinkSecretEncrypted }
@@ -394,6 +439,9 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
       : {}),
     ...(params.resolvedConnections !== undefined
       ? { resolvedConnections: params.resolvedConnections }
+      : {}),
+    ...(params.resolvedIntegrationVersions !== undefined
+      ? { resolvedIntegrationVersions: params.resolvedIntegrationVersions }
       : {}),
   });
 }
@@ -427,7 +475,6 @@ export async function createFailedRun(
     startedAt: now,
     completedAt: now,
     duration: 0,
-    notifiedAt: now,
     scheduleId,
     runNumber,
     agentScope: agentDenorm?.scope ?? null,
@@ -446,7 +493,6 @@ export async function updateRun(
     completedAt?: string;
     duration?: number;
     tokenUsage?: Record<string, unknown>;
-    notifiedAt?: string;
     metadata?: Record<string, unknown>;
     /** ISO-8601 timestamp; closes the signed-event sink — subsequent POSTs reject with 410. */
     sinkClosedAt?: string;
@@ -462,7 +508,6 @@ export async function updateRun(
   if (updates.result !== undefined) set.result = updates.result;
   if (updates.checkpoint !== undefined) set.checkpoint = updates.checkpoint;
   if (updates.tokenUsage !== undefined) set.tokenUsage = updates.tokenUsage;
-  if (updates.notifiedAt !== undefined) set.notifiedAt = new Date(updates.notifiedAt);
   if (updates.metadata !== undefined) set.metadata = parseRunMetadata(updates.metadata);
   if (updates.sinkClosedAt !== undefined) set.sinkClosedAt = new Date(updates.sinkClosedAt);
 
@@ -763,11 +808,12 @@ export async function listRunsWithFilter(
   filter: SQL,
   limit: number,
   offset = 0,
+  actor: Actor | null = null,
 ): Promise<RunListPage> {
   const [countRow] = await db.select({ count: count() }).from(runs).where(filter);
 
   const rows = await db
-    .select(enrichedRunSelect())
+    .select(enrichedRunSelect(actor))
     .from(runs)
     .leftJoin(profiles, eq(runs.userId, profiles.id))
     .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
@@ -794,9 +840,10 @@ export async function listPackageRuns(
     limit?: number;
     offset?: number;
     endUserId?: string | null;
+    actor?: Actor | null;
   } = {},
 ) {
-  const { limit = 50, offset = 0, endUserId } = options;
+  const { limit = 50, offset = 0, endUserId, actor = null } = options;
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
@@ -805,7 +852,7 @@ export async function listPackageRuns(
   if (endUserId) {
     conditions.push(eq(runs.endUserId, endUserId));
   }
-  return listRunsWithFilter(and(...conditions)!, limit, offset);
+  return listRunsWithFilter(and(...conditions)!, limit, offset, actor);
 }
 
 /**
@@ -828,13 +875,23 @@ export interface ListGlobalRunsOptions {
   startDate?: Date;
   endDate?: Date;
   endUserId?: string | null;
+  actor?: Actor | null;
 }
 
 export async function listGlobalRuns(
   scope: AppScope,
   options: ListGlobalRunsOptions = {},
 ): Promise<RunListPage> {
-  const { limit = 50, offset = 0, kind, status, startDate, endDate, endUserId } = options;
+  const {
+    limit = 50,
+    offset = 0,
+    kind,
+    status,
+    startDate,
+    endDate,
+    endUserId,
+    actor = null,
+  } = options;
 
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.applicationId, scope.applicationId)];
   if (status && isRunStatus(status)) conditions.push(eq(runs.status, status));
@@ -864,7 +921,7 @@ export async function listGlobalRuns(
     .where(filter);
 
   const rows = await db
-    .select(enrichedRunSelect())
+    .select(enrichedRunSelect(actor))
     .from(runs)
     .leftJoin(packages, eq(packages.id, runs.packageId))
     .leftJoin(profiles, eq(runs.userId, profiles.id))
@@ -887,9 +944,9 @@ export async function listGlobalRuns(
 export async function listScheduleRuns(
   scope: AppScope,
   scheduleId: string,
-  options: { limit?: number; offset?: number } = {},
+  options: { limit?: number; offset?: number; actor?: Actor | null } = {},
 ) {
-  const { limit = 20, offset = 0 } = options;
+  const { limit = 20, offset = 0, actor = null } = options;
   return listRunsWithFilter(
     scopedWhere(runs, {
       orgId: scope.orgId,
@@ -898,10 +955,11 @@ export async function listScheduleRuns(
     })!,
     limit,
     offset,
+    actor,
   );
 }
 
-export async function getRunFull(scope: AppScope, id: string) {
+export async function getRunFull(scope: AppScope, id: string, actor: Actor | null = null) {
   const conditions = [
     eq(runs.id, id),
     eq(runs.orgId, scope.orgId),
@@ -910,7 +968,7 @@ export async function getRunFull(scope: AppScope, id: string) {
 
   const [row] = await db
     .select({
-      ...enrichedRunSelect(),
+      ...enrichedRunSelect(actor),
       packageManifest: packages.draftManifest,
       packagePrompt: packages.draftContent,
     })
@@ -939,34 +997,6 @@ export async function getRunFull(scope: AppScope, id: string) {
     inline_manifest: inlineManifest,
     inline_prompt: inlinePrompt,
   };
-}
-
-/**
- * Org-scoped run snapshot read. Intentionally narrower than
- * `getRun(scope, id)`: cross-app consumers span applications within a
- * single org, so the read scopes on `orgId` alone. Returns the public
- * `Run` DTO shape — schema internals (scheduler ids, actor fields, etc.)
- * stay inside apps/api.
- *
- * The `{ runId, orgId }` object-args shape is the module-facing public
- * contract (registered on `PlatformServices.runs.get`) — keep it stable.
- * App-scoped internal callers prefer `getRun(scope, runId)`.
- */
-export async function getRunByOrg(args: { runId: string; orgId: string }) {
-  const [row] = await db
-    .select({
-      id: runs.id,
-      status: runs.status,
-      orgId: runs.orgId,
-      applicationId: runs.applicationId,
-      packageId: runs.packageId,
-      result: runs.result,
-      error: runs.error,
-    })
-    .from(runs)
-    .where(and(eq(runs.id, args.runId), eq(runs.orgId, args.orgId)))
-    .limit(1);
-  return row ?? null;
 }
 
 /**

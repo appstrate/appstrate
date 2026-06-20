@@ -68,7 +68,7 @@
   "deepseek-v3.2": {
     "label": "Deepseek V3.2",
     "contextWindow": 163840,
-    "maxTokens": 163840,
+    "maxTokens": null,
     "capabilities": [
       "text",
       "reasoning"

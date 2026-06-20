@@ -43,24 +43,24 @@
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "better-auth": "1.7.0-beta.4",
-    "bullmq": "^5.78.1",
+    "bullmq": "^5.79.0",
     "cron-parser": "4",
     "drizzle-orm": "^0.45.2",
     "fflate": "^0.8.3",
     "file-type": "^22.0.1",
-    "hono": "^4.12.25",
+    "hono": "^4.12.26",
     "ioredis": "^5.11.1",
     "jose": "^6.2.3",
-    "nodemailer": "^8.0.7",
+    "nodemailer": "^9.0.1",
     "rate-limiter-flexible": "^11.2.0",
-    "semver": "^7.7.1",
+    "semver": "^7.8.4",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "0.73.1",
     "@types/bun": "latest",
     "@types/ioredis": "^5.0.0",
-    "@types/nodemailer": "^8.0.0",
+    "@types/nodemailer": "^8.0.1",
     "pino-pretty": "^13.1.3"
   }
 }

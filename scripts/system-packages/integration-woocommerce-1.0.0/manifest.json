@@ -7,7 +7,7 @@
   "description": "E-commerce plugin for WordPress — manage products, orders, customers, and coupons",
   "keywords": ["e-commerce", "retail"],
   "license": "Apache-2.0",
-  "icon": "woo",
+  "icon": "logos:woocommerce-icon",
   "source": {
     "kind": "none"
   },

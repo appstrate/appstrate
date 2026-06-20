@@ -73,9 +73,10 @@ export function createRunsRouter() {
       const orgId = c.get("orgId");
       const actor = getActor(c);
       // Version selector from query param: `draft`, `published`, or a
-      // version spec (exact / dist-tag / semver range). Default for API and
-      // MCP callers: published when at least one version exists, draft
-      // otherwise (#636). The editor UI passes `version=draft` explicitly.
+      // version spec (exact / dist-tag / semver range). Omitted ≡ `published`
+      // for EVERY caller (latest published; 404 when none, #636) — the working
+      // copy is opt-in via `version=draft` only, never an implicit default.
+      // The editor UI passes `version=draft` explicitly.
       const versionOverride = c.req.query("version");
       const { agent: effectiveAgent, overrideVersionLabel } = await resolveAgentRunVersion(
         agent,
@@ -108,6 +109,7 @@ export function createRunsRouter() {
           proxyIdOverride,
           configOverride,
           connectionOverrides,
+          dependencyOverrides,
         } = inputResult;
 
         // An explicit per-run `modelId` override must reference a real model
@@ -163,6 +165,7 @@ export function createRunsRouter() {
           modelId: modelIdOverride ?? preflightModelId,
           proxyId: proxyIdOverride ?? preflightProxyId,
           overrideVersionLabel,
+          dependencyOverrides: dependencyOverrides ?? null,
           applicationId: c.get("applicationId"),
           apiKeyId: c.get("apiKeyId") ?? undefined,
           connectionOverrides: connectionOverrides ?? null,
@@ -189,7 +192,7 @@ export function createRunsRouter() {
         // #635, plus status, version_ref, agent_scope, …) without a follow-up
         // GET. The run row exists once `prepareAndExecuteRun` resolves.
         // No legacy `runId` alias (#657): the run id is `id`.
-        const row = await getRunFull(getAppScope(c), runId);
+        const row = await getRunFull(getAppScope(c), runId, getActor(c));
         if (!row) {
           // The run row was inserted by `prepareAndExecuteRun` above and is
           // read back on the same scope, so a miss means it was deleted out
@@ -234,6 +237,7 @@ export function createRunsRouter() {
       limit,
       offset,
       endUserId: endUser?.id,
+      actor: getActor(c),
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);
@@ -260,7 +264,7 @@ export function createRunsRouter() {
     // 400s even for runs the caller could not read.
     const waitMs = parseWaitQuery(c.req.query("wait"));
 
-    const row = await getRunFull(scope, runId);
+    const row = await getRunFull(scope, runId, getActor(c));
     if (!row) {
       throw notFound("Run not found");
     }
@@ -285,7 +289,7 @@ export function createRunsRouter() {
         // timers/subscriptions for a response nobody will read.
         signal: c.req.raw.signal,
       });
-      const fresh = await getRunFull(scope, runId);
+      const fresh = await getRunFull(scope, runId, getActor(c));
       // The run can be deleted mid-wait (e.g. DELETE agent runs) — surface
       // the same 404 the initial read would have.
       if (!fresh) {
@@ -424,7 +428,7 @@ export function createRunsRouter() {
     // Return the bare updated run resource — read AFTER synthesiseFinalize so
     // the response reflects the terminal state (`status: "cancelled"`, cost,
     // completed_at). Same DTO and serializer as GET /runs/:id (#657).
-    const row = await getRunFull(scope, runId);
+    const row = await getRunFull(scope, runId, getActor(c));
     if (!row) {
       // The run was readable above; a miss here means a concurrent delete
       // raced the finalize. The resource is gone — surface the same 404 a
@@ -478,7 +482,7 @@ export function createRunsRouter() {
       // to read from the `packageId` envelope field is the resource's own
       // `packageId`. The run row exists once `triggerInlineRun` resolves
       // (`prepareAndExecuteRun` inserts it before returning).
-      const row = await getRunFull(getAppScope(c), runId);
+      const row = await getRunFull(getAppScope(c), runId, getActor(c));
       if (!row) {
         // The shadow run was inserted by `triggerInlineRun` and read back on
         // the same scope; a miss means a concurrent teardown deleted it. The

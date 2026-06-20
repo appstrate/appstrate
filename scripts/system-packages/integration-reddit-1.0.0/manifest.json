@@ -7,7 +7,7 @@
   "description": "Social news aggregation and discussion platform",
   "keywords": ["social-media", "community"],
   "license": "Apache-2.0",
-  "icon": "reddit",
+  "icon": "logos:reddit-icon",
   "source": {
     "kind": "none"
   },

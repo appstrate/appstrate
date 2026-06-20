@@ -16,6 +16,7 @@ import {
   PowerOff,
   FileJson,
   FileText,
+  SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -59,6 +60,8 @@ interface PackageActionsDropdownProps {
   onDeleteRuns?: () => void;
   onAddSchedule?: () => void;
   onDeleteMemories?: () => void;
+  /** Agent-only: open the advanced run launcher (per-run overrides). */
+  onRunWithOptions?: () => void;
   // Skill/Tool-specific
   canDeletePackage?: boolean;
   onDeletePackage?: () => void;
@@ -94,6 +97,7 @@ export function PackageActionsDropdown({
   onDeleteRuns,
   onAddSchedule,
   onDeleteMemories,
+  onRunWithOptions,
   canDeletePackage,
   onDeletePackage,
   canUninstall,
@@ -123,6 +127,17 @@ export function PackageActionsDropdown({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          {/* ── Run with options (advanced launcher — per-run overrides) ── */}
+          {isAgent && isMember && onRunWithOptions && (
+            <>
+              <DropdownMenuItem onSelect={onRunWithOptions}>
+                <SlidersHorizontal size={14} />
+                {t("run.options.menuItem")}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
+
           {/* ── View Manifest ── */}
           {manifest && (
             <DropdownMenuItem onSelect={() => setManifestOpen(true)}>

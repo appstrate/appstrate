@@ -21,7 +21,7 @@
  * real DB, complementing the connection/pin/scope service unit coverage.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import {
@@ -39,6 +39,10 @@ import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
+import {
+  initSystemIntegrations,
+  __resetSystemIntegrationsForTest,
+} from "../../../src/services/integration-client-registry.ts";
 
 const app = getTestApp();
 
@@ -211,6 +215,77 @@ describe("block_user_connections workflow", () => {
       body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET" } }),
     });
     expect(res.status).toBe(200);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// 1b. block_user_connections on an auto-active system integration (no row yet)
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("block_user_connections — auto-active system integration", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    // Seed gmail but DO NOT activate it — no application_packages row exists.
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/clickup"));
+    // gmail ships a system client → auto-active. clickup does not.
+    initSystemIntegrations([
+      {
+        id: "@myorg/gmail",
+        clients: [
+          {
+            id: "gmail-system",
+            auth_key: "google",
+            client_id: "sys-client.apps.googleusercontent.com",
+            client_secret: "sys-secret",
+          },
+        ],
+      },
+    ]);
+  });
+
+  afterEach(() => __resetSystemIntegrationsForTest());
+
+  it("materializes a row (enabled stays true) when toggling block on a system integration with no row", async () => {
+    const res = await app.request("/api/integrations/@myorg/gmail/settings", {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ block_user_connections: true }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { block_user_connections: boolean; active: boolean };
+    expect(body.block_user_connections).toBe(true);
+    // Recording the block must NOT deactivate the auto-active integration.
+    expect(body.active).toBe(true);
+
+    // Row materialized with enabled=true + block flag set.
+    const [row] = await db
+      .select({
+        enabled: applicationPackages.enabled,
+        blocked: applicationPackages.blockUserConnections,
+      })
+      .from(applicationPackages)
+      .where(eq(applicationPackages.packageId, "@myorg/gmail"));
+    expect(row?.enabled).toBe(true);
+    expect(row?.blocked).toBe(true);
+  });
+
+  it("404s when toggling block on a non-system integration that is not installed", async () => {
+    const res = await app.request("/api/integrations/@myorg/clickup/settings", {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ block_user_connections: true }),
+    });
+    expect(res.status).toBe(404);
+    // Nothing materialized.
+    const rows = await db
+      .select()
+      .from(applicationPackages)
+      .where(eq(applicationPackages.packageId, "@myorg/clickup"));
+    expect(rows).toHaveLength(0);
   });
 });
 
@@ -437,8 +512,8 @@ describe("connect/oauth2 reconnect scope-union (incremental consent)", () => {
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
     await activate(ctx.defaultAppId, "@myorg/gmail");
     // Register the OAuth client so the kickoff can build an authorize URL.
-    await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
-      method: "PUT",
+    await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
+      method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
     });

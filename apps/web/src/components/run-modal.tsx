@@ -133,7 +133,7 @@ function ResolvedModelHint({ packageId }: { packageId: string }) {
   const pinned = agentModel?.modelId
     ? orgModels.find((m) => m.id === agentModel.modelId && m.enabled)
     : undefined;
-  const resolved = pinned ?? orgModels.find((m) => m.isDefault && m.enabled);
+  const resolved = pinned ?? orgModels.find((m) => m.is_default && m.enabled);
   if (!resolved) return null;
 
   const source = pinned ? t("input.modelSourceAgent") : t("input.modelSourceOrgDefault");

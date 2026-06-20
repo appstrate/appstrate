@@ -49,6 +49,7 @@ import {
 } from "@appstrate/core/mcp-server";
 import type { IntegrationSpawnSpec, ApiCallSpec } from "@appstrate/core/sidecar-types";
 
+import { BundleError } from "@appstrate/afps-runtime/bundle";
 import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
 import { isIntegrationActive, selectAccessibleConnection } from "./integration-connections.ts";
@@ -125,6 +126,13 @@ export async function resolveIntegrationSpawns(
       );
       if (spec) out.push(spec);
     } catch (err) {
+      // An unsatisfiable referenced-mcp-server pin is a hard failure: the run
+      // must NOT silently spawn without the integration's tools. resolveOne
+      // raises a DEPENDENCY_UNRESOLVED BundleError for it; let it propagate so
+      // the pipeline maps it to a structured 422 (#686), matching the skill
+      // closure (#666). Every other failure (not installed / not connected /
+      // missing referenced package) stays a per-integration warn-and-skip.
+      if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") throw err;
       logger.warn("integration resolve failed; skipping", {
         integrationId: entry.id,
         applicationId,
@@ -144,12 +152,14 @@ async function resolveOne(
   requiredAuthKey: string | undefined,
   manifestCache?: IntegrationManifestCache,
 ): Promise<IntegrationSpawnSpec | null> {
-  // (a) Package exists + integration type — read the latest manifest
-  // straight off `packages.draft_manifest`. System integrations have
-  // `source = 'system'`; org integrations have `org_id` set to the
-  // run's org. The runtime never resolves against a yanked version —
-  // we always use the package's draft manifest, which the publish path
-  // keeps pinned to the live "latest" snapshot.
+  // (a) Package exists + integration type. The manifest is read through the
+  // per-run `manifestCache`, which `resolveRunIntegrationVersions` seeds at
+  // kickoff (#686) with the manifest AT the version the
+  // `dependencies.integrations.<id>` pin resolved to (published / system /
+  // draft-override). So this read honors the pin transparently; only when no
+  // entry was seeded (soft-resolved or non-run callers) does it fall back to
+  // `packages.draft_manifest`. An unsatisfiable integration pin already failed
+  // the run loud upstream, before we get here.
   const res = await fetchIntegrationManifest(integrationId, manifestCache);
   if (!res.ok) {
     switch (res.failure.kind) {
@@ -272,6 +282,22 @@ async function resolveOne(
     // whatever bytes happen to be latest.
     const resolution = await resolveMcpServerForSpawn(ref.name, ref.version);
     if (!resolution.ok) {
+      // A real `source.server.version` pin that cannot be met (unsatisfiable
+      // range / never-published) fails the run LOUDLY (#686) — a pinned run
+      // must never silently spawn without the integration. A
+      // missing/wrong/invalid referenced package stays a soft skip: the
+      // integration is mis-declared, not the run's pin, so the run proceeds
+      // without it (the sidecar surfaces the gap from its side too).
+      if (
+        resolution.reason === "unsatisfiable_pin" ||
+        resolution.reason === "no_published_version"
+      ) {
+        throw new BundleError(
+          "DEPENDENCY_UNRESOLVED",
+          `Referenced mcp-server '${ref.name}@${ref.version ?? "latest"}' could not be resolved against published versions (${resolution.reason})`,
+          { missing: [{ name: ref.name, versionSpec: ref.version ?? "latest" }] },
+        );
+      }
       logger.warn("referenced mcp-server could not be resolved; skipping integration", {
         integrationId,
         mcpServerId: ref.name,

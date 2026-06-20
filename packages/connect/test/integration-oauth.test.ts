@@ -695,3 +695,66 @@ describe("handleIntegrationOAuthCallback", () => {
     expect(result.scopeShortfall).toEqual(["profile"]);
   });
 });
+
+describe("integration OAuth clientRef round-trip", () => {
+  let store: ReturnType<typeof memoryStore>;
+
+  beforeEach(() => {
+    store = memoryStore();
+  });
+
+  async function initiate(clientRef?: string) {
+    return initiateIntegrationOAuth(store, {
+      packageId: "@official/gmail",
+      authKey: "primary",
+      authorizationEndpoint: "https://idp/authorize",
+      tokenEndpoint: "https://idp/token",
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      scopes: ["openid", "email"],
+      redirectUri: "http://localhost:3000/cb",
+      orgId: "org_1",
+      applicationId: "app_1",
+      actor: { type: "user", id: "u_1" },
+      ...(clientRef ? { clientRef } : {}),
+    });
+  }
+
+  it("carries clientRef into the state record", async () => {
+    const { state } = await initiate("gmail-system");
+    const record = store._data.get(state);
+    expect(record?.integration?.clientRef).toBe("gmail-system");
+  });
+
+  it("omits clientRef from the state when not supplied", async () => {
+    const { state } = await initiate();
+    const record = store._data.get(state);
+    expect(record?.integration?.clientRef).toBeUndefined();
+  });
+
+  it("returns clientRef from the callback result so the connection can pin it", async () => {
+    const { state } = await initiate("a3f9c1b2-0000-4000-8000-000000000001");
+    const stub = (async () =>
+      new Response(JSON.stringify({ access_token: "AT", refresh_token: "RT", expires_in: 3600 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch;
+    const result = await withFetch(stub, () =>
+      handleIntegrationOAuthCallback(store, "CODE", state),
+    );
+    expect(result.clientRef).toBe("a3f9c1b2-0000-4000-8000-000000000001");
+  });
+
+  it("leaves the callback result clientRef undefined when none was pinned", async () => {
+    const { state } = await initiate();
+    const stub = (async () =>
+      new Response(JSON.stringify({ access_token: "AT", refresh_token: "RT", expires_in: 3600 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch;
+    const result = await withFetch(stub, () =>
+      handleIntegrationOAuthCallback(store, "CODE", state),
+    );
+    expect(result.clientRef).toBeUndefined();
+  });
+});

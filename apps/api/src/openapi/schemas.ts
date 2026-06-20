@@ -527,8 +527,6 @@ export const schemas = {
       "completed_at",
       "duration",
       "cost",
-      "notifiedAt",
-      "readAt",
       "runNumber",
       "token_usage",
       "version_label",
@@ -545,12 +543,14 @@ export const schemas = {
       "contextSnapshot",
       "modelCredentialId",
       "connection_overrides",
+      "dependency_overrides",
       "user_name",
       "end_user_name",
       "api_key_name",
       "schedule_name",
       "connections_used",
       "package_ephemeral",
+      "unread",
     ],
     properties: {
       id: { type: "string" },
@@ -715,16 +715,10 @@ export const schemas = {
         description:
           "Inline runs only. Snapshot of the prompt submitted at run time. Null once the shadow has been compacted.",
       },
-      notifiedAt: {
-        type: ["string", "null"],
-        format: "date-time",
+      unread: {
+        type: "boolean",
         description:
-          "When the user was notified of run completion (in-app notification). Null until notification fires.",
-      },
-      readAt: {
-        type: ["string", "null"],
-        format: "date-time",
-        description: "When the user marked the run notification as read. Null until acknowledged.",
+          "True when the requesting recipient has an unread notification for this run (issue #667). Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count.",
       },
       runNumber: {
         type: ["integer", "null"],
@@ -752,6 +746,12 @@ export const schemas = {
         type: ["object", "null"],
         description:
           'Per-integration connection picks for this run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (#1).',
+        additionalProperties: { type: "string" },
+      },
+      dependency_overrides: {
+        type: ["object", "null"],
+        description:
+          'Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. A `"draft"` value means the run consumed a dependency\'s mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions.',
         additionalProperties: { type: "string" },
       },
       connections_used: {
@@ -817,6 +817,7 @@ export const schemas = {
       "proxy_id_override",
       "version_override",
       "connection_overrides",
+      "dependency_overrides",
       "last_run_at",
       "next_run_at",
       "createdAt",
@@ -847,6 +848,12 @@ export const schemas = {
         type: ["object", "null"],
         description:
           'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Flat map: `{ "@scope/integration": "<connection_id>" }`. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4).',
+        additionalProperties: { type: "string" },
+      },
+      dependency_overrides: {
+        type: ["object", "null"],
+        description:
+          'Per-dependency version overrides frozen on the schedule row (#666/#686). Flat map: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run\'s `dependency_overrides` so a scheduled run resolves its dependencies exactly as the schedule froze them.',
         additionalProperties: { type: "string" },
       },
       last_run_at: { type: ["string", "null"], format: "date-time" },
@@ -1010,8 +1017,16 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       label: { type: "string" },
-      apiShape: { type: "string" },
-      baseUrl: { type: "string" },
+      apiShape: {
+        type: ["string", "null"],
+        description:
+          "Protocol family. `null` for a built-in credential whose every backing model is an alias (#727) — binding hidden so the endpoint doesn't reveal the provider.",
+      },
+      baseUrl: {
+        type: ["string", "null"],
+        description:
+          "Endpoint base URL. `null` for an alias-only built-in credential (see apiShape).",
+      },
       source: { type: "string", enum: ["built-in", "custom"] },
       authMode: { type: "string", enum: ["api_key", "oauth2"] },
       providerId: {
@@ -1042,7 +1057,8 @@ export const schemas = {
       "baseUrl",
       "modelId",
       "enabled",
-      "isDefault",
+      "is_default",
+      "aliased",
       "source",
       "credentialId",
       "created_by",
@@ -1052,24 +1068,40 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       label: { type: "string" },
-      apiShape: { type: "string" },
-      providerId: {
-        type: "string",
+      apiShape: {
+        type: ["string", "null"],
         description:
-          "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path.",
+          "Protocol family. `null` for model aliases (`aliased: true`) — binding hidden.",
       },
-      baseUrl: { type: "string" },
-      modelId: { type: "string" },
+      providerId: {
+        type: ["string", "null"],
+        description:
+          "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for model aliases — binding hidden.",
+      },
+      baseUrl: {
+        type: ["string", "null"],
+        description: "Provider endpoint. `null` for model aliases — binding hidden.",
+      },
+      modelId: {
+        type: ["string", "null"],
+        description: "Upstream model id. `null` for model aliases — the real backing is hidden.",
+      },
       input: { type: ["array", "null"], items: { type: "string" } },
       contextWindow: { type: ["integer", "null"] },
       maxTokens: { type: ["integer", "null"] },
       reasoning: { type: ["boolean", "null"] },
       enabled: { type: "boolean" },
-      isDefault: { type: "boolean" },
+      is_default: { type: "boolean" },
+      aliased: {
+        type: "boolean",
+        description:
+          "Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a public alias and the real binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is stripped from this projection — render an alias badge; the backing model is hidden.",
+      },
       source: { type: "string", enum: ["built-in", "custom"] },
       credentialId: {
-        type: "string",
-        description: "ID of the backing `model_provider_credentials` row.",
+        type: ["string", "null"],
+        description:
+          "ID of the backing `model_provider_credentials` row. `null` for model aliases — binding hidden.",
       },
       cost: {
         type: ["object", "null"],
@@ -1190,7 +1222,7 @@ export const schemas = {
       "label",
       "urlPrefix",
       "enabled",
-      "isDefault",
+      "is_default",
       "source",
       "created_by",
       "createdAt",
@@ -1201,7 +1233,7 @@ export const schemas = {
       label: { type: "string" },
       urlPrefix: { type: "string", description: "Masked proxy URL for display" },
       enabled: { type: "boolean" },
-      isDefault: { type: "boolean" },
+      is_default: { type: "boolean" },
       source: { type: "string", enum: ["built-in", "custom"] },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },

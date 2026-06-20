@@ -16,7 +16,14 @@ import {
   type SidecarConfig,
   type CredentialsResponse,
   type LlmProxyOauthConfig,
+  type ModelSwap,
 } from "./helpers.ts";
+import {
+  swapRequestModel,
+  swapResponseModelJson,
+  createSseModelSwapStream,
+  scrubModelText,
+} from "./model-swap.ts";
 import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
   DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
@@ -159,7 +166,11 @@ interface LlmStreamObservation {
   authMode?: "oauth" | "api_key";
 }
 
-function passUpstream(upstream: Response, observe?: LlmStreamObservation): Response {
+async function passUpstream(
+  upstream: Response,
+  observe?: LlmStreamObservation,
+  swap?: ModelSwap,
+): Promise<Response> {
   const responseHeaders: Record<string, string> = {};
   for (const name of PASSTHROUGH_RESPONSE_HEADERS) {
     const value = upstream.headers.get(name);
@@ -176,6 +187,35 @@ function passUpstream(upstream: Response, observe?: LlmStreamObservation): Respo
 
   if (!upstream.body) {
     return new Response(null, { status: upstream.status, headers: responseHeaders });
+  }
+
+  const contentType = (upstream.headers.get("content-type") ?? "").toLowerCase();
+
+  // Model-alias scrub for ERROR bodies. Provider error payloads name the model
+  // in free-form prose ("model `deepseek-chat` does not exist"), so the exact-
+  // field swap below misses it — and an alias's whole point is the agent never
+  // learns the backing id. An error body carries no generated content, so a
+  // blind substring replace is safe here (it isn't for 2xx). Applies to ANY
+  // content type on a non-2xx, mirroring the platform gateway (`llm-proxy/
+  // core.ts`); errors are tiny, so buffering them costs nothing.
+  if (swap && !upstream.ok) {
+    const text = await upstream.text();
+    return new Response(scrubModelText(text, swap), {
+      status: upstream.status,
+      headers: responseHeaders,
+    });
+  }
+
+  // Model-alias swap (response real→alias). A non-stream JSON body can't be
+  // rewritten chunk-by-chunk — buffer the whole thing, swap, re-serialize. SSE
+  // is rewritten in-stream below (frame-buffered). Other content types and the
+  // no-swap path keep the zero-copy telemetry passthrough.
+  if (swap && contentType.includes("application/json") && !contentType.includes("event-stream")) {
+    const text = await upstream.text();
+    const rewritten = swapResponseModelJson(text, swap);
+    // Length changed by the rewrite — let Response recompute Content-Length
+    // rather than forward a now-wrong upstream value.
+    return new Response(rewritten, { status: upstream.status, headers: responseHeaders });
   }
 
   const reader = upstream.body.getReader();
@@ -235,7 +275,16 @@ function passUpstream(upstream: Response, observe?: LlmStreamObservation): Respo
     },
   });
 
-  return new Response(observed, { status: upstream.status, headers: responseHeaders });
+  // Model-alias swap on a streaming (SSE) body: rewrite `model` real→alias in
+  // each frame as it flows. Frame-buffered, so a chunk boundary mid-frame is
+  // handled. The telemetry passthrough (`observed`) stays in front so stream
+  // metrics still reflect the upstream timing.
+  const body =
+    swap && contentType.includes("event-stream")
+      ? observed.pipeThrough(createSseModelSwapStream(swap))
+      : observed;
+
+  return new Response(body, { status: upstream.status, headers: responseHeaders });
 }
 
 /**
@@ -473,7 +522,19 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     const method = c.req.method;
-    const body = method !== "GET" && method !== "HEAD" ? (c.req.raw.body ?? undefined) : undefined;
+    // Model-alias swap (request alias→real). The body is normally forwarded as
+    // a zero-copy ReadableStream; for an alias we must buffer it to rewrite the
+    // `model` field. Only aliases pay that cost — every other model stays
+    // zero-copy.
+    let body: string | ReadableStream<Uint8Array> | undefined;
+    if (method !== "GET" && method !== "HEAD") {
+      if (apiKeyConfig.modelSwap) {
+        const text = await c.req.raw.text();
+        body = text ? swapRequestModel(text, apiKeyConfig.modelSwap) : undefined;
+      } else {
+        body = c.req.raw.body ?? undefined;
+      }
+    }
 
     let upstream: Response;
     try {
@@ -499,7 +560,7 @@ export function createApp(deps: AppDeps): Hono {
       return llmFetchErrorResponse(c, targetUrl, err);
     }
 
-    return passUpstream(upstream, { targetUrl, authMode: "api_key" });
+    return passUpstream(upstream, { targetUrl, authMode: "api_key" }, apiKeyConfig.modelSwap);
   });
 
   async function handleOauthLlmRequest(
@@ -577,6 +638,11 @@ export function createApp(deps: AppDeps): Hono {
           }
           throw err;
         }
+        // Model-alias swap (request alias→real) — after the wire-format
+        // transform, before content-length is recomputed.
+        if (llmConfig.modelSwap) {
+          bodyText = swapRequestModel(bodyText, llmConfig.modelSwap);
+        }
         // Refresh content-length to match the transformed body so the
         // upstream doesn't read a stale value forwarded from the agent.
         forwardedHeaders["content-length"] = String(new TextEncoder().encode(bodyText).byteLength);
@@ -623,11 +689,15 @@ export function createApp(deps: AppDeps): Hono {
           );
         }
         // Fall through with the original 401 — best-effort.
-        return passUpstream(upstream, {
-          targetUrl,
-          credentialId: llmConfig.credentialId,
-          authMode: "oauth",
-        });
+        return passUpstream(
+          upstream,
+          {
+            targetUrl,
+            credentialId: llmConfig.credentialId,
+            authMode: "oauth",
+          },
+          llmConfig.modelSwap,
+        );
       }
       forwardedHeaders = {
         ...forwardedHeaders,
@@ -660,11 +730,15 @@ export function createApp(deps: AppDeps): Hono {
       }
     }
 
-    return passUpstream(upstream, {
-      targetUrl,
-      credentialId: llmConfig.credentialId,
-      authMode: "oauth",
-    });
+    return passUpstream(
+      upstream,
+      {
+        targetUrl,
+        credentialId: llmConfig.credentialId,
+        authMode: "oauth",
+      },
+      llmConfig.modelSwap,
+    );
   }
 
   // MCP exposure — the agent-facing surface for the first-party tools

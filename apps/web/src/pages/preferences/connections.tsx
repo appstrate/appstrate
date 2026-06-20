@@ -15,6 +15,7 @@ import {
 import { formatDateField } from "../../lib/markdown";
 import { LoadingState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
+import { ConnectionStatusBadge } from "../../components/integration-connect/connection-status-badge";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 
 // ─────────────────────────────────────────────
@@ -22,17 +23,14 @@ import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shar
 // ─────────────────────────────────────────────
 
 function statusBadge(t: ReturnType<typeof useTranslation>["t"], conn: MeConnectionEntry) {
-  if (conn.needs_reconnection) {
-    return (
-      <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-px text-[0.65rem] text-amber-600">
-        {t("connections.statusNeedsReconnection")}
-      </span>
-    );
-  }
-  return (
-    <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-px text-[0.65rem] text-emerald-700">
+  return conn.needs_reconnection ? (
+    <ConnectionStatusBadge tone="needsReconnection">
+      {t("connections.statusNeedsReconnection")}
+    </ConnectionStatusBadge>
+  ) : (
+    <ConnectionStatusBadge tone="connected">
       {t("connections.statusConnected")}
-    </span>
+    </ConnectionStatusBadge>
   );
 }
 

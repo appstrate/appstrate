@@ -110,21 +110,34 @@ describe("mcp discovery + auth gate", () => {
     // the AS issuer was `${APP_URL}/api/auth`, the PRM advertised the bare
     // origin, and nothing asserted they matched, so the mismatch shipped.
     //
-    // Assert equality against the issuer the AS actually serves at its
-    // well-known (proxied from Better Auth) rather than a hard-coded suffix, so
-    // the contract holds even if Better Auth's `basePath` ever moves.
+    // Derive the discovery URL exactly as a strict RFC 8414 client does — by
+    // inserting the issuer's path component after `.well-known` — rather than
+    // fetching the origin-root form. Fetching the root form here would mask a
+    // path-insertion gap: the advertised issuer carries a `/api/auth` path, so
+    // a real client requests `/.well-known/oauth-authorization-server/api/auth`,
+    // NOT the bare root. (That gap shipped once: the root form returned JSON, the
+    // path-inserted form fell through to the SPA `/*` catch-all and returned
+    // `index.html`, so the connector's `JSON.parse` failed on the leading `<`.)
     const orgId = "00000000-0000-0000-0000-0000000000ae";
     const prmRes = await app.request(`/.well-known/oauth-protected-resource/api/mcp/o/${orgId}`);
     expect(prmRes.status).toBe(200);
     const prm = (await prmRes.json()) as { authorization_servers: string[] };
-    const advertisedAs = prm.authorization_servers[0];
+    const advertisedAs = prm.authorization_servers[0]!;
     expect(typeof advertisedAs).toBe("string");
 
-    const asRes = await app.request("/.well-known/oauth-authorization-server");
+    // RFC 8414 §3.1 path-insertion: `https://host/path` → `https://host/.well-known/oauth-authorization-server/path`.
+    const issuerPath = new URL(advertisedAs).pathname.replace(/\/$/, "");
+    const discoveryUrl = `/.well-known/oauth-authorization-server${issuerPath}`;
+    const asRes = await app.request(discoveryUrl);
+    // The derived URL MUST resolve to the metadata document — not a 404 and not
+    // the SPA shell. A non-JSON body here is exactly the failure that broke the
+    // Claude MCP connector.
     expect(asRes.status).toBe(200);
+    expect(asRes.headers.get("content-type") ?? "").toContain("json");
     const asMeta = (await asRes.json()) as { issuer: string };
     expect(typeof asMeta.issuer).toBe("string");
 
+    // Byte-match against the issuer served at the client-derived URL (RFC 8414 §3.3).
     expect(advertisedAs).toBe(asMeta.issuer);
   });
 

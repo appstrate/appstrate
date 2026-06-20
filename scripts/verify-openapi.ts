@@ -117,9 +117,11 @@ const expectedEndpoints = [
   "GET /api/integrations/{packageId}",
   "POST /api/integrations/{packageId}/activate",
   "DELETE /api/integrations/{packageId}/deactivate",
-  "GET /api/integrations/{packageId}/oauth-clients/{authKey}",
-  "PUT /api/integrations/{packageId}/oauth-clients/{authKey}",
-  "DELETE /api/integrations/{packageId}/oauth-clients/{authKey}",
+  "POST /api/integrations/{packageId}/auths/{authKey}/oauth-clients",
+  "PUT /api/integrations/{packageId}/oauth-clients/{clientId}",
+  "DELETE /api/integrations/{packageId}/oauth-clients/{clientId}",
+  "GET /api/integrations/{packageId}/auths/{authKey}/clients",
+  "PUT /api/integrations/{packageId}/auths/{authKey}/default-client",
   "POST /api/integrations/{packageId}/auths/{authKey}/connect/fields",
   "POST /api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
   "GET /api/integrations/{packageId}/connections",
@@ -287,8 +289,10 @@ const expectedEndpoints = [
   "GET /api/docs",
 
   // Notifications
+  "GET /api/notifications",
   "GET /api/notifications/unread-count",
   "GET /api/notifications/unread-counts-by-agent",
+  "PUT /api/notifications/{id}/read",
   "PUT /api/notifications/read/{runId}",
   "PUT /api/notifications/read-all",
   "GET /api/runs",
@@ -898,6 +902,8 @@ console.log(`  ----------------`);
 interface RouteRegistration {
   verb: string;
   path: string;
+  /** Error statuses the handler is statically certain to be able to return. */
+  statuses: Set<string>;
 }
 
 const ROUTE_VERBS = ["get", "post", "put", "patch", "delete", "all", "head", "options"] as const;
@@ -924,6 +930,80 @@ function extractFunctionBody(src: string, fnName: string): string | null {
     i++;
   }
   return depth === 0 ? src.slice(openIdx + 1, i - 1) : null;
+}
+
+/**
+ * Capture a `router.METHOD( … )` call's full source text starting at its
+ * opening `(`, paren-matching to the matching `)`. Skips string / template /
+ * line / block-comment content so parens inside those don't throw off the
+ * count. Returns the slice INCLUDING both parens, or null if unbalanced.
+ */
+function extractCallText(src: string, openParenIdx: number): string | null {
+  let depth = 0;
+  let inStr: string | null = null;
+  let inLine = false;
+  let inBlock = false;
+  for (let i = openParenIdx; i < src.length; i++) {
+    const ch = src[i]!;
+    const next = src[i + 1];
+    if (inLine) {
+      if (ch === "\n") inLine = false;
+      continue;
+    }
+    if (inBlock) {
+      if (ch === "*" && next === "/") {
+        inBlock = false;
+        i++;
+      }
+      continue;
+    }
+    if (inStr) {
+      if (ch === "\\")
+        i++; // skip escaped char
+      else if (ch === inStr) inStr = null;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      inLine = true;
+      i++;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlock = true;
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inStr = ch;
+      continue;
+    }
+    if (ch === "(") depth++;
+    else if (ch === ")") {
+      depth--;
+      if (depth === 0) return src.slice(openParenIdx, i + 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * Infer the error status codes a route handler is GUARANTEED able to return,
+ * from statically-certain signals in its `router.METHOD(...)` call text (guards
+ * + handler body). Only SOUND signals (zero false positives) are used:
+ *   - `requirePermission` / `requireCorePermission` / `requireModulePermission`
+ *     middleware → 403 (the guard always 403s a caller lacking the permission).
+ *   - `parseBody(` in the handler → 400 (it throws `invalidRequest` on a bad body).
+ * 404 is deliberately NOT inferred: most `notFound` throws live deep in the
+ * service layer (e.g. `setDefaultModel`), invisible at the route, so a 404
+ * signal would be unsound in both directions. Comments are stripped first so a
+ * commented-out guard never yields a phantom requirement.
+ */
+function inferRequiredStatuses(callText: string): Set<string> {
+  const code = callText.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  const out = new Set<string>();
+  if (/\brequire(?:Core|Module)?Permission\s*\(/.test(code)) out.add("403");
+  if (/\bparseBody\s*\(/.test(code)) out.add("400");
+  return out;
 }
 
 /**
@@ -1062,7 +1142,13 @@ function extractRouterRegistrations(
       unresolvedTemplatedRoutes.push({ file, verb, raw: m[2] ?? m[3] ?? "<unknown>" });
       continue;
     }
-    for (const p of resolved) out.push({ verb, path: p });
+    // Capture the whole call (guards + handler) to infer guaranteed error
+    // statuses. `m[0]` ends after the path arg; its first `(` is the METHOD's
+    // open paren.
+    const openParen = m.index + m[0].indexOf("(");
+    const callText = extractCallText(slice, openParen);
+    const statuses = callText ? inferRequiredStatuses(callText) : new Set<string>();
+    for (const p of resolved) out.push({ verb, path: p, statuses });
   }
   return out;
 }
@@ -1173,6 +1259,16 @@ for (const m of indexSrc.matchAll(
 
 // 4. Discovered code endpoints
 const codeEndpoints = new Set<string>();
+// "VERB PATH" → error statuses the handler is statically certain to return
+// (union across every registration that maps to the same endpoint). Feeds the
+// 5b documented-error-status check.
+const codeRouteStatuses = new Map<string, Set<string>>();
+function recordRouteStatuses(ep: string, statuses: Set<string>): void {
+  if (statuses.size === 0) return;
+  const existing = codeRouteStatuses.get(ep) ?? new Set<string>();
+  for (const s of statuses) existing.add(s);
+  codeRouteStatuses.set(ep, existing);
+}
 
 // 4a. Direct `app.METHOD("path", ...)` calls in index.ts
 for (const m of indexSrc.matchAll(
@@ -1249,7 +1345,10 @@ for (const mount of mounts) {
 
   for (const reg of extractRouterRegistrations(scope, src, mount.file)) {
     const fullPath = normaliseHonoPath(joinMountPath(mount.prefix, reg.path));
-    for (const ep of expandRegistration(reg.verb, fullPath)) codeEndpoints.add(ep);
+    for (const ep of expandRegistration(reg.verb, fullPath)) {
+      codeEndpoints.add(ep);
+      recordRouteStatuses(ep, reg.statuses);
+    }
   }
 }
 
@@ -1280,7 +1379,10 @@ if (existsSync(modulesDir)) {
       const rel = "modules/" + filePath.slice(modulesDir.length + 1);
       for (const reg of extractRouterRegistrations(src, src, rel)) {
         const fullPath = normaliseHonoPath(reg.path);
-        for (const ep of expandRegistration(reg.verb, fullPath)) codeEndpoints.add(ep);
+        for (const ep of expandRegistration(reg.verb, fullPath)) {
+          codeEndpoints.add(ep);
+          recordRouteStatuses(ep, reg.statuses);
+        }
       }
     }
   }
@@ -1370,6 +1472,62 @@ if (unresolvedTemplatedRoutes.length > 0) {
 }
 
 // ═══════════════════════════════════════════════════
+// 5b. Documented error statuses
+// ═══════════════════════════════════════════════════
+//
+// For every code-registered endpoint that IS documented, assert the spec
+// declares the error statuses the handler is STATICALLY CERTAIN to return:
+//   - a `requirePermission*` guard → 403
+//   - a `parseBody(` body validation → 400
+// (Sound, zero-false-positive signals only — see `inferRequiredStatuses`. 404
+// is not inferred because most `notFound` throws originate in the service layer,
+// invisible at the route.) This catches the "permission-guarded / body-parsing
+// route returns 403/400 but the spec omits it" drift that the runtime response
+// validator only catches when a test happens to exercise that exact error path.
+
+console.log(`\n  5b. Documented Error Statuses`);
+console.log(`  -------------------------------`);
+
+// "VERB /path STATUS" pairs where the handler can return the status but the
+// spec intentionally omits it. Each needs a justifying comment. Seeded empty —
+// the codebase is clean; a new gap must be fixed or explicitly waived here.
+const ERROR_STATUS_ALLOWLIST = new Set<string>([]);
+
+const errorStatusGaps: string[] = [];
+for (const [ep, inferred] of codeRouteStatuses) {
+  if (!specEndpoints.has(ep)) continue; // orphans handled by the Code ⊆ Spec check
+  const sepIdx = ep.indexOf(" ");
+  const method = ep.slice(0, sepIdx).toLowerCase();
+  const specPath = ep.slice(sepIdx + 1);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const op = (openApiSpec.paths as Record<string, any>)[specPath]?.[method];
+  if (!op?.responses) continue;
+  const documented = new Set(Object.keys(op.responses));
+  for (const status of inferred) {
+    if (documented.has(status)) continue;
+    if (ERROR_STATUS_ALLOWLIST.has(`${ep} ${status}`)) continue;
+    errorStatusGaps.push(`${ep} → missing "${status}"`);
+  }
+}
+errorStatusGaps.sort();
+
+console.log(`  Endpoints with inferred error statuses: ${codeRouteStatuses.size}`);
+if (errorStatusGaps.length === 0) {
+  console.log(`  OK — every guaranteed 400/403 is documented in the spec.`);
+} else {
+  exitCode = 1;
+  console.log(
+    `\n  Endpoint(s) whose handler can return an undocumented error status (${errorStatusGaps.length}):`,
+  );
+  for (const g of errorStatusGaps) console.log(`    - ${g}`);
+  console.log(
+    `\n  A \`requirePermission*\` guard always 403s, and \`parseBody(\` always 400s, on the ` +
+      `failing path. Add the response to the endpoint in apps/api/src/openapi/paths/, or ` +
+      `(if genuinely unreachable) waive it in ERROR_STATUS_ALLOWLIST in this file with a reason.`,
+  );
+}
+
+// ═══════════════════════════════════════════════════
 // 6. Response Schema Presence
 // ═══════════════════════════════════════════════════
 //
@@ -1389,6 +1547,11 @@ const RESPONSE_SCHEMA_ALLOWLIST = new Set<string>([
   // by the SPA's typed client.
   "GET /.well-known/oauth-authorization-server 200",
   "GET /.well-known/openid-configuration 200",
+  // RFC 8414 path-inserted variants — same Better-Auth-owned document, served
+  // for clients that derive the discovery URL from the `${APP_URL}/api/auth`
+  // issuer path (e.g. the Claude MCP SDK).
+  "GET /.well-known/oauth-authorization-server/api/auth 200",
+  "GET /.well-known/openid-configuration/api/auth 200",
   "GET /api/auth/oauth2/authorize 200",
   "GET /api/auth/oauth2/userinfo 200",
   "POST /api/auth/oauth2/revoke 200",

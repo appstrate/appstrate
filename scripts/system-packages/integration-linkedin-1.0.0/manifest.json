@@ -7,7 +7,7 @@
   "description": "Professional networking and B2B marketing platform",
   "keywords": ["social-media", "marketing", "crm"],
   "license": "Apache-2.0",
-  "icon": "linkedin",
+  "icon": "logos:linkedin-icon",
   "source": {
     "kind": "none"
   },

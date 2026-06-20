@@ -80,6 +80,34 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
     expect(result.tokenEndpoint).toBe("https://idp.example.com/oauth/token");
   });
 
+  it("projects grant_types_supported from the discovery document", async () => {
+    const result = await withFetch(
+      (async () =>
+        jsonResponse({
+          issuer: "https://mcp.example.com",
+          authorization_endpoint: "https://mcp.example.com/authorize",
+          token_endpoint: "https://mcp.example.com/token",
+          grant_types_supported: ["authorization_code", "refresh_token"],
+        })) as unknown as typeof fetch,
+      () => resolveOAuthEndpoints({ issuer: "https://mcp.example.com" }),
+    );
+    expect(result.grantTypesSupported).toEqual(["authorization_code", "refresh_token"]);
+  });
+
+  it("leaves grantTypesSupported undefined when the document omits it (e.g. ClickUp-style)", async () => {
+    const result = await withFetch(
+      (async () =>
+        jsonResponse({
+          issuer: "https://mcp.example.com",
+          authorization_endpoint: "https://mcp.example.com/authorize",
+          token_endpoint: "https://mcp.example.com/token",
+          // no grant_types_supported field
+        })) as unknown as typeof fetch,
+      () => resolveOAuthEndpoints({ issuer: "https://mcp.example.com" }),
+    );
+    expect(result.grantTypesSupported).toBeUndefined();
+  });
+
   it("trims a trailing slash on the issuer before joining the well-known suffix", async () => {
     const seen: string[] = [];
     await withFetch(

@@ -22,14 +22,9 @@
  * design.
  */
 
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  runs,
-  runLogs,
-  TERMINAL_RUN_EVENT_TYPES,
-  type RunResultPayload,
-} from "@appstrate/db/schema";
+import { runs, TERMINAL_RUN_EVENT_TYPES, type RunResultPayload } from "@appstrate/db/schema";
 import { type CloudEventEnvelope } from "@appstrate/afps-runtime/events";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
@@ -41,6 +36,7 @@ import { getEnv } from "@appstrate/env";
 import { runWithSpan, recordRunDuration, recordRunTerminal } from "../observability/index.ts";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
 import { updateRun, appendRunLog, computeRunCost } from "./state/runs.ts";
+import { createRunNotifications } from "./state/notifications.ts";
 import {
   addMemories as addUnifiedMemories,
   upsertPinned,
@@ -307,6 +303,16 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   let outputValidationErrors: string[] | null = null;
 
   if (status === "success" && agent?.manifest.output?.schema) {
+    // Distinguish two failure shapes that both surface as a schema mismatch:
+    //   1. the agent never called `output` (`result.output` is null) — the
+    //      empty `{}` only fails because required fields are absent, so a bare
+    //      "validation failed" message misleads (it reads as a malformed
+    //      payload when the tool was simply never invoked);
+    //   2. the agent called `output` with a payload that violates the schema.
+    // A schema with no required fields still validates an empty `{}` as valid,
+    // so a side-effect-only run (output schema, nothing required) stays success
+    // in both branches — only the error string differs.
+    const outputEmitted = isPlainRecord(result.output);
     const outputRecord = isPlainRecord(result.output) ? result.output : {};
     const validation = validateOutput(
       outputRecord,
@@ -314,27 +320,28 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     );
     if (!validation.valid) {
       status = "failed";
-      errorMessage = `Output validation failed: ${validation.errors.join("; ")}`;
+      errorMessage = outputEmitted
+        ? `Output validation failed: ${validation.errors.join("; ")}`
+        : "Agent finished without calling the required `output` tool. This agent " +
+          "declares an output schema, so it must call `output` exactly once before " +
+          `finishing with all required fields (missing: ${validation.errors.join("; ")}).`;
       outputValidationErrors = validation.errors;
     }
   }
 
-  // Adapter-error backstop. The Pi SDK keeps the agent loop alive after
-  // an `appstrate.error` (e.g. OpenAI 429 TPM rate-limit exhausting the
-  // SDK's internal retries) so `runner.run()` resolves without throwing.
-  // The result then lacks an explicit `status` / `error`, defaults to
-  // `success`, and `output` is null because the LLM never produced one.
-  // The `runHadZeroTokens` heuristic below does NOT trigger when partial
-  // tokens were produced before the fatal adapter error. Without this
-  // check, a run that hit an unrecoverable upstream error is reported as
-  // `success` with `result: null`.
-  if (status === "success" && (result.output === null || result.output === undefined)) {
-    const lastAdapterError = await findLastAdapterError(run.id);
-    if (lastAdapterError !== null) {
-      status = "failed";
-      errorMessage = lastAdapterError;
-    }
-  }
+  // NOTE: terminal success/failure is the RUNNER's call, not the
+  // platform's. `PiRunner.run()` inspects the settled session and stamps
+  // `status: "failed"` + `error` when the agent loop ended on an errored
+  // final turn (see the bridge's `getTerminalError()` in runner-pi); a
+  // transient mid-loop error the
+  // agent recovered from leaves `status: "success"`. `mapTerminalStatus`
+  // honours that authoritative status above. The platform deliberately
+  // does NOT second-guess it by scanning the `run_logs` adapter-error
+  // trail — that post-hoc archaeology produced false positives, failing
+  // runs whose agent recovered and delivered via `report`/`log` (which
+  // legitimately leave `output === null`). The `runHadZeroTokens` guard
+  // below remains as a distinct backstop for the "LLM never reachable,
+  // zero tokens, no terminal error surfaced" shape.
 
   // Zod boundary on the runner-supplied terminal usage (tolerant: known
   // numeric fields kept, unknown keys stripped, an invalid shape is treated
@@ -464,7 +471,6 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
       duration: resolvedDurationMs,
       cost: cost > 0 ? cost : null,
       sinkClosedAt: now,
-      notifiedAt: now,
       // Per-run checkpoint snapshot — read by `getRecentRuns` to feed the
       // sidecar `run_history` tool. The unified `package_persistence`
       // store only keeps the latest checkpoint per actor (last-write-wins
@@ -646,13 +652,34 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   }
 
   // 8. Status-change broadcast with the enriched params (including
-  //    validation-failure errors and any afterRun metadata).
+  //    validation-failure errors and any afterRun metadata). Fired BEFORE the
+  //    notification fan-out so the multi-row INSERT can never sit between the
+  //    CAS close and the broadcast — the broadcast is what updates the UI and
+  //    fires webhooks, so it must not wait on bell bookkeeping.
   const broadcastParams: RunStatusChangeParams = {
     ...hookParams,
     ...(errorMessage ? { extra: { error: errorMessage } } : {}),
     ...(resultToPersist && status === "success" ? { extra: { result: resultToPersist } } : {}),
   };
   void emitEvent("onRunStatusChange", broadcastParams);
+
+  // Fan out in-app notifications — one row per recipient (issue #667). Only
+  // the CAS winner reaches here, so this runs exactly once per run. Awaited
+  // (after the broadcast) rather than detached: the run is already terminal
+  // and the broadcast has already fired, so the small INSERT adds negligible
+  // latency, and awaiting it keeps the write from outliving the request — a
+  // detached promise would otherwise race a concurrent run-delete / test
+  // teardown. Best-effort by contract: a transient INSERT failure is logged
+  // and swallowed, never failing the runner finalize. The `notifications`
+  // table is the sole source of notification read-state; a dropped fan-out
+  // means a missing bell entry, not a stuck run-list badge (the badge derives
+  // from the same table).
+  await createRunNotifications(scope, run.id).catch((err) => {
+    logger.error("finalize: notification fan-out failed (run already terminal)", {
+      runId: run.id,
+      err: getErrorMessage(err),
+    });
+  });
 }
 
 /**
@@ -774,29 +801,12 @@ function validateFinalizeUsage(usage: unknown, runId: string): TokenUsage | null
 }
 
 /**
- * Last `adapter_error` row written by the {@link PersistingEventSink} for
- * this run, or `null` when none was recorded. `appstrate.error` events
- * fired by the Pi SDK on fatal upstream failures (rate-limit exhaustion,
- * auth failures, malformed responses) land in `run_logs` as
- * `type='system', event='adapter_error'`. When the runner then resolves
- * without throwing — which is the SDK's current behaviour for
- * `stopReason=error` — finalize is the last chance to translate that
- * trail into a `failed` status. Indexed via `idx_run_logs_lookup`
- * (run_id, id).
+ * Operator-facing message for the "LLM never reachable" failure shape —
+ * a run that produced zero tokens (see {@link runHadZeroTokens}). Distinct
+ * from a terminal model error the runner already stamped: that verdict is
+ * the runner's authoritative call (runner-pi's `getTerminalError()`), and
+ * finalize no longer scans the `run_logs` adapter-error trail at all.
  */
-async function findLastAdapterError(runId: string): Promise<string | null> {
-  const [row] = await db
-    .select({ message: runLogs.message })
-    .from(runLogs)
-    .where(
-      and(eq(runLogs.runId, runId), eq(runLogs.type, "system"), eq(runLogs.event, "adapter_error")),
-    )
-    .orderBy(desc(runLogs.id))
-    .limit(1);
-  if (!row) return null;
-  return typeof row.message === "string" && row.message.length > 0 ? row.message : null;
-}
-
 function llmUnreachableMessage(run: RunSinkContext): string {
   // Runs that carry a `proxyLabel` resolved a proxy at preflight — when they
   // subsequently fail to reach the LLM, the proxy is the first suspect. Keep

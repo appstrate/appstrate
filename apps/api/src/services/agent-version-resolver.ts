@@ -15,13 +15,17 @@
  *   - anything else → 3-step resolution (exact version → dist-tag → semver
  *                     range) via {@link getVersionDetail}. 404 when nothing
  *                     matches.
- *   - omitted       → **published when at least one version exists, draft
- *                     otherwise.** This is the documented default for API /
- *                     MCP / CLI / schedule callers: "run what was published"
- *                     is the least surprising semantics for programmatic
- *                     callers validating an agent. The editor UI passes
- *                     `version=draft` explicitly so test-runs keep executing
- *                     the working copy.
+ *   - omitted       → **strictly identical to `"published"`** (latest
+ *                     published; 404 `no_published_version` when none). One
+ *                     unified default for every caller — API / MCP / CLI /
+ *                     schedule AND the dashboard transport: "run what was
+ *                     published" is the least-surprising, reproducible default
+ *                     for programmatic use. The working copy is NEVER an
+ *                     implicit default: running it is opt-in via the explicit
+ *                     `draft` selector (the editor UI passes it explicitly).
+ *                     This keeps API and front coherent on every selector —
+ *                     `draft` is the one editor-only capability, always
+ *                     requested by name, never silently inferred.
  *
  * System agents have no published versions (their definition ships with the
  * platform), so any selector is ignored and the loaded definition runs as-is
@@ -32,10 +36,13 @@
  * `version_label` with `version_dirty: false`, and the run serializer derives
  * `version_ref` from that pair (see `deriveVersionRef` in state/runs.ts).
  *
- * Known scope limit (refs #588): substituting the published manifest + prompt
- * pins the agent definition itself, but skill dependencies still resolve
- * through `DraftPackageCatalog` on the run hot path — the org working-copy
- * model. Pinning the full transitive closure is the #588 follow-up.
+ * Scope: this resolver pins the agent's OWN definition (manifest + prompt) to
+ * the selected version. The transitive skill closure is pinned separately, on
+ * the run hot path, by `RunPackageCatalog` (#666) — it resolves each
+ * `dependencies.skills` entry against PUBLISHED versions honoring the manifest
+ * pin, so a dependency's mutable draft never leaks into a run. Integration /
+ * mcp-server spawns are resolved by the sidecar and remain the open follow-up
+ * (#686).
  */
 
 import { ApiError, notFound } from "../lib/errors.ts";
@@ -99,16 +106,15 @@ export async function resolveAgentRunVersion(
   if (sel === undefined || sel === VERSION_SELECTOR_PUBLISHED) {
     const latest = await getLatestVersionInfo(agent.id).catch(() => null);
     if (!latest) {
-      if (sel === VERSION_SELECTOR_PUBLISHED) {
-        throw new ApiError({
-          status: 404,
-          code: "no_published_version",
-          title: "No Published Version",
-          detail: `Agent '${agent.id}' has no published version — publish one or run with version=draft`,
-        });
-      }
-      // Default path: never-published agents run their draft.
-      return { agent };
+      // omit ≡ published — no silent draft fallback. A never-published agent
+      // run without a selector is an explicit error, not a surprise draft
+      // execution; the working copy is opt-in via `version=draft` only.
+      throw new ApiError({
+        status: 404,
+        code: "no_published_version",
+        title: "No Published Version",
+        detail: `Agent '${agent.id}' has no published version — publish one or run with version=draft`,
+      });
     }
     const detail = await getVersionDetail(agent.id, latest.version);
     if (!detail) {

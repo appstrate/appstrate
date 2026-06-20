@@ -13,10 +13,8 @@ import {
   getOrgMembers,
   getOrgMember,
   getOrgMemberWithProfile,
-  addMember,
   removeMember,
   updateMemberRole,
-  findUserByEmail,
   isSlugAvailable,
   getOrgSettings,
   updateOrgSettings,
@@ -28,13 +26,11 @@ import { ApiError, forbidden, invalidRequest, notFound, parseBody } from "../lib
 import { listResponse } from "../lib/list-response.ts";
 import {
   createInvitation,
-  sendMagicLinkInvitation,
   getOrgInvitations,
   cancelInvitation,
   updateInvitationRole,
   ASSIGNABLE_ROLES,
 } from "../services/invitations.ts";
-import { getAppConfig } from "../lib/app-config.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { getEnv } from "@appstrate/env";
 import { isPlatformAdmin } from "@appstrate/db/auth-policy";
@@ -288,6 +284,13 @@ router.delete("/:orgId", async (c) => {
 });
 
 // POST /api/orgs/:orgId/members — invite a member (admin+)
+//
+// Always creates a pending invitation — for new and existing users alike.
+// The invitee joins by opening the invite link, authenticating through the
+// standard login/signup flow, then explicitly accepting. This keeps a single,
+// consent-explicit join path: no silent direct-add of existing users, no
+// magic-link side channel. When SMTP is configured the invitation email is
+// sent; otherwise the admin shares the returned token/link out of band.
 router.post("/:orgId/members", async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId");
@@ -301,81 +304,8 @@ router.post("/:orgId/members", async (c) => {
 
   const body = await c.req.json();
   const data = parseBody(addMemberSchema, body);
-
   const role = data.role;
 
-  const targetUser = await findUserByEmail(data.email.trim());
-
-  // Polymorphic response (documented as oneOf in OpenAPI): the operation
-  // either creates an invitation (201 + bare OrgInvitationInfo — has `id` +
-  // `token`) or adds an existing user directly (201 + bare OrgMember — has
-  // `userId`). Both DTOs use the same serializers as the lists in
-  // GET /orgs/:orgId. The `token` is exposed because this endpoint is
-  // admin-gated, consistent with the invitations list.
-  const serializeInvitation = (inv: Awaited<ReturnType<typeof createInvitation>>) => ({
-    id: inv.id,
-    email: inv.email,
-    role: inv.role,
-    token: inv.token,
-    expiresAt: inv.expiresAt?.toISOString(),
-    createdAt: inv.createdAt?.toISOString(),
-  });
-
-  if (targetUser) {
-    if (getAppConfig().features.smtp) {
-      // User exists + SMTP → create invitation with magic link (auto-auth on click)
-      const invitation = await createInvitation({
-        email: data.email.trim(),
-        orgId,
-        role,
-        invitedBy: user.id,
-        skipEmail: true,
-      });
-      void sendMagicLinkInvitation(invitation);
-      await recordAuditFromContext(c, {
-        action: "org.invitation_created",
-        resourceType: "invitation",
-        resourceId: invitation.id,
-        after: { email: invitation.email, role },
-        orgIdOverride: orgId,
-      });
-      return c.json(serializeInvitation(invitation), 201);
-    }
-    // User exists + no SMTP → add directly
-    try {
-      await addMember(orgId, targetUser.id, role);
-    } catch (err) {
-      throw new ApiError({
-        status: 400,
-        code: "add_member_failed",
-        title: "Bad Request",
-        detail: err instanceof Error ? err.message : "Failed to add member",
-      });
-    }
-    await recordAuditFromContext(c, {
-      action: "org.member_added",
-      resourceType: "member",
-      resourceId: targetUser.id,
-      after: { email: data.email.trim(), role },
-      orgIdOverride: orgId,
-    });
-    const member = await getOrgMemberWithProfile(orgId, targetUser.id);
-    if (!member) {
-      throw notFound("Member not found");
-    }
-    return c.json(
-      {
-        userId: member.userId,
-        role: member.role,
-        joinedAt: member.joinedAt,
-        displayName: member.displayName,
-        email: member.email,
-      },
-      201,
-    );
-  }
-
-  // User doesn't exist — create invitation
   try {
     const invitation = await createInvitation({
       email: data.email.trim(),
@@ -391,7 +321,21 @@ router.post("/:orgId/members", async (c) => {
       after: { email: invitation.email, role },
       orgIdOverride: orgId,
     });
-    return c.json(serializeInvitation(invitation), 201);
+
+    // Bare OrgInvitationInfo — same shape as the items in the invitations
+    // list in GET /orgs/:orgId. The `token` is exposed because this endpoint
+    // is admin-gated (it lets a no-SMTP admin copy the invite link).
+    return c.json(
+      {
+        id: invitation.id,
+        email: invitation.email,
+        role: invitation.role,
+        token: invitation.token,
+        expiresAt: invitation.expiresAt?.toISOString(),
+        createdAt: invitation.createdAt?.toISOString(),
+      },
+      201,
+    );
   } catch (err) {
     throw new ApiError({
       status: 500,

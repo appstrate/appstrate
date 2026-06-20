@@ -58,6 +58,13 @@ interface ScheduleJobData {
    * with the scheduler's intent. Loses to admin pins.
    */
   connectionOverrides?: Record<string, string>;
+  /**
+   * Frozen per-dependency version overrides (#666/#686). Loaded from
+   * `package_schedules.dependency_overrides`, forwarded into
+   * `runs.dependency_overrides` at fire time so a scheduled run resolves its
+   * skill / integration dependencies exactly as the schedule froze them.
+   */
+  dependencyOverrides?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +94,7 @@ function toSchedule(row: typeof schedules.$inferSelect): ScheduleWireDto {
     proxy_id_override: row.proxyIdOverride,
     version_override: row.versionOverride,
     connection_overrides: (row.connectionOverrides as Record<string, string> | null) ?? null,
+    dependency_overrides: (row.dependencyOverrides as Record<string, string> | null) ?? null,
     last_run_at: row.lastRunAt ? row.lastRunAt.toISOString() : null,
     next_run_at: row.nextRunAt ? row.nextRunAt.toISOString() : null,
     createdAt: row.createdAt!.toISOString(),
@@ -124,6 +132,7 @@ async function upsertScheduleJob(schedule: ScheduleWireDto, orgId: string): Prom
     proxyIdOverride: schedule.proxy_id_override ?? undefined,
     versionOverride: schedule.version_override ?? undefined,
     connectionOverrides: schedule.connection_overrides ?? undefined,
+    dependencyOverrides: schedule.dependency_overrides ?? undefined,
   };
 
   await (
@@ -155,6 +164,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     proxyIdOverride,
     versionOverride,
     connectionOverrides,
+    dependencyOverrides,
   } = job.data;
 
   await triggerScheduledRun(
@@ -164,7 +174,14 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     orgId,
     applicationId,
     input,
-    { configOverride, modelIdOverride, proxyIdOverride, versionOverride, connectionOverrides },
+    {
+      configOverride,
+      modelIdOverride,
+      proxyIdOverride,
+      versionOverride,
+      connectionOverrides,
+      dependencyOverrides,
+    },
   );
 
   // Update schedule timestamps
@@ -241,7 +258,18 @@ export async function shutdownScheduleWorker(): Promise<void> {
 // Run trigger
 // ---------------------------------------------------------------------------
 
-async function triggerScheduledRun(
+/**
+ * Fire one scheduled run. Loads the agent, resolves the version selector
+ * (`versionOverride` | inherit → `published`, #636), runs the readiness +
+ * preflight gates, then executes. Any `ApiError` along the way is converted
+ * into a visible failed-run record via `failSchedule()` (never a silent skip).
+ *
+ * Exported for the fire-path integration test: the unified-version breaking
+ * change (omit ≡ published) means an inheriting schedule on a never-published
+ * agent must surface a `no_published_version` failed run here — the riskiest
+ * surface of #636 because it runs in the background worker, not a request.
+ */
+export async function triggerScheduledRun(
   scheduleId: string,
   packageId: string,
   actor: Actor | null,
@@ -254,6 +282,7 @@ async function triggerScheduledRun(
     proxyIdOverride?: string;
     versionOverride?: string;
     connectionOverrides?: Record<string, string>;
+    dependencyOverrides?: Record<string, string>;
   } = {},
 ) {
   // Populated once the agent loads so every failSchedule() call can
@@ -301,10 +330,14 @@ async function triggerScheduledRun(
 
     // Resolve which definition this scheduled run executes (#636). The
     // schedule's `version_override` is a selector (`draft` | `published` |
-    // spec); when absent, scheduled runs default to the latest published
-    // version when one exists (draft otherwise) — same default as the API
-    // run route. Pre-fix, `version_override` only relabeled the run while
-    // the draft executed regardless; resolving here makes the pin real.
+    // spec); when absent it defaults to `published` — same unified default as
+    // the API run route, the working copy is never an implicit default. A
+    // schedule inheriting on a never-published agent therefore resolves to
+    // 404 `no_published_version`, caught just below: no run executes, a warning
+    // is logged AND a visible failed run is recorded via failSchedule() (never
+    // a silent skip — pin `version_override = draft` to schedule the working
+    // copy). Pre-fix, `version_override` only relabeled the run while the
+    // draft executed regardless; resolving here makes the pin real.
     let agent: LoadedPackage;
     let overrideVersionLabel: string | undefined;
     try {
@@ -424,6 +457,7 @@ async function triggerScheduledRun(
         scheduleId,
         applicationId,
         scheduleConnectionOverrides: overrides.connectionOverrides ?? null,
+        dependencyOverrides: overrides.dependencyOverrides ?? null,
       });
     } catch (err) {
       if (err instanceof ApiError) {
@@ -561,6 +595,7 @@ export async function createSchedule(
     proxyIdOverride?: string | null;
     versionOverride?: string | null;
     connectionOverrides?: Record<string, string> | null;
+    dependencyOverrides?: Record<string, string> | null;
   },
 ): Promise<EnrichedSchedule> {
   const id = `sched_${crypto.randomUUID()}`;
@@ -588,6 +623,7 @@ export async function createSchedule(
       proxyIdOverride: data.proxyIdOverride ?? null,
       versionOverride: data.versionOverride ?? null,
       connectionOverrides: data.connectionOverrides ?? null,
+      dependencyOverrides: data.dependencyOverrides ?? null,
       nextRunAt: nextRun ?? null,
     })
     .returning();
@@ -619,6 +655,7 @@ export async function updateSchedule(
     proxyIdOverride?: string | null;
     versionOverride?: string | null;
     connectionOverrides?: Record<string, string> | null;
+    dependencyOverrides?: Record<string, string> | null;
   },
 ): Promise<EnrichedSchedule | null> {
   const existing = await getSchedule(id, scope);
@@ -647,6 +684,8 @@ export async function updateSchedule(
   if (data.versionOverride !== undefined) payload.versionOverride = data.versionOverride;
   if (data.connectionOverrides !== undefined)
     payload.connectionOverrides = data.connectionOverrides;
+  if (data.dependencyOverrides !== undefined)
+    payload.dependencyOverrides = data.dependencyOverrides;
 
   const [row] = await db
     .update(schedules)

@@ -2,7 +2,7 @@
 
 import { createApp, buildSidecarRuntimeDeps, SIDECAR_IDLE_TIMEOUT_SECONDS } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
-import type { CredentialsResponse, LlmProxyConfig } from "./helpers.ts";
+import type { CredentialsResponse, LlmProxyConfig, ModelSwap } from "./helpers.ts";
 import { logger } from "./logger.ts";
 import { CredentialsCache } from "./credentials-cache.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
@@ -51,6 +51,13 @@ function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
       baseUrl: process.env.PI_BASE_URL,
       apiKey: process.env.PI_API_KEY,
       placeholder: process.env.PI_PLACEHOLDER || "sk-placeholder",
+      // Model-alias swap (api-key path). The OAuth path carries `modelSwap`
+      // inside PI_LLM_OAUTH_CONFIG_JSON already. A malformed payload is a
+      // launcher bug — let JSON.parse throw rather than silently disable the
+      // swap (which would leak the real id to the agent).
+      ...(process.env.PI_MODEL_SWAP_JSON
+        ? { modelSwap: JSON.parse(process.env.PI_MODEL_SWAP_JSON) as ModelSwap }
+        : {}),
     };
   }
   return undefined;
