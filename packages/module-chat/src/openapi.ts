@@ -31,9 +31,19 @@ export const chatComponentSchemas = {
     type: "object",
     required: ["id", "parent_id", "format", "content"],
     properties: {
-      id: { type: "string", description: "Client-generated message id" },
-      parent_id: { type: ["string", "null"] },
-      format: { type: "string", description: "Format adapter id (e.g. aui/v0)" },
+      id: {
+        type: "string",
+        minLength: 1,
+        maxLength: 200,
+        description: "Client-generated message id",
+      },
+      parent_id: { type: ["string", "null"], maxLength: 200 },
+      format: {
+        type: "string",
+        minLength: 1,
+        maxLength: 100,
+        description: "Format adapter id (e.g. aui/v0)",
+      },
       content: { description: "Opaque encoded message" },
     },
   },
@@ -66,6 +76,7 @@ export const chatPaths = {
             },
           },
         },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
     post: {
@@ -79,7 +90,7 @@ export const chatPaths = {
           "application/json": {
             schema: {
               type: "object",
-              properties: { title: { type: "string", maxLength: 200 } },
+              properties: { title: { type: "string", minLength: 1, maxLength: 200 } },
             },
           },
         },
@@ -92,6 +103,8 @@ export const chatPaths = {
             "application/json": { schema: { $ref: "#/components/schemas/ChatSession" } },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -128,7 +141,8 @@ export const chatPaths = {
             },
           },
         },
-        "404": { description: "Session not found" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
     patch: {
@@ -153,7 +167,9 @@ export const chatPaths = {
       },
       responses: {
         "204": { description: "Session renamed" },
-        "404": { description: "Session not found" },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
     delete: {
@@ -166,7 +182,8 @@ export const chatPaths = {
       ],
       responses: {
         "204": { description: "Session deleted (messages cascade)" },
-        "404": { description: "Session not found" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -189,7 +206,9 @@ export const chatPaths = {
       },
       responses: {
         "204": { description: "Entry persisted" },
-        "404": { description: "Session not found" },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -246,6 +265,7 @@ export const chatPaths = {
           content: { "text/event-stream": { schema: { type: "string" } } },
         },
         "400": { description: "No enabled model configured, or invalid body" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "429": { description: "Rate limited (20/min per caller)" },
       },
     },
@@ -299,6 +319,7 @@ export const chatPaths = {
           },
         },
         "400": { description: "No enabled model configured, or invalid body" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "429": { description: "Rate limited (20/min per caller)" },
       },
     },

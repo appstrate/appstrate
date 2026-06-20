@@ -41,12 +41,18 @@ export interface CollectedModuleOpenApi {
 export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
   const scriptDir = dirname(fileURLToPath(import.meta.url));
   const modulesDir = resolve(scriptDir, "../../apps/api/src/modules");
+  // Workspace-package modules (`packages/module-<name>/src/index.ts`) are
+  // first-class modules too — they contribute routes/openApiPaths exactly like
+  // the built-in dirs (e.g. module-chat). They must be scanned here so their
+  // contributions land in the validated spec; the code-route scan in
+  // verify-openapi.ts §4c mirrors this set so Code ⊆ Spec stays balanced.
+  const workspaceModulesDir = resolve(scriptDir, "../../packages");
 
   // Sorted for determinism: readdir order is filesystem-dependent (ext4
   // returns hash order, APFS roughly lexicographic), and the contribution
   // order shapes the merged spec's key order — which generate-api-types.ts
   // byte-compares across machines.
-  const discoveredModules: string[] = existsSync(modulesDir)
+  const builtIn: Array<{ name: string; entry: string }> = existsSync(modulesDir)
     ? readdirSync(modulesDir)
         .filter((name) => {
           const subdir = join(modulesDir, name);
@@ -57,7 +63,26 @@ export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
           }
         })
         .sort()
+        .map((name) => ({ name, entry: join(modulesDir, name, "index.ts") }))
     : [];
+
+  const workspace: Array<{ name: string; entry: string }> = existsSync(workspaceModulesDir)
+    ? readdirSync(workspaceModulesDir)
+        .filter((name) => {
+          if (!name.startsWith("module-")) return false;
+          try {
+            return existsSync(join(workspaceModulesDir, name, "src/index.ts"));
+          } catch {
+            return false;
+          }
+        })
+        .sort()
+        .map((name) => ({ name, entry: join(workspaceModulesDir, name, "src/index.ts") }))
+    : [];
+
+  // Built-ins first, then workspace modules — both groups internally sorted, so
+  // the merged key order is stable across machines.
+  const discoveredModules = [...builtIn, ...workspace];
 
   const paths: Record<string, unknown> = {};
   const componentSchemas: Record<string, unknown> = {};
@@ -67,8 +92,7 @@ export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
   const ownedSchemaNames = new Set<string>();
   const ownedTagNames = new Set<string>();
 
-  for (const name of discoveredModules) {
-    const entry = join(modulesDir, name, "index.ts");
+  for (const { entry } of discoveredModules) {
     const mod: AppstrateModule = (await import(entry)).default;
     const modPaths = mod.openApiPaths?.();
     if (modPaths) {

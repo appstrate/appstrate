@@ -213,6 +213,13 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "shared-type is the Drizzle profiles row (Date, displayName); wire is the joined {id,language,email,name} resource",
   RunLog:
     "shared-type RunLog has createdAt:Date; wire is an ISO string — SPA consumes the generated spec type",
+  // @appstrate/module-chat wire DTOs. The module owns no tables of its own as a
+  // shared-type export (chat_sessions/chat_messages are core schema), and these
+  // are hand-shaped wire envelopes (ISO timestamps, opaque message content) the
+  // chat UI consumes via the generated spec type — not a Drizzle shared-type.
+  ChatSession:
+    "module-chat wire DTO; ISO timestamps, no shared-type (UI uses the generated spec type)",
+  ChatMessageEntry: "module-chat opaque history-node wire DTO; no shared-type",
 };
 
 /**

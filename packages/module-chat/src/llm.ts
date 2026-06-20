@@ -13,7 +13,6 @@
 
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModel } from "ai";
 import { badGateway, invalidRequest } from "@appstrate/core/api-errors";
 import { CHAT_USABLE_FAMILIES } from "./chat-families.ts";
@@ -84,7 +83,7 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
   return chosen;
 }
 
-type ProxyKind = "anthropic" | "openai-compatible" | "openai-responses";
+type ProxyKind = "anthropic" | "openai-compatible";
 
 /**
  * Map a proxy family to its AI SDK provider kind and the baseURL suffix under
@@ -92,7 +91,6 @@ type ProxyKind = "anthropic" | "openai-compatible" | "openai-responses";
  * so a provider configured here hits the right proxy route:
  *   - Anthropic SDK appends `/v1/messages`         → suffix carries `/v1`.
  *   - OpenAI-compatible appends `/chat/completions` → suffix carries `/v1`.
- *   - OpenAI Responses appends `/responses`         → suffix is the family root.
  * Returns `null` for an unknown family rather than guessing a route.
  */
 export function proxyTarget(family: string): { kind: ProxyKind; suffix: string } | null {
@@ -144,10 +142,6 @@ export function modelFromFamily(
   switch (target.kind) {
     case "anthropic":
       return createAnthropic({ baseURL, apiKey: "proxy", headers, fetch: fetchImpl })(model.id);
-    case "openai-responses":
-      return createOpenAI({ baseURL, apiKey: "proxy", headers, fetch: fetchImpl }).responses(
-        model.id,
-      );
     case "openai-compatible":
       return createOpenAICompatible({
         name: "appstrate-llm-proxy",
@@ -183,6 +177,16 @@ export async function resolveModel(args: ResolveArgs): Promise<LanguageModel> {
  * the default app rarely changes.
  */
 const appCache = new Map<string, string | null>();
+const APP_CACHE_MAX = 500;
+
+/** Bounded insert: evict the oldest entry once the per-org cache is full. */
+function cacheApp(orgId: string, id: string | null): void {
+  if (appCache.size >= APP_CACHE_MAX && !appCache.has(orgId)) {
+    const oldest = appCache.keys().next().value;
+    if (oldest !== undefined) appCache.delete(oldest);
+  }
+  cacheApp(orgId, id);
+}
 
 export async function resolveDefaultApplicationId(
   origin: string,
@@ -194,7 +198,7 @@ export async function resolveDefaultApplicationId(
   try {
     const res = await fetch(`${origin}/api/applications`, { headers });
     if (!res.ok) {
-      appCache.set(orgId, null);
+      cacheApp(orgId, null);
       return undefined;
     }
     interface App {
@@ -204,10 +208,10 @@ export async function resolveDefaultApplicationId(
     const body = (await res.json()) as { data?: App[] } | App[];
     const apps = Array.isArray(body) ? body : (body.data ?? []);
     const id = (apps.find((a) => a.isDefault) ?? apps[0])?.id ?? null;
-    appCache.set(orgId, id);
+    cacheApp(orgId, id);
     return id ?? undefined;
   } catch {
-    appCache.set(orgId, null);
+    cacheApp(orgId, null);
     return undefined;
   }
 }

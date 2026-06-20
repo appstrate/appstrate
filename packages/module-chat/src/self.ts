@@ -17,10 +17,35 @@
 
 import type { Context } from "hono";
 
-/** Loopback origin of the running platform (same process, no proxy hop). */
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+
+/**
+ * Loopback origin of the running platform (same process, no proxy hop).
+ *
+ * `forwardedHeaders` sends the caller's cookie / Authorization on this hop, so
+ * the target MUST stay on-host: a `CHAT_SELF_ORIGIN` pointing at an external
+ * host would exfiltrate the caller's credentials. We therefore reject any
+ * override that is not a loopback origin (fail-fast rather than leak).
+ */
 export function selfOrigin(): string {
+  const override = process.env.CHAT_SELF_ORIGIN;
+  if (override) {
+    let host: string;
+    try {
+      host = new URL(override).hostname;
+    } catch {
+      throw new Error(`CHAT_SELF_ORIGIN is not a valid URL: ${override}`);
+    }
+    if (!LOOPBACK_HOSTS.has(host)) {
+      throw new Error(
+        `CHAT_SELF_ORIGIN must be a loopback origin (got "${host}"). The chat module ` +
+          "forwards the caller's cookie/Authorization on this hop and must never send them off-host.",
+      );
+    }
+    return override;
+  }
   const port = process.env.PORT ?? "3000";
-  return process.env.CHAT_SELF_ORIGIN ?? `http://127.0.0.1:${port}`;
+  return `http://127.0.0.1:${port}`;
 }
 
 const FORWARDED = ["cookie", "authorization", "x-org-id", "x-application-id"] as const;

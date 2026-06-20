@@ -206,13 +206,13 @@ export function createChatRouter() {
           messageId: entry.id,
           parentId: entry.parent_id,
           format: entry.format,
-          content: (entry.content ?? null) as object,
+          content: (entry.content ?? null) as typeof chatMessages.$inferInsert.content,
         })
         .onConflictDoUpdate({
           target: [chatMessages.sessionId, chatMessages.messageId],
           set: {
             parentId: entry.parent_id,
-            content: (entry.content ?? null) as object,
+            content: (entry.content ?? null) as typeof chatMessages.$inferInsert.content,
             format: entry.format,
           },
         });
