@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The apiShapes the chat can use: API-key families only. `claude-code` is
- * selectable via its `anthropic-messages` apiShape but is routed to the Claude
- * Agent SDK engine (by `providerId`, in chat-stream.ts), NOT the proxy.
+ * The apiShapes the chat can use. API-key families bind to the llm-proxy;
+ * subscription families are routed (by `providerId`, in chat-stream.ts) to their
+ * own ToS-clean engine instead of the proxy:
+ *   - `anthropic-messages` + providerId `claude-code` → Claude Agent SDK engine.
+ *   - `openai-codex-responses` + providerId `codex`   → Codex CLI engine.
  *
- * Codex is deliberately excluded. It is an OAuth-subscription provider with no
- * fingerprint-forging path and no official SDK driver, so — exactly like a
- * codex agent run — it has no usable chat path and must surface a clear error
- * rather than a grey 404 dead-route. The codex guard in `chat-stream.ts`
- * enforces this even if a codex preset id is requested directly; the
- * run-launcher's `assertRunnableOnEngine` is the run-side mirror.
+ * Both subscription engines drive the vendor's official binary (which signs its
+ * own client fingerprint) behind a non-forging credential-injection gateway.
  *
  * Shared by the server-side picker (`llm.ts`) and the client model picker
  * (`ui/model-select.tsx`) so the two filters can never drift. Kept dependency-
@@ -20,7 +18,8 @@ export const CHAT_USABLE_FAMILIES = new Set([
   "openai-completions",
   "anthropic-messages",
   "mistral-conversations",
+  "openai-codex-responses",
 ]);
 
-/** apiShape of the codex OAuth-subscription provider — never usable in chat. */
+/** apiShape of the codex (ChatGPT) subscription provider — routed to the codex CLI engine. */
 export const CODEX_API_SHAPE = "openai-codex-responses";

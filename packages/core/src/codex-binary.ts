@@ -45,35 +45,47 @@ function b64url(value: object): string {
 }
 
 /**
- * Build the placeholder ChatGPT-subscription `auth.json` the spawned `codex`
- * binary reads from `CODEX_HOME`. The access token is a syntactically-valid but
- * unsigned JWT with a far-future `exp` so the CLI never tries to refresh it (a
- * refresh would hit the real OpenAI auth server with a bogus refresh token and
- * fail). The gateway swaps this placeholder bearer for the real subscription
- * token server-side, so the real token never lives in the subprocess env.
+ * Build the ChatGPT-subscription `auth.json` the spawned `codex` binary reads
+ * from `CODEX_HOME`.
+ *
+ * Empirically (codex-cli 0.141): the CLI sends `tokens.access_token` **verbatim**
+ * as the outbound `Authorization: Bearer` to `chatgpt_base_url` — it does NOT
+ * have to be a JWT. So `accessToken` is the gateway-auth token (a chat-loopback
+ * token for the chat path; a dummy for the runner's sidecar, which swaps by
+ * configured credential). The CLI DOES require `tokens.id_token` to be a
+ * parseable JWT to boot — so that one is a syntactically-valid unsigned JWT with
+ * a far-future `exp` (so the CLI never tries to refresh — a refresh would hit
+ * the real OpenAI auth server with a bogus refresh token and fail). The gateway
+ * swaps the placeholder bearer for the real subscription token + stamps the real
+ * `chatgpt-account-id` server-side, so neither the real token nor the real
+ * account id ever lives in the subprocess.
  *
  * Pure (the caller passes `now`) so it is unit-testable and free of the
  * Date.now() ambient-clock dependency.
  */
-export function buildCodexAuthJson(opts: { nowMs: number }): {
+export function buildCodexAuthJson(opts: { accessToken: string; nowMs: number }): {
   auth_mode: string;
   tokens: { access_token: string; account_id: string; id_token: string; refresh_token: string };
   last_refresh: string;
 } {
-  const placeholderJwt = [
+  const idToken = [
     b64url({ alg: "none", typ: "JWT" }),
     b64url({
       exp: Math.floor(opts.nowMs / 1000) + 365 * 24 * 3600,
       "https://api.openai.com/auth": { chatgpt_account_id: PLACEHOLDER_ACCOUNT_ID },
+      email: "chat@appstrate.local",
     }),
     "placeholder",
   ].join(".");
   return {
     auth_mode: "chatgpt",
     tokens: {
-      access_token: placeholderJwt,
+      // Sent verbatim as the Bearer → must authenticate at the gateway.
+      access_token: opts.accessToken,
       account_id: PLACEHOLDER_ACCOUNT_ID,
-      id_token: placeholderJwt,
+      // Must be a valid-format JWT for the CLI to boot; identity is overwritten
+      // by the gateway, so the claims here are inert placeholders.
+      id_token: idToken,
       refresh_token: "placeholder-refresh",
     },
     last_refresh: new Date(opts.nowMs).toISOString(),

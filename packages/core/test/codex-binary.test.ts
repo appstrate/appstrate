@@ -57,15 +57,22 @@ describe("resolveCodexBinary", () => {
 });
 
 describe("buildCodexAuthJson", () => {
-  test("placeholder token is an unsigned JWT with a far-future exp", () => {
+  test("access_token is the caller's gateway-auth token, sent verbatim", () => {
     const now = 1_700_000_000_000;
-    const auth = buildCodexAuthJson({ nowMs: now });
+    const auth = buildCodexAuthJson({ accessToken: "chatloop_abc.def", nowMs: now });
     expect(auth.auth_mode).toBe("chatgpt");
-    const [, payloadB64] = auth.tokens.access_token.split(".");
-    const payload = JSON.parse(Buffer.from(payloadB64!, "base64url").toString());
-    expect(payload.exp).toBeGreaterThan(Math.floor(now / 1000));
+    // Bearer = the loopback/gateway token verbatim (not a JWT).
+    expect(auth.tokens.access_token).toBe("chatloop_abc.def");
     expect(auth.tokens.refresh_token).toBe("placeholder-refresh");
     expect(auth.last_refresh).toBe(new Date(now).toISOString());
+  });
+  test("id_token is a valid-format JWT with far-future exp (so the CLI boots)", () => {
+    const now = 1_700_000_000_000;
+    const auth = buildCodexAuthJson({ accessToken: "x", nowMs: now });
+    const parts = auth.tokens.id_token.split(".");
+    expect(parts).toHaveLength(3);
+    const payload = JSON.parse(Buffer.from(parts[1]!, "base64url").toString());
+    expect(payload.exp).toBeGreaterThan(Math.floor(now / 1000));
   });
 });
 

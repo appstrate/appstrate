@@ -22,16 +22,19 @@ import { logger } from "./logger.ts";
 import { listModels, pickModel, modelFromFamily, resolveDefaultApplicationId } from "./llm.ts";
 import { openPlatformMcp } from "./platform-mcp.ts";
 import { createWaitForRunTool } from "./wait-for-run.ts";
-import { CODEX_API_SHAPE } from "./chat-families.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
 import { runClaudeAgentChat } from "./claude-agent/engine.ts";
+import { runCodexAgentChat } from "./codex-agent/engine.ts";
 import { RENDER_HTML_DESCRIPTION, renderHtmlInputShape } from "./render-html-spec.ts";
 
 const MAX_STEPS = 16;
 
 /** Credential provider id of the Claude subscription — routed to the Agent SDK engine. */
 const CLAUDE_CODE_PROVIDER_ID = "claude-code";
+
+/** Credential provider id of the Codex (ChatGPT) subscription — routed to the codex CLI engine. */
+const CODEX_PROVIDER_ID = "codex";
 
 /**
  * TTL for the engine path's loopback bearer. The Agent SDK bakes it into the
@@ -200,17 +203,25 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
     });
   }
 
-  // Codex is an OAuth-subscription provider with no forging path and no SDK
-  // driver — refuse it with a clear error instead of routing to a non-existent
-  // proxy route (which would surface as an opaque 404). Mirrors the run-side
-  // `assertRunnableOnEngine`. CHAT_USABLE_FAMILIES already excludes it from the
-  // picker; this guards a directly-requested codex preset id.
-  if (chosen.apiShape === CODEX_API_SHAPE) {
+  // Codex (ChatGPT) subscription → official `codex` CLI engine (clean/sanctioned),
+  // pointed at the non-forging codex-sdk gateway. The CLI signs its own
+  // fingerprint; the gateway swaps the placeholder bearer for the real token.
+  // Conversational MVP — no platform MCP tools wired yet (codex's own coding
+  // sandbox is read-only here), so close the probe client.
+  if (chosen.providerId === CODEX_PROVIDER_ID) {
     await mcp?.close();
-    throw invalidRequest(
-      `Le fournisseur d'abonnement « ${chosen.providerId} » n'est pas utilisable dans le chat.`,
-      "model",
-    );
+    return runCodexAgentChat({
+      messages,
+      system,
+      modelId: chosen.modelId,
+      gatewayBaseUrl: `${origin}/api/llm-proxy/codex-sdk/${encodeURIComponent(chosen.id)}`,
+      accessToken: mintLoopbackToken(
+        { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
+        { ttlMs: ENGINE_LOOPBACK_TTL_MS },
+      ),
+      abortSignal: c.req.raw.signal,
+      onError: clientErrorMessage,
+    });
   }
 
   // ai-sdk path — API-key providers only, bound to the llm-proxy.
