@@ -63,16 +63,21 @@ function b64url(value: object): string {
  * Pure (the caller passes `now`) so it is unit-testable and free of the
  * Date.now() ambient-clock dependency.
  */
-export function buildCodexAuthJson(opts: { accessToken: string; nowMs: number }): {
+export function buildCodexAuthJson(opts: {
+  accessToken: string;
+  accountId?: string | null;
+  nowMs: number;
+}): {
   auth_mode: string;
   tokens: { access_token: string; account_id: string; id_token: string; refresh_token: string };
   last_refresh: string;
 } {
+  const accountId = opts.accountId || PLACEHOLDER_ACCOUNT_ID;
   const idToken = [
     b64url({ alg: "none", typ: "JWT" }),
     b64url({
       exp: Math.floor(opts.nowMs / 1000) + 365 * 24 * 3600,
-      "https://api.openai.com/auth": { chatgpt_account_id: PLACEHOLDER_ACCOUNT_ID },
+      "https://api.openai.com/auth": { chatgpt_account_id: accountId },
       email: "chat@appstrate.local",
     }),
     "placeholder",
@@ -80,13 +85,14 @@ export function buildCodexAuthJson(opts: { accessToken: string; nowMs: number })
   return {
     auth_mode: "chatgpt",
     tokens: {
-      // Sent verbatim as the Bearer → must authenticate at the gateway.
+      // The REAL subscription access token (vended server-side). The CLI sends it
+      // to chatgpt.com directly, so it must be the genuine token.
       access_token: opts.accessToken,
-      account_id: PLACEHOLDER_ACCOUNT_ID,
-      // Must be a valid-format JWT for the CLI to boot; identity is overwritten
-      // by the gateway, so the claims here are inert placeholders.
+      account_id: accountId,
+      // `last_refresh` (below) keeps the CLI from refreshing; this only needs to
+      // be a valid-format JWT for the CLI to boot.
       id_token: idToken,
-      refresh_token: "placeholder-refresh",
+      refresh_token: "appstrate-managed",
     },
     last_refresh: new Date(opts.nowMs).toISOString(),
   };

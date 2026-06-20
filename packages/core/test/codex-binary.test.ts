@@ -61,9 +61,9 @@ describe("buildCodexAuthJson", () => {
     const now = 1_700_000_000_000;
     const auth = buildCodexAuthJson({ accessToken: "chatloop_abc.def", nowMs: now });
     expect(auth.auth_mode).toBe("chatgpt");
-    // Bearer = the loopback/gateway token verbatim (not a JWT).
+    // The real vended subscription token, written verbatim (the CLI sends it to
+    // chatgpt.com directly).
     expect(auth.tokens.access_token).toBe("chatloop_abc.def");
-    expect(auth.tokens.refresh_token).toBe("placeholder-refresh");
     expect(auth.last_refresh).toBe(new Date(now).toISOString());
   });
   test("id_token is a valid-format JWT with far-future exp (so the CLI boots)", () => {

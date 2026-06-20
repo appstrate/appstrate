@@ -62,10 +62,10 @@ export interface CodexAgentChatInput {
   system: string;
   /** Real upstream model id (e.g. `gpt-5.4-mini`) — NOT the preset id. */
   modelId: string;
-  /** `chatgpt_base_url`: the non-forging gateway, `…/codex-sdk/:presetId`. */
-  gatewayBaseUrl: string;
-  /** Placeholder bearer written to auth.json; the gateway swaps it server-side. */
-  accessToken: string;
+  /** First-party credential-vend endpoint, `…/api/llm-proxy/codex-sdk/:presetId`. */
+  credentialUrl: string;
+  /** Loopback bearer authorizing the vend GET (resolved to the caller's identity). */
+  loopbackToken: string;
   /** Aborts the codex subprocess when the client disconnects. */
   abortSignal: AbortSignal;
   /** Maps a thrown error to a client-safe message. */
@@ -174,10 +174,35 @@ export function runCodexAgentChat(input: CodexAgentChatInput): Response {
       try {
         writer.write(mapper.startChunk(crypto.randomUUID()));
 
+        // Vend the real subscription credential server-side (first-party). The
+        // CLI needs the genuine token in auth.json — it calls chatgpt.com
+        // directly and ignores chatgpt_base_url for its models-manager.
+        const vend = await fetch(input.credentialUrl, {
+          headers: { authorization: `Bearer ${input.loopbackToken}` },
+        });
+        if (!vend.ok) {
+          writer.write({
+            type: "error",
+            errorText:
+              vend.status === 401
+                ? "Reconnectez votre abonnement ChatGPT — la connexion a expiré ou été révoquée."
+                : input.onError(undefined),
+          });
+          writer.write(mapper.finishChunk());
+          return;
+        }
+        const cred = (await vend.json()) as { access_token: string; account_id?: string | null };
+
         home = await mkdtemp(join(tmpdir(), "codex-chat-"));
         await writeFile(
           join(home, "auth.json"),
-          JSON.stringify(buildCodexAuthJson({ accessToken: input.accessToken, nowMs: Date.now() })),
+          JSON.stringify(
+            buildCodexAuthJson({
+              accessToken: cred.access_token,
+              accountId: cred.account_id,
+              nowMs: Date.now(),
+            }),
+          ),
           { mode: 0o600 },
         );
 
@@ -189,8 +214,6 @@ export function runCodexAgentChat(input: CodexAgentChatInput): Response {
             "--skip-git-repo-check",
             "-s",
             "read-only",
-            "-c",
-            `chatgpt_base_url=${input.gatewayBaseUrl}`,
             "-m",
             input.modelId,
             buildCodexPrompt(input.messages, input.system),

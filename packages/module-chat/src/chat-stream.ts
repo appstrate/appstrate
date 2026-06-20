@@ -214,8 +214,8 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
       messages,
       system,
       modelId: chosen.modelId,
-      gatewayBaseUrl: `${origin}/api/llm-proxy/codex-sdk/${encodeURIComponent(chosen.id)}`,
-      accessToken: mintLoopbackToken(
+      credentialUrl: `${origin}/api/llm-proxy/codex-sdk/${encodeURIComponent(chosen.id)}`,
+      loopbackToken: mintLoopbackToken(
         { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
         { ttlMs: ENGINE_LOOPBACK_TTL_MS },
       ),

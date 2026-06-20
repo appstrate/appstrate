@@ -140,25 +140,21 @@ export function createLlmProxyRouter() {
     );
   }
 
-  // Codex (ChatGPT) subscription CLI gateway — FIRST-PARTY ONLY. The chat
-  // module's official `codex` CLI is pointed here via `-c chatgpt_base_url=…`;
-  // the gateway swaps the placeholder bearer for the real subscription token +
-  // stamps the real chatgpt-account-id, forging nothing (the CLI signs its own
-  // fingerprint). A wildcard path forwards whatever subpath the CLI appends
-  // (`/responses`, `/api/codex/ps/mcp`, …). See
-  // services/llm-proxy/codex-sdk-gateway.ts.
-  const codexGateway = async (c: Context<AppEnv>): Promise<Response> => {
-    assertFirstPartyOnly(c.get("authMethod"), "Codex CLI gateway");
-    return handleCodexSdkGateway(c, limits.max_request_bytes);
+  // Codex (ChatGPT) subscription credential vend — FIRST-PARTY ONLY. The chat
+  // module's codex engine GETs the resolved subscription token here (the CLI
+  // needs the real token in its auth.json — it can't be pointed at a forwarding
+  // gateway, see codex-sdk-gateway.ts). Forges nothing; the official CLI signs
+  // its own fingerprint and talks to chatgpt.com directly.
+  const codexVend = async (c: Context<AppEnv>): Promise<Response> => {
+    assertFirstPartyOnly(c.get("authMethod"), "Codex credential vend");
+    return handleCodexSdkGateway(c);
   };
-  for (const path of ["/codex-sdk/:presetId/*", "/codex-sdk/:presetId"]) {
-    router.all(
-      path,
-      rateLimit(limits.rate_per_min),
-      requirePermission("llm-proxy", "call"),
-      codexGateway,
-    );
-  }
+  router.get(
+    "/codex-sdk/:presetId",
+    rateLimit(limits.rate_per_min),
+    requirePermission("llm-proxy", "call"),
+    codexVend,
+  );
 
   return router;
 }
