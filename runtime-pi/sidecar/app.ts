@@ -490,6 +490,41 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(deps.integrationBootReportProvider());
   });
 
+  // Credential vend — the in-container path for a `vend`-mode run (the Codex
+  // CLI, whose models-manager calls the upstream verbatim and cannot be
+  // reverse-proxied through `/llm`). The in-container runner GETs this ONCE at
+  // run start, writes the resolved token into the binary's `auth.json`, and the
+  // binary egresses straight to the provider — locked to the provider's hosts
+  // by the per-run egress allowlist (`SidecarConfig.egressAllowlist`).
+  //
+  // No inbound auth — same posture as `/mcp` and `/integrations/boot-report`:
+  // the per-run internal Docker network is the boundary. Only a `vend`-mode run
+  // answers; `oauth` (Claude) and `api_key` runs 403, so their
+  // no-real-token-in-container invariant is preserved.
+  app.get("/credential-vend", async (c) => {
+    if (config.llm?.authMode !== "vend") {
+      return c.json({ error: "credential vend not enabled for this run" }, 403);
+    }
+    const tokenCache = deps.oauthTokenCache;
+    if (!tokenCache) {
+      return c.json({ error: "oauth token cache unavailable" }, 503);
+    }
+    try {
+      const token = await tokenCache.getToken(config.llm.credentialId);
+      c.header("cache-control", "no-store");
+      return c.json({ access_token: token.accessToken, account_id: token.accountId ?? null });
+    } catch (err) {
+      if (err instanceof NeedsReconnectionError) {
+        return c.json({ error: "subscription credential needs reconnection" }, 410);
+      }
+      logger.error("credential vend: token resolution failed", {
+        credentialId: config.llm.credentialId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.json({ error: "failed to resolve credential" }, 502);
+    }
+  });
+
   // LLM reverse proxy. Two modes:
   //
   //   - api_key: the Pi SDK formats every header (auth, beta, identity)
@@ -506,6 +541,16 @@ export function createApp(deps: AppDeps): Hono {
   app.all("/llm/*", async (c) => {
     if (!config.llm) {
       return c.json({ error: "LLM proxy not configured" }, 503);
+    }
+
+    if (config.llm.authMode === "vend") {
+      // Vend-mode runs (the Codex CLI) drive the upstream directly with a
+      // token handed over via `/credential-vend` — they never proxy through
+      // `/llm` (and carry no `baseUrl`). A request here is a misconfiguration.
+      return c.json(
+        { error: "this run uses an in-container credential driver; /llm is disabled" },
+        400,
+      );
     }
 
     if (isBlockedUrl(config.llm.baseUrl)) {

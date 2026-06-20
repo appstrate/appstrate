@@ -139,10 +139,30 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     return platformHost !== null && hostname.toLowerCase() === platformHost;
   }
 
+  // Per-run egress allowlist (vend-mode runs, e.g. the Codex CLI). When set,
+  // outbound traffic is locked to these hosts only — the real upstream token
+  // lives in-container, so a wide-open egress would let it be exfiltrated.
+  // Normalised once; a target matches by exact name or parent-domain suffix.
+  const egressAllowlist = (config.egressAllowlist ?? [])
+    .map((h) => h.toLowerCase())
+    .filter(Boolean);
+
+  function isOnAllowlist(hostname: string): boolean {
+    return egressAllowlist.some(
+      (allowed) => hostname === allowed || hostname.endsWith(`.${allowed}`),
+    );
+  }
+
   function isAllowedHost(hostname: string): boolean {
     const h = hostname.toLowerCase();
+    // The platform host is always reachable (HMAC-scoped internal traffic),
+    // even under an allowlist — the agent's sink/finalize POSTs must get out.
     if (isPlatformHost(h)) return true;
-    return !isBlockedHostFn(h);
+    if (isBlockedHostFn(h)) return false;
+    // Allowlist mode (vend runs): everything not on the list is refused.
+    if (egressAllowlist.length > 0) return isOnAllowlist(h);
+    // Default posture: SSRF-block-only (every public host allowed).
+    return true;
   }
 
   /**

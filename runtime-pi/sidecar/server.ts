@@ -63,6 +63,23 @@ function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
   return undefined;
 }
 
+/** Parse the per-run egress allowlist forwarded via `EGRESS_ALLOWLIST_JSON`. */
+function readEgressAllowlistFromEnv(): string[] | undefined {
+  const raw = process.env.EGRESS_ALLOWLIST_JSON;
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const hosts = parsed.filter((h): h is string => typeof h === "string" && h.length > 0);
+      return hosts.length > 0 ? hosts : undefined;
+    }
+  } catch {
+    // Launcher bug — surface via the warn below rather than crashing the sidecar.
+    logger.warn("Sidecar env: ignoring invalid EGRESS_ALLOWLIST_JSON", { raw });
+  }
+  return undefined;
+}
+
 function readPositiveIntFromEnv(name: string): number | undefined {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return undefined;
@@ -87,6 +104,7 @@ const config = {
   llm: readLlmConfigFromEnv(),
   modelContextWindow: readPositiveIntFromEnv("MODEL_CONTEXT_WINDOW"),
   modelMaxTokens: readPositiveIntFromEnv("MODEL_MAX_TOKENS"),
+  egressAllowlist: readEgressAllowlistFromEnv(),
 };
 
 // ─── P4 — connect mode (`runAt: "link"` ephemeral connect-run) ───
