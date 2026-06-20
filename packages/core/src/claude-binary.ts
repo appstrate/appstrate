@@ -63,16 +63,22 @@ export function buildClaudeSdkEnv(opts: {
     const value = process.env[key];
     if (value) env[key] = value;
   }
-  env.ANTHROPIC_BASE_URL = opts.baseUrl;
-  env.ANTHROPIC_AUTH_TOKEN = opts.placeholderToken;
-  // Never let an ambient API key flip the binary onto the API-key path.
-  env.ANTHROPIC_API_KEY = "";
   // Keep the subscription binary quiet and non-self-updating in a server.
   env.DISABLE_AUTOUPDATER = "1";
   env.DISABLE_TELEMETRY = "1";
   env.DISABLE_ERROR_REPORTING = "1";
   env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
-  return { ...env, ...(opts.extra ?? {}) };
+
+  // `extra` is merged first so callers can add env, then the
+  // credential-isolation keys are re-asserted LAST: `extra` must never be able
+  // to redirect the binary's upstream (ANTHROPIC_BASE_URL) or swap its
+  // credential (ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY) — that would defeat
+  // the no-secret-leak posture this builder exists to guarantee.
+  const merged = { ...env, ...(opts.extra ?? {}) };
+  merged.ANTHROPIC_BASE_URL = opts.baseUrl;
+  merged.ANTHROPIC_AUTH_TOKEN = opts.placeholderToken;
+  merged.ANTHROPIC_API_KEY = "";
+  return merged;
 }
 
 /**

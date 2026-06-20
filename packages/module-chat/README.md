@@ -33,9 +33,13 @@ Discipline d'embarquabilité : pas de store global, pas de navigation interne, t
 - **Persistance** : chaque tour est écrit dans `chat_sessions`/`chat_messages` ; le client épingle la session via le header `X-Chat-Session-Id`.
 - **Front** : assistant-ui (`useChatRuntime` + `AssistantChatTransport`), thread porté du satellite (markdown, cartes de tools, branching, édition/régénération).
 
-## Reste à faire
+## Limitations connues (hors périmètre)
 
-- **Liste de sessions dans l'UI** (`GET /api/chat/sessions` existe) + restauration d'un thread persisté ; citations numérotées (idée Onyx).
-- **Sélecteur de modèle** dans `ChatPanel` (le header `X-Model-Id` est déjà câblé côté serveur).
-- **Rate limiting** : `rateLimit()`/`idempotency()` sont internes à apps/api — à exporter pour les modules npm.
-- **End-users** : flip `endUserGrantable` quand le chat embarqué B2B2C arrive.
+Le module est fonctionnel et autonome ; les points ci-dessous sont des extensions
+volontairement hors périmètre, documentées pour les intégrateurs — pas du code
+inachevé.
+
+- **Liste de sessions dans l'UI** : `GET /api/chat/sessions` existe côté serveur ; l'UI ne propose pas encore la restauration d'un thread persisté ni les citations numérotées.
+- **Sélecteur de modèle** dans `ChatPanel` : le header `X-Model-Id` est câblé côté serveur, le sélecteur côté UI reste à ajouter.
+- **Rate limiting** : `rateLimit()`/`idempotency()` sont internes à apps/api ; un module npm ne peut pas encore les appliquer tant qu'ils ne sont pas exportés.
+- **End-users** : `endUserGrantable` reste désactivé jusqu'à l'arrivée du chat embarqué B2B2C.

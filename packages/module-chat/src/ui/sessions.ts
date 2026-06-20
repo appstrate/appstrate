@@ -97,10 +97,16 @@ export async function appendEntry(
   sessionId: string,
   entry: Entry,
 ): Promise<void> {
-  await fetch(`/api/chat/sessions/${sessionId}/messages`, {
+  const res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
     method: "POST",
     credentials: "include",
     headers: headers(getHeaders, true),
     body: JSON.stringify(entry),
   });
+  // Surface persistence failures: the assistant-ui history adapter awaits this
+  // and would otherwise treat a dropped message as saved, so it silently
+  // vanishes on the next reload. Throw so the caller can show an error.
+  if (!res.ok) {
+    throw new Error(`Failed to persist chat message (HTTP ${res.status})`);
+  }
 }

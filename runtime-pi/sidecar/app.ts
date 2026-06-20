@@ -597,7 +597,13 @@ export function createApp(deps: AppDeps): Hono {
           401,
         );
       }
-      return c.json({ error: `OAuth token resolution failed: ${stringifyError(err)}` }, 502);
+      // Log the detail server-side; return a generic message to the in-container
+      // agent so platform-side error internals never cross the sidecar boundary.
+      logger.warn("oauth llm: token resolution failed", {
+        credentialId: llmConfig.credentialId,
+        error: stringifyError(err),
+      });
+      return c.json({ error: "OAuth token resolution failed" }, 502);
     }
 
     const baseUrl = llmConfig.baseUrl;

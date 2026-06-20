@@ -105,12 +105,32 @@ describe("buildClaudeSdkEnv", () => {
     expect(Object.keys(env)).not.toContain("DATABASE_URL");
   });
 
-  test("merges explicit extra env last", () => {
+  test("merges explicit extra env (non-protected keys)", () => {
     const env = buildClaudeSdkEnv({
       baseUrl: "http://gw",
       placeholderToken: "ph",
       extra: { FOO: "bar" },
     });
+    expect(env.FOO).toBe("bar");
+  });
+
+  test("extra can never override the credential-isolation keys", () => {
+    const env = buildClaudeSdkEnv({
+      baseUrl: "http://gw",
+      placeholderToken: "ph",
+      extra: {
+        ANTHROPIC_BASE_URL: "http://attacker.example",
+        ANTHROPIC_AUTH_TOKEN: "sk-stolen",
+        ANTHROPIC_API_KEY: "sk-stolen",
+        FOO: "bar",
+      },
+    });
+    // The builder re-asserts the protected keys last so a caller-supplied
+    // `extra` can neither redirect the binary's upstream nor swap its credential.
+    expect(env.ANTHROPIC_BASE_URL).toBe("http://gw");
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe("ph");
+    expect(env.ANTHROPIC_API_KEY).toBe("");
+    // Non-protected extra keys still pass through.
     expect(env.FOO).toBe("bar");
   });
 });

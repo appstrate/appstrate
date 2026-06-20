@@ -68,7 +68,7 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
   const pool = models.filter((m) => m.enabled !== false && CHAT_USABLE_FAMILIES.has(m.apiShape));
   if (pool.length === 0 && models.some((m) => m.enabled !== false)) {
     throw invalidRequest(
-      "Aucun modèle utilisable par le chat n'est configuré. Connectez un modèle par clé API (Anthropic, OpenAI, Mistral) ou un abonnement (Codex, Claude Code) dans Settings → Models.",
+      "Aucun modèle utilisable par le chat n'est configuré. Connectez un modèle par clé API (Anthropic, OpenAI, Mistral) ou un abonnement Claude Code dans Settings → Models.",
     );
   }
   const chosen = modelId
@@ -103,8 +103,9 @@ export function proxyTarget(family: string): { kind: ProxyKind; suffix: string }
       return { kind: "openai-compatible", suffix: "/openai-completions/v1" };
     case "mistral-conversations":
       return { kind: "openai-compatible", suffix: "/mistral-conversations/v1" };
-    case "openai-codex-responses":
-      return { kind: "openai-responses", suffix: "/openai-codex-responses/codex" };
+    // Codex (openai-codex-responses) is intentionally absent: it has no
+    // llm-proxy route and is refused upstream of here by the codex guard in
+    // chat-stream.ts, so it must never resolve to a proxy target.
     default:
       return null;
   }

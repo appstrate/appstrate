@@ -22,6 +22,7 @@ import { logger } from "./logger.ts";
 import { listModels, pickModel, modelFromFamily, resolveDefaultApplicationId } from "./llm.ts";
 import { openPlatformMcp } from "./platform-mcp.ts";
 import { createWaitForRunTool } from "./wait-for-run.ts";
+import { CODEX_API_SHAPE } from "./chat-families.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
 import { runClaudeAgentChat } from "./claude-agent/engine.ts";
@@ -199,7 +200,20 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
     });
   }
 
-  // ai-sdk path — API-key providers + codex-grey, bound to the llm-proxy.
+  // Codex is an OAuth-subscription provider with no forging path and no SDK
+  // driver — refuse it with a clear error instead of routing to a non-existent
+  // proxy route (which would surface as an opaque 404). Mirrors the run-side
+  // `assertRunnableOnEngine`. CHAT_USABLE_FAMILIES already excludes it from the
+  // picker; this guards a directly-requested codex preset id.
+  if (chosen.apiShape === CODEX_API_SHAPE) {
+    await mcp?.close();
+    throw invalidRequest(
+      `Le fournisseur d'abonnement « ${chosen.providerId} » n'est pas utilisable dans le chat.`,
+      "model",
+    );
+  }
+
+  // ai-sdk path — API-key providers only, bound to the llm-proxy.
   const model = modelFromFamily(chosen, origin, inferenceHeaders, mintInferenceAuth);
   if (!model) {
     await mcp?.close();
@@ -220,11 +234,6 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
         : { render_html: renderHtmlTool },
       stopWhen: stepCountIs(MAX_STEPS),
       abortSignal: c.req.raw.signal,
-      // Codex (ChatGPT) backend quirks, ignored by non-OpenAI providers:
-      //  - `store: false` is mandatory.
-      //  - it requires the top-level `instructions` field — the Responses
-      //    provider only sets it from `providerOptions.openai.instructions`.
-      providerOptions: { openai: { store: false, instructions: system } },
       onStepFinish: ({ toolCalls, toolResults, finishReason, usage }) => {
         const now = Date.now();
         logger.info("chat step", {
@@ -253,12 +262,16 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
           usage: totalUsage as unknown as Record<string, unknown>,
           finishReason,
         });
-        void mcp?.close();
+        void mcp?.close().catch((err) => logger.warn("mcp close failed", { err: String(err) }));
       },
     });
 
     // Close the MCP session if the client disconnects mid-stream.
-    c.req.raw.signal.addEventListener("abort", () => void mcp?.close(), { once: true });
+    c.req.raw.signal.addEventListener(
+      "abort",
+      () => void mcp?.close().catch((err) => logger.warn("mcp close failed", { err: String(err) })),
+      { once: true },
+    );
 
     // Surface the real failure to the client (AI SDK masks errors otherwise).
     return result.toUIMessageStreamResponse({ onError: clientErrorMessage });
