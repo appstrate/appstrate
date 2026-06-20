@@ -30,12 +30,12 @@
  */
 
 import type { Context } from "hono";
-import { loadModel } from "../org-models.ts";
+import { loadModel, modelNeedsReconnection } from "../org-models.ts";
 import { resolveOAuthTokenForSidecar } from "../model-providers/token-resolver.ts";
 import { anthropicMessagesAdapter } from "./anthropic.ts";
 import { cloneResponseHeaders, recordProxyUsage, tapSseUsage } from "./metering.ts";
 import type { LlmProxyPrincipal } from "./types.ts";
-import { invalidRequest } from "../../lib/errors.ts";
+import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
@@ -93,6 +93,39 @@ export function buildSubscriptionHeaders(incoming: Headers, accessToken: string)
 }
 
 /**
+ * Anthropic-native `authentication_error` envelope (HTTP 401) the official
+ * `claude` binary understands, so the chat surfaces an actionable "reconnect
+ * your subscription" message instead of an opaque transport error or a
+ * misleading "model not enabled". Returned for both reconnection paths below.
+ */
+export function anthropicAuthErrorResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      type: "error",
+      error: {
+        type: "authentication_error",
+        message: "Reconnectez votre abonnement Claude — la connexion a expiré ou été révoquée.",
+      },
+    }),
+    { status: 401, headers: { "content-type": "application/json" } },
+  );
+}
+
+/**
+ * Translate a token-resolution failure into {@link anthropicAuthErrorResponse}
+ * when it is a `gone()` (HTTP 410) — i.e. a refresh-time revocation discovered
+ * by `resolveOAuthTokenForSidecar` (the credential wasn't pre-flagged, the
+ * refresh hit `invalid_grant`). Returns `null` for any other error so the
+ * caller rethrows — unexpected failures must not masquerade as an auth problem.
+ * Pure for unit testing. (The pre-flagged `needsReconnection` case is caught
+ * earlier, at the `loadModel` layer, via `modelNeedsReconnection`.)
+ */
+export function subscriptionAuthErrorResponse(err: unknown): Response | null {
+  if (!(err instanceof ApiError) || err.status !== 410) return null;
+  return anthropicAuthErrorResponse();
+}
+
+/**
  * Handle one upstream call from the Claude Agent SDK. The route layer has
  * already enforced bearer-only + first-party + rate limit + `llm-proxy:call`.
  */
@@ -118,7 +151,19 @@ export async function handleClaudeCodeSdkGateway(
   // Must be a Claude Code subscription model: this route injects an OAuth
   // subscription token, which only the claude-code provider may receive.
   const resolved = await loadModel(orgId, presetId);
-  if (!resolved) throw invalidRequest(`Model preset "${presetId}" is not enabled for this org`);
+  if (!resolved) {
+    // `loadModel` nulls a model whose OAuth credential is flagged
+    // `needsReconnection` (same as one that's truly disabled/missing). For a
+    // chat user that's the common "subscription expired" case — surface the
+    // actionable reconnect prompt instead of a misleading "not enabled" 400.
+    if (await modelNeedsReconnection(orgId, presetId)) {
+      logger.warn("claude-code-sdk gateway: subscription needs reconnection (pre-flagged)", {
+        presetId,
+      });
+      return anthropicAuthErrorResponse();
+    }
+    throw invalidRequest(`Model preset "${presetId}" is not enabled for this org`);
+  }
   if (resolved.providerId !== CLAUDE_CODE_PROVIDER_ID) {
     throw invalidRequest(
       `Model preset "${presetId}" is not a Claude Code subscription model (provider: ${resolved.providerId})`,
@@ -143,8 +188,22 @@ export async function handleClaudeCodeSdkGateway(
   const rawBody = new Uint8Array(buf);
 
   // Resolve a fresh subscription token (auto-refresh, Redis-deduped). A
-  // credential needing reconnection throws `gone()` → surfaced as 410.
-  const token = await resolveOAuthTokenForSidecar(resolved.credentialId, orgId);
+  // credential needing reconnection throws `gone()` → translate it into an
+  // Anthropic-native 401 the SDK surfaces as an actionable reconnect prompt.
+  let token: Awaited<ReturnType<typeof resolveOAuthTokenForSidecar>>;
+  try {
+    token = await resolveOAuthTokenForSidecar(resolved.credentialId, orgId);
+  } catch (err) {
+    const authError = subscriptionAuthErrorResponse(err);
+    if (authError) {
+      logger.warn("claude-code-sdk gateway: subscription needs reconnection", {
+        presetId,
+        code: err instanceof ApiError ? err.code : undefined,
+      });
+      return authError;
+    }
+    throw err;
+  }
 
   const upstreamUrl = `${resolved.baseUrl.replace(/\/+$/, "")}${subpath}${new URL(c.req.url).search}`;
   const upstreamHeaders = buildSubscriptionHeaders(c.req.raw.headers, token.accessToken);

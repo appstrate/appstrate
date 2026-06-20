@@ -99,6 +99,9 @@ export interface ClaudeResultMeta {
 
 const SDK_ERROR_MESSAGES: Record<string, string> = {
   authentication_failed: "Authentification Claude échouée — reconnectez votre abonnement Claude.",
+  // Anthropic's wire code for an auth failure (e.g. the gateway's 401 envelope
+  // on a revoked subscription) — alias of the above so either surfaces cleanly.
+  authentication_error: "Authentification Claude échouée — reconnectez votre abonnement Claude.",
   oauth_org_not_allowed: "Cet abonnement Claude n'autorise pas cette organisation.",
   billing_error: "Problème de facturation sur l'abonnement Claude.",
   rate_limit: "Limite de débit Claude atteinte — réessayez dans un instant.",

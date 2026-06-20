@@ -196,6 +196,56 @@ describe("Claude Code SDK gateway — first-party happy path", () => {
     expect(row!.userId).toBe(h.ctx.user.id);
   });
 
+  it("surfaces a revoked subscription as a 401 authentication_error, no upstream call", async () => {
+    // A claude-code credential flagged needsReconnection → the token resolver
+    // throws gone(); the gateway must translate that into the Anthropic-native
+    // 401 the SDK understands, NOT reach the upstream or leak a 410.
+    const ctx = await createTestContext({ orgSlug: "ccsdkreconnect" });
+    const cred = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: "claude-code",
+      accessToken: "sk-ant-oat-STALE",
+      expiresAt: Date.now() + 3_600_000,
+      needsReconnection: true,
+    });
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: cred.id,
+      label: "Claude Code (revoked)",
+      modelId: "claude-haiku-4-5",
+      enabled: true,
+    });
+    const loopback = mintLoopbackToken({
+      userId: ctx.user.id,
+      email: ctx.user.email ?? "u@test",
+      name: ctx.user.name ?? "U",
+      orgId: ctx.orgId,
+      orgRole: "owner",
+    });
+    let upstreamHit = false;
+    mockUpstream(async () => {
+      upstreamHit = true;
+      return new Response("x", { status: 200 });
+    });
+
+    const res = await app.request(`/api/llm-proxy/claude-code-sdk/${model.id}/v1/messages`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${loopback}`,
+        "X-Org-Id": ctx.orgId,
+        "Content-Type": "application/json",
+      },
+      body: messagesBody("claude-haiku-4-5"),
+    });
+
+    expect(res.status).toBe(401);
+    expect(upstreamHit).toBe(false);
+    const body = (await res.json()) as { type: string; error: { type: string; message: string } };
+    expect(body.type).toBe("error");
+    expect(body.error.type).toBe("authentication_error");
+    expect(body.error.message).toMatch(/[Rr]econnect/);
+  });
+
   it("acks the SDK connectivity probe (bare HEAD) with 200 and no upstream call", async () => {
     const h = await buildClaudeCodeHarness();
     let upstreamHit = false;

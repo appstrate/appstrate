@@ -268,3 +268,135 @@ describe("SdkUiStreamMapper — startChunk", () => {
     expect(mapper.startChunk("msg_1")).toEqual({ type: "start", messageId: "msg_1" });
   });
 });
+
+/**
+ * Contract-lock regression for a COMPLETE multi-step turn, using the exact SDK
+ * message shapes confirmed against a live Claude subscription run (thinking +
+ * text + a tool round-trip + a second answer step + the terminal `result`).
+ *
+ * The mapper is a pure function, so a fixture replay — not a live network call
+ * — is the correct regression form: it pins the full ordered UI-chunk output so
+ * an SDK shape drift (e.g. a message-type rename on a version bump) fails here
+ * instead of silently in production. Assert the ENTIRE sequence, not a subset.
+ */
+describe("SdkUiStreamMapper — full turn (captured real shapes)", () => {
+  test("maps a thinking→text→tool→result→answer turn to the exact UI-chunk sequence", () => {
+    const mapper = new SdkUiStreamMapper();
+    const out: UIMessageChunk[] = [];
+    const push = (m: ClaudeSdkMessage) => out.push(...mapper.map(m));
+
+    // ── Step 1: the model thinks, says a line, then calls a tool ──
+    push(ev({ type: "message_start" }));
+    push(ev({ type: "content_block_start", index: 0, content_block: { type: "thinking" } }));
+    push(
+      ev({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: "Need a chart." },
+      }),
+    );
+    push(ev({ type: "content_block_stop", index: 0 }));
+    push(ev({ type: "content_block_start", index: 1, content_block: { type: "text" } }));
+    push(
+      ev({
+        type: "content_block_delta",
+        index: 1,
+        delta: { type: "text_delta", text: "Voici." },
+      }),
+    );
+    push(ev({ type: "content_block_stop", index: 1 }));
+    push(
+      ev({
+        type: "content_block_start",
+        index: 2,
+        content_block: {
+          type: "tool_use",
+          id: "toolu_42",
+          name: "mcp__appstrate_local__render_html",
+        },
+      }),
+    );
+    push(
+      ev({
+        type: "content_block_delta",
+        index: 2,
+        delta: { type: "input_json_delta", partial_json: '{"html":"<h1>x</h1>"}' },
+      }),
+    );
+    push(ev({ type: "content_block_stop", index: 2 }));
+    push(ev({ type: "message_stop" }));
+
+    // ── Tool result comes back as a `user` message ──
+    push({
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "toolu_42", content: [{ type: "text", text: "ok" }] },
+        ],
+      },
+    } as ClaudeSdkMessage);
+
+    // ── Step 2: the model answers after the tool ──
+    push(ev({ type: "message_start" }));
+    push(ev({ type: "content_block_start", index: 0, content_block: { type: "text" } }));
+    push(
+      ev({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Fait." },
+      }),
+    );
+    push(ev({ type: "content_block_stop", index: 0 }));
+    push(ev({ type: "message_stop" }));
+
+    // ── Terminal result (no chunks; captured as metadata) ──
+    push({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      stop_reason: "end_turn",
+      usage: { input_tokens: 200, output_tokens: 25 },
+      total_cost_usd: 0.0031,
+    } as ClaudeSdkMessage);
+
+    expect(out).toEqual([
+      // step 1
+      { type: "start-step" },
+      { type: "reasoning-start", id: "1-0" },
+      { type: "reasoning-delta", id: "1-0", delta: "Need a chart." },
+      { type: "reasoning-end", id: "1-0" },
+      { type: "text-start", id: "1-1" },
+      { type: "text-delta", id: "1-1", delta: "Voici." },
+      { type: "text-end", id: "1-1" },
+      { type: "tool-input-start", toolCallId: "toolu_42", toolName: "render_html" },
+      { type: "tool-input-delta", toolCallId: "toolu_42", inputTextDelta: '{"html":"<h1>x</h1>"}' },
+      {
+        type: "tool-input-available",
+        toolCallId: "toolu_42",
+        toolName: "render_html",
+        input: { html: "<h1>x</h1>" },
+      },
+      { type: "finish-step" },
+      // tool result
+      {
+        type: "tool-output-available",
+        toolCallId: "toolu_42",
+        output: [{ type: "text", text: "ok" }],
+      },
+      // step 2 (block ids namespaced to step 2 → no collision with step 1)
+      { type: "start-step" },
+      { type: "text-start", id: "2-0" },
+      { type: "text-delta", id: "2-0", delta: "Fait." },
+      { type: "text-end", id: "2-0" },
+      { type: "finish-step" },
+    ]);
+
+    // Terminal metadata rides on the engine's closing finish chunk.
+    expect(mapper.finishChunk()).toEqual({
+      type: "finish",
+      finishReason: "stop",
+      messageMetadata: { usage: { input_tokens: 200, output_tokens: 25 }, costUsd: 0.0031 },
+    });
+  });
+});

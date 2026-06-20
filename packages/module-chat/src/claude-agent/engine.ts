@@ -27,10 +27,38 @@ import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } 
 import { resolveClaudeCodeBinary } from "./binary.ts";
 import { createLocalToolsServer, type LocalToolsContext } from "./local-tools.ts";
 import { SdkUiStreamMapper, type ClaudeSdkMessage } from "./ui-stream-mapper.ts";
+import { acquireClaudeSlot } from "./concurrency.ts";
 import { logger } from "../logger.ts";
 
 /** Upper bound on agent turns per chat message (mirrors the ai-sdk path's MAX_STEPS). */
 const MAX_TURNS = 16;
+
+/**
+ * Returned (instead of a stream) when the engine is at its subprocess cap, so
+ * the client backs off rather than the instance forking unbounded binaries.
+ * A 429 problem+json — `useChat` surfaces it as a turn error.
+ */
+function capacityResponse(): Response {
+  const retryAfterSeconds = 5;
+  return new Response(
+    JSON.stringify({
+      type: "https://docs.appstrate.dev/errors/chat-capacity",
+      title: "Too Many Requests",
+      status: 429,
+      detail:
+        "Le service de chat Claude est temporairement saturé. Réessayez dans quelques instants.",
+      code: "chat_capacity",
+      retryAfter: retryAfterSeconds,
+    }),
+    {
+      status: 429,
+      headers: {
+        "content-type": "application/problem+json",
+        "retry-after": String(retryAfterSeconds),
+      },
+    },
+  );
+}
 
 export interface ClaudeAgentChatInput {
   /** Full thread from the client (assistant-ui sends every turn). */
@@ -128,7 +156,14 @@ function buildMcpServers(input: ClaudeAgentChatInput): Record<string, unknown> {
  * `toUIMessageStreamResponse`).
  */
 export function runClaudeAgentChat(input: ClaudeAgentChatInput): Response {
+  // Resolve the binary BEFORE reserving a slot so a resolution failure can't
+  // leak a slot (it throws straight out, no acquire held).
   const binary = resolveClaudeCodeBinary();
+
+  // Bound the number of concurrent `claude` subprocesses per instance.
+  const slot = acquireClaudeSlot();
+  if (!slot) return capacityResponse();
+
   const controller = new AbortController();
   if (input.abortSignal.aborted) controller.abort();
   else input.abortSignal.addEventListener("abort", () => controller.abort(), { once: true });
@@ -138,36 +173,42 @@ export function runClaudeAgentChat(input: ClaudeAgentChatInput): Response {
   const stream = createUIMessageStream({
     onError: input.onError,
     execute: async ({ writer }) => {
-      writer.write(mapper.startChunk(crypto.randomUUID()));
+      // The finally guarantees the slot is freed on success, SDK error, AND
+      // client abort (the for-await unwinds when the controller aborts).
+      try {
+        writer.write(mapper.startChunk(crypto.randomUUID()));
 
-      const response = query({
-        prompt: buildPromptFromMessages(input.messages),
-        options: {
-          pathToClaudeCodeExecutable: binary,
-          env: buildSdkEnv(input.gatewayBaseUrl, input.placeholderToken),
-          model: input.modelId,
-          systemPrompt: input.system,
-          tools: [], // disable ALL built-ins — chat must not get host execution
-          mcpServers: buildMcpServers(input) as never,
-          includePartialMessages: true,
-          permissionMode: "bypassPermissions",
-          settingSources: [],
-          persistSession: false,
-          maxTurns: MAX_TURNS,
-          abortController: controller,
-        },
-      });
+        const response = query({
+          prompt: buildPromptFromMessages(input.messages),
+          options: {
+            pathToClaudeCodeExecutable: binary,
+            env: buildSdkEnv(input.gatewayBaseUrl, input.placeholderToken),
+            model: input.modelId,
+            systemPrompt: input.system,
+            tools: [], // disable ALL built-ins — chat must not get host execution
+            mcpServers: buildMcpServers(input) as never,
+            includePartialMessages: true,
+            permissionMode: "bypassPermissions",
+            settingSources: [],
+            persistSession: false,
+            maxTurns: MAX_TURNS,
+            abortController: controller,
+          },
+        });
 
-      for await (const message of response) {
-        for (const chunk of mapper.map(message as ClaudeSdkMessage)) writer.write(chunk);
+        for await (const message of response) {
+          for (const chunk of mapper.map(message as ClaudeSdkMessage)) writer.write(chunk);
+        }
+
+        const meta = mapper.resultMeta();
+        if (meta?.isError) {
+          logger.warn("claude-agent chat turn ended in error", { finishReason: meta.finishReason });
+          writer.write({ type: "error", errorText: meta.errorText ?? input.onError(undefined) });
+        }
+        writer.write(mapper.finishChunk());
+      } finally {
+        slot.release();
       }
-
-      const meta = mapper.resultMeta();
-      if (meta?.isError) {
-        logger.warn("claude-agent chat turn ended in error", { finishReason: meta.finishReason });
-        writer.write({ type: "error", errorText: meta.errorText ?? input.onError(undefined) });
-      }
-      writer.write(mapper.finishChunk());
     },
   });
 

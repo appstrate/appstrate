@@ -4,7 +4,9 @@ import { describe, expect, test } from "bun:test";
 import {
   deriveUpstreamSubpath,
   buildSubscriptionHeaders,
+  subscriptionAuthErrorResponse,
 } from "../../src/services/llm-proxy/claude-code-sdk-gateway.ts";
+import { gone, invalidRequest, internalError } from "../../src/lib/errors.ts";
 
 describe("deriveUpstreamSubpath", () => {
   const preset = "11111111-1111-1111-1111-111111111111";
@@ -84,5 +86,32 @@ describe("buildSubscriptionHeaders", () => {
     const serialized = JSON.stringify([...out.entries()]);
     expect(serialized).not.toContain("x-api-key");
     expect(out.get("authorization")).toContain("secret-token");
+  });
+});
+
+describe("subscriptionAuthErrorResponse", () => {
+  test("translates a 410 gone() into a 401 Anthropic authentication_error envelope", async () => {
+    const res = subscriptionAuthErrorResponse(
+      gone("OAUTH_CONNECTION_NEEDS_RECONNECTION", "needs reconnection"),
+    );
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(401);
+    expect(res!.headers.get("content-type")).toBe("application/json");
+    const body = (await res!.json()) as { type: string; error: { type: string; message: string } };
+    // Shape the official `claude` binary recognises natively.
+    expect(body.type).toBe("error");
+    expect(body.error.type).toBe("authentication_error");
+    // Actionable, user-facing (French) — not an opaque transport error.
+    expect(body.error.message).toMatch(/[Rr]econnect/);
+  });
+
+  test("returns null for a non-410 ApiError (caller rethrows — not an auth problem)", () => {
+    expect(subscriptionAuthErrorResponse(invalidRequest("bad"))).toBeNull();
+    expect(subscriptionAuthErrorResponse(internalError())).toBeNull();
+  });
+
+  test("returns null for a plain Error (transient failures must not look like auth)", () => {
+    expect(subscriptionAuthErrorResponse(new Error("ECONNRESET"))).toBeNull();
+    expect(subscriptionAuthErrorResponse(undefined)).toBeNull();
   });
 });
