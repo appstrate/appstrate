@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.20
 #
 # Appstrate Sidecar — credential-isolating HTTP proxy for agent containers.
 #
@@ -20,30 +20,16 @@ FROM ${BUN_IMAGE} AS builder
 
 WORKDIR /build
 
-# Root manifest + lockfile + every workspace manifest referenced by the
-# lockfile. `bun install --frozen-lockfile` walks the full graph; stub
-# manifests satisfy the walker without pulling unused sources.
+# Root manifest + lockfile + EVERY workspace manifest referenced by the
+# lockfile. `bun install --frozen-lockfile` walks the full graph, so any
+# workspace package depended on transitively (e.g. apps/api → @appstrate/
+# module-chat) must have its manifest on disk even when its sources aren't
+# pulled. The `--parents` glob copies all of them at their real paths — same
+# pattern as runtime-pi/Dockerfile — so a newly added workspace package never
+# breaks this build (no hand-maintained list to forget to update).
 COPY package.json bun.lock ./
 COPY patches/ patches/
-COPY packages/afps-runtime/package.json  packages/afps-runtime/
-COPY packages/afps-shared/package.json   packages/afps-shared/
-COPY packages/connect/package.json       packages/connect/
-COPY packages/core/package.json          packages/core/
-COPY packages/db/package.json            packages/db/
-COPY packages/emails/package.json        packages/emails/
-COPY packages/env/package.json           packages/env/
-COPY packages/mcp-transport/package.json     packages/mcp-transport/
-COPY packages/module-claude-code/package.json packages/module-claude-code/
-COPY packages/module-codex/package.json      packages/module-codex/
-COPY packages/runner-pi/package.json     packages/runner-pi/
-COPY packages/shared-types/package.json  packages/shared-types/
-COPY packages/ui/package.json            packages/ui/
-COPY apps/api/package.json               apps/api/
-COPY apps/cli/package.json               apps/cli/
-COPY apps/web/package.json               apps/web/
-COPY runtime-pi/package.json             runtime-pi/
-COPY runtime-pi/sidecar/package.json     runtime-pi/sidecar/
-COPY e2e/package.json                    e2e/
+COPY --parents */package.json */*/package.json ./
 
 # `--filter=appstrate-sidecar` restricts the install to the sidecar's
 # subgraph. Same root lockfile, subset of the workspace.
