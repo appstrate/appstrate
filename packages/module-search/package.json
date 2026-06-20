@@ -1,0 +1,27 @@
+{
+  "name": "@appstrate/module-search",
+  "version": "0.1.0",
+  "description": "Appstrate module — search: indexes content (chunk + local embeddings + pgvector) and answers hybrid queries (vector + full-text + RRF). Consumes storage objects through the event seam, reads bytes by id over the storage API. Opt-in: append `@appstrate/module-search` to MODULES to enable.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": null,
+  "module": null,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test test/"
+  },
+  "dependencies": {
+    "@appstrate/core": "workspace:*",
+    "@appstrate/db": "workspace:*",
+    "@huggingface/transformers": "^4",
+    "drizzle-orm": "^0.45.2",
+    "unpdf": "^1.4.0",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "hono": "*"
+  }
+}
