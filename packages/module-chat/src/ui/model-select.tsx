@@ -20,7 +20,8 @@ export interface OrgModelOption {
   apiShape: string | null;
   providerId?: string | null;
   label: string | null;
-  isDefault?: boolean;
+  /** snake_case to match the `/api/models` wire field (org-models.ts). */
+  is_default?: boolean;
   enabled?: boolean;
   /** Model-alias flag — selectable in chat without exposing the backing model. */
   aliased?: boolean;

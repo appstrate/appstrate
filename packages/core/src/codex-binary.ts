@@ -258,3 +258,34 @@ export function resolveCodexBinary(opts: {
     );
   }
 }
+
+/**
+ * Split a byte stream into newline-delimited, trimmed, non-empty strings
+ * (UTF-8), flushing any unterminated tail. Used to read the `codex exec --json`
+ * NDJSON event stream off the subprocess stdout — shared by the chat engine
+ * (`module-chat`) and the AFPS runner (`runner-codex`).
+ */
+export async function* readNdjsonLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+  const decoder = new TextDecoder();
+  let buf = "";
+  for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) {
+    buf += decoder.decode(chunk, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (line) yield line;
+    }
+  }
+  const tail = (buf + decoder.decode()).trim();
+  if (tail) yield tail;
+}
+
+/** Parse one NDJSON line, returning `null` instead of throwing on malformed JSON. */
+export function safeParseJson<T>(line: string): T | null {
+  try {
+    return JSON.parse(line) as T;
+  } catch {
+    return null;
+  }
+}

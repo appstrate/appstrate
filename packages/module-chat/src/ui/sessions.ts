@@ -30,7 +30,11 @@ export async function fetchSessions(getHeaders: GetHeaders): Promise<SessionSumm
     credentials: "include",
     headers: headers(getHeaders),
   });
-  if (!res.ok) return [];
+  // Throw (don't return []) so the assistant-ui thread-list adapter sees a
+  // rejected load instead of a fake-empty list — a failed fetch must not render
+  // as the "no conversations yet" empty state. Consistent with the write
+  // helpers below, which already throw on !res.ok.
+  if (!res.ok) throw new Error(`Failed to load conversations (HTTP ${res.status})`);
   return ((await res.json()) as { data?: SessionSummary[] }).data ?? [];
 }
 
@@ -88,7 +92,9 @@ export async function fetchEntries(getHeaders: GetHeaders, sessionId: string): P
     credentials: "include",
     headers: headers(getHeaders),
   });
-  if (!res.ok) return [];
+  // Throw (don't return []) so the history adapter doesn't render a conversation
+  // whose messages failed to load as an empty thread. Consistent with appendEntry.
+  if (!res.ok) throw new Error(`Failed to load conversation (HTTP ${res.status})`);
   return ((await res.json()) as { messages?: Entry[] }).messages ?? [];
 }
 

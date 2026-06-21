@@ -3,7 +3,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   SdkUiStreamMapper,
-  normalizeToolName,
+  stripMcpToolPrefix,
   type ClaudeSdkMessage,
 } from "../src/claude-agent/ui-stream-mapper.ts";
 import type { UIMessageChunk } from "ai";
@@ -17,16 +17,16 @@ function run(messages: ClaudeSdkMessage[]): UIMessageChunk[] {
 const ev = (event: Record<string, unknown>): ClaudeSdkMessage =>
   ({ type: "stream_event", event }) as ClaudeSdkMessage;
 
-describe("normalizeToolName", () => {
+describe("stripMcpToolPrefix", () => {
   it("strips the mcp__<server>__ prefix", () => {
-    expect(normalizeToolName("mcp__platform__search_operations")).toBe("search_operations");
-    expect(normalizeToolName("mcp__appstrate_local__render_html")).toBe("render_html");
+    expect(stripMcpToolPrefix("mcp__platform__search_operations")).toBe("search_operations");
+    expect(stripMcpToolPrefix("mcp__appstrate_local__render_html")).toBe("render_html");
   });
   it("preserves tool names that themselves contain __", () => {
-    expect(normalizeToolName("mcp__platform__a__b")).toBe("a__b");
+    expect(stripMcpToolPrefix("mcp__platform__a__b")).toBe("a__b");
   });
   it("passes through non-mcp names", () => {
-    expect(normalizeToolName("wait_for_run")).toBe("wait_for_run");
+    expect(stripMcpToolPrefix("wait_for_run")).toBe("wait_for_run");
   });
 });
 

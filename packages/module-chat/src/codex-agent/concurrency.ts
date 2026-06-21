@@ -2,44 +2,28 @@
 
 /**
  * Bounded concurrency for the Codex CLI engine — the codex twin of
- * {@link ../claude-agent/concurrency.ts}. Each chat turn on the `codex` path
- * spawns a native `codex` subprocess inside the single `apps/api` process; a
- * burst of concurrent chats would otherwise fork unbounded binaries and exhaust
- * the instance. Simple in-process counting gate; when saturated the engine
- * returns 429 so the client backs off.
+ * {@link ../claude-agent/concurrency.ts}.
  *
- * Cap via `CHAT_CODEX_MAX_CONCURRENCY` (positive integer, default 6), read from
- * `process.env` to match the module's `CHAT_DEBUG` / `CHAT_CLAUDE_*` convention.
+ * Each chat turn on the `codex` path spawns a native `codex` subprocess (see
+ * engine.ts). Thin instantiation of the shared {@link createConcurrencyGate} —
+ * capped by `CHAT_CODEX_MAX_CONCURRENCY` (positive integer, default 6).
  */
 
-const DEFAULT_MAX_CONCURRENCY = 6;
+import { createConcurrencyGate, type ConcurrencySlot } from "../concurrency-gate.ts";
 
-export function codexMaxConcurrency(): number {
-  const raw = process.env.CHAT_CODEX_MAX_CONCURRENCY;
-  if (!raw) return DEFAULT_MAX_CONCURRENCY;
-  const n = Number.parseInt(raw, 10);
-  return Number.isInteger(n) && n > 0 ? n : DEFAULT_MAX_CONCURRENCY;
-}
+const gate = createConcurrencyGate("CHAT_CODEX_MAX_CONCURRENCY");
 
-let active = 0;
+/** A reserved subprocess slot. `release()` is idempotent (safe to call twice). */
+export type CodexSlot = ConcurrencySlot;
 
-export interface CodexSlot {
-  release(): void;
-}
+/** Resolve the configured cap, falling back to the default on absent/invalid input. */
+export const codexMaxConcurrency = (): number => gate.max();
 
-export function acquireCodexSlot(): CodexSlot | null {
-  if (active >= codexMaxConcurrency()) return null;
-  active += 1;
-  let released = false;
-  return {
-    release() {
-      if (released) return;
-      released = true;
-      active -= 1;
-    },
-  };
-}
+/**
+ * Try to reserve a subprocess slot. Returns the slot when below the cap, or
+ * `null` when the engine is already at capacity (caller should 429).
+ */
+export const acquireCodexSlot = (): CodexSlot | null => gate.acquire();
 
-export function activeCodexSlots(): number {
-  return active;
-}
+/** Active reserved-slot count — for tests and observability. */
+export const activeCodexSlots = (): number => gate.active();

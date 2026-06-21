@@ -1,40 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Appstrate
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   buildCodexAuthJson,
   buildCodexEnv,
   codexBinaryPackage,
   codexTargetTriple,
+  readNdjsonLines,
   redactSecrets,
   resolveCodexBinary,
+  safeParseJson,
 } from "../src/codex-binary.ts";
 
 describe("codexTargetTriple", () => {
-  test("linux is musl (runs on Alpine)", () => {
+  it("linux is musl (runs on Alpine)", () => {
     expect(codexTargetTriple("linux", "x64")).toBe("x86_64-unknown-linux-musl");
     expect(codexTargetTriple("linux", "arm64")).toBe("aarch64-unknown-linux-musl");
   });
-  test("darwin + win32", () => {
+  it("darwin + win32", () => {
     expect(codexTargetTriple("darwin", "arm64")).toBe("aarch64-apple-darwin");
     expect(codexTargetTriple("win32", "x64")).toBe("x86_64-pc-windows-msvc");
   });
-  test("unknown arch → null", () => {
+  it("unknown arch → null", () => {
     expect(codexTargetTriple("linux", "ia32")).toBeNull();
     expect(codexTargetTriple("freebsd" as NodeJS.Platform, "x64")).toBeNull();
   });
 });
 
 describe("codexBinaryPackage", () => {
-  test("per-platform package name", () => {
+  it("per-platform package name", () => {
     expect(codexBinaryPackage("linux", "arm64")).toBe("@openai/codex-linux-arm64");
     expect(codexBinaryPackage("darwin", "x64")).toBe("@openai/codex-darwin-x64");
   });
 });
 
 describe("resolveCodexBinary", () => {
-  test("resolves the vendored musl binary path on linux", () => {
+  it("resolves the vendored musl binary path on linux", () => {
     const resolved = resolveCodexBinary({
       platform: "linux",
       arch: "arm64",
@@ -44,7 +46,7 @@ describe("resolveCodexBinary", () => {
       "/store/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex",
     );
   });
-  test("throws a descriptive error when the package is absent", () => {
+  it("throws a descriptive error when the package is absent", () => {
     expect(() =>
       resolveCodexBinary({
         platform: "linux",
@@ -58,7 +60,7 @@ describe("resolveCodexBinary", () => {
 });
 
 describe("buildCodexAuthJson", () => {
-  test("access_token is the caller's gateway-auth token, sent verbatim", () => {
+  it("access_token is the caller's gateway-auth token, sent verbatim", () => {
     const now = 1_700_000_000_000;
     const auth = buildCodexAuthJson({ accessToken: "chatloop_abc.def", nowMs: now });
     expect(auth.auth_mode).toBe("chatgpt");
@@ -67,7 +69,7 @@ describe("buildCodexAuthJson", () => {
     expect(auth.tokens.access_token).toBe("chatloop_abc.def");
     expect(auth.last_refresh).toBe(new Date(now).toISOString());
   });
-  test("id_token is a valid-format JWT with far-future exp (so the CLI boots)", () => {
+  it("id_token is a valid-format JWT with far-future exp (so the CLI boots)", () => {
     const now = 1_700_000_000_000;
     const auth = buildCodexAuthJson({ accessToken: "x", nowMs: now });
     const parts = auth.tokens.id_token.split(".");
@@ -78,7 +80,7 @@ describe("buildCodexAuthJson", () => {
 });
 
 describe("buildCodexEnv", () => {
-  test("sets CODEX_HOME and cannot be overridden by extra", () => {
+  it("sets CODEX_HOME and cannot be overridden by extra", () => {
     const env = buildCodexEnv({ codexHome: "/run/codex", extra: { CODEX_HOME: "/evil" } });
     expect(env.CODEX_HOME).toBe("/run/codex");
     expect(env.CODEX_DISABLE_UPDATE_CHECK).toBe("1");
@@ -86,7 +88,7 @@ describe("buildCodexEnv", () => {
 });
 
 describe("redactSecrets", () => {
-  test("strips Bearer tokens, JWTs, and sk- keys from subprocess stderr", () => {
+  it("strips Bearer tokens, JWTs, and sk- keys from subprocess stderr", () => {
     const dirty =
       "auth failed for Bearer sk-proj-AAAABBBBCCCCDDDD1234 using eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0.";
     const clean = redactSecrets(dirty);
@@ -95,8 +97,90 @@ describe("redactSecrets", () => {
     expect(clean).toContain("Bearer [REDACTED]");
     expect(clean).toContain("[REDACTED_JWT]");
   });
-  test("leaves non-secret diagnostics intact", () => {
+  it("leaves non-secret diagnostics intact", () => {
     const msg = "ENOENT: codex binary not found at /usr/local/bin/codex (exit 127)";
     expect(redactSecrets(msg)).toBe(msg);
+  });
+
+  it("redacts MULTIPLE distinct Bearer tokens in one line (all replaced)", () => {
+    const dirty = "tried Bearer abc123DEF456ghi789 then retried with Bearer zzz999YYY888www777";
+    const clean = redactSecrets(dirty);
+    expect(clean).not.toContain("abc123DEF456ghi789");
+    expect(clean).not.toContain("zzz999YYY888www777");
+    // Both occurrences collapse to the redacted form.
+    expect(clean.match(/Bearer \[REDACTED\]/g)).toHaveLength(2);
+  });
+
+  it("redacts sk-ant- subscription keys", () => {
+    const dirty = "credential sk-ant-oat-REAL-SUBSCRIPTION-TOKEN rejected upstream";
+    const clean = redactSecrets(dirty);
+    expect(clean).not.toContain("sk-ant-oat-REAL-SUBSCRIPTION-TOKEN");
+    expect(clean).toContain("[REDACTED_KEY]");
+  });
+
+  it("redacts every repeated occurrence of the same secret (global flag)", () => {
+    const token = "sk-proj-DEADBEEFDEADBEEF0000";
+    const dirty = `first ${token} … and again ${token} end`;
+    const clean = redactSecrets(dirty);
+    expect(clean).not.toContain(token);
+    expect(clean.match(/\[REDACTED_KEY\]/g)).toHaveLength(2);
+  });
+});
+
+// ─── NDJSON stream reader (codex exec --json) ────────────────────────────────
+
+/** Build a byte ReadableStream from an ordered list of string chunks. */
+function streamFrom(chunks: string[]): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const c of chunks) controller.enqueue(enc.encode(c));
+      controller.close();
+    },
+  });
+}
+
+async function collect(stream: ReadableStream<Uint8Array>): Promise<string[]> {
+  const out: string[] = [];
+  for await (const line of readNdjsonLines(stream)) out.push(line);
+  return out;
+}
+
+describe("readNdjsonLines", () => {
+  it("splits a multi-line chunk into separate lines", async () => {
+    expect(await collect(streamFrom(["a\nb\nc\n"]))).toEqual(["a", "b", "c"]);
+  });
+
+  it("reassembles a line split across two chunks", async () => {
+    expect(await collect(streamFrom(["hel", "lo\n"]))).toEqual(["hello"]);
+  });
+
+  it("flushes an unterminated trailing line (no final newline)", async () => {
+    expect(await collect(streamFrom(["a\nb"]))).toEqual(["a", "b"]);
+  });
+
+  it("skips blank / whitespace-only lines", async () => {
+    expect(await collect(streamFrom(["a\n\n   \nb\n"]))).toEqual(["a", "b"]);
+  });
+
+  it("trims CRLF and surrounding whitespace from each line", async () => {
+    expect(await collect(streamFrom(["  a  \r\n\tb\t\r\n"]))).toEqual(["a", "b"]);
+  });
+
+  it("yields nothing for an empty / whitespace-only stream", async () => {
+    expect(await collect(streamFrom([]))).toEqual([]);
+    expect(await collect(streamFrom(["   \n\n"]))).toEqual([]);
+  });
+});
+
+describe("safeParseJson", () => {
+  it("parses valid JSON into the typed object", () => {
+    const parsed = safeParseJson<{ type: string; n: number }>('{"type":"turn.completed","n":3}');
+    expect(parsed).toEqual({ type: "turn.completed", n: 3 });
+  });
+
+  it("returns null on malformed JSON instead of throwing", () => {
+    expect(safeParseJson("{not json")).toBeNull();
+    expect(safeParseJson("")).toBeNull();
   });
 });

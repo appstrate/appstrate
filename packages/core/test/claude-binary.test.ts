@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Appstrate
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   candidateBinaryPackages,
   binaryFileName,
@@ -10,7 +10,7 @@ import {
 } from "../src/claude-binary.ts";
 
 describe("candidateBinaryPackages", () => {
-  test("linux tries the musl variant first, then glibc", () => {
+  it("linux tries the musl variant first, then glibc", () => {
     expect(candidateBinaryPackages("linux", "x64")).toEqual([
       "@anthropic-ai/claude-agent-sdk-linux-x64-musl",
       "@anthropic-ai/claude-agent-sdk-linux-x64",
@@ -21,7 +21,7 @@ describe("candidateBinaryPackages", () => {
     ]);
   });
 
-  test("darwin / win32 have a single per-arch candidate", () => {
+  it("darwin / win32 have a single per-arch candidate", () => {
     expect(candidateBinaryPackages("darwin", "arm64")).toEqual([
       "@anthropic-ai/claude-agent-sdk-darwin-arm64",
     ]);
@@ -30,13 +30,13 @@ describe("candidateBinaryPackages", () => {
     ]);
   });
 
-  test("unknown platform yields no candidates", () => {
+  it("unknown platform yields no candidates", () => {
     expect(candidateBinaryPackages("freebsd" as NodeJS.Platform, "x64")).toEqual([]);
   });
 });
 
 describe("binaryFileName", () => {
-  test("claude.exe on Windows, claude elsewhere", () => {
+  it("claude.exe on Windows, claude elsewhere", () => {
     expect(binaryFileName("win32")).toBe("claude.exe");
     expect(binaryFileName("linux")).toBe("claude");
     expect(binaryFileName("darwin")).toBe("claude");
@@ -44,7 +44,7 @@ describe("binaryFileName", () => {
 });
 
 describe("resolveClaudeCodeBinary", () => {
-  test("returns the first candidate that resolves", () => {
+  it("returns the first candidate that resolves", () => {
     const resolved = resolveClaudeCodeBinary({
       platform: "linux",
       arch: "x64",
@@ -56,7 +56,7 @@ describe("resolveClaudeCodeBinary", () => {
     expect(resolved).toBe("/opt/musl/claude");
   });
 
-  test("falls through to the glibc variant when musl is absent", () => {
+  it("falls through to the glibc variant when musl is absent", () => {
     const resolved = resolveClaudeCodeBinary({
       platform: "linux",
       arch: "x64",
@@ -68,7 +68,7 @@ describe("resolveClaudeCodeBinary", () => {
     expect(resolved).toBe("/usr/lib/claude");
   });
 
-  test("throws a descriptive error listing the tried specifiers when none resolve", () => {
+  it("throws a descriptive error listing the tried specifiers when none resolve", () => {
     expect(() =>
       resolveClaudeCodeBinary({
         platform: "linux",
@@ -80,7 +80,7 @@ describe("resolveClaudeCodeBinary", () => {
     ).toThrow(/claude-agent-sdk-linux-arm64-musl\/claude.*claude-agent-sdk-linux-arm64\/claude/s);
   });
 
-  test("error mentions the platform when no candidate exists at all", () => {
+  it("error mentions the platform when no candidate exists at all", () => {
     expect(() =>
       resolveClaudeCodeBinary({
         platform: "freebsd" as NodeJS.Platform,
@@ -92,7 +92,7 @@ describe("resolveClaudeCodeBinary", () => {
 });
 
 describe("buildClaudeSdkEnv", () => {
-  test("curates env: gateway pointers, blanked API key, telemetry off, no process.env leak", () => {
+  it("curates env: gateway pointers, blanked API key, telemetry off, no process.env leak", () => {
     const env = buildClaudeSdkEnv({ baseUrl: "http://gw", placeholderToken: "ph" });
     expect(env.ANTHROPIC_BASE_URL).toBe("http://gw");
     expect(env.ANTHROPIC_AUTH_TOKEN).toBe("ph");
@@ -105,7 +105,7 @@ describe("buildClaudeSdkEnv", () => {
     expect(Object.keys(env)).not.toContain("DATABASE_URL");
   });
 
-  test("merges explicit extra env (non-protected keys)", () => {
+  it("merges explicit extra env (non-protected keys)", () => {
     const env = buildClaudeSdkEnv({
       baseUrl: "http://gw",
       placeholderToken: "ph",
@@ -114,7 +114,7 @@ describe("buildClaudeSdkEnv", () => {
     expect(env.FOO).toBe("bar");
   });
 
-  test("extra can never override the credential-isolation keys", () => {
+  it("extra can never override the credential-isolation keys", () => {
     const env = buildClaudeSdkEnv({
       baseUrl: "http://gw",
       placeholderToken: "ph",

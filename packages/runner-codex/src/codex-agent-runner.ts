@@ -47,7 +47,13 @@ import {
   type RunResult,
 } from "@appstrate/afps-runtime/runner";
 import type { Runner, RunOptions } from "@appstrate/afps-runtime/runner";
-import { buildCodexAuthJson, buildCodexEnv, redactSecrets } from "@appstrate/core/codex-binary";
+import {
+  buildCodexAuthJson,
+  buildCodexEnv,
+  readNdjsonLines,
+  redactSecrets,
+  safeParseJson,
+} from "@appstrate/core/codex-binary";
 import {
   CodexRunEventMapper,
   computeCodexCost,
@@ -115,31 +121,6 @@ function inputToText(input: unknown): string {
 export function buildCodexRunPrompt(systemPrompt: string, input: unknown): string {
   const task = inputToText(input) || "Begin the task described in your instructions.";
   return systemPrompt ? `${systemPrompt}\n\n---\n\n${task}` : task;
-}
-
-/** Split a byte stream into newline-delimited strings (UTF-8), flushing the tail. */
-async function* readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
-  const decoder = new TextDecoder();
-  let buf = "";
-  for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) {
-    buf += decoder.decode(chunk, { stream: true });
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) !== -1) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (line) yield line;
-    }
-  }
-  const tail = (buf + decoder.decode()).trim();
-  if (tail) yield tail;
-}
-
-function safeParse(line: string): CodexEvent | null {
-  try {
-    return JSON.parse(line) as CodexEvent;
-  } catch {
-    return null;
-  }
 }
 
 const defaultSpawn: CodexSpawnFn = (cmd, opts) =>
@@ -237,8 +218,8 @@ export class CodexAgentRunner implements Runner {
       if (signal?.aborted) onAbort();
 
       // 4. Map the NDJSON event stream → RunEvents.
-      for await (const line of readLines(child.stdout)) {
-        const ev = safeParse(line);
+      for await (const line of readNdjsonLines(child.stdout)) {
+        const ev = safeParseJson<CodexEvent>(line);
         if (!ev) continue;
         for (const event of mapper.map(ev)) await emit(event);
       }

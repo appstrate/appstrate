@@ -25,7 +25,7 @@
  * Tool-name parity: the SDK prefixes MCP tools as `mcp__<server>__<tool>`.
  * The `ai-sdk` path exposes them unprefixed (`search_operations`,
  * `render_html`, …). We strip the prefix so the client's tool UIs match
- * regardless of engine — see {@link normalizeToolName}.
+ * regardless of engine — see {@link stripMcpToolPrefix}.
  */
 
 import type { UIMessageChunk } from "ai";
@@ -36,7 +36,7 @@ import type { UIMessageChunk } from "ai";
  * Tool names may themselves contain `__`, so we split on the delimiter and
  * drop exactly the `mcp` + server segments. Non-MCP names pass through.
  */
-export function normalizeToolName(name: string): string {
+export function stripMcpToolPrefix(name: string): string {
   const parts = name.split("__");
   if (parts.length >= 3 && parts[0] === "mcp") return parts.slice(2).join("__");
   return name;
@@ -186,7 +186,7 @@ export class SdkUiStreamMapper {
       return [{ type: "reasoning-start", id }];
     }
     if (cb.type === "tool_use" && cb.id && cb.name) {
-      const toolName = normalizeToolName(cb.name);
+      const toolName = stripMcpToolPrefix(cb.name);
       this.open.set(index, { kind: "tool", id: cb.id, toolCallId: cb.id, toolName, json: "" });
       return [{ type: "tool-input-start", toolCallId: cb.id, toolName }];
     }

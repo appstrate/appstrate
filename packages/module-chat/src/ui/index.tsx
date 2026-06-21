@@ -78,7 +78,7 @@ export function ChatPanel({ context, getHeaders, modelId, className }: ChatPanel
       setModels(list);
       setSelectedModel((cur) => {
         if (cur && list.some((m) => m.id === cur)) return cur;
-        return (list.find((m) => m.isDefault) ?? list[0])?.id ?? null;
+        return (list.find((m) => m.is_default) ?? list[0])?.id ?? null;
       });
     });
   }, [getHeaders, modelId]);
@@ -209,7 +209,7 @@ export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
       setModels(list);
       setSelectedModel((cur) => {
         if (cur && list.some((m) => m.id === cur)) return cur;
-        return (list.find((m) => m.isDefault) ?? list[0])?.id ?? null;
+        return (list.find((m) => m.is_default) ?? list[0])?.id ?? null;
       });
     });
   }, [getHeaders]);

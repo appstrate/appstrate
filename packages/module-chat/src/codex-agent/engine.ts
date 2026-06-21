@@ -37,8 +37,10 @@ import {
   buildCodexAuthJson,
   buildCodexEnv,
   makeCodexScopeResolver,
+  readNdjsonLines,
   redactSecrets,
   resolveCodexBinary,
+  safeParseJson,
 } from "@appstrate/core/codex-binary";
 import { CodexUiStreamMapper, type CodexEvent } from "./ui-stream-mapper.ts";
 import { acquireCodexSlot } from "./concurrency.ts";
@@ -123,31 +125,6 @@ export function buildCodexPrompt(messages: UIMessage[], system: string): string 
       : turns.map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.text}`).join("\n\n");
 
   return system ? `${system}\n\n---\n\n${transcript}` : transcript;
-}
-
-/** Split a byte stream into newline-delimited strings (UTF-8), flushing the tail. */
-async function* readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
-  const decoder = new TextDecoder();
-  let buf = "";
-  for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) {
-    buf += decoder.decode(chunk, { stream: true });
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) !== -1) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (line) yield line;
-    }
-  }
-  const tail = (buf + decoder.decode()).trim();
-  if (tail) yield tail;
-}
-
-function safeParse(line: string): CodexEvent | null {
-  try {
-    return JSON.parse(line) as CodexEvent;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -235,8 +212,8 @@ export function runCodexAgentChat(input: CodexAgentChatInput): Response {
         if (input.abortSignal.aborted) onAbort();
         else input.abortSignal.addEventListener("abort", onAbort, { once: true });
 
-        for await (const line of readLines(child.stdout as ReadableStream<Uint8Array>)) {
-          const ev = safeParse(line);
+        for await (const line of readNdjsonLines(child.stdout as ReadableStream<Uint8Array>)) {
+          const ev = safeParseJson<CodexEvent>(line);
           if (!ev) continue;
           for (const chunk of mapper.map(ev)) writer.write(chunk);
         }
