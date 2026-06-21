@@ -14,8 +14,14 @@ export interface AnonBackend {
 }
 
 export class AnonSession {
-  private mapping: Mapping = {};
-  constructor(private backend: AnonBackend) {}
+  private mapping: Mapping;
+  /** `seed` = table de départ (continuité d'un run quand l'état vit ailleurs). */
+  constructor(
+    private backend: AnonBackend,
+    seed?: Mapping,
+  ) {
+    this.mapping = seed ? { ...seed } : {};
+  }
 
   /** Masque un texte et accumule la table du run. */
   async mask(text: string): Promise<string> {

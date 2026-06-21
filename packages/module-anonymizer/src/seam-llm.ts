@@ -24,7 +24,7 @@ import type {
   LlmBodyTransformContext,
 } from "@appstrate/core/module";
 import { InProcessDetector } from "./detector.ts";
-import { AnonSession } from "./run-session.ts";
+import { AnonSession, type AnonBackend, type Mapping } from "./run-session.ts";
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
@@ -89,6 +89,21 @@ export function createLlmBodyTransformer(session: AnonSession): LlmBodyTransform
   return new AnonLlmBodyTransformer(session);
 }
 
+/**
+ * Masque UN corps de requête LLM de façon stateless : on sème une session
+ * jetable avec `mapping`, on masque (system + messages content), on rend le
+ * mapping mis à jour. `backend` injectable → testable sans GLiNER.
+ */
+export async function maskLlmRequestBody(
+  backend: AnonBackend,
+  body: Uint8Array,
+  mapping: Mapping,
+): Promise<{ body: Uint8Array; mapping: Mapping }> {
+  const session = new AnonSession(backend, mapping);
+  const masked = await maskRequestBody(session, body);
+  return { body: masked, mapping: session.table() };
+}
+
 // Détecteur partagé sur tout le process : le modèle GLiNER ne se charge qu'une
 // fois (paresseux), à la première vraie requête anonymisée.
 const sharedDetector = new InProcessDetector();
@@ -96,5 +111,11 @@ const sharedDetector = new InProcessDetector();
 export const llmBodyTransformerFactory: LlmBodyTransformerFactory = {
   create(_ctx: LlmBodyTransformContext): LlmBodyTransformer {
     return createLlmBodyTransformer(new AnonSession(sharedDetector));
+  },
+
+  // Stateless mask pour l'endpoint /internal/anonymize (sidecar, b2) : délègue
+  // à maskLlmRequestBody avec le détecteur partagé. Aucune session conservée.
+  maskLlmBody(body: Uint8Array, mapping: Mapping): Promise<{ body: Uint8Array; mapping: Mapping }> {
+    return maskLlmRequestBody(sharedDetector, body, mapping);
   },
 };

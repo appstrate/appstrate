@@ -37,7 +37,9 @@ import {
   notFound,
   invalidRequest,
   internalError,
+  parseBody,
 } from "../lib/errors.ts";
+import { getModuleLlmBodyTransformer } from "../lib/modules/module-loader.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
 import {
   forceRefreshOAuthModelProviderToken,
@@ -50,6 +52,13 @@ import {
 import { readIntegrationManifestForRun } from "../services/integration-service.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
 import { isIntegrationActive } from "../services/integration-connections.ts";
+
+/** Body of POST /internal/anonymize: a base64-encoded LLM request body + the
+ * run's current token↔value mapping (empty on the first call of a run). */
+const anonymizeRequestSchema = z.object({
+  body: z.string(),
+  mapping: z.record(z.string(), z.string()).default({}),
+});
 
 /**
  * Verify the run token from the Authorization header.
@@ -524,6 +533,27 @@ export function createInternalRouter() {
     });
     throw notFound(`mcp-server '${mcpServerId}' is not referenced by the running agent`);
   }
+
+  // POST /internal/anonymize — mask ONE LLM request body for a run (b2).
+  //
+  // Stateless seam: the per-run sidecar owns the mapping (Option S — the table
+  // lives with the run, not on the platform) and threads it in/out. The
+  // platform only lends its shared detector; it keeps no per-run state. Restore
+  // is NOT here — it needs no detection, the sidecar does it locally.
+  //
+  // 404 when no anonymizer module is loaded: the sidecar only calls this when
+  // anonymization is enabled for the run, which requires the module.
+  router.post("/anonymize", async (c) => {
+    await verifyRunToken(c); // any valid run token may mask its own traffic
+    const factory = getModuleLlmBodyTransformer();
+    if (!factory) throw notFound("anonymizer module not loaded");
+    const { body, mapping } = parseBody(anonymizeRequestSchema, await c.req.json());
+    const masked = await factory.maskLlmBody(Buffer.from(body, "base64"), mapping);
+    return c.json({
+      body: Buffer.from(masked.body).toString("base64"),
+      mapping: masked.mapping,
+    });
+  });
 
   return router;
 }

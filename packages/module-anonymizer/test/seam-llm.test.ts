@@ -6,7 +6,7 @@
 // du détecteur. Aucun onnxruntime, aucune table : test pur-logique.
 import { describe, it, expect } from "bun:test";
 import { AnonSession, type AnonBackend, type Mapping } from "../src/run-session.ts";
-import { createLlmBodyTransformer } from "../src/seam-llm.ts";
+import { createLlmBodyTransformer, maskLlmRequestBody } from "../src/seam-llm.ts";
 
 /** Backend déterministe : masque une liste fixe de littéraux, restore par table. */
 function fakeBackend(terms: Record<string, string>): AnonBackend {
@@ -114,5 +114,35 @@ describe("llm-proxy anonymization seam", () => {
     const t = createLlmBodyTransformer(new AnonSession(fakeBackend({ Benjamin: "PERSON" })));
     const out = await t.maskRequest(enc.encode("pas du json Benjamin"));
     expect(dec.decode(out)).toBe("pas du json Benjamin");
+  });
+});
+
+describe("stateless maskLlmRequestBody (the /internal/anonymize endpoint seam)", () => {
+  it("masks a body and returns the updated mapping (no session kept)", async () => {
+    const { body, mapping } = await maskLlmRequestBody(
+      fakeBackend({ "Benjamin Macé": "PERSON" }),
+      toBytes({ messages: [{ role: "user", content: "Bonjour Benjamin Macé" }] }),
+      {},
+    );
+    expect(fromBytes(body).messages[0].content).toMatch(/\[PERSON_\d+\]/);
+    expect(Object.values(mapping)).toContain("Benjamin Macé");
+  });
+
+  it("reuses a seeded token across calls (run continuity — table lives in the caller)", async () => {
+    const backend = fakeBackend({ "Benjamin Macé": "PERSON" });
+    const first = await maskLlmRequestBody(
+      backend,
+      toBytes({ messages: [{ role: "user", content: "Benjamin Macé" }] }),
+      {},
+    );
+    const seededToken = Object.keys(first.mapping)[0]!;
+    // 2ᵉ appel SÉMÉ avec le mapping du 1er → même valeur ⇒ même jeton
+    const second = await maskLlmRequestBody(
+      backend,
+      toBytes({ messages: [{ role: "user", content: "Encore Benjamin Macé" }] }),
+      first.mapping,
+    );
+    expect(fromBytes(second.body).messages[0].content).toContain(seededToken);
+    expect(Object.keys(second.mapping)).toHaveLength(1); // pas de doublon
   });
 });

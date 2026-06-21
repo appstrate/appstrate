@@ -796,7 +796,19 @@ export interface LlmBodyTransformer {
  * model); `create` is called once per proxy request.
  */
 export interface LlmBodyTransformerFactory {
+  /** In-process per-call transformer — used by the platform LLM proxy (b1). */
   create(ctx: LlmBodyTransformContext): LlmBodyTransformer;
+  /**
+   * Stateless masking of one LLM request body, used by the `/internal/anonymize`
+   * endpoint that the per-run sidecar calls (b2). The CALLER (the sidecar) holds
+   * the run's mapping and threads it in/out — the platform keeps no per-run
+   * state. Restore is NOT here: it needs no detection (pure token→value lookup),
+   * so the caller does it locally.
+   */
+  maskLlmBody(
+    body: Uint8Array,
+    mapping: Record<string, string>,
+  ): Promise<{ body: Uint8Array; mapping: Record<string, string> }>;
 }
 
 // ---------------------------------------------------------------------------
