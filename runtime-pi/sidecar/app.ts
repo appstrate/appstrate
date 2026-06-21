@@ -723,11 +723,10 @@ export function createApp(deps: AppDeps): Hono {
     // when configured; otherwise forward the body verbatim.
     let body: string | undefined;
     if (method !== "GET" && method !== "HEAD") {
-      const text = await c.req.raw.text();
-      body =
-        text && llmConfig.modelSwap
-          ? swapRequestModel(text, llmConfig.modelSwap)
-          : text || undefined;
+      let text = await c.req.raw.text();
+      if (text && llmConfig.modelSwap) text = swapRequestModel(text, llmConfig.modelSwap);
+      if (text && anonymizer) text = await anonymizer.maskBody(text);
+      body = text || undefined;
     }
 
     const doFetch = (headers: Record<string, string>): Promise<Response> =>
@@ -785,6 +784,7 @@ export function createApp(deps: AppDeps): Hono {
         authMode: "oauth",
       },
       llmConfig.modelSwap,
+      anonymizer,
     );
   }
 
