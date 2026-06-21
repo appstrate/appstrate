@@ -86,5 +86,16 @@ describe("applySpecToSidecarEnv", () => {
     expect(env.INTEGRATIONS_TO_SPAWN_JSON).toBeUndefined();
     expect(env.OUTPUT_SCHEMA).toBeUndefined();
     expect(env.CONNECT_LOGIN_JSON).toBeUndefined();
+    expect(env.ANONYMIZE).toBeUndefined(); // off by default → zero footprint
+  });
+
+  it("sets ANONYMIZE=1 only when the spec enables anonymization", () => {
+    const on: Record<string, string> = {};
+    applySpecToSidecarEnv({ runToken: "rt", anonymize: true }, on);
+    expect(on.ANONYMIZE).toBe("1");
+
+    const off: Record<string, string> = {};
+    applySpecToSidecarEnv({ runToken: "rt", anonymize: false }, off);
+    expect(off.ANONYMIZE).toBeUndefined();
   });
 });

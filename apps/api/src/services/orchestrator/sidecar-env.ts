@@ -35,6 +35,11 @@ export function applySpecToSidecarEnv(
     // provider's hosts so the in-container token can't be exfiltrated.
     target.EGRESS_ALLOWLIST_JSON = JSON.stringify(spec.egressAllowlist);
   }
+  if (spec.anonymize) {
+    // PII anonymization on for this run — the sidecar masks LLM traffic through
+    // the platform's /internal/anonymize endpoint (palier b2).
+    target.ANONYMIZE = "1";
+  }
   if (spec.llm) {
     if (spec.llm.authMode === "oauth" || spec.llm.authMode === "vend") {
       // OAuth config (non-forging — the driver signs its own fingerprint) OR

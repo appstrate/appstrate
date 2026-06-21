@@ -51,6 +51,7 @@ import {
 import { getEnv } from "@appstrate/env";
 import { isOAuthModelProvider, getModelProvider } from "../model-providers/registry.ts";
 import type { LlmProxyConfig, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
+import { getModuleLlmBodyTransformer } from "../../lib/modules/module-loader.ts";
 
 /** Terminal state reported back to the caller once the container has exited. */
 export interface PlatformContainerResult {
@@ -242,6 +243,9 @@ async function runPlatformContainerImpl(
       ...(llmConfig.maxTokens != null ? { modelMaxTokens: llmConfig.maxTokens } : {}),
       // Codex runs: lock the forward proxy to OpenAI's hosts (in-container token).
       ...(egressAllowlist ? { egressAllowlist } : {}),
+      // PII anonymization (palier b2): on iff an anonymizer module is loaded, so
+      // the sidecar's /internal/anonymize calls are guaranteed to resolve.
+      ...(getModuleLlmBodyTransformer() ? { anonymize: true } : {}),
       // Phase 1.4 — integrations the sidecar will spawn + multiplex onto
       // the agent-facing `/mcp` surface. Resolved upstream by
       // `resolveIntegrationSpawns` (run-context-builder).
