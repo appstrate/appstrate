@@ -28,7 +28,16 @@ jobs:
           bun-version: "1.3.11"
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install
+
+      # Lockfile integrity guard. We can't use `bun install --frozen-lockfile`:
+      # its comparator has a bug with @openai/codex's same-name aliased platform
+      # binaries (@openai/codex@0.141.0-<platform>) and false-reports "lockfile
+      # had changes" on a byte-stable lockfile. A non-frozen `bun install`
+      # resolves correctly from the committed lockfile; this diff catches any
+      # PR that legitimately drifts it.
+      - name: Verify lockfile is up to date
+        run: git diff --exit-code bun.lock
 
       - name: Run checks
         run: bun run check

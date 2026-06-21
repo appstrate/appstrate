@@ -38,15 +38,23 @@ COPY --parents */package.json */*/package.json ./
 COPY patches/ patches/
 
 # `--filter=appstrate-pi-runtime` restricts the install to runtime-pi's
-# subgraph (Pi SDK pair + @appstrate/afps-runtime + @appstrate/runner-pi
-# + their transitive deps). Pulls the same versions as the root lock
-# (`--frozen-lockfile`) without installing apps/api / apps/web / dev
-# toolchain — the runtime image ships ~190 MB of node_modules instead
-# of the full ~860 MB workspace tree.
+# subgraph (Pi + Claude + Codex SDKs, @appstrate/afps-runtime, the three
+# @appstrate/runner-* packages + their transitive deps), excluding apps/api,
+# apps/web, and the workspace dev toolchain — the runtime image ships only the
+# runtime subgraph, not the full workspace tree. runtime-pi has no devDeps of
+# its own and `--filter` does not pull transitive workspace pkgs' devDeps, so
+# `--production` would be a no-op for what's installed here — we omit it.
+#
+# NOT `--frozen-lockfile`: bun's frozen comparator has a bug with @openai/codex's
+# same-name aliased platform binaries (@openai/codex@0.141.0-<platform>) and
+# false-reports "lockfile had changes" on a byte-stable lockfile — confirmed on
+# bun 1.3.11 and 1.3.14, and on both the full graph and a `--filter` subset.
+# `--production` makes it unfixable here: it implicitly freezes with no override
+# flag in bun 1.3.x. Versions stay pinned because resolution still reads the
+# COPY'd bun.lock; lockfile drift is caught by the `git diff --exit-code bun.lock`
+# guard in CI (.github/workflows/check.yml) on every commit.
 RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
     bun install \
-        --frozen-lockfile \
-        --production \
         --filter=appstrate-pi-runtime \
         --no-progress
 
