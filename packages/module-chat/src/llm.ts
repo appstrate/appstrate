@@ -202,7 +202,15 @@ export async function resolveDefaultApplicationId(
   if (cached !== undefined) return cached;
   try {
     const res = await fetchImpl(`${origin}/api/applications`, { headers });
-    if (!res.ok) return undefined; // transient — don't cache
+    if (!res.ok) {
+      // A persistent miss silently strips every app-scoped MCP tool for the
+      // turn — leave a breadcrumb so it isn't invisible.
+      logger.warn("chat: default-application lookup returned non-ok", {
+        orgId,
+        status: res.status,
+      });
+      return undefined; // transient — don't cache
+    }
     interface App {
       id: string;
       isDefault?: boolean;
@@ -215,7 +223,8 @@ export async function resolveDefaultApplicationId(
       return id;
     }
     return undefined; // empty 200 — anomalous, don't cache
-  } catch {
+  } catch (err) {
+    logger.warn("chat: default-application lookup failed", { orgId, err: String(err) });
     return undefined; // network error — transient, don't cache
   }
 }

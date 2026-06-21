@@ -47,7 +47,7 @@ import {
   type RunResult,
 } from "@appstrate/afps-runtime/runner";
 import type { Runner, RunOptions } from "@appstrate/afps-runtime/runner";
-import { buildCodexAuthJson, buildCodexEnv } from "@appstrate/core/codex-binary";
+import { buildCodexAuthJson, buildCodexEnv, redactSecrets } from "@appstrate/core/codex-binary";
 import {
   CodexRunEventMapper,
   computeCodexCost,
@@ -262,7 +262,7 @@ export class CodexAgentRunner implements Runner {
           .catch(() => "");
         error = {
           code: "adapter_error",
-          message: `The Codex CLI exited with code ${exitCode}${stderr ? `: ${stderr.slice(0, 500)}` : ""}`,
+          message: `The Codex CLI exited with code ${exitCode}${stderr ? `: ${redactSecrets(stderr).slice(0, 500)}` : ""}`,
         };
         await emit({ type: "appstrate.error", timestamp: now(), runId, message: error.message });
       }

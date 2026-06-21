@@ -228,6 +228,19 @@ async function runPlatformContainerImpl(
       };
     }
 
+    // Invariant: a vend-mode run hands the REAL subscription token into the
+    // container (the CLI talks to the upstream directly and can't be reverse-
+    // proxied), so its egress MUST be locked to the provider's hosts — the
+    // allowlist is the sole compensating control. Fail closed rather than launch
+    // an unconstrained container holding a live credential. (Today only the
+    // `codex` branch sets vend, and it always sets CODEX_EGRESS_ALLOWLIST; this
+    // guards any future vend provider against shipping without its lock.)
+    if (sidecarLlm?.authMode === "vend" && (!egressAllowlist || egressAllowlist.length === 0)) {
+      throw new Error(
+        "vend-mode run requires a non-empty egress allowlist (refusing to launch an unlocked container with a vended credential)",
+      );
+    }
+
     const sidecarSpec: SidecarLaunchSpec = {
       runToken: plan.runToken ?? "",
       proxyUrl: plan.proxyUrl ?? undefined,

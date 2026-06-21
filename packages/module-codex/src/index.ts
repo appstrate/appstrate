@@ -17,8 +17,7 @@
  *     the chatgpt.com Codex backend) and `email`.
  *   - `beforeLlmProxyRequest` is not currently needed — the sidecar
  *     reads the persisted `accountId` from the credential row before
- *     each request, and `forceStream` / `forceStore` are pinned in the
- *     declarative wire-format fields.
+ *     each request.
  */
 
 import type {

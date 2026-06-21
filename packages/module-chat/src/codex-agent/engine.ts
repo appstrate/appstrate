@@ -5,19 +5,23 @@
  * the ToS-clean counterpart of the `claude-agent` engine.
  *
  * It drives the official `codex` binary as a subprocess
- * (`codex exec --json …`), pointed at the non-forging credential-injection
- * gateway via `-c chatgpt_base_url=…`, and maps the CLI's `--json` event stream
- * onto the same AI SDK UI message stream the other engines emit
- * (see ui-stream-mapper.ts) so the chat client is engine-agnostic.
+ * (`codex exec --json …`) and maps the CLI's `--json` event stream onto the same
+ * AI SDK UI message stream the other engines emit (see ui-stream-mapper.ts) so
+ * the chat client is engine-agnostic. The CLI calls `chatgpt.com` directly and
+ * ignores any `chatgpt_base_url` override, so there is no reverse-proxy gateway:
+ * the real subscription token is vended first-party at turn start and written
+ * into the binary's `auth.json`.
  *
  * Security posture (mirrors claude-agent):
  *   - `-s read-only`: the codex sandbox may read but never write/execute against
  *     the host — a chat must not get host mutation. It runs in a throwaway empty
  *     working directory.
- *   - The spawned binary's `CODEX_HOME/auth.json` holds only a PLACEHOLDER
- *     bearer (the turn-scoped chat-loopback token, sent verbatim by the CLI);
- *     the gateway swaps it for the real subscription token + stamps the real
- *     `chatgpt-account-id` server-side, so neither ever enters the subprocess.
+ *   - The spawned binary's `CODEX_HOME/auth.json` holds the REAL subscription
+ *     token (vended first-party at turn start) — the CLI sends it verbatim to
+ *     `chatgpt.com`. Chat runs on the platform host itself (not a sandboxed
+ *     container), so the token stays inside the trust boundary that already holds
+ *     every credential; the temp `CODEX_HOME` is written 0600 and removed in
+ *     `finally`.
  *   - The curated env (`@appstrate/core/codex-binary`) carries no platform
  *     secrets and routes outbound traffic through the forward proxy when set.
  *
@@ -33,6 +37,7 @@ import {
   buildCodexAuthJson,
   buildCodexEnv,
   makeCodexScopeResolver,
+  redactSecrets,
   resolveCodexBinary,
 } from "@appstrate/core/codex-binary";
 import { CodexUiStreamMapper, type CodexEvent } from "./ui-stream-mapper.ts";
@@ -245,7 +250,10 @@ export function runCodexAgentChat(input: CodexAgentChatInput): Response {
           const stderr = await new Response(child.stderr as ReadableStream<Uint8Array>)
             .text()
             .catch(() => "");
-          logger.warn("codex chat exited non-zero", { exitCode, stderr: stderr.slice(0, 500) });
+          logger.warn("codex chat exited non-zero", {
+            exitCode,
+            stderr: redactSecrets(stderr).slice(0, 500),
+          });
           writer.write({ type: "error", errorText: input.onError(undefined) });
         }
         writer.write(mapper.finishChunk());

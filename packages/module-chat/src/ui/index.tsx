@@ -229,7 +229,7 @@ export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
           ...getHeaders?.(),
           ...(selectedModelRef.current ? { "X-Model-Id": selectedModelRef.current } : {}),
         }),
-        [],
+        [getHeaders],
       );
       const transport = useMemo(
         () =>

@@ -3,24 +3,27 @@
 
 /**
  * Resolve the prebuilt `codex` native binary that backs the OpenAI Codex CLI,
- * plus the placeholder `auth.json` + curated env a host needs to drive it
- * headlessly against the credential-injection gateway.
+ * plus the `auth.json` + curated env a host needs to drive it headlessly.
  *
  * The Codex counterpart of {@link ./claude-binary.ts}. Codex is a single Rust
  * binary (not an npm SDK with a `query()` function), so hosts drive it as a
- * subprocess: `codex exec --json -c chatgpt_base_url=<gateway> …`. This module
- * holds the universal, IO-free parts:
+ * subprocess: `codex exec --json …`. The CLI's models-manager calls
+ * `chatgpt.com` VERBATIM and ignores any `chatgpt_base_url` override, so — unlike
+ * the Claude path — the sidecar cannot reverse-proxy it. Instead the real
+ * subscription token is written into `auth.json` and the binary egresses
+ * straight to the upstream. This module holds the universal, IO-free parts:
  *   - the per-arch package matrix (so `bun install` of `@openai/codex` places
  *     the matching binary; we resolve whichever variant is present),
- *   - the placeholder `auth.json` builder (ChatGPT-subscription mode), and
+ *   - the `auth.json` builder (ChatGPT-subscription mode), and
  *   - the curated subprocess env.
  *
  * ToS posture (identical to claude): the official `codex` binary signs its OWN
  * client fingerprint (`originator: codex_exec`) and sends its own
- * `chatgpt-account-id`. We forge NOTHING — we only point it at a gateway
- * (`chatgpt_base_url`) that swaps a placeholder bearer for the real
- * subscription token server-side. The spawned binary only ever holds a
- * placeholder access token; the real token never enters its environment.
+ * `chatgpt-account-id`. We forge NOTHING. Because the token cannot be swapped in
+ * flight, the binary holds the genuine subscription token (vended at run start);
+ * the compensating control is the sidecar's per-run egress allowlist, which
+ * locks outbound traffic to the provider's hosts so the token cannot be
+ * exfiltrated (see `LlmProxyVendConfig` in `./sidecar-types.ts`).
  *
  * The linux per-arch binaries are **musl-static**
  * (`*-unknown-linux-musl`), so they run on the Alpine production image with no
@@ -33,10 +36,10 @@ import { createRequire } from "node:module";
 
 const CODEX_SCOPE = "@openai/codex";
 
-/** A dummy UUID written into the placeholder `auth.json`. The gateway overwrites
- * the outbound `chatgpt-account-id` header with the credential's real account
- * id, so this value never reaches the upstream — it only has to be present so
- * the CLI boots in ChatGPT mode. */
+/** Fallback UUID written into `auth.json` only when the credential carries no
+ * account id. When present, the credential's REAL `chatgpt_account_id` is written
+ * verbatim (the CLI sends it as the `chatgpt-account-id` header). This dummy just
+ * keeps the CLI booting in ChatGPT mode for credentials that lack the claim. */
 const PLACEHOLDER_ACCOUNT_ID = "00000000-0000-0000-0000-000000000000";
 
 /** Base64url without padding (Bun/Node `base64url` encoding). */
@@ -45,20 +48,34 @@ function b64url(value: object): string {
 }
 
 /**
+ * Best-effort scrub of credential material from a `codex` subprocess's stderr
+ * before it is logged or folded into a run error. The spawned binary holds the
+ * real subscription token in its `auth.json`; its stderr is therefore treated as
+ * potentially secret-bearing (defense-in-depth — the CLI is not expected to echo
+ * the bearer, but we never persist its stderr unredacted). Strips `Bearer`
+ * tokens, JWTs, and `sk-`-style keys.
+ */
+export function redactSecrets(text: string): string {
+  return text
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+    .replace(/eyJ[A-Za-z0-9._-]{10,}/g, "[REDACTED_JWT]")
+    .replace(/\bsk-[A-Za-z0-9-]{16,}/g, "[REDACTED_KEY]");
+}
+
+/**
  * Build the ChatGPT-subscription `auth.json` the spawned `codex` binary reads
  * from `CODEX_HOME`.
  *
  * Empirically (codex-cli 0.141): the CLI sends `tokens.access_token` **verbatim**
- * as the outbound `Authorization: Bearer` to `chatgpt_base_url` — it does NOT
- * have to be a JWT. So `accessToken` is the gateway-auth token (a chat-loopback
- * token for the chat path; a dummy for the runner's sidecar, which swaps by
- * configured credential). The CLI DOES require `tokens.id_token` to be a
- * parseable JWT to boot — so that one is a syntactically-valid unsigned JWT with
- * a far-future `exp` (so the CLI never tries to refresh — a refresh would hit
- * the real OpenAI auth server with a bogus refresh token and fail). The gateway
- * swaps the placeholder bearer for the real subscription token + stamps the real
- * `chatgpt-account-id` server-side, so neither the real token nor the real
- * account id ever lives in the subprocess.
+ * as the outbound `Authorization: Bearer` to `chatgpt.com` — it does NOT have to
+ * be a JWT. `accessToken` is therefore the REAL subscription token, vended to the
+ * caller at run/turn start (the CLI talks to the upstream directly and ignores
+ * any base-url override, so there is no in-flight swap). The CLI DOES require
+ * `tokens.id_token` to be a parseable JWT to boot — so that one is a
+ * syntactically-valid UNSIGNED (`alg:none`) JWT, local-only and never transmitted,
+ * with a far-future `exp` so the CLI never tries to refresh (a refresh would hit
+ * the real OpenAI auth server with a bogus refresh token and fail). The real
+ * `chatgpt_account_id` is written verbatim when the credential carries it.
  *
  * Pure (the caller passes `now`) so it is unit-testable and free of the
  * Date.now() ambient-clock dependency.
@@ -102,12 +119,13 @@ export function buildCodexAuthJson(opts: {
  * Curated environment for a spawned `codex` binary. Like
  * {@link ./claude-binary.ts}'s `buildClaudeSdkEnv`, this deliberately does NOT
  * forward the full `process.env` (that would leak platform secrets). It sets
- * `CODEX_HOME` (where the placeholder `auth.json` + config live), forwards the
- * proxy vars (so the binary's outbound traffic egresses through the sidecar
- * forward-proxy), and disables telemetry/update noise.
+ * `CODEX_HOME` (where the `auth.json` + config live), forwards the proxy vars
+ * (so the binary's outbound traffic egresses through the sidecar forward-proxy),
+ * and disables telemetry/update noise.
  *
- * The gateway base URL is NOT an env var — it is passed on the command line
- * (`-c chatgpt_base_url=…`), so it can't be overridden by ambient env.
+ * There is no base-url override: the CLI talks to `chatgpt.com` directly
+ * (ignoring `chatgpt_base_url`), and outbound traffic is constrained by the
+ * sidecar's per-run egress allowlist rather than a gateway.
  */
 export function buildCodexEnv(opts: {
   codexHome: string;

@@ -7,6 +7,7 @@ import {
   buildCodexEnv,
   codexBinaryPackage,
   codexTargetTriple,
+  redactSecrets,
   resolveCodexBinary,
 } from "../src/codex-binary.ts";
 
@@ -81,5 +82,21 @@ describe("buildCodexEnv", () => {
     const env = buildCodexEnv({ codexHome: "/run/codex", extra: { CODEX_HOME: "/evil" } });
     expect(env.CODEX_HOME).toBe("/run/codex");
     expect(env.CODEX_DISABLE_UPDATE_CHECK).toBe("1");
+  });
+});
+
+describe("redactSecrets", () => {
+  test("strips Bearer tokens, JWTs, and sk- keys from subprocess stderr", () => {
+    const dirty =
+      "auth failed for Bearer sk-proj-AAAABBBBCCCCDDDD1234 using eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0.";
+    const clean = redactSecrets(dirty);
+    expect(clean).not.toContain("sk-proj-AAAABBBBCCCCDDDD1234");
+    expect(clean).not.toContain("eyJhbGciOiJub25lIn0");
+    expect(clean).toContain("Bearer [REDACTED]");
+    expect(clean).toContain("[REDACTED_JWT]");
+  });
+  test("leaves non-secret diagnostics intact", () => {
+    const msg = "ENOENT: codex binary not found at /usr/local/bin/codex (exit 127)";
+    expect(redactSecrets(msg)).toBe(msg);
   });
 });

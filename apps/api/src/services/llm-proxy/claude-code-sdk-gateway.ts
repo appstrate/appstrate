@@ -244,16 +244,28 @@ export async function handleClaudeCodeSdkGateway(
   const isSse = (upstream.headers.get("content-type") ?? "").includes("text/event-stream");
   if (isSse && upstream.body) {
     const [clientStream, tapStream] = upstream.body.tee();
-    void tapSseUsage(tapStream, anthropicMessagesAdapter).then((usage) =>
-      recordProxyUsage({
-        principal,
-        runId,
-        presetId,
-        resolved,
-        usage,
-        durationMs: Date.now() - started,
-      }),
-    );
+    void tapSseUsage(tapStream, anthropicMessagesAdapter)
+      .then((usage) =>
+        recordProxyUsage({
+          principal,
+          runId,
+          presetId,
+          resolved,
+          usage,
+          durationMs: Date.now() - started,
+        }),
+      )
+      .catch((err: unknown) => {
+        // Metering tap is best-effort and out-of-band of the client stream; a
+        // parse/insert failure must surface in logs, not vanish into an
+        // unhandled rejection (silent usage under-counting otherwise). Mirrors
+        // the core llm-proxy gateway (core.ts).
+        logger.error("claude-code-sdk gateway: SSE usage metering failed", {
+          runId,
+          presetId,
+          error: getErrorMessage(err),
+        });
+      });
     return new Response(clientStream, {
       status: upstream.status,
       headers: cloneResponseHeaders(upstream.headers),
