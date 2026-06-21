@@ -39,16 +39,22 @@
  */
 
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
+import { llmBodyTransformerFactory } from "./seam-llm.ts";
 
 const anonymizerModule: AppstrateModule = {
   manifest: { id: "anonymizer", name: "Anonymizer (reversible PII)", version: "0.1.0" },
 
   async init(ctx: ModuleInitContext) {
-    // Palier (a): no seam wired. The detector model loads lazily on the first
-    // anonymize() call (none until palier b), so boot never pulls onnxruntime.
-    ctx.services.logger.info(
-      "anonymizer module loaded — reversible PII layer ready, seam not yet wired (palier b pending)",
-    );
+    // The GLiNER detector loads lazily on the first masked request — boot
+    // itself never pulls the onnxruntime native binding.
+    ctx.services.logger.info("anonymizer module loaded — LLM-proxy masking seam active");
+  },
+
+  // The llm-proxy anonymization seam (palier b1): a stable factory whose
+  // shared detector is reused across requests; each request gets a fresh
+  // session. The buildTools / agent-run paths land in palier b2.
+  llmBodyTransformer() {
+    return llmBodyTransformerFactory;
   },
 };
 

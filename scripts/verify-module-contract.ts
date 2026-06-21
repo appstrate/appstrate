@@ -81,6 +81,7 @@ const MODULE_TENANT: Record<string, Tenant> = {
   "module-codex": "oss",
   "module-claude-code": "oss",
   "module-chat": "oss",
+  "module-anonymizer": "oss",
   cloud: "cloud",
 };
 
@@ -98,6 +99,7 @@ const DECLARER_ROOTS: Record<string, string> = {
   "module-codex": "appstrate/packages/module-codex/src",
   "module-claude-code": "appstrate/packages/module-claude-code/src",
   "module-chat": "appstrate/packages/module-chat/src",
+  "module-anonymizer": "appstrate/packages/module-anonymizer/src",
   cloud: "cloud/src",
 };
 
@@ -157,6 +159,13 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
     owners: ["cloud"],
     justification:
       "Email-template override into @appstrate/emails registry — cloud branding, single-owner by design.",
+  },
+  llmBodyTransformer: {
+    kind: "seam",
+    owners: ["module-anonymizer"],
+    justification:
+      "LLM-proxy body masking/restore — the proxy (apps/api/.../llm-proxy/core.ts) sits below the " +
+      "module layer; a direct import would name module-anonymizer. Single-owner by design.",
   },
 } satisfies Record<ContractMember, LedgerEntry>;
 

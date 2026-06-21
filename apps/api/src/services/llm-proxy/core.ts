@@ -28,6 +28,7 @@ import { cloneResponseHeaders, recordProxyUsage, tapSseUsage } from "./metering.
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getModelProvider } from "../model-providers/registry.ts";
+import { getModuleLlmBodyTransformer } from "../../lib/modules/module-loader.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
 import {
   swapResponseModelJson,
@@ -155,6 +156,19 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     cacheKeyForWrite = probe.cacheKey;
   }
 
+  // PII anonymization seam (module-anonymizer). Absent module → null → bodies
+  // forwarded untouched (zero footprint). ONE transformer per call so the mask
+  // table built for the request is the one that restores its own response.
+  // Built after the cache lookup: a cache hit already returned a restored body.
+  const anonymizer =
+    getModuleLlmBodyTransformer()?.create({
+      runId: inputs.runId,
+      orgId: inputs.principal.orgId,
+    }) ?? null;
+  const restorePii = (text: string): Promise<string> =>
+    anonymizer ? anonymizer.restoreResponse(text) : Promise.resolve(text);
+  const outboundBody = anonymizer ? await anonymizer.maskRequest(rewrittenBody) : rewrittenBody;
+
   const upstreamUrl = joinUpstreamUrl(resolved.baseUrl, inputs.upstreamPath);
   const upstreamHeaders = inputs.adapter.buildUpstreamHeaders(
     inputs.incomingHeaders,
@@ -168,7 +182,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     upstream = await fetchImpl(upstreamUrl, {
       method: "POST",
       headers: upstreamHeaders,
-      body: rewrittenBody,
+      body: outboundBody,
     });
   } catch (err) {
     logger.error("llm-proxy: upstream fetch failed", {
@@ -191,8 +205,9 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     const errorBody = await upstream.text();
     const headers = cloneResponseHeaders(upstream.headers);
     // Error bodies are free-form prose that may name the real id ("model
-    // deepseek-chat does not exist") — blind-scrub it back to the alias.
-    const clientBody = swap ? scrubModelText(errorBody, swap) : errorBody;
+    // deepseek-chat does not exist") — blind-scrub it back to the alias, then
+    // restore any PII tokens the upstream echoed into its message.
+    const clientBody = await restorePii(swap ? scrubModelText(errorBody, swap) : errorBody);
     return new Response(clientBody, { status: upstream.status, headers });
   }
 
@@ -220,12 +235,14 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
         });
       });
     const headers = cloneResponseHeaders(upstream.headers);
-    // Rewrite the echoed real id back to the alias in every SSE frame. The tap
-    // above reads the untouched `tapStream`, so accounting still sees the real
-    // id; only the client-facing copy is swapped.
-    const clientStream2 = swap
+    // Rewrite the echoed real id back to the alias in every SSE frame, then
+    // restore PII tokens per frame. The tap above reads the untouched
+    // `tapStream`, so accounting still sees the real id and the masked tokens;
+    // only the client-facing copy is swapped + restored.
+    let clientStream2 = swap
       ? clientStream.pipeThrough(createSseModelSwapStream(swap))
       : clientStream;
+    if (anonymizer) clientStream2 = clientStream2.pipeThrough(anonymizer.restoreResponseStream());
     return new Response(clientStream2, {
       status: upstream.status,
       headers,
@@ -242,9 +259,9 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   } catch {
     // Upstream advertised a non-JSON content-type but still returned a
     // non-SSE body — forward without metering. Scrub any real id from the
-    // free-form body for aliases.
+    // free-form body for aliases, then restore PII tokens.
     const headers = cloneResponseHeaders(upstream.headers);
-    const clientBody = swap ? scrubModelText(bodyText, swap) : bodyText;
+    const clientBody = await restorePii(swap ? scrubModelText(bodyText, swap) : bodyText);
     return new Response(clientBody, { status: upstream.status, headers });
   }
 
@@ -267,9 +284,10 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   }
 
   const headers = cloneResponseHeaders(upstream.headers);
-  // Rewrite the echoed real id back to the alias before the body leaves the
-  // server — and BEFORE caching, so a replay returns the alias too.
-  const clientBody = swap ? swapResponseModelJson(bodyText, swap) : bodyText;
+  // Rewrite the echoed real id back to the alias AND restore PII tokens before
+  // the body leaves the server — and BEFORE caching, so a replay returns the
+  // alias + the restored (real) values too.
+  const clientBody = await restorePii(swap ? swapResponseModelJson(bodyText, swap) : bodyText);
   // Persist 2xx replies for future lookups. Tag the MISS so the caller
   // sees a consistent `x-llm-proxy-cache-status` contract whether the
   // cache is enabled or off.

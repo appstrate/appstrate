@@ -267,6 +267,23 @@ export interface AppstrateModule {
    */
   modelProviders?(): readonly ModelProviderDefinition[];
 
+  /**
+   * SEAM (single-owner legal): contribute a factory that builds a per-call
+   * transformer for LLM request/response bodies at the `/api/llm-proxy/*`
+   * gateway. The proxy builds one transformer per call, masks the outbound
+   * request body with it, and restores every response branch (JSON, SSE,
+   * error) through it.
+   *
+   * Single-owner by design: without this seam the LLM proxy
+   * (`apps/api/src/services/llm-proxy/core.ts`) would have to import the
+   * anonymizer module directly to mask bodies — exactly the lower-layer →
+   * module coupling the module system forbids. The platform resolves the
+   * first loaded module's factory (`getModuleLlmBodyTransformer()`); absent
+   * module → no transformer → the proxy forwards bytes untouched, preserving
+   * the zero-footprint invariant.
+   */
+  llmBodyTransformer?(): LlmBodyTransformerFactory;
+
   /** Called during graceful shutdown (reverse init order). */
   shutdown?(): Promise<void>;
 }
@@ -738,6 +755,48 @@ export interface ModelProviderDefinition {
    * returned (or nothing if the hook is absent).
    */
   requiredIdentityClaims?: readonly (keyof ModelProviderIdentity)[];
+}
+
+// ---------------------------------------------------------------------------
+// LLM body transformer contribution types (the llm-proxy anonymization seam)
+//
+// A module contributes a STABLE factory (holds shared state, e.g. a loaded NER
+// model). The proxy calls `create(ctx)` once per request to get a per-call
+// transformer whose mask table is consistent across that request and its
+// response. Bodies cross the seam as raw bytes (request) / text (buffered
+// response) / a byte stream (SSE) — the proxy is wire-format agnostic and never
+// looks inside.
+// ---------------------------------------------------------------------------
+
+/** Per-call context for building an {@link LlmBodyTransformer}. */
+export interface LlmBodyTransformContext {
+  /** Run id when the call is attributed to a run (`X-Run-Id`), else null. */
+  runId: string | null;
+  /** Caller org — scopes any per-run state the transformer keeps. */
+  orgId: string;
+}
+
+/**
+ * Per-call, stateful transformer for one LLM proxy request and its response.
+ * Built once per call so the outbound mask table is the same one used to
+ * restore the inbound response.
+ */
+export interface LlmBodyTransformer {
+  /** Transform the outbound request body (e.g. mask PII). Bytes in, bytes out. */
+  maskRequest(body: Uint8Array): Promise<Uint8Array>;
+  /** Transform a fully-buffered response/error body (JSON or free-form prose). */
+  restoreResponse(text: string): Promise<string>;
+  /** Transform SSE response frames as they stream back (best-effort per chunk). */
+  restoreResponseStream(): TransformStream<Uint8Array, Uint8Array>;
+}
+
+/**
+ * Stable factory contributed by {@link AppstrateModule.llmBodyTransformer}.
+ * Lives for the process lifetime (so it can own shared state like a loaded
+ * model); `create` is called once per proxy request.
+ */
+export interface LlmBodyTransformerFactory {
+  create(ctx: LlmBodyTransformContext): LlmBodyTransformer;
 }
 
 // ---------------------------------------------------------------------------
