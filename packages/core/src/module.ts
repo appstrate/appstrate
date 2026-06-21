@@ -809,6 +809,18 @@ export interface LlmBodyTransformerFactory {
     body: Uint8Array,
     mapping: Record<string, string>,
   ): Promise<{ body: Uint8Array; mapping: Record<string, string> }>;
+  /**
+   * Stateless DEEP masking of an arbitrary JSON value — every string in the
+   * structure is masked. Used by the `/internal/anonymize` endpoint for the
+   * agent tool path (b2.3): a tool RESULT may carry fresh PII the LLM must not
+   * see, so the sidecar re-masks it before handing it back to the model.
+   * (Restoring tool ARGS before execution needs no detection — the sidecar does
+   * that locally.) Mapping threaded in/out like {@link maskLlmBody}.
+   */
+  maskDeep(
+    value: unknown,
+    mapping: Record<string, string>,
+  ): Promise<{ value: unknown; mapping: Record<string, string> }>;
 }
 
 // ---------------------------------------------------------------------------

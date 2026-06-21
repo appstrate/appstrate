@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createApp, buildSidecarRuntimeDeps, SIDECAR_IDLE_TIMEOUT_SECONDS } from "./app.ts";
-import { createRunAnonymizer } from "./anonymizer.ts";
+import { createRunAnonymizer, wrapToolHandler } from "./anonymizer.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
 import type { CredentialsResponse, LlmProxyConfig, ModelSwap } from "./helpers.ts";
 import { logger } from "./logger.ts";
@@ -300,7 +300,13 @@ const app = createApp({
   isReady: () => proxy.readySync,
   oauthTokenCache,
   anonymizer,
-  additionalMcpToolsProvider: () => [...runtimeToolDefs, ...integrationTools],
+  // Tool path (palier b2.3): when anonymization is on, wrap every tool so its
+  // args are un-masked before execution (the tool acts on real values) and its
+  // result is re-masked (the LLM only ever sees tokens). No-op when off.
+  additionalMcpToolsProvider: () => {
+    const tools = [...runtimeToolDefs, ...integrationTools];
+    return anonymizer ? tools.map((t) => wrapToolHandler(t, anonymizer)) : tools;
+  },
   integrationBootPromise,
   integrationBootReportProvider: () => integrationBootReport,
 });

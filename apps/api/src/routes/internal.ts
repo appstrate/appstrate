@@ -53,10 +53,12 @@ import { readIntegrationManifestForRun } from "../services/integration-service.t
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
 import { isIntegrationActive } from "../services/integration-connections.ts";
 
-/** Body of POST /internal/anonymize: a base64-encoded LLM request body + the
- * run's current token↔value mapping (empty on the first call of a run). */
+/** Body of POST /internal/anonymize. Exactly one of `body` (base64 LLM request
+ * body, field-targeted masking) or `value` (arbitrary JSON, deep masking for the
+ * tool path) + the run's current token↔value mapping (empty on the run's 1st call). */
 const anonymizeRequestSchema = z.object({
-  body: z.string(),
+  body: z.string().optional(),
+  value: z.unknown().optional(),
   mapping: z.record(z.string(), z.string()).default({}),
 });
 
@@ -547,12 +549,18 @@ export function createInternalRouter() {
     await verifyRunToken(c); // any valid run token may mask its own traffic
     const factory = getModuleLlmBodyTransformer();
     if (!factory) throw notFound("anonymizer module not loaded");
-    const { body, mapping } = parseBody(anonymizeRequestSchema, await c.req.json());
-    const masked = await factory.maskLlmBody(Buffer.from(body, "base64"), mapping);
-    return c.json({
-      body: Buffer.from(masked.body).toString("base64"),
-      mapping: masked.mapping,
-    });
+    const { body, value, mapping } = parseBody(anonymizeRequestSchema, await c.req.json());
+    if (body !== undefined) {
+      // LLM request body — field-targeted (system + messages content).
+      const masked = await factory.maskLlmBody(Buffer.from(body, "base64"), mapping);
+      return c.json({ body: Buffer.from(masked.body).toString("base64"), mapping: masked.mapping });
+    }
+    if (value !== undefined) {
+      // Arbitrary JSON — deep masking (tool result, b2.3).
+      const masked = await factory.maskDeep(value, mapping);
+      return c.json({ value: masked.value, mapping: masked.mapping });
+    }
+    throw invalidRequest("provide either `body` (base64 LLM request) or `value` (deep)");
   });
 
   return router;
