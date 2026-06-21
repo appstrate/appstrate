@@ -201,6 +201,18 @@ async function runPlatformContainerImpl(
       isOauthCredential,
     });
 
+    // Codex vend mode is the irreducible anonymization gap (palier b2): the
+    // in-container `codex` binary egresses straight to chatgpt.com — no reverse
+    // proxy is possible — so the sidecar's /llm masking never sees its traffic.
+    // Warn loudly rather than let an operator believe an anonymized codex run
+    // masks anything; it does not. Use an api_key / OAuth model to anonymize.
+    if (anonymizeEnabled && engine === "codex") {
+      logger.warn(
+        "anonymization is ON for this run but does NOT apply: codex vend egresses directly and cannot be masked",
+        { runId, providerId: llmConfig.providerId },
+      );
+    }
+
     let sidecarLlm: LlmProxyConfig | undefined;
     // Codex runs hold the real token in-container and lock egress to OpenAI's
     // hosts (the binary talks to the upstream directly; no reverse proxy is
