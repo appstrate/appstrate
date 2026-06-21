@@ -14,6 +14,7 @@ import { orgModels, organizations } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
+import { mintLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
 
@@ -99,6 +100,45 @@ describe("Models API", () => {
       // Hard guarantee: the real upstream id never appears anywhere in the
       // user-facing list payload (mirrors the integration client-masking test).
       expect(JSON.stringify(listBody)).not.toContain(realModelId);
+    });
+
+    it("does NOT strip the alias backing for the first-party chat-loopback caller (chat routing)", async () => {
+      // The chat needs the real apiShape/modelId to route an aliased model to
+      // the right engine/proxy. The loopback is trusted server code — the
+      // backing it reads never reaches the browser. See models.ts GET handler.
+      const credentialId = await createProviderKey();
+      const realModelId = "secret-backing-loopback-9q";
+      const create = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Medium",
+          modelId: realModelId,
+          credentialId,
+          aliased: true,
+        }),
+      });
+      expect(create.status).toBe(201);
+      const created = (await create.json()) as any;
+
+      const loopback = mintLoopbackToken({
+        userId: ctx.user.id,
+        email: ctx.user.email ?? "u@test",
+        name: ctx.user.name ?? "U",
+        orgId: ctx.orgId,
+        orgRole: "owner",
+      });
+      const list = await app.request("/api/models", {
+        headers: { Authorization: `Bearer ${loopback}`, "X-Org-Id": ctx.orgId },
+      });
+      expect(list.status).toBe(200);
+      const row = ((await list.json()) as any).data.find((m: any) => m.id === created.id);
+      expect(row).toBeDefined();
+      expect(row.aliased).toBe(true);
+      // Real binding is present for the loopback (so the chat can route it).
+      expect(row.modelId).toBe(realModelId);
+      expect(row.apiShape).not.toBeNull();
+      expect(row.credentialId).toBe(credentialId);
     });
   });
 

@@ -12,6 +12,7 @@
   "switcher.appAriaLabel": "Changer d'application",
   "nav.ariaLabel": "Navigation",
   "nav.orgSection": "Organisation",
+  "nav.chat": "Chat",
   "nav.dashboard": "Dashboard",
   "nav.storage": "Stockage",
   "nav.agents": "Agents",

@@ -14,6 +14,7 @@ import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import {
   loadInferenceCredentials,
+  loadCredentialRow,
   type DecryptedModelProviderCredentials,
 } from "./model-providers/credentials.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -114,6 +115,7 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
     updatedAt: model.updatedAt,
     // Backing — always null for an alias.
     apiShape: null,
+    providerId: null,
     baseUrl: null,
     modelId: null,
     credentialId: null,
@@ -162,6 +164,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         resolveCatalogDefaults(def.providerId, def.modelId),
       ),
       apiShape: def.apiShape,
+      providerId: def.providerId,
       baseUrl: def.baseUrl,
       modelId: def.modelId,
       enabled: def.enabled !== false,
@@ -183,6 +186,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
           resolveCatalogDefaults(creds.providerId, row.modelId),
         ),
         apiShape: creds.apiShape,
+        providerId: creds.providerId,
         baseUrl: creds.baseUrl,
         modelId: row.modelId,
         enabled: row.enabled,
@@ -657,6 +661,37 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   if (!creds) return null;
 
   return buildDbResolvedModel(row, creds);
+}
+
+/**
+ * Disambiguate the `loadModel(...) === null` result for an org (DB) model: is it
+ * null because the model is missing/disabled, or because its OAuth credential is
+ * flagged `needsReconnection` (which `loadInferenceCredentials` treats as dead)?
+ *
+ * Returns `true` only for the second case — an enabled DB model whose OAuth
+ * credential needs reconnection — so a caller can surface an actionable
+ * "reconnect" instead of a misleading "not found / not enabled". System models
+ * and non-UUID ids are never reconnection cases (`false`).
+ */
+export async function modelNeedsReconnection(orgId: string, modelDbId: string): Promise<boolean> {
+  if (isSystemModel(modelDbId)) return false;
+
+  let row: { credentialId: string; enabled: boolean } | undefined;
+  try {
+    [row] = await db
+      .select({ credentialId: orgModels.credentialId, enabled: orgModels.enabled })
+      .from(orgModels)
+      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
+      .limit(1);
+  } catch (err) {
+    // Same non-UUID cast hazard `loadModel` guards against → treat as "no".
+    if (isInvalidTextRepresentation(err)) return false;
+    throw err;
+  }
+  if (!row || !row.enabled || !row.credentialId) return false;
+
+  const cred = await loadCredentialRow(row.credentialId, orgId);
+  return !!cred && cred.blob.kind === "oauth" && !!cred.blob.needsReconnection;
 }
 
 /**

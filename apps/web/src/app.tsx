@@ -56,6 +56,9 @@ const AuthCallbackPage = lazy(() =>
 const StorageModulePage = lazy(() =>
   import("./modules/storage/storage-page").then((m) => ({ default: m.StorageModulePage })),
 );
+const ChatModulePage = lazy(() =>
+  import("./modules/chat/chat-page").then((m) => ({ default: m.ChatModulePage })),
+);
 
 // Route-level code splitting — heavy authenticated pages are lazy-loaded so
 // the entry chunk only carries the login/dashboard shell. Same Suspense +
@@ -797,6 +800,16 @@ export function App() {
                 element={
                   <Suspense fallback={<LoadingState />}>
                     <StorageModulePage />
+                  </Suspense>
+                }
+              />
+            )}
+            {features.chat && (
+              <Route
+                path="/chat"
+                element={
+                  <Suspense fallback={<LoadingState />}>
+                    <ChatModulePage />
                   </Suspense>
                 }
               />

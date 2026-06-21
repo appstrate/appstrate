@@ -278,6 +278,12 @@ export const schemas = {
           integrations: { type: "object", additionalProperties: { type: "string" } },
         },
       },
+      runtime_tools: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Built-in runtime tools the agent opted into via `manifest.runtime_tools` (output/log/note/pin/report).",
+      },
     },
   },
   AgentDetail: {
@@ -1047,6 +1053,7 @@ export const schemas = {
       "id",
       "label",
       "apiShape",
+      "providerId",
       "baseUrl",
       "modelId",
       "enabled",
@@ -1065,6 +1072,11 @@ export const schemas = {
         type: ["string", "null"],
         description:
           "Protocol family. `null` for model aliases (`aliased: true`) — binding hidden.",
+      },
+      providerId: {
+        type: ["string", "null"],
+        description:
+          "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for model aliases — binding hidden.",
       },
       baseUrl: {
         type: ["string", "null"],

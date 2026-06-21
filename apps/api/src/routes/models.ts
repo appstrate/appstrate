@@ -133,7 +133,16 @@ export function createModelsRouter() {
     const models = await listOrgModels(orgId);
     // Strip the backing of any model alias before it reaches the dashboard user
     // (Threat A) — see projectAliasedModel. Non-aliased models pass through.
-    return c.json(listResponse(models.map(projectAliasedModel)));
+    //
+    // EXCEPTION: the chat's in-process loopback (`chat-loopback`, first-party,
+    // server-minted) needs the real `apiShape`/`providerId` to route an aliased
+    // model to the right engine/proxy — otherwise aliases are unusable in chat.
+    // This is trusted server code (same trust boundary as `loadModel`); the
+    // backing it reads never reaches the browser (the chat streams AI output,
+    // not the model list). The dashboard's own picker calls this with a cookie
+    // and still gets the stripped view, so the backing stays hidden from users.
+    const firstPartyLoopback = c.get("authMethod") === "chat-loopback";
+    return c.json(listResponse(firstPartyLoopback ? models : models.map(projectAliasedModel)));
   });
 
   // POST /api/models — create a custom model

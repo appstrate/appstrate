@@ -18,17 +18,16 @@
  * caching blocks, extended-thinking, tool use — all pass untouched.
  */
 
-import { db } from "@appstrate/db/client";
-import { llmUsage } from "@appstrate/db/schema";
 import { loadModel, type ResolvedModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
 import { lookupResponse, storeResponse } from "./response-cache.ts";
 import { parseProxyRequest } from "./helpers.ts";
-import type { LlmProxyAdapter, LlmProxyPrincipal, UpstreamUsage } from "./types.ts";
+import { cloneResponseHeaders, recordProxyUsage, tapSseUsage } from "./metering.ts";
+import type { LlmProxyAdapter, LlmProxyPrincipal } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import type { ModelCost } from "@appstrate/core/module";
+import { getModelProvider } from "../model-providers/registry.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
 import {
   swapResponseModelJson,
@@ -74,6 +73,26 @@ export class LlmProxyModelApiMismatchError extends Error {
   }
 }
 
+/**
+ * Thrown when an OAuth-subscription model is requested through this generic
+ * gateway. The gateway forges nothing — a raw bearer alone won't satisfy a
+ * subscription upstream — so subscription providers have no path here. The only
+ * supported subscription is `claude-code`, served by its own dedicated SDK
+ * gateway (`claude-code-sdk-gateway.ts`), where the official Claude Agent SDK
+ * signs its own client fingerprint. Any other subscription has no
+ * ToS-compliant chat path.
+ */
+export class LlmProxyUnsupportedSubscriptionError extends Error {
+  constructor(public readonly providerId: string) {
+    super(
+      `Provider "${providerId}" is an OAuth subscription and cannot be served through ` +
+        `this gateway (no fingerprint forging). Only "claude-code" supports subscription ` +
+        `chat, via its dedicated SDK gateway. Use an API-key model instead.`,
+    );
+    this.name = "LlmProxyUnsupportedSubscriptionError";
+  }
+}
+
 export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   const fetchImpl = inputs.fetchImpl ?? fetch;
   const maxBytes = inputs.maxRequestBytes ?? DEFAULT_MAX_REQUEST_BYTES;
@@ -88,6 +107,13 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     inputs.principal.orgId,
     inputs.adapter.apiShape,
   );
+
+  // No fingerprint forging: an OAuth-subscription provider has no path through
+  // this generic gateway (a bare bearer won't satisfy a subscription upstream).
+  // claude-code is served by its own SDK gateway; reject everything else.
+  if (getModelProvider(resolved.providerId)?.authMode === "oauth2") {
+    throw new LlmProxyUnsupportedSubscriptionError(resolved.providerId);
+  }
 
   const rewrittenBody = request.rewriteModel(resolved.modelId);
 
@@ -133,6 +159,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   const upstreamHeaders = inputs.adapter.buildUpstreamHeaders(
     inputs.incomingHeaders,
     resolved.apiKey,
+    resolved.accountId,
   );
 
   const started = Date.now();
@@ -171,16 +198,27 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
 
   if (isSse && upstream.body) {
     const [clientStream, tapStream] = upstream.body.tee();
-    void tapSseStream(tapStream, inputs.adapter).then((usage) =>
-      recordUsage({
-        principal: inputs.principal,
-        runId: inputs.runId,
-        presetId,
-        resolved,
-        usage,
-        durationMs: Date.now() - started,
-      }),
-    );
+    void tapSseUsage(tapStream, inputs.adapter)
+      .then((usage) =>
+        recordProxyUsage({
+          principal: inputs.principal,
+          runId: inputs.runId,
+          presetId,
+          resolved,
+          usage,
+          durationMs: Date.now() - started,
+        }),
+      )
+      .catch((err: unknown) => {
+        // Metering tap is best-effort and out-of-band of the client stream;
+        // a parse/insert failure must surface in logs, not vanish into an
+        // unhandled rejection (silent usage under-counting otherwise).
+        logger.error("llm-proxy: SSE usage metering failed", {
+          runId: inputs.runId,
+          presetId,
+          error: getErrorMessage(err),
+        });
+      });
     const headers = cloneResponseHeaders(upstream.headers);
     // Rewrite the echoed real id back to the alias in every SSE frame. The tap
     // above reads the untouched `tapStream`, so accounting still sees the real
@@ -214,11 +252,11 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   if (usage) {
     // Non-streaming path: the upstream body is already fully buffered,
     // so awaiting the metering insert costs ~1ms and removes the
-    // observable race. `recordUsage` swallows its own DB errors (a
+    // observable race. `recordProxyUsage` swallows its own DB errors (a
     // failed insert never breaks the call), so awaiting is safe.
-    // Streaming uses `void tapSseStream(...)` deliberately — the
+    // Streaming uses `void tapSseUsage(...)` deliberately — the
     // response is already on the wire before the SSE tap drains.
-    await recordUsage({
+    await recordProxyUsage({
       principal: inputs.principal,
       runId: inputs.runId,
       presetId,
@@ -276,159 +314,4 @@ function joinUpstreamUrl(base: string, path: string): string {
   const trimmedBase = base.replace(/\/+$/, "");
   const normalisedPath = path.startsWith("/") ? path : `/${path}`;
   return `${trimmedBase}${normalisedPath}`;
-}
-
-const HOP_BY_HOP = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-]);
-
-// Bun's fetch auto-decompresses upstream responses, so `upstream.body`
-// holds plaintext even when the upstream advertised `content-encoding:
-// gzip`. Forwarding the original encoding header would tell the caller
-// to decompress bytes that aren't compressed → ZlibError. We also drop
-// `content-length` because it described the compressed payload; the
-// rewrapped Response recomputes it from the uncompressed body.
-const STRIPPED_CONTENT_HEADERS = new Set(["content-encoding", "content-length"]);
-
-function cloneResponseHeaders(src: Headers): Headers {
-  const out = new Headers();
-  src.forEach((v, k) => {
-    const lower = k.toLowerCase();
-    if (HOP_BY_HOP.has(lower)) return;
-    if (STRIPPED_CONTENT_HEADERS.has(lower)) return;
-    out.set(k, v);
-  });
-  return out;
-}
-
-/**
- * Upper bound on usage-bearing frames retained by {@link tapSseStream}.
- * Real providers emit at most two (Anthropic: `message_start` +
- * terminal `message_delta`; OpenAI-compatible: the terminal frame when
- * `stream_options.include_usage` is set). The cap only guards against a
- * pathological upstream stamping usage on every frame.
- */
-const MAX_RETAINED_USAGE_FRAMES = 64;
-
-/**
- * Tap the teed SSE stream and extract usage WITHOUT retaining the full
- * response (the previous implementation accumulated every frame —
- * O(response) memory per in-flight stream). Frames are parsed as they
- * are delimited; only frames that individually yield usage (probed via
- * `adapter.parseSseUsage([frame])`) are retained, in arrival order, and
- * the adapter extracts the final result from that subset:
- *
- *   - OpenAI-compatible (`openai.ts`): usage appears only on the
- *     terminal frame; the adapter's newest-first scan over the retained
- *     subset returns the same frame it would find scanning all frames.
- *   - Anthropic (`anthropic.ts`): `message_start` (input + cache
- *     tokens) and `message_delta` (cumulative output tokens) carry
- *     usage and are merged in order; every other frame contributed
- *     nothing to the aggregate.
- *
- * A frame the probe rejects can never alter `parseSseUsage`'s result
- * for either adapter, so the final call over the retained subset is
- * behaviour-identical to the old call over every frame.
- */
-async function tapSseStream(
-  stream: ReadableStream<Uint8Array>,
-  adapter: LlmProxyAdapter,
-): Promise<UpstreamUsage | null> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  const usageFrames: string[] = [];
-  const considerFrame = (frame: string): void => {
-    if (adapter.parseSseUsage([frame]) === null) return;
-    if (usageFrames.length >= MAX_RETAINED_USAGE_FRAMES) {
-      // Keep the FIRST retained frame (Anthropic's `message_start`
-      // seeds input/cache tokens) and the newest tail; drop the oldest
-      // intermediate — both adapters let later frames supersede it.
-      usageFrames.splice(1, 1);
-    }
-    usageFrames.push(frame);
-  };
-  try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) buffer += decoder.decode(value, { stream: true });
-      // Split on SSE frame delimiter (blank line). Keep the tail in the
-      // buffer until the next chunk — a frame may straddle chunks.
-      let idx: number;
-      while ((idx = buffer.indexOf("\n\n")) !== -1) {
-        considerFrame(buffer.slice(0, idx));
-        buffer = buffer.slice(idx + 2);
-      }
-    }
-    if (buffer.trim().length > 0) considerFrame(buffer);
-  } catch (err) {
-    logger.warn("llm-proxy: stream tap read failed — usage not recorded", {
-      error: getErrorMessage(err),
-    });
-    return null;
-  }
-  return adapter.parseSseUsage(usageFrames);
-}
-
-interface RecordUsageInputs {
-  principal: LlmProxyPrincipal;
-  runId: string | null;
-  presetId: string;
-  resolved: ResolvedModel;
-  usage: UpstreamUsage | null;
-  durationMs: number;
-}
-
-async function recordUsage(inputs: RecordUsageInputs): Promise<void> {
-  if (!inputs.usage) return;
-  try {
-    await db.insert(llmUsage).values({
-      source: "proxy",
-      orgId: inputs.principal.orgId,
-      apiKeyId: inputs.principal.kind === "api_key" ? inputs.principal.apiKeyId : null,
-      userId: inputs.principal.kind === "jwt_user" ? inputs.principal.userId : null,
-      runId: inputs.runId,
-      model: inputs.presetId,
-      realModel: inputs.resolved.modelId,
-      api: inputs.resolved.apiShape,
-      inputTokens: inputs.usage.inputTokens,
-      outputTokens: inputs.usage.outputTokens,
-      cacheReadTokens: inputs.usage.cacheReadTokens ?? null,
-      cacheWriteTokens: inputs.usage.cacheWriteTokens ?? null,
-      costUsd: computeCostUsd(inputs.usage, inputs.resolved.cost ?? null),
-      durationMs: inputs.durationMs,
-      // Fresh UUID per upstream call — satisfies the partial-unique index
-      // on (source='proxy', request_id). CLI-level retries land as new
-      // rows (same behaviour as pre-ledger; idempotency belongs to the
-      // Idempotency-Key middleware, not the ledger).
-      requestId: crypto.randomUUID(),
-    });
-  } catch (err) {
-    // Metering failures MUST NOT break a successful LLM call — the
-    // caller already consumed the response bytes. Log and move on;
-    // ops can reconcile from upstream provider invoices.
-    logger.error("llm-proxy: failed to record usage", {
-      orgId: inputs.principal.orgId,
-      presetId: inputs.presetId,
-      error: getErrorMessage(err),
-    });
-  }
-}
-
-function computeCostUsd(usage: UpstreamUsage, cost: ModelCost | null): number {
-  if (!cost) return 0;
-  const perMillion = 1_000_000;
-  const inputCost = (usage.inputTokens * cost.input) / perMillion;
-  const outputCost = (usage.outputTokens * cost.output) / perMillion;
-  const cacheReadCost = ((usage.cacheReadTokens ?? 0) * (cost.cacheRead ?? 0)) / perMillion;
-  const cacheWriteCost = ((usage.cacheWriteTokens ?? 0) * (cost.cacheWrite ?? 0)) / perMillion;
-  return inputCost + outputCost + cacheReadCost + cacheWriteCost;
 }

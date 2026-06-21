@@ -127,6 +127,13 @@
       "when": 1781998697260,
       "tag": "0017_far_vulture",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1782000627304,
+      "tag": "0018_absurd_the_phantom",
+      "breakpoints": true
     }
   ]
 }

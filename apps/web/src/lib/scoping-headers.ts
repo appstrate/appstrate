@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
+// Scoping headers for hand-rolled fetches that bypass the typed API client
+// (SSE streams, uploads) — mirrors the `X-Org-Id` / `X-Application-Id`
+// injection the client middleware performs (see `api/client.ts`). Module
+// shells hand this to their packaged UI as the `getHeaders` prop.
+
 import { getCurrentOrgId } from "../stores/org-store";
 import { getCurrentApplicationId } from "../stores/app-store";
 
-/**
- * Scoping headers (`X-Org-Id` / `X-Application-Id`) for module UIs that hit the
- * platform API with raw `fetch` instead of the typed client (which injects
- * them automatically). Mirrors the typed client's middleware.
- */
 export function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   const orgId = getCurrentOrgId();

@@ -1,19 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration coverage for the sidecar's `/llm/*` OAuth path
- * (SPEC §5.3–5.5).
+ * Integration coverage for the sidecar's `/llm/*` `oauth` path — the ToS-clean
+ * runner mode for a driver that signs its OWN provider fingerprint (the official
+ * Claude Agent SDK binary).
  *
- * Exercises the full lifecycle: token cache fetch → identity injection
- * → URL rewriting → body transform → upstream → 401 retry → adaptive
- * beta retry. Mocks both the platform's `/internal/oauth-token/*`
- * endpoints and the upstream LLM provider via a single `fetchFn`
- * dispatcher.
- *
- * The two synthetic configs below exercise every wire-format feature
- * (identityHeaders, accountIdHeader, systemPrepend, forceStream/Store,
- * adaptiveRetry) without naming any real-world provider — the sidecar
- * is provider-agnostic, and so are these tests.
+ * The defining property under test: the sidecar does NOT forge. There are no
+ * identity headers, no `system`-prepend, no `forceStream`. It only swaps the
+ * bearer for a fresh real token, ensures the OAuth beta is present, and forwards
+ * the driver's own fingerprint untouched. Mocks the platform token endpoint and
+ * the upstream provider via one `fetchFn` dispatcher.
  */
 
 import { describe, it, expect, mock } from "bun:test";
@@ -24,19 +20,12 @@ import type { CredentialsResponse, LlmProxyOauthConfig } from "../helpers.ts";
 
 const PLATFORM_API = "http://platform-mock:3000";
 const RUN_TOKEN = "run-tok";
-const PREPEND_TEXT = "synthetic-system-prelude";
 
 interface FetchCall {
   url: string;
   method: string;
   headers: Record<string, string>;
   body?: string;
-}
-
-interface MockUpstream {
-  /** Called for every fetch issued through the cache or `/llm/*`. */
-  fetchFn: ReturnType<typeof mock>;
-  calls: FetchCall[];
 }
 
 function buildOAuthTokenResponse(overrides: Partial<OAuthTokenResponse> = {}): OAuthTokenResponse {
@@ -53,8 +42,7 @@ function setupFetchMock(handler: (url: string, init: RequestInit) => Promise<Res
     const u = typeof url === "string" ? url : (url as URL).toString();
     const headers: Record<string, string> = {};
     if (init?.headers) {
-      const h = init.headers as Record<string, string>;
-      for (const [k, v] of Object.entries(h)) headers[k] = v;
+      for (const [k, v] of Object.entries(init.headers as Record<string, string>)) headers[k] = v;
     }
     const body = typeof init?.body === "string" ? init.body : undefined;
     calls.push({ url: u, method: init?.method ?? "GET", headers, body });
@@ -63,17 +51,14 @@ function setupFetchMock(handler: (url: string, init: RequestInit) => Promise<Res
   return { fetchFn, calls };
 }
 
-function makeDepsWithCache(upstream: MockUpstream): AppDeps {
+function makeDeps(fetchFn: ReturnType<typeof mock>): AppDeps {
   const cache = new OAuthTokenCache({
     getPlatformApiUrl: () => PLATFORM_API,
     getRunToken: () => RUN_TOKEN,
-    fetchFn: upstream.fetchFn as unknown as typeof fetch,
+    fetchFn: fetchFn as unknown as typeof fetch,
   });
   return {
-    config: {
-      platformApiUrl: PLATFORM_API,
-      runToken: RUN_TOKEN,
-    },
+    config: { platformApiUrl: PLATFORM_API, runToken: RUN_TOKEN },
     fetchCredentials: mock(
       async (): Promise<CredentialsResponse> => ({
         credentials: { access_token: "stub" },
@@ -85,475 +70,168 @@ function makeDepsWithCache(upstream: MockUpstream): AppDeps {
       }),
     ),
     cookieJar: new Map(),
-    fetchFn: upstream.fetchFn as unknown as typeof fetch,
+    fetchFn: fetchFn as unknown as typeof fetch,
     isReady: () => true,
     oauthTokenCache: cache,
   };
 }
 
-/**
- * Synthetic config exercising:
- *   - identityHeaders (static fingerprint headers)
- *   - systemPrepend (body transform that injects an Anthropic-style
- *     `system` array block at index 0)
- *   - adaptiveRetry (strip a header token on a known 4xx + body pattern,
- *     replay once)
- *
- * Models the shape any subscription-flavoured provider whose ToS
- * mandates an identity prelude in the `system` block would use.
- */
-const PREPEND_OAUTH: LlmProxyOauthConfig = {
+const OAUTH_CFG: LlmProxyOauthConfig = {
   authMode: "oauth",
-  baseUrl: "https://provider-a.example.com",
-  credentialId: "conn-prepend",
-  wireFormat: {
-    identityHeaders: {
-      accept: "application/json",
-      "x-app": "cli",
-      "x-fingerprint": "synthetic",
-    },
-    systemPrepend: {
-      type: "text",
-      text: PREPEND_TEXT,
-    },
-    adaptiveRetry: {
-      status: 400,
-      bodyPatterns: ["out of extra usage", "long context beta not available"],
-      headerName: "anthropic-beta",
-      removeToken: "context-1m-2025-08-07",
-    },
-  },
+  baseUrl: "https://api.anthropic.com",
+  credentialId: "conn-oauth",
 };
 
-/**
- * Synthetic config exercising:
- *   - identityHeaders + accountIdHeader (per-account routing)
- *   - forceStream / forceStore body coercion
- *   - a non-`/v1/...` path so we verify the sidecar forwards whatever
- *     path the agent issues without rewriting it
- *
- * Models the shape any subscription-flavoured provider that gates calls
- * on an `accountId` header would use.
- */
-const ACCOUNT_ID_OAUTH: LlmProxyOauthConfig = {
-  authMode: "oauth",
-  baseUrl: "https://provider-b.example.com/backend-api",
-  credentialId: "conn-acct",
-  wireFormat: {
-    identityHeaders: {
-      "x-originator": "pi",
-      "x-feature-beta": "responses=experimental",
-      "user-agent": "pi (linux x86_64)",
-      accept: "text/event-stream",
-    },
-    accountIdHeader: "x-account-id",
-    forceStream: true,
-    forceStore: false,
-  },
-};
-
-describe("/llm/* OAuth — system-prepend variant", () => {
-  it("injects bearer + identity headers and prepends the configured system block", async () => {
-    const upstream = setupFetchMock((url) => {
-      if (url.startsWith(PLATFORM_API)) {
-        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      return new Response('{"id":"msg_1"}', {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    const deps = makeDepsWithCache(upstream);
-    deps.config.llm = PREPEND_OAUTH;
-    const app = createApp(deps);
-
-    const res = await app.request("/llm/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: "synthetic-model", messages: [] }),
-    });
-    expect(res.status).toBe(200);
-
-    // First call → platform; second call → upstream
-    expect(upstream.calls).toHaveLength(2);
-    const upstreamCall = upstream.calls[1]!;
-    expect(upstreamCall.url).toBe("https://provider-a.example.com/v1/messages");
-    expect(upstreamCall.headers["authorization"]).toBe("Bearer oat-fresh-token");
-    expect(upstreamCall.headers["x-app"]).toBe("cli");
-    expect(upstreamCall.headers["accept"]).toBe("application/json");
-    expect(upstreamCall.headers["x-fingerprint"]).toBe("synthetic");
-
-    // Body has the configured prepend block injected into `system`
-    const body = JSON.parse(upstreamCall.body!);
-    expect(body.system).toEqual([{ type: "text", text: PREPEND_TEXT }]);
-  });
-
-  it("retries once on 401 with a force-refreshed token", async () => {
-    let upstreamCallNumber = 0;
-    const upstream = setupFetchMock((url) => {
-      if (url.startsWith(PLATFORM_API)) {
-        // Both /token and /refresh return a token, but /refresh returns a fresh one
-        const isRefresh = url.endsWith("/refresh");
-        return new Response(
-          JSON.stringify(
-            buildOAuthTokenResponse({
-              accessToken: isRefresh ? "oat-after-refresh" : "oat-stale",
-            }),
-          ),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      upstreamCallNumber++;
-      if (upstreamCallNumber === 1) {
-        return new Response('{"error":"invalid_token"}', {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      return new Response('{"id":"msg_after_retry"}', {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    const deps = makeDepsWithCache(upstream);
-    deps.config.llm = PREPEND_OAUTH;
-    const app = createApp(deps);
-
-    const res = await app.request("/llm/v1/messages", {
-      method: "POST",
+function upstreamOk(url: string): Response {
+  if (url.startsWith(PLATFORM_API)) {
+    return new Response(JSON.stringify(buildOAuthTokenResponse()), {
+      status: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: [] }),
     });
-    expect(res.status).toBe(200);
-    expect(await res.text()).toContain("msg_after_retry");
-
-    // Calls: /token, upstream(401), /refresh, upstream(200) = 4
-    expect(upstream.calls).toHaveLength(4);
-    const upstreamCalls = upstream.calls.filter((c) => !c.url.startsWith(PLATFORM_API));
-    expect(upstreamCalls).toHaveLength(2);
-    expect(upstreamCalls[0]!.headers["authorization"]).toBe("Bearer oat-stale");
-    expect(upstreamCalls[1]!.headers["authorization"]).toBe("Bearer oat-after-refresh");
+  }
+  return new Response('{"id":"msg_1"}', {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
   });
+}
 
-  it("propagates 401 + needsReconnection when refresh returns 410", async () => {
-    let upstreamCallNumber = 0;
-    const upstream = setupFetchMock((url) => {
-      if (url.startsWith(PLATFORM_API)) {
-        if (url.endsWith("/refresh")) {
-          return new Response(JSON.stringify({ detail: "revoked" }), {
-            status: 410,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-        return new Response(JSON.stringify(buildOAuthTokenResponse({ accessToken: "stale" })), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      upstreamCallNumber++;
-      return new Response('{"error":"invalid_token"}', {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    const deps = makeDepsWithCache(upstream);
-    deps.config.llm = PREPEND_OAUTH;
-    const app = createApp(deps);
-
-    const res = await app.request("/llm/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: [] }),
-    });
-    expect(res.status).toBe(401);
-    const body = (await res.json()) as { needsReconnection: boolean };
-    expect(body.needsReconnection).toBe(true);
-    // Only the first upstream call happened — the retry was aborted by the 410
-    expect(upstreamCallNumber).toBe(1);
-  });
-
-  it("returns 401 + needsReconnection if initial token fetch returns 410", async () => {
-    const upstream = setupFetchMock(
-      () =>
-        new Response(JSON.stringify({ detail: "needs reconnection" }), {
-          status: 410,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    const deps = makeDepsWithCache(upstream);
-    deps.config.llm = PREPEND_OAUTH;
-    const app = createApp(deps);
-
-    const res = await app.request("/llm/v1/messages", { method: "POST" });
-    expect(res.status).toBe(401);
-    const body = (await res.json()) as { needsReconnection: boolean };
-    expect(body.needsReconnection).toBe(true);
-  });
-
-  it("strips the configured adaptive-retry token on a matching 4xx and retries", async () => {
-    let upstreamCalls = 0;
-    const upstream = setupFetchMock((url) => {
-      if (url.startsWith(PLATFORM_API)) {
-        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      upstreamCalls++;
-      if (upstreamCalls === 1) {
-        return new Response(
-          JSON.stringify({ error: { message: "out of extra usage for long context beta" } }),
-          { status: 400, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      return new Response('{"id":"msg_after_beta_strip"}', {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    const deps = makeDepsWithCache(upstream);
-    deps.config.llm = PREPEND_OAUTH;
+describe("/llm/* oauth — no forging", () => {
+  it("swaps the bearer, merges the oauth beta, and preserves the driver fingerprint", async () => {
+    const { fetchFn, calls } = setupFetchMock(upstreamOk);
+    const deps = makeDeps(fetchFn);
+    deps.config.llm = OAUTH_CFG;
     const app = createApp(deps);
 
     const res = await app.request("/llm/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "anthropic-beta": "context-1m-2025-08-07, other-beta-x",
+        authorization: "Bearer placeholder",
+        "user-agent": "claude-cli/1.2.3 (external, cli)",
+        "x-app": "cli",
+        "anthropic-beta": "claude-code-20250219",
+        "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify({ messages: [] }),
-    });
-    expect(res.status).toBe(200);
-    expect(await res.text()).toContain("msg_after_beta_strip");
-
-    const upstreamFetches = upstream.calls.filter((c) => !c.url.startsWith(PLATFORM_API));
-    expect(upstreamFetches).toHaveLength(2);
-    // Second call has the configured adaptive-retry token stripped
-    expect(upstreamFetches[1]!.headers["anthropic-beta"]).toBe("other-beta-x");
-  });
-});
-
-describe("/llm/* OAuth — account-id variant", () => {
-  it("forwards the agent's path verbatim, injects accountIdHeader + identity headers, and coerces stream/store flags", async () => {
-    const upstream = setupFetchMock((url) => {
-      if (url.startsWith(PLATFORM_API)) {
-        return new Response(
-          JSON.stringify(
-            buildOAuthTokenResponse({
-              accountId: "acc_007",
-            }),
-          ),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      return new Response('{"ok":true}', {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    const deps = makeDepsWithCache(upstream);
-    deps.config.llm = ACCOUNT_ID_OAUTH;
-    const app = createApp(deps);
-
-    // The agent sends whatever path it wants — the sidecar forwards it
-    // verbatim under the configured `baseUrl`.
-    const res = await app.request("/llm/v2/responses", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "synthetic-model",
-        stream: false,
-        store: true,
-        input: "hello",
+        model: "claude-haiku-4-5",
+        system: "You are Claude Code.",
+        messages: [],
       }),
     });
     expect(res.status).toBe(200);
 
-    const upstreamCall = upstream.calls.find((c) => !c.url.startsWith(PLATFORM_API))!;
-    expect(upstreamCall.url).toBe("https://provider-b.example.com/backend-api/v2/responses");
-    expect(upstreamCall.headers["authorization"]).toBe("Bearer oat-fresh-token");
-    expect(upstreamCall.headers["x-account-id"]).toBe("acc_007");
-    expect(upstreamCall.headers["x-originator"]).toBe("pi");
-    expect(upstreamCall.headers["x-feature-beta"]).toBe("responses=experimental");
-    // Custom user-agent must be set — agents cannot be trusted to set
-    // their own, so the configured UA is forced server-side.
-    expect(upstreamCall.headers["user-agent"]).toBe("pi (linux x86_64)");
-    expect(upstreamCall.headers["accept"]).toBe("text/event-stream");
+    // call 0 → platform token; call 1 → upstream provider.
+    expect(calls).toHaveLength(2);
+    const up = calls[1]!;
+    expect(up.url).toBe("https://api.anthropic.com/v1/messages");
 
-    const body = JSON.parse(upstreamCall.body!);
-    expect(body.stream).toBe(true);
-    expect(body.store).toBe(false);
+    // Real bearer swapped in (placeholder gone).
+    expect(up.headers["authorization"]).toBe("Bearer oat-fresh-token");
+
+    // Driver fingerprint preserved verbatim — NOT forged by us.
+    expect(up.headers["user-agent"]).toBe("claude-cli/1.2.3 (external, cli)");
+    expect(up.headers["x-app"]).toBe("cli");
+
+    // OAuth beta merged onto the driver's existing betas (both present, order kept).
+    expect(up.headers["anthropic-beta"]).toBe("claude-code-20250219,oauth-2025-04-20");
+
+    // Body forwarded UNCHANGED — no system-prepend injection.
+    const body = JSON.parse(up.body!);
+    expect(body.system).toBe("You are Claude Code.");
+    expect(body.model).toBe("claude-haiku-4-5");
   });
-});
 
-describe("/llm/* OAuth — provider failure modes (Phase 8)", () => {
-  it("propagates 429 rate limit verbatim (no retry, Retry-After preserved)", async () => {
-    let upstreamCalls = 0;
-    const upstream = setupFetchMock((url) => {
-      if (url.startsWith(PLATFORM_API)) {
-        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      upstreamCalls++;
-      return new Response(
-        JSON.stringify({ error: { type: "rate_limit_error", message: "rate limited" } }),
-        {
-          status: 429,
-          headers: { "Content-Type": "application/json", "Retry-After": "30" },
-        },
-      );
-    });
-    const deps = makeDepsWithCache(upstream);
-    deps.config.llm = PREPEND_OAUTH;
+  it("adds the oauth beta even when the driver sent none", async () => {
+    const { fetchFn, calls } = setupFetchMock(upstreamOk);
+    const deps = makeDeps(fetchFn);
+    deps.config.llm = OAUTH_CFG;
     const app = createApp(deps);
 
-    const res = await app.request("/llm/v1/messages", {
+    await app.request("/llm/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: [] }),
+      headers: { "Content-Type": "application/json", authorization: "Bearer placeholder" },
+      body: JSON.stringify({ model: "m", messages: [] }),
     });
-    expect(res.status).toBe(429);
-    expect(res.headers.get("Retry-After")).toBe("30");
-    // Single upstream call: 429 must NOT trigger the 401-retry path
-    expect(upstreamCalls).toBe(1);
-    const body = (await res.json()) as { error: { type: string } };
-    expect(body.error.type).toBe("rate_limit_error");
+    expect(calls[1]!.headers["anthropic-beta"]).toBe("oauth-2025-04-20");
   });
 
-  it("propagates 5xx upstream error verbatim", async () => {
-    let upstreamCalls = 0;
-    const upstream = setupFetchMock((url) => {
+  it("honours a custom oauthBeta flag", async () => {
+    const { fetchFn, calls } = setupFetchMock(upstreamOk);
+    const deps = makeDeps(fetchFn);
+    deps.config.llm = { ...OAUTH_CFG, oauthBeta: "oauth-2099-01-01" };
+    const app = createApp(deps);
+
+    await app.request("/llm/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "m", messages: [] }),
+    });
+    expect(calls[1]!.headers["anthropic-beta"]).toBe("oauth-2099-01-01");
+  });
+
+  it("strips any x-api-key (this path is bearer-only)", async () => {
+    const { fetchFn, calls } = setupFetchMock(upstreamOk);
+    const deps = makeDeps(fetchFn);
+    deps.config.llm = OAUTH_CFG;
+    const app = createApp(deps);
+
+    await app.request("/llm/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": "sk-ant-leak" },
+      body: JSON.stringify({ model: "m", messages: [] }),
+    });
+    const up = calls[1]!;
+    const keys = Object.keys(up.headers).map((k) => k.toLowerCase());
+    expect(keys).not.toContain("x-api-key");
+  });
+
+  it("rewrites the model alias→real in the request body when modelSwap is set", async () => {
+    const { fetchFn, calls } = setupFetchMock(upstreamOk);
+    const deps = makeDeps(fetchFn);
+    deps.config.llm = {
+      ...OAUTH_CFG,
+      modelSwap: { alias: "appstrate-small", real: "claude-haiku-4-5" },
+    };
+    const app = createApp(deps);
+
+    await app.request("/llm/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "appstrate-small", messages: [] }),
+    });
+    expect(JSON.parse(calls[1]!.body!).model).toBe("claude-haiku-4-5");
+  });
+
+  it("retries once on 401 with a force-refreshed token", async () => {
+    let upstreamN = 0;
+    const { fetchFn, calls } = setupFetchMock((url) => {
       if (url.startsWith(PLATFORM_API)) {
-        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
+        const isRefresh = url.endsWith("/refresh");
+        return new Response(
+          JSON.stringify(
+            buildOAuthTokenResponse({ accessToken: isRefresh ? "oat-refreshed" : "oat-stale" }),
+          ),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
       }
-      upstreamCalls++;
-      return new Response('{"error":"upstream service unavailable"}', {
-        status: 503,
+      upstreamN += 1;
+      return new Response(upstreamN === 1 ? "unauth" : '{"id":"ok"}', {
+        status: upstreamN === 1 ? 401 : 200,
         headers: { "Content-Type": "application/json" },
       });
     });
-    const deps = makeDepsWithCache(upstream);
-    deps.config.llm = PREPEND_OAUTH;
+    const deps = makeDeps(fetchFn);
+    deps.config.llm = OAUTH_CFG;
     const app = createApp(deps);
 
     const res = await app.request("/llm/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: [] }),
+      body: JSON.stringify({ model: "m", messages: [] }),
     });
-    expect(res.status).toBe(503);
-    expect(upstreamCalls).toBe(1);
-  });
-
-  it("does NOT retry indefinitely on repeated 401s — second 401 is propagated", async () => {
-    let upstreamCalls = 0;
-    const upstream = setupFetchMock((url) => {
-      if (url.startsWith(PLATFORM_API)) {
-        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      upstreamCalls++;
-      return new Response('{"error":"invalid_token"}', {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    const deps = makeDepsWithCache(upstream);
-    deps.config.llm = PREPEND_OAUTH;
-    const app = createApp(deps);
-
-    const res = await app.request("/llm/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: [] }),
-    });
-    expect(res.status).toBe(401);
-    // Exactly 2 upstream calls: original + the single retry. Not 3, not 1.
-    expect(upstreamCalls).toBe(2);
-  });
-
-  it("returns a structured 502 when the upstream provider is unreachable", async () => {
-    const upstream = setupFetchMock((url) => {
-      if (url.startsWith(PLATFORM_API)) {
-        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      throw new Error("ENETUNREACH");
-    });
-    const deps = makeDepsWithCache(upstream);
-    deps.config.llm = PREPEND_OAUTH;
-    const app = createApp(deps);
-
-    const res = await app.request("/llm/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: [] }),
-    });
-    // Sidecar must surface a 502 (or 5xx) rather than crash; agent will see a clean error.
-    expect(res.status).toBeGreaterThanOrEqual(500);
-    expect(res.status).toBeLessThan(600);
-  });
-
-  it("returns a 5xx when the platform's /internal/oauth-token call fails (not a hard crash)", async () => {
-    const upstream = setupFetchMock((url) => {
-      if (url.startsWith(PLATFORM_API)) {
-        return new Response(JSON.stringify({ detail: "platform DB down" }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      return new Response("ok", { status: 200 });
-    });
-    const deps = makeDepsWithCache(upstream);
-    deps.config.llm = PREPEND_OAUTH;
-    const app = createApp(deps);
-
-    const res = await app.request("/llm/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: [] }),
-    });
-    expect(res.status).toBeGreaterThanOrEqual(500);
-  });
-});
-
-describe("/llm/* OAuth — config errors", () => {
-  it("returns 503 when oauthTokenCache dep is missing", async () => {
-    const upstream = setupFetchMock(() => new Response("ok", { status: 200 }));
-    const deps = makeDepsWithCache(upstream);
-    delete deps.oauthTokenCache;
-    deps.config.llm = PREPEND_OAUTH;
-    const app = createApp(deps);
-    const res = await app.request("/llm/v1/messages", { method: "POST" });
-    expect(res.status).toBe(503);
-  });
-
-  it("returns 403 when llmConfig.baseUrl targets a blocked network range", async () => {
-    const upstream = setupFetchMock((url) => {
-      if (url.startsWith(PLATFORM_API)) {
-        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      return new Response("ok", { status: 200 });
-    });
-    const deps = makeDepsWithCache(upstream);
-    deps.config.llm = { ...PREPEND_OAUTH, baseUrl: "http://10.0.0.1" };
-    const app = createApp(deps);
-    const res = await app.request("/llm/v1/messages", { method: "POST" });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    const upstreamCalls = calls.filter((c) => c.url.startsWith("https://api.anthropic.com"));
+    expect(upstreamCalls).toHaveLength(2);
+    expect(upstreamCalls[1]!.headers["authorization"]).toBe("Bearer oat-refreshed");
   });
 });

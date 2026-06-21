@@ -613,6 +613,14 @@ export interface OrgModelInfo extends ModelMetadata {
    * provider/endpoint/upstream id behind the alias. Always set otherwise.
    */
   apiShape: string | null;
+  /**
+   * The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`).
+   * Distinguishes subscription providers that share an `apiShape` with an
+   * API-key provider (`claude-code` vs `anthropic`, both `anthropic-messages`)
+   * — clients route them to the right proxy path. `null` for model aliases
+   * (part of the stripped backing, same as {@link apiShape}).
+   */
+  providerId: string | null;
   baseUrl: string | null;
   modelId: string | null;
   enabled: boolean;
@@ -679,7 +687,7 @@ export interface ModelProviderCredentialInfo {
  * data-driven (no hardcoded provider list client-side). Mirrors
  * {@link import("@appstrate/core/module").ModelProviderDefinition} with the
  * optional-fields normalised to nullable for wire clarity (and stripped of
- * the platform-internal `hooks` / `oauthWireFormat` blocks).
+ * the platform-internal `hooks` block).
  */
 export interface ProviderRegistryEntry {
   providerId: string;

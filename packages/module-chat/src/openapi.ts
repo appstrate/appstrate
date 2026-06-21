@@ -1,0 +1,327 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * OpenAPI contribution for the chat module — merged into the platform spec
+ * at boot (absent when the module is disabled). Because these are normal
+ * documented operations, the `mcp` module's meta-tools expose them to MCP
+ * clients automatically (search/describe/invoke_operation).
+ */
+
+const stdHeaders = {
+  "Request-Id": { $ref: "#/components/headers/RequestId" },
+  "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+} as const;
+
+export const chatComponentSchemas = {
+  ChatSession: {
+    type: "object",
+    required: ["object", "id", "createdAt", "updatedAt"],
+    properties: {
+      object: { type: "string", enum: ["chat_session"] },
+      id: { type: "string", description: "Session ID (chs_ prefix)" },
+      title: { type: ["string", "null"] },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
+    },
+  },
+  // One conversation-tree node, written by the client's assistant-ui
+  // history adapter. `content` is the format-encoded message — opaque to
+  // the server (it only peeks for a best-effort title).
+  ChatMessageEntry: {
+    type: "object",
+    required: ["id", "parent_id", "format", "content"],
+    properties: {
+      id: {
+        type: "string",
+        minLength: 1,
+        maxLength: 200,
+        description: "Client-generated message id",
+      },
+      parent_id: { type: ["string", "null"], maxLength: 200 },
+      format: {
+        type: "string",
+        minLength: 1,
+        maxLength: 100,
+        description: "Format adapter id (e.g. aui/v0)",
+      },
+      content: { description: "Opaque encoded message" },
+    },
+  },
+} as const;
+
+export const chatPaths = {
+  "/api/chat/sessions": {
+    get: {
+      operationId: "listChatSessions",
+      tags: ["Chat"],
+      summary: "List chat sessions",
+      description:
+        "List the caller's chat sessions in the current organization (most recent first).",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      responses: {
+        "200": {
+          description: "Sessions list",
+          headers: stdHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: { type: "array", items: { $ref: "#/components/schemas/ChatSession" } },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+    post: {
+      operationId: "createChatSession",
+      tags: ["Chat"],
+      summary: "Create a chat session",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: { title: { type: "string", minLength: 1, maxLength: 200 } },
+            },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "Session created",
+          headers: stdHeaders,
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/ChatSession" } },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/chat/sessions/{id}": {
+    get: {
+      operationId: "getChatSession",
+      tags: ["Chat"],
+      summary: "Get a chat session with its messages",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Session with full message tree",
+          headers: stdHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/ChatSession" },
+                  {
+                    type: "object",
+                    required: ["messages"],
+                    properties: {
+                      messages: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/ChatMessageEntry" },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    patch: {
+      operationId: "renameChatSession",
+      tags: ["Chat"],
+      summary: "Rename a chat session",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["title"],
+              properties: { title: { type: "string", minLength: 1, maxLength: 200 } },
+            },
+          },
+        },
+      },
+      responses: {
+        "204": { description: "Session renamed" },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteChatSession",
+      tags: ["Chat"],
+      summary: "Delete a chat session",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "204": { description: "Session deleted (messages cascade)" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/chat/sessions/{id}/messages": {
+    post: {
+      operationId: "appendChatMessage",
+      tags: ["Chat"],
+      summary: "Append/upsert a history entry",
+      description:
+        "Persistence write from the client's assistant-ui history adapter: one opaque conversation-tree node, upserted on its client id. The live conversation flows through `POST /api/chat` (streaming).",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": { schema: { $ref: "#/components/schemas/ChatMessageEntry" } },
+        },
+      },
+      responses: {
+        "204": { description: "Entry persisted" },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/chat": {
+    post: {
+      operationId: "streamChat",
+      tags: ["Chat"],
+      summary: "Run a conversational turn (streaming)",
+      description:
+        "Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference goes through the org's configured models via the llm-proxy; tool calls dispatch through `/api/mcp` with the caller's own permissions. History persistence is client-owned (see the session entry endpoints). Rate limited (20/min per caller). Not invocable over MCP (streaming).",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        {
+          name: "X-Model-Id",
+          in: "header",
+          required: false,
+          schema: { type: "string" },
+          description: "Org model (preset id) override; defaults to the org default model.",
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["messages"],
+              properties: {
+                messages: {
+                  type: "array",
+                  items: { type: "object", description: "AI SDK UIMessage" },
+                  minItems: 1,
+                },
+                modelId: { type: "string" },
+                id: { type: "string", description: "Thread id (assistant-ui)" },
+                context: {
+                  type: "object",
+                  required: ["type", "id"],
+                  properties: {
+                    type: { type: "string" },
+                    id: { type: "string" },
+                    label: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "AI SDK UIMessage stream (text/event-stream)",
+          headers: stdHeaders,
+          content: { "text/event-stream": { schema: { type: "string" } } },
+        },
+        "400": { description: "No enabled model configured, or invalid body" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "429": { description: "Rate limited (20/min per caller)" },
+      },
+    },
+  },
+  "/api/chat/title": {
+    post: {
+      operationId: "generateChatTitle",
+      tags: ["Chat"],
+      summary: "Generate a short conversation title (LLM)",
+      description:
+        "Runs a tiny non-streamed completion over the first few messages and returns a 3–6 word title. Inference goes through the org's configured models via the llm-proxy. The client persists the title via the session rename endpoint. Rate limited (20/min per caller).",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["messages"],
+              properties: {
+                messages: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 8,
+                  items: {
+                    type: "object",
+                    required: ["role", "text"],
+                    properties: {
+                      role: { type: "string" },
+                      text: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Generated title",
+          headers: stdHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["title"],
+                properties: { title: { type: "string" } },
+              },
+            },
+          },
+        },
+        "400": { description: "No enabled model configured, or invalid body" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "429": { description: "Rate limited (20/min per caller)" },
+      },
+    },
+  },
+} as const;

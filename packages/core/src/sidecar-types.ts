@@ -48,6 +48,19 @@ export interface SidecarConfig {
    * passes to Pi SDK's compaction settings.
    */
   modelMaxTokens?: number;
+  /**
+   * Per-run egress allowlist for the forward proxy. When set (non-empty), the
+   * agent's outbound traffic is restricted to ONLY these hosts (plus the
+   * trusted platform host) — every other destination is refused, on top of the
+   * always-on SSRF blocklist. A host matches by exact name or as a parent
+   * domain suffix (`chatgpt.com` allows `chatgpt.com` and `x.chatgpt.com`).
+   *
+   * Set for `vend`-mode runs (the Codex CLI), which hold the real upstream
+   * token in-container: locking egress to the provider's hosts means the token
+   * cannot be exfiltrated to an attacker-controlled endpoint. Unset (the
+   * default) keeps the open SSRF-block-only posture used by every other run.
+   */
+  egressAllowlist?: readonly string[];
 }
 
 /**
@@ -68,6 +81,8 @@ export interface SidecarLaunchSpec {
   modelContextWindow?: number;
   /** See {@link SidecarConfig.modelMaxTokens}. */
   modelMaxTokens?: number;
+  /** See {@link SidecarConfig.egressAllowlist}. Serialised as `EGRESS_ALLOWLIST_JSON`. */
+  egressAllowlist?: readonly string[];
   /**
    * Integrations to bootstrap inside the sidecar (Phase 1.4). Each entry
    * declares an `type: integration` AFPS package the agent depends on —
@@ -476,13 +491,16 @@ export interface IntegrationSpawnSpec {
  *
  *   - `api_key`: the agent SDK builds the auth header with a placeholder and
  *     the sidecar swaps the placeholder for the real key.
- *   - `oauth`: the sidecar fetches a fresh access token from the platform
- *     (`GET /internal/oauth-token/:connectionId`) and injects it as the
- *     bearer + the per-provider identity headers + applies the declarative
- *     body transforms read from `wireFormat` (system-prepend, force-stream,
- *     force-store).
+ *   - `oauth`: the ToS-clean OAuth path for an agent driver that signs its OWN
+ *     provider fingerprint (the official Claude Agent SDK binary). The sidecar
+ *     fetches a fresh access token from the platform
+ *     (`GET /internal/oauth-token/:credentialId`), swaps the request bearer for
+ *     it, and ensures the OAuth beta flag — but forges nothing (no identity
+ *     headers, no body transforms). There is deliberately no fingerprint-forging
+ *     mode: a subscription provider whose driver can't sign its own fingerprint
+ *     cannot execute.
  */
-export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
+export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig | LlmProxyVendConfig;
 
 /**
  * Canonical wire-format identifier for every LLM model provider Appstrate
@@ -532,86 +550,58 @@ export interface LlmProxyApiKeyConfig {
   modelSwap?: ModelSwap;
 }
 
+/**
+ * OAuth mode — the ToS-clean path for an agent driver that signs its OWN
+ * provider fingerprint (the official Claude Agent SDK binary).
+ *
+ * The sidecar forges nothing: no identity headers, no `system`-prepend /
+ * `forceStream` body transform. It only resolves a fresh access token from the
+ * platform, swaps the request bearer for it, and ensures the OAuth beta flag
+ * ({@link oauthBeta}) is present — leaving the driver's own user-agent / `x-app`
+ * / `anthropic-beta` fingerprint untouched. This is the runner-side counterpart
+ * of the chat's `claude-code-sdk-gateway`. There is no forging fallback: a
+ * subscription provider whose driver can't sign its own fingerprint has no
+ * execution path.
+ */
 export interface LlmProxyOauthConfig {
   authMode: "oauth";
   /** Fallback base URL — the sidecar prefers `baseUrl` returned by the platform's token endpoint. */
   baseUrl: string;
   /** ID of the `model_provider_credentials` row backing this OAuth connection. */
   credentialId: string;
+  /**
+   * OAuth beta flag ensured on the outbound `anthropic-beta` header (merged,
+   * never replacing the driver's own betas). Defaults to `oauth-2025-04-20`.
+   */
+  oauthBeta?: string;
   /** Set for model aliases — rewrite `model` alias↔real in req/resp. See {@link ModelSwap}. */
   modelSwap?: ModelSwap;
-  /**
-   * Declarative wire-format contract contributed by the provider module
-   * (`ModelProviderDefinition.oauthWireFormat`). Drives identity-header
-   * injection, body transforms (system prepend, `forceStream`, `forceStore`),
-   * URL path rewriting, and adaptive header retries without the sidecar
-   * needing to know any provider name. When absent, no identity headers or
-   * transforms apply.
-   */
-  wireFormat?: OAuthWireFormat;
 }
 
 /**
- * Declarative wire-format quirks an OAuth model provider needs the sidecar
- * to apply on its behalf. Lives in {@link LlmProxyOauthConfig} (carried at
- * boot via env), so the sidecar runtime stays provider-agnostic — there is
- * no provider-name switch anywhere; every behavior is data-driven from this
- * struct.
- *
- * All fields optional. An empty `OAuthWireFormat` is equivalent to "pass
- * the agent's request through with just the bearer attached."
+ * Vend mode — the in-container-driver path for a subscription whose official
+ * binary talks to the upstream DIRECTLY and cannot be pointed at a reverse
+ * proxy (the OpenAI Codex CLI: its models-manager calls `chatgpt.com` verbatim,
+ * ignoring `chatgpt_base_url`). The sidecar can't sit in the request path, so
+ * instead it VENDS the resolved access token to the in-container runner once,
+ * over the internal-network-gated `GET /credential-vend`. The runner writes it
+ * into the binary's `auth.json` and the binary egresses straight to the upstream
+ * — locked to the provider's hosts by the sidecar's per-run egress allowlist
+ * ({@link SidecarConfig.egressAllowlist}). The real token therefore DOES enter
+ * the container (unlike {@link LlmProxyOauthConfig}); the compensating controls
+ * are the locked egress + the no-refresh-token vend (the access token is
+ * non-renewable and the container is ephemeral).
  */
-export interface OAuthWireFormat {
-  /**
-   * Static headers injected on every OAuth-authenticated upstream call.
-   * Lower-cased keys recommended; the sidecar forwards verbatim. Used for
-   * provider fingerprinting (a fixed client-identity header the upstream
-   * expects to see on subscription-bearing calls).
-   */
-  identityHeaders?: Record<string, string>;
-  /**
-   * Header name to echo the resolved `accountId` as (when the token endpoint
-   * surfaced one). Skipped when the cached token carries no `accountId`.
-   */
-  accountIdHeader?: string;
-  /**
-   * Anthropic-style system-prompt prelude prepended to outbound JSON
-   * bodies. Applied only when the request body is a JSON object with a
-   * `system` field — otherwise pass-through.
-   */
-  systemPrepend?: { type: "text"; text: string };
-  /** Force `stream: true` on outbound JSON bodies (required by some subscription-flavoured providers). */
-  forceStream?: boolean;
-  /** Force `store: false` on outbound JSON bodies (required by some subscription-flavoured providers). */
-  forceStore?: boolean;
-  /** Path rewriting applied at the proxy boundary. */
-  rewriteUrlPath?: { from: string; to: string };
-  /**
-   * Single adaptive retry policy: when an upstream returns `status` and
-   * the response body matches any of `bodyPatterns` (case-insensitive
-   * regex), strip `removeToken` from the comma-separated header named
-   * `headerName` and replay the request once. Used by Anthropic to fall
-   * back when the long-context beta isn't available on the account.
-   */
-  adaptiveRetry?: OAuthAdaptiveRetryPolicy;
-}
-
-/** See {@link OAuthWireFormat.adaptiveRetry}. */
-export interface OAuthAdaptiveRetryPolicy {
-  /** HTTP status code triggering the retry (typically 400). */
-  status: number;
-  /** Body-text patterns (case-insensitive regex strings). Any match triggers retry. */
-  bodyPatterns: readonly string[];
-  /** Header name to mutate (case-insensitive lookup). */
-  headerName: string;
-  /** Comma-separated token to remove from the header value before retry. */
-  removeToken: string;
+export interface LlmProxyVendConfig {
+  authMode: "vend";
+  /** ID of the `model_provider_credentials` row whose token is vended in-container. */
+  credentialId: string;
 }
 
 /**
  * Wire-format response from the platform's `GET /internal/oauth-token/:credentialId`
  * (and `POST .../refresh`) endpoint. Carries only the fields that change per
- * refresh — provider invariants (baseUrl, providerId, wireFormat) live in
+ * refresh — provider invariants (baseUrl, providerId) live in
  * {@link LlmProxyOauthConfig}, which the sidecar already received at boot.
  */
 export interface OAuthTokenResponse {
@@ -620,8 +610,8 @@ export interface OAuthTokenResponse {
   expiresAt: number | null;
   /**
    * Abstract account/tenant identifier surfaced by the integration's
-   * `extractTokenIdentity` hook. Echoed by the sidecar as the header
-   * named by {@link OAuthWireFormat.accountIdHeader} (when both are set).
+   * `extractTokenIdentity` hook (used at connect time for required-claim
+   * validation; not forwarded to the upstream provider).
    */
   accountId?: string;
 }

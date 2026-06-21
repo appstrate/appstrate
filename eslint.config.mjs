@@ -192,7 +192,14 @@ export default tseslint.config(
     },
   },
   {
-    files: ["apps/web/src/**/*.{ts,tsx}", "packages/ui/src/**/*.{ts,tsx}"],
+    files: [
+      "apps/web/src/**/*.{ts,tsx}",
+      "packages/ui/src/**/*.{ts,tsx}",
+      // The chat module ships its frontend under `ui/` — gate it with the same
+      // React Compiler / hooks rules as the app (its backend `.ts` stays under
+      // the general TS config, no browser globals).
+      "packages/module-chat/src/ui/**/*.{ts,tsx}",
+    ],
     languageOptions: {
       globals: globals.browser,
     },

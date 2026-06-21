@@ -17,6 +17,7 @@ const base: OrgModelInfo = {
   id: "appstrate-medium",
   label: "Appstrate Medium",
   apiShape: "openai-completions",
+  providerId: "openai-compatible",
   baseUrl: "https://api.deepseek.com/v1",
   modelId: "deepseek-chat",
   input: ["text"],

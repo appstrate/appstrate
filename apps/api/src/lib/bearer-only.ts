@@ -20,6 +20,11 @@ const ACCEPTED_AUTH_METHODS: ReadonlySet<string> = new Set([
   "api_key",
   "oauth2-instance",
   "oauth2-dashboard",
+  // In-process loopback bearer minted by the chat module for its own
+  // inference calls (process-local secret, 60s TTL, llm-proxy:call +
+  // models:read only). A server-constructed request — the cookie/CSRF
+  // threat model doesn't apply. See packages/module-chat/src/loopback-auth.ts.
+  "chat-loopback",
 ]);
 
 /**
@@ -31,6 +36,35 @@ export function assertBearerOnly(authMethod: string | undefined, surfaceName: st
   if (!authMethod || !ACCEPTED_AUTH_METHODS.has(authMethod)) {
     throw forbidden(
       `${surfaceName} does not accept auth method "${authMethod}" (cookie sessions and unknown strategies rejected)`,
+    );
+  }
+}
+
+/**
+ * The strictly first-party interactive auth methods — the platform's own
+ * surfaces acting for a logged-in operator. Subscription LLM routes accept
+ * ONLY these: an API key (headless, third-party-distributable) must never
+ * be able to spend a personal ChatGPT/Claude subscription, while the org's
+ * own members using the org's own dashboard/chat may (same trust boundary
+ * as the in-container sidecar that already serves these credentials to
+ * runs).
+ */
+// NOTE: for `chat-loopback`, the effective subscription gate is the loopback
+// HMAC secret (process-local, never persisted/transmitted — see
+// packages/module-chat/src/loopback-auth.ts), not this route check. Anything
+// that persists/exports that secret, or widens this set, breaks the invariant
+// that a personal subscription is never spendable by a third party.
+export const FIRST_PARTY_AUTH_METHODS: ReadonlySet<string> = new Set([
+  "oauth2-dashboard",
+  "chat-loopback",
+]);
+
+/** Throw `forbidden(...)` unless the auth method is first-party interactive. */
+export function assertFirstPartyOnly(authMethod: string | undefined, surfaceName: string): void {
+  assertBearerOnly(authMethod, surfaceName);
+  if (!authMethod || !FIRST_PARTY_AUTH_METHODS.has(authMethod)) {
+    throw forbidden(
+      `${surfaceName} is restricted to first-party interactive callers — subscription credentials are never spendable through API keys or external tokens`,
     );
   }
 }

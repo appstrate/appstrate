@@ -31,12 +31,6 @@ import {
   readPositiveTokenEnv,
 } from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
-import {
-  buildIdentityHeaders,
-  transformBody,
-  adaptHeaderForRetry,
-  TransformBodyTooLargeError,
-} from "./oauth-identity.ts";
 import { logger } from "./logger.ts";
 import { filterSensitiveHeaders } from "./redact.ts";
 
@@ -164,6 +158,23 @@ interface LlmStreamObservation {
   targetUrl?: string;
   credentialId?: string;
   authMode?: "oauth" | "api_key";
+}
+
+/** Default OAuth beta flag merged onto outbound `anthropic-beta` in OAuth mode. */
+const DEFAULT_OAUTH_BETA = "oauth-2025-04-20";
+
+/**
+ * Merge an OAuth beta flag into a comma-separated `anthropic-beta` header
+ * without dropping the driver's own betas (e.g. the Agent SDK's context/feature
+ * flags). Order-preserving; idempotent.
+ */
+export function mergeAnthropicBeta(existing: string | undefined, beta: string): string {
+  const parts = (existing ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!parts.includes(beta)) parts.push(beta);
+  return parts.join(",");
 }
 
 async function passUpstream(
@@ -305,12 +316,13 @@ async function logOauthLlmResponse(
     // body unreadable — log what we have
   }
   // Drop credential-bearing headers (set-cookie, www-authenticate, …)
-  // before the response hits the operator log. We don't regex-scrub the
-  // body sample — upstream JSON error payloads never echo bearer tokens
-  // back, and a 200-char preview is enough to diagnose without amplifying
-  // log noise.
+  // before the response hits the operator log. A 200-char preview is enough
+  // to diagnose. Upstream JSON error payloads don't echo bearer tokens, but
+  // we still scrub bearer/api-key patterns from the sample so the no-leak
+  // guarantee holds independent of upstream behavior.
   const responseHeaders = filterSensitiveHeaders(upstream.headers);
-  const truncated = bodySample.length > 200 ? bodySample.slice(0, 200) + "…" : bodySample;
+  const scrubbed = bodySample.replace(/(sk-ant-[a-z0-9-]+|Bearer\s+[\w.~+/=-]+)/gi, "[redacted]");
+  const truncated = scrubbed.length > 200 ? scrubbed.slice(0, 200) + "…" : scrubbed;
   logger.warn("oauth llm: upstream response non-2xx", {
     credentialId,
     targetUrl,
@@ -478,6 +490,41 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(deps.integrationBootReportProvider());
   });
 
+  // Credential vend — the in-container path for a `vend`-mode run (the Codex
+  // CLI, whose models-manager calls the upstream verbatim and cannot be
+  // reverse-proxied through `/llm`). The in-container runner GETs this ONCE at
+  // run start, writes the resolved token into the binary's `auth.json`, and the
+  // binary egresses straight to the provider — locked to the provider's hosts
+  // by the per-run egress allowlist (`SidecarConfig.egressAllowlist`).
+  //
+  // No inbound auth — same posture as `/mcp` and `/integrations/boot-report`:
+  // the per-run internal Docker network is the boundary. Only a `vend`-mode run
+  // answers; `oauth` (Claude) and `api_key` runs 403, so their
+  // no-real-token-in-container invariant is preserved.
+  app.get("/credential-vend", async (c) => {
+    if (config.llm?.authMode !== "vend") {
+      return c.json({ error: "credential vend not enabled for this run" }, 403);
+    }
+    const tokenCache = deps.oauthTokenCache;
+    if (!tokenCache) {
+      return c.json({ error: "oauth token cache unavailable" }, 503);
+    }
+    try {
+      const token = await tokenCache.getToken(config.llm.credentialId);
+      c.header("cache-control", "no-store");
+      return c.json({ access_token: token.accessToken, account_id: token.accountId ?? null });
+    } catch (err) {
+      if (err instanceof NeedsReconnectionError) {
+        return c.json({ error: "subscription credential needs reconnection" }, 410);
+      }
+      logger.error("credential vend: token resolution failed", {
+        credentialId: config.llm.credentialId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.json({ error: "failed to resolve credential" }, 502);
+    }
+  });
+
   // LLM reverse proxy. Two modes:
   //
   //   - api_key: the Pi SDK formats every header (auth, beta, identity)
@@ -485,17 +532,25 @@ export function createApp(deps: AppDeps): Hono {
   //     for the real key and forward directly to the upstream provider.
   //     Request/response bodies stream through zero-copy. The Pi SDK
   //     handles retry on 429/5xx natively (Retry-After honoring + jitter).
-  //   - oauth: the sidecar resolves a fresh access token from the
-  //     platform (`/internal/oauth-token/:id`), injects bearer +
-  //     provider identity headers, applies the declarative body
-  //     transforms read from `wireFormat` (system-prepend, force-stream,
-  //     force-store). Bodies are buffered (transform requirement) but
-  //     the response still streams. On 401 we refresh + retry once; on
-  //     the wireFormat-configured adaptive-retry trigger we strip the
-  //     designated header token and retry once.
+  //   - oauth: the ToS-clean path for a driver that signs its OWN provider
+  //     fingerprint (the official Claude Agent SDK binary). The sidecar
+  //     resolves a fresh access token from the platform
+  //     (`/internal/oauth-token/:id`), swaps the request bearer for it, and
+  //     ensures the OAuth beta header — forging nothing. On 401 we refresh +
+  //     retry once. There is no fingerprint-forging mode.
   app.all("/llm/*", async (c) => {
     if (!config.llm) {
       return c.json({ error: "LLM proxy not configured" }, 503);
+    }
+
+    if (config.llm.authMode === "vend") {
+      // Vend-mode runs (the Codex CLI) drive the upstream directly with a
+      // token handed over via `/credential-vend` — they never proxy through
+      // `/llm` (and carry no `baseUrl`). A request here is a misconfiguration.
+      return c.json(
+        { error: "this run uses an in-container credential driver; /llm is disabled" },
+        400,
+      );
     }
 
     if (isBlockedUrl(config.llm.baseUrl)) {
@@ -563,6 +618,11 @@ export function createApp(deps: AppDeps): Hono {
     return passUpstream(upstream, { targetUrl, authMode: "api_key" }, apiKeyConfig.modelSwap);
   });
 
+  // OAuth: resolve the real bearer and ensure the OAuth beta is present, but
+  // DO NOT forge — no identity headers, no body transform. The driver (the
+  // official Claude Agent SDK binary) signs its own fingerprint; we forward its
+  // user-agent / x-app / anthropic-beta untouched. This is the ToS-clean runner
+  // path and the in-container twin of the chat's `claude-code-sdk-gateway`.
   async function handleOauthLlmRequest(
     c: Context,
     llmConfig: LlmProxyOauthConfig,
@@ -582,7 +642,13 @@ export function createApp(deps: AppDeps): Hono {
           401,
         );
       }
-      return c.json({ error: `OAuth token resolution failed: ${stringifyError(err)}` }, 502);
+      // Log the detail server-side; return a generic message to the in-container
+      // agent so platform-side error internals never cross the sidecar boundary.
+      logger.warn("oauth llm: token resolution failed", {
+        credentialId: llmConfig.credentialId,
+        error: stringifyError(err),
+      });
+      return c.json({ error: "OAuth token resolution failed" }, 502);
     }
 
     const baseUrl = llmConfig.baseUrl;
@@ -590,80 +656,58 @@ export function createApp(deps: AppDeps): Hono {
       return c.json({ error: "Resolved OAuth base URL targets a blocked network range" }, 403);
     }
 
-    const incomingPath = c.req.path.slice("/llm".length) || "/";
+    const path = c.req.path.slice("/llm".length) || "/";
     const qs = new URL(c.req.url).search;
-    const rewrite = llmConfig.wireFormat?.rewriteUrlPath;
-    const rewrittenPath = rewrite ? incomingPath.replace(rewrite.from, rewrite.to) : incomingPath;
-    const targetUrl = `${baseUrl}${rewrittenPath}${qs}`;
-
+    const targetUrl = `${baseUrl}${path}${qs}`;
     const method = c.req.method;
-    const filtered = filterHeaders(c.req.header());
-    const baseHeaders: Record<string, string> = { ...filtered };
+    const oauthBeta = llmConfig.oauthBeta ?? DEFAULT_OAUTH_BETA;
 
-    // Strip any auth/api-key/UA/accept the agent SDK may have set — the
-    // OAuth path forces all four (real bearer + provider-mandated fingerprint
-    // headers). Case-insensitive removal: filterHeaders preserves the caller's
-    // original casing, so we delete every variant before re-injecting our own.
-    const STRIP_HEADERS = ["authorization", "x-api-key", "user-agent", "accept"];
-    for (const key of Object.keys(baseHeaders)) {
-      if (STRIP_HEADERS.includes(key.toLowerCase())) {
-        delete baseHeaders[key];
+    // Forward the driver's headers verbatim except: drop any x-api-key (this
+    // path is bearer-only), force the real bearer, and merge the OAuth beta.
+    // The driver's own fingerprint (user-agent, x-app, anthropic-beta) is
+    // preserved — the whole point of pass-through.
+    const buildHeaders = (accessToken: string): Record<string, string> => {
+      const filtered = filterHeaders(c.req.header(), new Set(["x-api-key"]));
+      const headers: Record<string, string> = { ...filtered };
+      // filterHeaders preserves original casing — find any anthropic-beta variant.
+      let betaKey: string | undefined;
+      for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === "anthropic-beta") betaKey = key;
+        if (key.toLowerCase() === "authorization") delete headers[key];
       }
-    }
-
-    const identityHeaders = buildIdentityHeaders(llmConfig.wireFormat, token);
-    let forwardedHeaders: Record<string, string> = {
-      ...baseHeaders,
-      ...identityHeaders,
-      authorization: `Bearer ${token.accessToken}`,
+      headers["anthropic-beta"] = mergeAnthropicBeta(
+        betaKey ? headers[betaKey] : undefined,
+        oauthBeta,
+      );
+      if (betaKey && betaKey !== "anthropic-beta") delete headers[betaKey];
+      headers["authorization"] = `Bearer ${accessToken}`;
+      return headers;
     };
 
-    let bodyText: string | undefined;
+    // Buffer the request body (inference JSON, bounded by
+    // SIDECAR_MAX_REQUEST_BODY_BYTES) so a 401 can be replayed after a token
+    // refresh — a consumed stream can't be. Apply the model-alias swap here
+    // when configured; otherwise forward the body verbatim.
+    let body: string | undefined;
     if (method !== "GET" && method !== "HEAD") {
-      bodyText = await c.req.raw.text();
-      if (bodyText) {
-        try {
-          bodyText = transformBody(llmConfig.wireFormat, bodyText);
-        } catch (err) {
-          if (err instanceof TransformBodyTooLargeError) {
-            return c.json(
-              {
-                error: err.message,
-                limit: err.limitBytes,
-                actual: err.actualBytes,
-                envVar: "SIDECAR_MAX_REQUEST_BODY_BYTES",
-              },
-              413,
-            );
-          }
-          throw err;
-        }
-        // Model-alias swap (request alias→real) — after the wire-format
-        // transform, before content-length is recomputed.
-        if (llmConfig.modelSwap) {
-          bodyText = swapRequestModel(bodyText, llmConfig.modelSwap);
-        }
-        // Refresh content-length to match the transformed body so the
-        // upstream doesn't read a stale value forwarded from the agent.
-        forwardedHeaders["content-length"] = String(new TextEncoder().encode(bodyText).byteLength);
-      }
+      const text = await c.req.raw.text();
+      body =
+        text && llmConfig.modelSwap
+          ? swapRequestModel(text, llmConfig.modelSwap)
+          : text || undefined;
     }
 
-    const doFetch = async (
-      headers: Record<string, string>,
-      body: string | undefined,
-    ): Promise<Response> => {
-      return fetchFn(targetUrl, {
+    const doFetch = (headers: Record<string, string>): Promise<Response> =>
+      fetchFn(targetUrl, {
         method,
         headers,
         body,
         signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
       } as RequestInit);
-    };
 
     let upstream: Response;
     try {
-      upstream = await doFetch(forwardedHeaders, bodyText);
+      upstream = await doFetch(buildHeaders(token.accessToken));
     } catch (err) {
       logger.error("oauth llm: upstream fetch threw", {
         credentialId: llmConfig.credentialId,
@@ -675,12 +719,13 @@ export function createApp(deps: AppDeps): Hono {
 
     upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
 
-    // 401 retry: invalidate cache, force-refresh token, replay once.
+    // 401 retry: invalidate + force-refresh the token, replay once.
     if (upstream.status === 401) {
       tokenCache.invalidate(llmConfig.credentialId);
-      let refreshed: CachedToken;
       try {
-        refreshed = await tokenCache.forceRefresh(llmConfig.credentialId);
+        const refreshed = await tokenCache.forceRefresh(llmConfig.credentialId);
+        upstream = await doFetch(buildHeaders(refreshed.accessToken));
+        upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
       } catch (err) {
         if (err instanceof NeedsReconnectionError) {
           return c.json(
@@ -688,45 +733,14 @@ export function createApp(deps: AppDeps): Hono {
             401,
           );
         }
-        // Fall through with the original 401 — best-effort.
-        return passUpstream(
-          upstream,
-          {
-            targetUrl,
-            credentialId: llmConfig.credentialId,
-            authMode: "oauth",
-          },
-          llmConfig.modelSwap,
-        );
-      }
-      forwardedHeaders = {
-        ...forwardedHeaders,
-        ...buildIdentityHeaders(llmConfig.wireFormat, refreshed),
-        authorization: `Bearer ${refreshed.accessToken}`,
-      };
-      try {
-        upstream = await doFetch(forwardedHeaders, bodyText);
-      } catch (err) {
-        return llmFetchErrorResponse(c, targetUrl, err);
-      }
-      upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
-      // No second-level retry on the retry — propagate whatever we got.
-    }
-
-    // Adaptive header retry: provider declares the policy (status +
-    // body pattern → header-token strip) via `wireFormat.adaptiveRetry`.
-    // Best-effort, replays the request once.
-    const adaptivePolicy = llmConfig.wireFormat?.adaptiveRetry;
-    if (adaptivePolicy && upstream.status === adaptivePolicy.status) {
-      const text = await upstream.clone().text();
-      const adapted = adaptHeaderForRetry(adaptivePolicy, upstream.status, text, forwardedHeaders);
-      if (adapted) {
-        try {
-          upstream = await doFetch(adapted.headers, bodyText);
-          forwardedHeaders = adapted.headers;
-        } catch (err) {
-          return llmFetchErrorResponse(c, targetUrl, err);
-        }
+        // Refresh/replay failed for another reason (network, parse) — log it
+        // so a recurring 401 isn't silently masked as a plain upstream 401,
+        // then fall through and return the original response best-effort.
+        logger.warn("oauth llm: token refresh/replay failed after 401", {
+          credentialId: llmConfig.credentialId,
+          targetUrl,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 

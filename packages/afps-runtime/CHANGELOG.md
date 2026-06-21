@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — shared tool-result truncation
+
+- `@appstrate/afps-runtime/runner` now exports `truncateToolResult` and
+  `toolResultByteLimit` — byte-aware, UTF-8-safe truncation of tool-result
+  payloads before they ride an `EventSink` (env-tunable via
+  `TOOL_RESULT_BYTE_LIMIT`). Shared by every Runner that forwards tool results;
+  previously duplicated inside the Pi runner.
+
 ### Added — Letta-style `note` + `pin` tools
 
 - New `noteTool` (`note`) and `pinTool` (`pin`) replace `memoryTool`

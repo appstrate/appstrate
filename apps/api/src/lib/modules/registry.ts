@@ -12,11 +12,13 @@
 import { db } from "@appstrate/db/client";
 import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
+import type { MiddlewareHandler } from "hono";
 import type { ModuleInitContext, PlatformServices } from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
 
 // ---- Platform service imports (for buildPlatformServices) -----------------
 import { logger } from "../logger.ts";
+import { rateLimit } from "../../middleware/rate-limit.ts";
 import { listLlmUsageForRun } from "../../services/state/runs.ts";
 import { proxyCall } from "../../services/credential-proxy/core.ts";
 import { emitEvent } from "./module-loader.ts";
@@ -105,6 +107,11 @@ function buildPlatformServices(): PlatformServices {
     queues: {
       create: (name, defaults) => createQueue(name, defaults),
       processingEnabled: queueProcessingEnabled(),
+    },
+    http: {
+      // Same authenticated limiter every core route uses — modules get
+      // identical guard semantics (keying, headers, 429 shape).
+      rateLimit: (maxPerMinute) => rateLimit(maxPerMinute) as MiddlewareHandler,
     },
     runs: { listLlmUsage: listLlmUsageForRun },
     // Reuse the platform's existing credential-proxy (the same one the agent

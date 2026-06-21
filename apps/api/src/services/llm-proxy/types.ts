@@ -33,8 +33,17 @@ export interface UpstreamUsage {
 export interface LlmProxyAdapter {
   /** Protocol string — must match the route's apiShape and the resolved model's apiShape. */
   readonly apiShape: string;
-  /** Build the upstream request headers (auth + protocol-specific). */
-  buildUpstreamHeaders(incoming: Headers, apiKey: string): Record<string, string>;
+  /**
+   * Build the upstream request headers (auth + protocol-specific).
+   * `accountId` is the credential's abstract identity slot (set for OAuth
+   * credentials whose provider surfaced one) — subscription adapters echo
+   * it as their routing header (e.g. codex `chatgpt-account-id`).
+   */
+  buildUpstreamHeaders(
+    incoming: Headers,
+    apiKey: string,
+    accountId?: string,
+  ): Record<string, string>;
   /** Extract usage from a non-streaming JSON body. Returns null if the shape is unexpected. */
   parseJsonUsage(body: unknown): UpstreamUsage | null;
   /** Extract usage from a streamed SSE payload. Returns null if none was observed. */

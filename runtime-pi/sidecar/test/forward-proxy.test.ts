@@ -215,6 +215,41 @@ describe("HTTP forwarding", () => {
     expect(res.status).toBe(403);
   });
 
+  it("egress allowlist: forwards to an allowlisted host", async () => {
+    const echo = await startEchoServer();
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: "http://mock:3000",
+        runToken: "tok",
+        proxyUrl: "",
+        egressAllowlist: ["127.0.0.1"],
+      },
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/ok`);
+    expect(res.status).toBe(200);
+  });
+
+  it("egress allowlist: refuses a host that is not on the list", async () => {
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: "http://mock:3000",
+        runToken: "tok",
+        proxyUrl: "",
+        egressAllowlist: ["chatgpt.com"],
+      },
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    // 127.0.0.1 is NOT on the allowlist → refused even though isBlockedHostFn() is false.
+    const res = await httpViaProxy(port, "http://127.0.0.1:9999/nope");
+    expect(res.status).toBe(403);
+    expect(res.body).toContain("Blocked");
+  });
+
   it("returns 400 for invalid URL", async () => {
     const proxy = makeProxy();
     await proxy.ready;

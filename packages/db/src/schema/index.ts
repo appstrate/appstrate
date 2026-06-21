@@ -17,4 +17,5 @@ export * from "./webhooks.ts";
 export * from "./oidc.ts";
 export * from "./storage.ts";
 export * from "./search.ts";
+export * from "./chat.ts";
 export * from "./types.ts";

@@ -1388,6 +1388,31 @@ if (existsSync(modulesDir)) {
   }
 }
 
+// 4d. Workspace-package module routes (`packages/module-<name>/src/**`). These
+//     are modules too (e.g. module-chat mounts /api/chat) and their openApiPaths
+//     are now collected into the validated spec (see lib/module-openapi.ts), so
+//     their code routes must be scanned here to keep Code ⊆ Spec balanced.
+const workspaceModulesDir = join(REPO_ROOT, "packages");
+if (existsSync(workspaceModulesDir)) {
+  for (const name of readdirSync(workspaceModulesDir, { withFileTypes: true })) {
+    if (!name.isDirectory() || !name.name.startsWith("module-")) continue;
+    const srcDir = join(workspaceModulesDir, name.name, "src");
+    if (!existsSync(srcDir)) continue;
+    for (const filePath of collectModuleRouteFiles(srcDir)) {
+      const src = readFileSync(filePath, "utf8");
+      if (!src.includes("new Hono")) continue; // only files that define a router
+      const rel = name.name + "/src/" + filePath.slice(srcDir.length + 1);
+      for (const reg of extractRouterRegistrations(src, src, rel)) {
+        const fullPath = normaliseHonoPath(reg.path);
+        for (const ep of expandRegistration(reg.verb, fullPath)) {
+          codeEndpoints.add(ep);
+          recordRouteStatuses(ep, reg.statuses);
+        }
+      }
+    }
+  }
+}
+
 // 5. Allowlist — endpoints that exist in code by design but are intentionally
 //    NOT documented in the OpenAPI spec.
 const CODE_TO_SPEC_ALLOWLIST = new Set<string>([

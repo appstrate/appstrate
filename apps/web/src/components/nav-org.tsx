@@ -14,6 +14,7 @@ import {
   Users,
   Boxes,
   HardDrive,
+  MessageSquare,
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
@@ -53,6 +54,8 @@ export function NavOrg() {
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
     // Module capabilities surface right under the dashboard, above Agents.
     ...(features.storage ? [{ path: "/storage", label: t("nav.storage"), icon: HardDrive }] : []),
+    // Module-contributed product surfaces (absent flag = entry hidden)
+    ...(features.chat ? [{ path: "/chat", label: t("nav.chat"), icon: MessageSquare }] : []),
     { path: "/agents", label: t("nav.agents"), icon: Layers },
     { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
   ];

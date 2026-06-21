@@ -8,6 +8,10 @@
    dropped. */
 @source "../../../packages/ui/src";
 @source "../../../packages/module-storage/src";
+/* Module UI packages are symlinked under node_modules, which Tailwind's
+   auto-detection skips — declare their sources explicitly so their classes
+   are generated. One line per UI-contributing module. */
+@source "../../../packages/module-chat/src";
 
 @custom-variant dark (&:is(.dark *));
 

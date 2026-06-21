@@ -30,11 +30,18 @@ export function applySpecToSidecarEnv(
   if (spec.modelMaxTokens != null) {
     target.MODEL_MAX_TOKENS = String(spec.modelMaxTokens);
   }
+  if (spec.egressAllowlist && spec.egressAllowlist.length > 0) {
+    // Per-run egress allowlist (vend runs) — locks the forward proxy to the
+    // provider's hosts so the in-container token can't be exfiltrated.
+    target.EGRESS_ALLOWLIST_JSON = JSON.stringify(spec.egressAllowlist);
+  }
   if (spec.llm) {
-    if (spec.llm.authMode === "oauth") {
-      // OAuth wire format: ship the LlmProxyOauthConfig as JSON so
-      // server.ts parses it into config.llm at boot. Without this,
-      // /llm/* returns 503 "LLM proxy not configured".
+    if (spec.llm.authMode === "oauth" || spec.llm.authMode === "vend") {
+      // OAuth config (non-forging — the driver signs its own fingerprint) OR
+      // vend config (the Codex CLI, token handed over via /credential-vend):
+      // ship the full LlmProxyConfig as JSON so server.ts parses it into
+      // config.llm at boot. Without this, /llm/* returns 503 and the vend
+      // endpoint 403s "not enabled for this run".
       target.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(spec.llm);
     } else {
       target.PI_BASE_URL = spec.llm.baseUrl;

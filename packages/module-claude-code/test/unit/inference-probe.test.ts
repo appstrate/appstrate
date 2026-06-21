@@ -15,7 +15,7 @@ describe("claude-code discovery candidates", () => {
 });
 
 describe("claude-code buildInferenceProbe", () => {
-  it("carries the OAuth wire fingerprint (bearer + beta token + tier prelude, no x-api-key)", () => {
+  it("sends bearer + version + oauth beta only — no x-api-key, no forged fingerprint", () => {
     const probe = def.hooks?.buildInferenceProbe?.({
       baseUrl: "https://api.anthropic.com",
       modelId: "claude-sonnet-4-6",
@@ -25,15 +25,17 @@ describe("claude-code buildInferenceProbe", () => {
     if (!probe || "error" in probe) throw new Error("expected a request, got an error result");
     expect(probe.url).toBe("https://api.anthropic.com/v1/messages");
     expect(probe.method).toBe("POST");
+    // Subscription token rides the bearer header (NOT x-api-key).
     expect(probe.headers["Authorization"]).toBe("Bearer sk-ant-oat-test");
     expect(probe.headers["anthropic-beta"]).toContain("oauth");
     expect(probe.headers["anthropic-version"]).toBe("2023-06-01");
-    // Subscription tokens go in the bearer header — the generic
-    // anthropic-messages test path would wrongly send x-api-key.
     expect(probe.headers["x-api-key"]).toBeUndefined();
+    // No Claude Code client-fingerprint forging.
+    expect(probe.headers["x-app"]).toBeUndefined();
+    expect(probe.headers["anthropic-dangerous-direct-browser-access"]).toBeUndefined();
   });
 
-  it("builds a 1-token request for the exact model with the verbatim tier prelude", () => {
+  it("builds a 1-token request with NO third-party-tier system prelude", () => {
     const probe = def.hooks!.buildInferenceProbe!({
       baseUrl: "https://api.anthropic.com/",
       modelId: "claude-opus-4-8",
@@ -45,12 +47,12 @@ describe("claude-code buildInferenceProbe", () => {
     const body = JSON.parse(probe.body) as {
       model: string;
       max_tokens: number;
-      system: Array<{ type: string; text: string }>;
+      system?: unknown;
       messages: unknown[];
     };
     expect(body.model).toBe("claude-opus-4-8");
     expect(body.max_tokens).toBe(1);
-    expect(body.system[0]!.text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
-    expect(body.messages).toHaveLength(1);
+    expect(body.system).toBeUndefined();
+    expect(body.messages).toEqual([{ role: "user", content: "ping" }]);
   });
 });

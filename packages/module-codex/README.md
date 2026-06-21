@@ -20,8 +20,8 @@ The platform resolves it via dynamic import — workspace resolution finds it lo
 
 ## What it contributes
 
-- `modelProviders()` → one `ModelProviderDefinition` with `providerId: "codex"`, `apiShape: "openai-codex-responses"`, OAuth metadata pointing at `auth.openai.com`, the chatgpt.com Codex backend URL, and the wire-format headers (`originator`, `openai-beta`, `user-agent`, `accept`) the backend requires.
-- Provider `hooks` — `extractTokenIdentity` decodes the access JWT to surface `chatgpt_account_id` / `email`; `buildApiKeyPlaceholder` builds the synthetic JWT the agent container sees; `buildInferenceProbe` issues a real one-token request against `${baseUrl}/codex/responses` for the connection test.
+- `modelProviders()` → one `ModelProviderDefinition` with `providerId: "codex"`, `apiShape: "openai-codex-responses"`, OAuth metadata pointing at `auth.openai.com`, and the chatgpt.com Codex backend URL. It declares **no** `oauthWireFormat` — fingerprint forging is removed platform-wide (see Execution status below).
+- Provider `hooks` — `extractTokenIdentity` decodes the access JWT to surface `chatgpt_account_id` / `email`; `buildApiKeyPlaceholder` builds the synthetic JWT the agent container sees; `buildInferenceProbe` issues a real one-token request against `${baseUrl}/codex/responses` for the connection test (this self-contained probe still sends the backend-required client headers — the only place codex touches its fingerprint, kept so the credential stays connectable).
 
 No DB tables, no routes, no workers — the unified `model_provider_credentials` table in core holds the OAuth blob.
 
@@ -33,4 +33,6 @@ The helper's source lives in a separate private repo (`appstrate/connect-helper`
 
 ## Authoring follow-on OAuth providers
 
-This module is the canonical example. Copy the shape: declare a `ModelProviderDefinition` with `authMode: "oauth2"`, provide `hooks` if the access token needs to be decoded for an identity claim, and pin any wire-format quirks in `oauthWireFormat`. The client-side helper (`@appstrate/connect-helper`) registers each provider by canonical `providerId` in its own `MODEL_PROVIDERS` table — extending it requires a coordinated bump.
+This module is a canonical example. Copy the shape: declare a `ModelProviderDefinition` with `authMode: "oauth2"` and provide `hooks` if the access token needs to be decoded for an identity claim or a credential-validation probe is required. The client-side helper (`@appstrate/connect-helper`) registers each provider by canonical `providerId` in its own `MODEL_PROVIDERS` table — extending it requires a coordinated bump.
+
+> **Execution status.** Fingerprint forging has been removed platform-wide, so codex is currently **connectable but non-executable**: a run throws `UnrunnableOauthProviderError` and a chat call is refused (`LlmProxyUnsupportedSubscriptionError`). Making codex runnable again requires migrating it to its own official SDK (a driver that signs its own client fingerprint), mirroring what `claude-code` does with the Claude Agent SDK.

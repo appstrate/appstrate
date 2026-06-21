@@ -47,6 +47,10 @@ import {
   type AppstrateCtxProvider,
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { ClaudeAgentRunner } from "@appstrate/runner-claude";
+import { CodexAgentRunner } from "@appstrate/runner-codex";
+import { resolveClaudeCodeBinary, makeSdkScopeResolver } from "@appstrate/core/claude-binary";
+import { resolveCodexBinary, makeCodexScopeResolver } from "@appstrate/core/codex-binary";
 import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import {
   BUNDLE_FORMAT_VERSION,
@@ -418,88 +422,107 @@ await progress(
 
 const sidecarUrl = env.sidecarUrl;
 
+// Engine selection. Set by the launcher's `RUN_ENGINE` container env
+// (`container-env.ts`) — `"claude"` for a `claude-code` subscription run,
+// the Pi default for everything else (and the absent var). The Claude engine
+// drives the official Agent SDK and owns its OWN MCP/tool wiring (in-process
+// runtime tools + the sidecar `/mcp` over HTTP), so the Pi-specific MCP client
+// + extension factories below are skipped for it — but the integration boot
+// gate stays (engine-agnostic).
+const runEngine: "pi" | "claude" | "codex" =
+  process.env.RUN_ENGINE === "claude"
+    ? "claude"
+    : process.env.RUN_ENGINE === "codex"
+      ? "codex"
+      : "pi";
+
 // When no sidecar is attached (no integrations + static API
 // key), the agent runs without MCP-backed tools. The platform wires
 // MODEL_BASE_URL directly to the upstream provider; the LLM only sees
 // the agent's bundle tools + runtime extensions.
 let mcpClient: AppstrateMcpClient | undefined;
 if (sidecarUrl) {
-  await progress("connecting to sidecar");
-  try {
-    // Retry the initial MCP handshake — the platform now starts the agent
-    // in parallel with sidecar boot (issue #406), so the sidecar's /mcp
-    // may briefly answer ECONNREFUSED / ENOTFOUND while the container is
-    // still wiring its listener and the Docker DNS alias is propagating.
-    // AWS-style full jitter (50ms → 1s) absorbs the race without
-    // pessimising the warm-path; the default 60s deadline covers
-    // worst-case cold container pulls (#406 acceptance criteria: 20–45s
-    // boots are routine). Operators on slow registries can widen via
-    // `APPSTRATE_MCP_CONNECT_DEADLINE_MS`.
-    // The sidecar's /mcp endpoint gates inbound requests by the per-run
-    // Docker network + Host-header check (`validateMcpHostHeader`); it does
-    // NOT verify a bearer token, so the agent connects unauthenticated. (An
-    // earlier RUN_TOKEN-as-bearer path was wired but never validated — dropped.)
-    mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
-      clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
-      retry: {
-        deadlineMs: env.mcpConnectDeadlineMs,
-        baseMs: 50,
-        capMs: 1_000,
-        onRetry: ({ url, attempt, delayMs, errorCode, error }) => {
-          // pino-shaped JSON line — stdout is captured by the platform's
-          // container log buffer, so this lands on the same audit trail
-          // operators use for run diagnostics.
-          process.stdout.write(
-            `${JSON.stringify({
-              level: "warn",
-              event: "mcp_connect_retry",
-              url,
-              attempt,
-              delayMs,
-              errorCode: errorCode ?? null,
-              error: error instanceof Error ? error.message : String(error),
-            })}\n`,
-          );
+  // Pi-specific sidecar tool wiring. The Claude engine talks to the sidecar
+  // `/mcp` through the Agent SDK's own HTTP MCP client (configured at runner
+  // construction), so it skips this whole block — only the boot gate below runs.
+  if (runEngine === "pi") {
+    await progress("connecting to sidecar");
+    try {
+      // Retry the initial MCP handshake — the platform now starts the agent
+      // in parallel with sidecar boot (issue #406), so the sidecar's /mcp
+      // may briefly answer ECONNREFUSED / ENOTFOUND while the container is
+      // still wiring its listener and the Docker DNS alias is propagating.
+      // AWS-style full jitter (50ms → 1s) absorbs the race without
+      // pessimising the warm-path; the default 60s deadline covers
+      // worst-case cold container pulls (#406 acceptance criteria: 20–45s
+      // boots are routine). Operators on slow registries can widen via
+      // `APPSTRATE_MCP_CONNECT_DEADLINE_MS`.
+      // The sidecar's /mcp endpoint gates inbound requests by the per-run
+      // Docker network + Host-header check (`validateMcpHostHeader`); it does
+      // NOT verify a bearer token, so the agent connects unauthenticated. (An
+      // earlier RUN_TOKEN-as-bearer path was wired but never validated — dropped.)
+      mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
+        clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
+        retry: {
+          deadlineMs: env.mcpConnectDeadlineMs,
+          baseMs: 50,
+          capMs: 1_000,
+          onRetry: ({ url, attempt, delayMs, errorCode, error }) => {
+            // pino-shaped JSON line — stdout is captured by the platform's
+            // container log buffer, so this lands on the same audit trail
+            // operators use for run diagnostics.
+            process.stdout.write(
+              `${JSON.stringify({
+                level: "warn",
+                event: "mcp_connect_retry",
+                url,
+                attempt,
+                delayMs,
+                errorCode: errorCode ?? null,
+                error: error instanceof Error ? error.message : String(error),
+              })}\n`,
+            );
+          },
         },
-      },
-    });
-  } catch (err) {
-    await emitError(`Failed to connect MCP client to sidecar: ${getErrorMessage(err)}`);
-    process.exit(1);
-  }
+      });
+    } catch (err) {
+      await emitError(`Failed to connect MCP client to sidecar: ${getErrorMessage(err)}`);
+      process.exit(1);
+    }
 
-  await progress("MCP connected");
+    await progress("MCP connected");
 
-  try {
-    // `buildMcpDirectFactories` registers `run_history` and
-    // `recall_memory`, plus one forwarding factory per namespaced
-    // integration tool (including the generic `{ns}__api_call`).
-    const factories = await buildMcpDirectFactories({
-      mcp: mcpClient,
-      runId: AGENT_RUN_ID,
-      workspace: WORKSPACE,
-      emit: (event) => {
-        void bridgedSink.handle(event as RunEvent);
-      },
-    });
-    extensionFactories.push(...factories);
+    try {
+      // `buildMcpDirectFactories` registers `run_history` and
+      // `recall_memory`, plus one forwarding factory per namespaced
+      // integration tool (including the generic `{ns}__api_call`).
+      const factories = await buildMcpDirectFactories({
+        mcp: mcpClient,
+        runId: AGENT_RUN_ID,
+        workspace: WORKSPACE,
+        emit: (event) => {
+          void bridgedSink.handle(event as RunEvent);
+        },
+      });
+      extensionFactories.push(...factories);
 
-    // Wire the tool-side runtime context (4th `execute` arg). Integrations
-    // expose their own namespaced tools (including the generic
-    // `{ns}__api_call`) directly to the LLM, so the only capability the ctx
-    // carries is `readResource` — it resolves any MCP `resource_link` an
-    // integration tool may return for spilled blobs.
-    const mcp = mcpClient;
-    appstrateRuntimeCtx = {
-      readResource: async (uri) => {
-        const result = await mcp.readResource({ uri });
-        return result as Awaited<ReturnType<AppstrateToolCtx["readResource"]>>;
-      },
-    };
-  } catch (err) {
-    await emitError(`Failed to wire MCP-backed tools: ${getErrorMessage(err)}`);
-    process.exit(1);
-  }
+      // Wire the tool-side runtime context (4th `execute` arg). Integrations
+      // expose their own namespaced tools (including the generic
+      // `{ns}__api_call`) directly to the LLM, so the only capability the ctx
+      // carries is `readResource` — it resolves any MCP `resource_link` an
+      // integration tool may return for spilled blobs.
+      const mcp = mcpClient;
+      appstrateRuntimeCtx = {
+        readResource: async (uri) => {
+          const result = await mcp.readResource({ uri });
+          return result as Awaited<ReturnType<AppstrateToolCtx["readResource"]>>;
+        },
+      };
+    } catch (err) {
+      await emitError(`Failed to wire MCP-backed tools: ${getErrorMessage(err)}`);
+      process.exit(1);
+    }
+  } // end Pi-only sidecar tool wiring
 
   // --- 2c-bis. Integration boot gate + per-phase observability ---
   // The sidecar booted each declared integration in parallel with this
@@ -656,17 +679,16 @@ const heartbeat = startSinkHeartbeat({
   },
 });
 
-// --- 7. Run via PiRunner ---
+// --- 7. Run via the selected engine (Pi or the Claude Agent SDK) ---
 //
-// PiRunner calls `sink.finalize(result)` on both happy path and its own
-// internal error path. Any error escaping it here is a bootstrap-level
-// failure (before the runner reached its own try/catch) — we catch it,
-// emit an error + finalize, then exit non-zero so the container monitor
-// also records the crash.
+// Both runners call `sink.finalize(result)` on the happy path and their own
+// internal error path. Any error escaping here is a bootstrap-level failure
+// (before the runner reached its own try/catch) — we catch it, emit an error +
+// finalize, then exit non-zero so the container monitor also records the crash.
 
-const startTime = Date.now();
-try {
-  const runner = new PiRunner({
+/** Construct the default Pi runner (every non-`claude-code` run). */
+function buildPiRunner(): PiRunner {
+  return new PiRunner({
     model,
     apiKey: env.modelApiKey,
     systemPrompt,
@@ -675,6 +697,101 @@ try {
     extensionFactories,
     authStoragePath: "/tmp/pi-auth/auth.json",
   });
+}
+
+/**
+ * Construct the Claude Agent SDK runner (a `claude-code` run). It drives the
+ * official `claude` binary, pointed at the sidecar's non-forging `oauth` `/llm`
+ * gateway (swap bearer + ensure beta only), and reaches integrations via
+ * the sidecar `/mcp` over HTTP (its own client, not the Pi one). Runtime tools
+ * (log/note/pin/report) are hosted in-process by the runner; `output` is native
+ * via the SDK's `outputFormat`.
+ */
+function buildClaudeAgentRunner(): ClaudeAgentRunner {
+  if (!sidecarUrl) {
+    // A claude-code run is always OAuth → always sidecar-backed (the gateway
+    // that injects the real bearer). No sidecar means a launcher bug; fail loud
+    // rather than calling the upstream unauthenticated.
+    throw new Error("Claude engine selected but no sidecar is attached (no /llm gateway).");
+  }
+  const base = sidecarUrl.replace(/\/$/, "");
+  const rootManifest = bundle
+    ? (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
+    : undefined;
+  let outputSchema: Record<string, unknown> | null = null;
+  if (process.env.OUTPUT_SCHEMA) {
+    try {
+      outputSchema = JSON.parse(process.env.OUTPUT_SCHEMA) as Record<string, unknown>;
+    } catch {
+      outputSchema = null;
+    }
+  }
+  return new ClaudeAgentRunner({
+    binaryPath: resolveClaudeCodeBinary({ resolve: makeSdkScopeResolver(import.meta.url) }),
+    modelId: env.modelId,
+    systemPrompt,
+    // The sidecar `/llm` runs in `oauth` mode: it swaps the placeholder bearer
+    // for the real subscription token without forging a fingerprint.
+    baseUrl: `${base}/llm`,
+    placeholderToken: env.modelApiKey ?? "placeholder",
+    cwd: WORKSPACE,
+    ...(rootManifest?.runtime_tools ? { runtimeTools: rootManifest.runtime_tools } : {}),
+    outputSchema,
+    // Integrations + api_call + run_history + recall_memory over the sidecar's
+    // stateless Streamable-HTTP `/mcp`. `Host: sidecar` satisfies the sidecar's
+    // host-header gate.
+    sidecarMcp: { url: `${base}/mcp`, headers: { Host: "sidecar" } },
+  });
+}
+
+/**
+ * Construct the Codex CLI runner (a `codex` run). It drives the official
+ * `codex` binary as a subprocess. Unlike the Claude runner, the binary talks to
+ * the upstream (`chatgpt.com`) DIRECTLY — its models-manager ignores any base-URL
+ * override — so the sidecar cannot reverse-proxy it. Instead the runner VENDS
+ * the real subscription token from the sidecar's `/credential-vend` at run start
+ * and the binary egresses straight out, locked to the provider's hosts by the
+ * sidecar's per-run egress allowlist. Nothing is forged (the binary signs its
+ * own fingerprint).
+ */
+function buildCodexAgentRunner(): CodexAgentRunner {
+  if (!sidecarUrl) {
+    // A codex run is always OAuth → always sidecar-backed (the vend endpoint
+    // that hands over the real token). No sidecar means a launcher bug.
+    throw new Error("Codex engine selected but no sidecar is attached (no /credential-vend).");
+  }
+  const base = sidecarUrl.replace(/\/$/, "");
+  // Resolve order: explicit CODEX_BINARY_PATH → the bundled per-arch package →
+  // bare `codex` on PATH (the image also symlinks the binary onto PATH as a
+  // belt-and-suspenders). Mirrors the chat engine's fallback chain.
+  let codexBinary: string;
+  if (process.env.CODEX_BINARY_PATH) {
+    codexBinary = process.env.CODEX_BINARY_PATH;
+  } else {
+    try {
+      codexBinary = resolveCodexBinary({ resolve: makeCodexScopeResolver(import.meta.url) });
+    } catch {
+      codexBinary = "codex";
+    }
+  }
+  return new CodexAgentRunner({
+    binaryPath: codexBinary,
+    modelId: env.modelId,
+    systemPrompt,
+    credentialUrl: `${base}/credential-vend`,
+    cwd: WORKSPACE,
+    modelCost: env.modelCost,
+  });
+}
+
+const startTime = Date.now();
+try {
+  const runner =
+    runEngine === "claude"
+      ? buildClaudeAgentRunner()
+      : runEngine === "codex"
+        ? buildCodexAgentRunner()
+        : buildPiRunner();
 
   await runner.run({
     bundle: runnerBundle,

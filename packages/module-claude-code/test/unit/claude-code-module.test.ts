@@ -15,10 +15,14 @@ describe("claude-code module", () => {
     expect(cc?.apiShape).toBe("anthropic-messages");
     expect(cc?.defaultBaseUrl).toBe("https://api.anthropic.com");
     expect(cc?.baseUrlOverridable).toBe(false);
-    // No Codex-style stream/store coercion — Anthropic accepts the
-    // agent's declared body verbatim.
-    expect(cc?.oauthWireFormat?.forceStream).toBeUndefined();
-    expect(cc?.oauthWireFormat?.forceStore).toBeUndefined();
+  });
+
+  it("declares NO oauthWireFormat — forging is removed platform-wide", () => {
+    // Real inference runs on the official Claude Agent SDK (which signs its own
+    // fingerprint); the sidecar / chat gateways only swap the bearer + ensure
+    // the oauth beta. There is no wire-format forge to declare.
+    const cc = claudeCodeModule.modelProviders?.()[0] as Record<string, unknown>;
+    expect(cc.oauthWireFormat).toBeUndefined();
   });
 
   it("OAuth metadata points at platform.claude.com (canonical token host)", () => {
@@ -43,40 +47,11 @@ describe("claude-code module", () => {
   it("declares no identity hook — Anthropic OAuth tokens are not JWTs", () => {
     // Identity comes from the token endpoint response body (the CLI
     // surfaces `email` / `subscriptionType`), not from a self-describing
-    // access token. The only hook is `buildInferenceProbe` (OAuth wire
-    // fingerprint for connection test + model discovery); wire-format
-    // quirks live declaratively on `oauthWireFormat`.
+    // access token. The only hook is `buildInferenceProbe` (credential
+    // validation + model discovery) — its non-forging shape is covered by
+    // `inference-probe.test.ts`.
     const cc = claudeCodeModule.modelProviders?.()[0];
     expect(cc?.hooks?.extractTokenIdentity).toBeUndefined();
     expect(cc?.hooks?.buildInferenceProbe).toBeFunction();
-  });
-
-  it("ships the third-party-tier identity prelude verbatim", () => {
-    // Paraphrasing this string (even capitalisation) trips Anthropic's
-    // third-party tier filter and silently 429s every request.
-    const cc = claudeCodeModule.modelProviders?.()[0];
-    expect(cc?.oauthWireFormat?.systemPrepend).toEqual({
-      type: "text",
-      text: "You are Claude Code, Anthropic's official CLI for Claude.",
-    });
-  });
-
-  it("forces the Claude Code identity headers on every OAuth call", () => {
-    const cc = claudeCodeModule.modelProviders?.()[0];
-    expect(cc?.oauthWireFormat?.identityHeaders).toEqual({
-      accept: "application/json",
-      "anthropic-dangerous-direct-browser-access": "true",
-      "x-app": "cli",
-    });
-  });
-
-  it("declares the long-context adaptive retry policy", () => {
-    const cc = claudeCodeModule.modelProviders?.()[0];
-    expect(cc?.oauthWireFormat?.adaptiveRetry).toEqual({
-      status: 400,
-      bodyPatterns: ["out of extra usage", "long context beta not available"],
-      headerName: "anthropic-beta",
-      removeToken: "context-1m-2025-08-07",
-    });
   });
 });

@@ -18,17 +18,20 @@
  * spec explicitly resists premature abstraction so each route keeps its
  * own adapter binding instead of sharing a single dispatch table.
  *
- * Run-only shapes (no proxy route, by design):
- *   - `openai-codex-responses` (the `codex` OAuth subscription provider) and
- *     the `claude-code` subscription provider are **run-only**. Their
- *     credentials are short-lived OAuth subscription tokens the sidecar
- *     injects per-request inside the run sandbox; there is deliberately no
- *     `/api/llm-proxy/...` route that would hand a third-party caller a path
- *     to spend a user's personal subscription. A remote/CLI runner using one
- *     of these providers calls the upstream itself with its own token — it
- *     does not route through this proxy. (Note `claude-code` rides the
- *     `anthropic-messages` shape, which DOES have a route for API-key
- *     Anthropic; the subscription provider still never proxies.)
+ * Subscription shapes (FIRST-PARTY-ONLY):
+ *   - The Claude Pro/Max/Team subscription (`claude-code`) is served by the
+ *     `/claude-code-sdk/:presetId/*` gateway, which injects the token WITHOUT
+ *     forging any client identity — the chat's official Claude Agent SDK signs
+ *     the legit Claude Code fingerprint itself. See
+ *     services/llm-proxy/claude-code-sdk-gateway.ts.
+ *   - The Codex (ChatGPT) subscription (`codex`) is served by the
+ *     `/codex-sdk/:presetId/*` gateway, which swaps the placeholder bearer for
+ *     the real subscription token + stamps the real chatgpt-account-id — again
+ *     WITHOUT forging any client identity (the official `codex` CLI signs its
+ *     own fingerprint). See services/llm-proxy/codex-sdk-gateway.ts.
+ *   - The generic gateway (`proxyLlmCall`) forges nothing, so an
+ *     OAuth-subscription model with no dedicated CLI gateway is refused with
+ *     `LlmProxyUnsupportedSubscriptionError`. Connect an API-key provider.
  *
  * Security:
  *   - Bearer auth only — API keys with `llm-proxy:call` (headless) OR
@@ -53,16 +56,19 @@ import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest } from "../lib/errors.ts";
-import { assertBearerOnly } from "../lib/bearer-only.ts";
+import { assertBearerOnly, assertFirstPartyOnly } from "../lib/bearer-only.ts";
 import { recordLlmLatency } from "../observability/index.ts";
 import {
   proxyLlmCall,
   LlmProxyModelApiMismatchError,
   LlmProxyUnsupportedModelError,
+  LlmProxyUnsupportedSubscriptionError,
 } from "../services/llm-proxy/core.ts";
 import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
+import { handleClaudeCodeSdkGateway } from "../services/llm-proxy/claude-code-sdk-gateway.ts";
+import { handleCodexSdkGateway } from "../services/llm-proxy/codex-sdk-gateway.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -113,6 +119,42 @@ export function createLlmProxyRouter() {
       async (c) => handleProxy(c, entry.adapter, entry.upstreamPath, limits),
     );
   }
+
+  // Claude Code subscription SDK gateway — FIRST-PARTY ONLY. The chat module's
+  // official Claude Agent SDK points `ANTHROPIC_BASE_URL` here; the gateway
+  // injects the real subscription token without forging any client identity
+  // (the SDK's own binary signs the legit Claude Code fingerprint). A wildcard
+  // path forwards whatever upstream subpath the SDK appends
+  // (`/v1/messages`, …). The bare-preset route catches the SDK's connectivity
+  // probe. See services/llm-proxy/claude-code-sdk-gateway.ts.
+  const sdkGateway = async (c: Context<AppEnv>): Promise<Response> => {
+    assertFirstPartyOnly(c.get("authMethod"), "Claude Code SDK gateway");
+    return handleClaudeCodeSdkGateway(c, limits.max_request_bytes);
+  };
+  for (const path of ["/claude-code-sdk/:presetId/*", "/claude-code-sdk/:presetId"]) {
+    router.all(
+      path,
+      rateLimit(limits.rate_per_min),
+      requirePermission("llm-proxy", "call"),
+      sdkGateway,
+    );
+  }
+
+  // Codex (ChatGPT) subscription credential vend — FIRST-PARTY ONLY. The chat
+  // module's codex engine GETs the resolved subscription token here (the CLI
+  // needs the real token in its auth.json — it can't be pointed at a forwarding
+  // gateway, see codex-sdk-gateway.ts). Forges nothing; the official CLI signs
+  // its own fingerprint and talks to chatgpt.com directly.
+  const codexVend = async (c: Context<AppEnv>): Promise<Response> => {
+    assertFirstPartyOnly(c.get("authMethod"), "Codex credential vend");
+    return handleCodexSdkGateway(c);
+  };
+  router.get(
+    "/codex-sdk/:presetId",
+    rateLimit(limits.rate_per_min),
+    requirePermission("llm-proxy", "call"),
+    codexVend,
+  );
 
   return router;
 }
@@ -181,6 +223,9 @@ async function handleProxy(
     // only for errors from an actual upstream attempt.
     if (err instanceof LlmProxyUnsupportedModelError) {
       throw invalidRequest(err.message);
+    }
+    if (err instanceof LlmProxyUnsupportedSubscriptionError) {
+      throw invalidRequest(err.message, "model");
     }
     if (err instanceof LlmProxyModelApiMismatchError) {
       throw invalidRequest(err.message, "model");
