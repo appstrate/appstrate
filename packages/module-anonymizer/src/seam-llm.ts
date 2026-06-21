@@ -104,21 +104,6 @@ export async function maskLlmRequestBody(
   return { body: masked, mapping: session.table() };
 }
 
-/**
- * Masque EN PROFONDEUR une valeur JSON arbitraire (chaque string), stateless.
- * Sert au chemin outils (b2.3) : re-masquer le résultat d'un outil avant de le
- * rendre au LLM. `backend` injectable → testable sans GLiNER.
- */
-export async function maskDeepValue(
-  backend: AnonBackend,
-  value: unknown,
-  mapping: Mapping,
-): Promise<{ value: unknown; mapping: Mapping }> {
-  const session = new AnonSession(backend, mapping);
-  const masked = await session.maskDeep(value);
-  return { value: masked, mapping: session.table() };
-}
-
 // Détecteur partagé sur tout le process : le modèle GLiNER ne se charge qu'une
 // fois (paresseux), à la première vraie requête anonymisée.
 const sharedDetector = new InProcessDetector();
@@ -132,10 +117,5 @@ export const llmBodyTransformerFactory: LlmBodyTransformerFactory = {
   // à maskLlmRequestBody avec le détecteur partagé. Aucune session conservée.
   maskLlmBody(body: Uint8Array, mapping: Mapping): Promise<{ body: Uint8Array; mapping: Mapping }> {
     return maskLlmRequestBody(sharedDetector, body, mapping);
-  },
-
-  // Deep mask pour le chemin outils (b2.3) : même détecteur partagé, stateless.
-  maskDeep(value: unknown, mapping: Mapping): Promise<{ value: unknown; mapping: Mapping }> {
-    return maskDeepValue(sharedDetector, value, mapping);
   },
 };

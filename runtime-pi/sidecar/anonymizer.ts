@@ -24,10 +24,6 @@ export interface RunAnonymizer {
   restore(text: string): string;
   /** Restaure les jetons d'un flux SSE — LOCAL, par chunk (best-effort). */
   restoreStream(): TransformStream<Uint8Array, Uint8Array>;
-  /** Masque EN PROFONDEUR une valeur (résultat d'outil) via la plateforme — détection requise. */
-  maskDeep(value: unknown): Promise<unknown>;
-  /** Restaure EN PROFONDEUR une valeur (args d'outil) — LOCAL, sans réseau. */
-  restoreDeep(value: unknown): unknown;
 }
 
 export interface RunAnonymizerOptions {
@@ -47,18 +43,6 @@ function restoreLocal(text: string, mapping: Mapping): string {
     text = text.split(token).join(mapping[token]!);
   }
   return text;
-}
-
-/** Restore récursif d'une valeur JSON (chaque string) — local, sans réseau. */
-function restoreDeepLocal(value: unknown, mapping: Mapping): unknown {
-  if (typeof value === "string") return restoreLocal(value, mapping);
-  if (Array.isArray(value)) return value.map((v) => restoreDeepLocal(v, mapping));
-  if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) out[k] = restoreDeepLocal(v, mapping);
-    return out;
-  }
-  return value;
 }
 
 class HttpRunAnonymizer implements RunAnonymizer {
@@ -96,30 +80,6 @@ class HttpRunAnonymizer implements RunAnonymizer {
     return restoreLocal(text, this.mapping);
   }
 
-  async maskDeep(value: unknown): Promise<unknown> {
-    const res = await this.fetchImpl(this.opts.endpointUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.opts.runToken}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ value, mapping: this.mapping }),
-    });
-    if (!res.ok) {
-      // Fail-CLOSED : mieux vaut faire échouer l'appel d'outil que rendre au LLM
-      // un résultat porteur de PII en clair.
-      const detail = await res.text().catch(() => "");
-      throw new Error(`anonymize(deep) endpoint ${res.status}: ${detail}`);
-    }
-    const out = (await res.json()) as { value: unknown; mapping: Mapping };
-    this.mapping = out.mapping;
-    return out.value;
-  }
-
-  restoreDeep(value: unknown): unknown {
-    return restoreDeepLocal(value, this.mapping);
-  }
-
   restoreStream(): TransformStream<Uint8Array, Uint8Array> {
     const mappingRef = () => this.mapping;
     // Décodeur à état : ne coupe pas un caractère multi-octets entre chunks.
@@ -136,26 +96,4 @@ class HttpRunAnonymizer implements RunAnonymizer {
 
 export function createRunAnonymizer(opts: RunAnonymizerOptions): RunAnonymizer {
   return new HttpRunAnonymizer(opts);
-}
-
-/**
- * Enveloppe un outil (palier b2.3) : le LLM raisonne en jetons, donc il appelle
- * l'outil avec des jetons dans les args.
- *   - RESTORE les args AVANT exécution (l'outil agit sur les vraies valeurs) — LOCAL.
- *   - RE-MASQUE le résultat APRÈS (le LLM ne revoit que des jetons) — via l'endpoint.
- * Générique sur la forme `{ handler }` pour ne pas coupler aux types MCP.
- */
-export function wrapToolHandler<T extends { handler: (args: any, extra: any) => Promise<any> }>(
-  tool: T,
-  anon: RunAnonymizer,
-): T {
-  const original = tool.handler;
-  return {
-    ...tool,
-    handler: async (args: any, extra: any) => {
-      const realArgs = anon.restoreDeep(args); // jetons → vraies valeurs (local)
-      const result = await original(realArgs, extra); // l'outil agit pour de vrai
-      return anon.maskDeep(result); // résultat → jetons (endpoint)
-    },
-  };
 }
