@@ -3930,6 +3930,149 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Search the index
+         * @description Hybrid org-scoped retrieval (semantic vector + full-text, merged with RRF) over indexed content. Results are filtered by the caller's ACL (org-visible objects plus their own private ones). The bytes of a hit are read by `storageObjectId` through the storage API.
+         */
+        post: operations["search"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/storage/disks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List storage disks
+         * @description Lists the org's storage disks. The native default disk is created on first access if missing.
+         */
+        get: operations["listStorageDisks"];
+        put?: never;
+        /**
+         * Connect a cloud disk
+         * @description Connect an S3-compatible bucket (credentials encrypted at rest) or a Google Drive that references one of the caller's existing platform integration connections (no OAuth here — the credential-proxy injects the token). The initial inventory sync runs synchronously.
+         */
+        post: operations["createStorageDisk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/storage/disks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Disconnect a storage disk */
+        delete: operations["deleteStorageDisk"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/storage/disks/{id}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync a cloud disk
+         * @description Synchronously list a cloud disk's objects (filtered by the watermark cursor when the API allows) and upsert the inventory. Returns the counts.
+         */
+        post: operations["syncStorageDisk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/storage/objects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List storage objects */
+        get: operations["listStorageObjects"];
+        put?: never;
+        /**
+         * Upload an object
+         * @description Upload a file (multipart/form-data) to a writable disk — the native default disk unless `diskId` is given. The new object gets a stable opaque id consumers read bytes by.
+         */
+        post: operations["uploadStorageObject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/storage/objects/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get object metadata */
+        get: operations["getStorageObject"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete an object
+         * @description Deletes the bytes and the inventory row. Read-only disks (Drive) reject this.
+         */
+        delete: operations["deleteStorageObject"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/storage/objects/{id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download object bytes
+         * @description Stream the raw bytes of an object by its opaque id — the read seam chat, agents and the future search index use (never the disk's internal key). Enforces org + ACL.
+         */
+        get: operations["downloadStorageObject"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/uploads": {
         parameters: {
             query?: never;
@@ -5109,6 +5252,19 @@ export interface components {
             /** @enum {string|null} */
             actor_type: "user" | "end_user" | null;
         };
+        SearchHit: {
+            /** @enum {string} */
+            object: "search_hit";
+            /** @description The matched chunk id */
+            chunkId: string;
+            /** @description Opaque storage object id — read its bytes via the storage API */
+            storageObjectId: string;
+            /** @description Object name at index time */
+            name?: string | null;
+            chunkIndex: number;
+            /** @description The chunk text */
+            content: string;
+        };
         SmtpConfigView: {
             applicationId: string;
             host: string;
@@ -5134,6 +5290,42 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        StorageDisk: {
+            /** @enum {string} */
+            object: "storage_disk";
+            /** @description Disk ID (sdsk_ prefix) */
+            id: string;
+            /** @enum {string} */
+            kind: "native" | "s3" | "google_drive" | "onedrive" | "dropbox";
+            name: string;
+            /** @description The org's native default disk */
+            isDefault: boolean;
+            enabled: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        StorageObject: {
+            /** @enum {string} */
+            object: "storage_object";
+            /** @description Object ID (sobj_ prefix) — the opaque handle */
+            id: string;
+            diskId: string;
+            name: string;
+            mime?: string | null;
+            sizeBytes?: number | null;
+            /**
+             * @description `org` = visible to every member; `private` = owner only
+             * @enum {string}
+             */
+            visibility: "org" | "private";
+            ownerId?: string | null;
+            /** Format: date-time */
+            syncedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
         };
         TestResult: {
             ok: boolean;
@@ -18042,6 +18234,409 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    search: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    query: string;
+                    /**
+                     * @description Max hits to return
+                     * @default 10
+                     */
+                    limit?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Ranked hits */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["SearchHit"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+        };
+    };
+    listStorageDisks: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Disks list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["StorageDisk"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+        };
+    };
+    createStorageDisk: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    kind: "s3";
+                    name: string;
+                    config: {
+                        bucket: string;
+                        region?: string;
+                        /** Format: uri */
+                        endpoint?: string;
+                        force_path_style?: boolean;
+                        prefix?: string;
+                        access_key_id: string;
+                        secret_access_key: string;
+                    };
+                } | {
+                    /** @enum {string} */
+                    kind: "google_drive";
+                    name: string;
+                    config: {
+                        /** @description Integration package id of the picked connection */
+                        integration_id: string;
+                        /** @description The caller's existing integration connection id */
+                        connection_id: string;
+                        /** @description Application the connection lives in */
+                        application_id: string;
+                        /** @description Drive folder ids to index (never the whole Drive) */
+                        folder_ids: string[];
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Disk connected (initial sync run) */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageDisk"];
+                };
+            };
+        };
+    };
+    deleteStorageDisk: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Disk disconnected (objects cascade) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The default disk cannot be deleted */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Disk not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    syncStorageDisk: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sync done */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "disk_sync";
+                        diskId: string;
+                        listed: number;
+                        upserted: number;
+                    };
+                };
+            };
+            /** @description Disk kind cannot be synced */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Disk not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listStorageObjects: {
+        parameters: {
+            query?: {
+                /** @description Filter by disk */
+                diskId?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Objects inventory */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["StorageObject"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+        };
+    };
+    uploadStorageObject: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: Blob;
+                    /** @description Target disk (defaults to the native disk) */
+                    diskId?: string;
+                    /** @description Overrides the file name */
+                    name?: string;
+                    /**
+                     * @default org
+                     * @enum {string}
+                     */
+                    visibility?: "org" | "private";
+                };
+            };
+        };
+        responses: {
+            /** @description Object uploaded */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageObject"];
+                };
+            };
+            /** @description Missing file or disk is read-only */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Disk not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getStorageObject: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Object metadata */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageObject"];
+                };
+            };
+            /** @description Object not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    deleteStorageObject: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Object deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Object lives on a read-only disk */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Object not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    downloadStorageObject: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Raw object bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": Blob;
+                };
+            };
+            /** @description Object not found or content unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     createUpload: {
