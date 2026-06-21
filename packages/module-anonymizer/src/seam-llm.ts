@@ -29,17 +29,36 @@ import { AnonSession, type AnonBackend, type Mapping } from "./run-session.ts";
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 
-/** Masque `obj[key]` si c'est une string OU un tableau de parts {type:"text"}. */
+/**
+ * Masque les parts porteuses de texte d'un tableau de content :
+ *   - `{type:"text", text}` (texte normal)
+ *   - `{type:"tool_result", content}` (Anthropic) — RÉSULTAT d'outil renvoyé au
+ *     LLM au tour suivant : il peut porter de la PII fraîche, on le masque pour
+ *     que le modèle ne la revoie jamais. `content` = string OU tableau de parts.
+ * (Mistral/OpenAI mettent les résultats d'outils dans un `content` string de
+ * message → couverts par la branche string de `maskField`.)
+ */
+async function maskContentParts(session: AnonSession, parts: any[]): Promise<void> {
+  for (const part of parts) {
+    if (part?.type === "text" && typeof part.text === "string") {
+      part.text = await session.mask(part.text);
+    } else if (part?.type === "tool_result") {
+      if (typeof part.content === "string") {
+        part.content = await session.mask(part.content);
+      } else if (Array.isArray(part.content)) {
+        await maskContentParts(session, part.content);
+      }
+    }
+  }
+}
+
+/** Masque `obj[key]` si c'est une string OU un tableau de parts de content. */
 async function maskField(session: AnonSession, obj: any, key: string): Promise<void> {
   const value = obj?.[key];
   if (typeof value === "string") {
     obj[key] = await session.mask(value);
   } else if (Array.isArray(value)) {
-    for (const part of value) {
-      if (part?.type === "text" && typeof part.text === "string") {
-        part.text = await session.mask(part.text);
-      }
-    }
+    await maskContentParts(session, value);
   }
 }
 

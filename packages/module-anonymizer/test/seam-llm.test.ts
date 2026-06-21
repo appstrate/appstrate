@@ -115,6 +115,30 @@ describe("llm-proxy anonymization seam", () => {
     const out = await t.maskRequest(enc.encode("pas du json Benjamin"));
     expect(dec.decode(out)).toBe("pas du json Benjamin");
   });
+
+  it("masks Anthropic tool_result content fed back into the request (string and nested)", async () => {
+    const t = createLlmBodyTransformer(new AnonSession(fakeBackend({ "Benjamin Macé": "PERSON" })));
+    const masked = fromBytes(
+      await t.maskRequest(
+        toBytes({
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "tool_result", content: "Le client est Benjamin Macé" },
+                { type: "tool_result", content: [{ type: "text", text: "aussi Benjamin Macé" }] },
+              ],
+            },
+          ],
+        }),
+      ),
+    );
+    const parts = masked.messages[0].content;
+    expect(parts[0].content).not.toContain("Benjamin Macé"); // string tool_result masked
+    expect(parts[0].content).toMatch(/\[PERSON_\d+\]/);
+    expect(parts[1].content[0].text).not.toContain("Benjamin Macé"); // nested tool_result masked
+    expect(JSON.stringify(masked)).not.toContain("Benjamin Macé");
+  });
 });
 
 describe("stateless maskLlmRequestBody (the /internal/anonymize endpoint seam)", () => {
