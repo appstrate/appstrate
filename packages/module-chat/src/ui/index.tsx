@@ -177,8 +177,6 @@ export interface ChatPageProps {
  * embeddable `ChatPanel` stays single-thread (ephemeral) by design.
  */
 export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
-  const adapter = useMemo(() => makeThreadListAdapter(getHeaders), [getHeaders]);
-
   // Thread-list column is a fixed sidebar on desktop; on mobile it collapses
   // into a left drawer toggled from the card header.
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -203,6 +201,17 @@ export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
   useEffect(() => {
     selectedModelRef.current = selectedModel;
   }, [selectedModel]);
+
+  // Title generation reuses the chat's selected model so an auto-title comes from
+  // the SAME model the user picked, not the org default. We capture the state
+  // value (not the ref — the React Compiler forbids ref reads crossing into a
+  // function at render): the adapter rebuilds when the model changes, which only
+  // re-runs the cheap `list()` fetch; the open thread (keyed per-id by the history
+  // adapter) is unaffected.
+  const adapter = useMemo(
+    () => makeThreadListAdapter(getHeaders, () => selectedModel),
+    [getHeaders, selectedModel],
+  );
 
   useEffect(() => {
     void fetchModels(getHeaders).then((list) => {

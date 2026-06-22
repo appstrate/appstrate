@@ -43,7 +43,11 @@ function fallbackTitle(items: { role: string; text: string }[]): string {
   return first.length > 50 ? `${first.slice(0, 47)}…` : first;
 }
 
-export function makeThreadListAdapter(getHeaders: GetHeaders): RemoteThreadListAdapter {
+export function makeThreadListAdapter(
+  getHeaders: GetHeaders,
+  /** Live getter for the chat's selected model, so the title uses it too. */
+  getModelId?: () => string | null,
+): RemoteThreadListAdapter {
   // Per-thread history adapter, keyed by the thread's remoteId (= session id).
   function HistoryProvider({ children }: PropsWithChildren) {
     const remoteId = useThreadListItem((s) => s.remoteId);
@@ -89,7 +93,7 @@ export function makeThreadListAdapter(getHeaders: GetHeaders): RemoteThreadListA
       if (items.length === 0) return createAssistantStream(() => {});
       let title = "";
       try {
-        title = await generateSessionTitle(getHeaders, items);
+        title = await generateSessionTitle(getHeaders, items, getModelId?.());
       } catch {
         title = "";
       }

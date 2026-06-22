@@ -58,15 +58,20 @@ export async function renameSession(
   });
 }
 
-/** Generate a short LLM title from the first messages (role + text). */
+/**
+ * Generate a short LLM title from the first messages (role + text). `modelId`
+ * pins the title to the chat's selected model (via `X-Model-Id`) so the title is
+ * produced by the SAME model the user picked, not the org default.
+ */
 export async function generateSessionTitle(
   getHeaders: GetHeaders,
   messages: { role: string; text: string }[],
+  modelId?: string | null,
 ): Promise<string> {
   const res = await fetch("/api/chat/title", {
     method: "POST",
     credentials: "include",
-    headers: headers(getHeaders, true),
+    headers: { ...headers(getHeaders, true), ...(modelId ? { "X-Model-Id": modelId } : {}) },
     body: JSON.stringify({ messages }),
   });
   if (!res.ok) throw new Error(`/api/chat/title returned ${res.status}`);
