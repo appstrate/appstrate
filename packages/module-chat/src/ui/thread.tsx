@@ -239,7 +239,7 @@ function ToolGroup({
 }: React.PropsWithChildren<{ count: number; running: boolean }>) {
   const [open, setOpen] = React.useState(false);
   return (
-    <div className="bg-card text-card-foreground mb-3 w-full rounded-lg border">
+    <div className="bg-card text-card-foreground my-3 w-full rounded-lg border">
       <button
         type="button"
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm"
