@@ -30,7 +30,7 @@ import {
   selectRunEngine,
   assertRunnableOnEngine,
   buildOauthSidecarLlm,
-  CODEX_EGRESS_ALLOWLIST,
+  subscriptionEngineDef,
 } from "./engine-select.ts";
 import {
   getOrchestrator,
@@ -194,19 +194,22 @@ async function runPlatformContainerImpl(
     });
 
     let sidecarLlm: LlmProxyConfig | undefined;
-    // Codex runs hold the real token in-container and lock egress to OpenAI's
-    // hosts (the binary talks to the upstream directly; no reverse proxy is
-    // possible). Set only for the `codex` engine.
+    // Credential delivery is driven by the provider→engine registry, not an
+    // engine literal: a `"vend"` subscription engine holds the real token
+    // in-container (the binary talks to the upstream directly; no reverse proxy
+    // is possible) and locks egress to the vendor's hosts; an `"oauth"` engine
+    // has its bearer swapped server-side by the gateway. Adding a new
+    // subscription engine is a registry entry, not a branch here.
+    const subDef = subscriptionEngineDef(llmConfig.providerId);
     let egressAllowlist: readonly string[] | undefined;
-    if (engine === "codex") {
+    if (subDef?.sidecarAuthMode === "vend") {
       // Vend mode: the sidecar hands the resolved token to the in-container
-      // Codex runner via `/credential-vend` instead of swapping the bearer in
-      // flight. No model alias (subscription models aren't aliased).
+      // runner via `/credential-vend` instead of swapping the bearer in flight.
+      // No model alias (subscription models aren't aliased).
       sidecarLlm = { authMode: "vend", credentialId: llmConfig.credentialId! };
-      egressAllowlist = CODEX_EGRESS_ALLOWLIST;
+      egressAllowlist = subDef.egressAllowlist;
     } else if (isOauthCredential) {
-      // Only the `claude` engine reaches here (codex took the branch above, and
-      // assertRunnableOnEngine rejected any other oauth provider). The official
+      // An `"oauth"` subscription engine (e.g. Claude Agent SDK). The official
       // binary signs its own fingerprint, so the sidecar just swaps the bearer
       // + ensures the OAuth beta — no forging.
       sidecarLlm = buildOauthSidecarLlm({
@@ -232,9 +235,9 @@ async function runPlatformContainerImpl(
     // container (the CLI talks to the upstream directly and can't be reverse-
     // proxied), so its egress MUST be locked to the provider's hosts — the
     // allowlist is the sole compensating control. Fail closed rather than launch
-    // an unconstrained container holding a live credential. (Today only the
-    // `codex` branch sets vend, and it always sets CODEX_EGRESS_ALLOWLIST; this
-    // guards any future vend provider against shipping without its lock.)
+    // an unconstrained container holding a live credential. (A `"vend"` engine
+    // always carries an `egressAllowlist` in the registry; this guards any vend
+    // provider against shipping without its lock.)
     if (sidecarLlm?.authMode === "vend" && (!egressAllowlist || egressAllowlist.length === 0)) {
       throw new Error(
         "vend-mode run requires a non-empty egress allowlist (refusing to launch an unlocked container with a vended credential)",

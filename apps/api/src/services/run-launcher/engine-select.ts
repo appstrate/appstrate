@@ -24,16 +24,8 @@ import {
   type RunEngine,
 } from "@appstrate/core/subscription-engines";
 
+export { subscriptionEngineDef };
 export type { RunEngine };
-
-/**
- * Per-run egress allowlist for a `codex` run's forward proxy — sourced from the
- * provider→engine registry (the single place that knows codex holds the real
- * token in-container and must be locked to OpenAI's hosts). The platform host
- * stays reachable regardless (HMAC-scoped sink traffic).
- */
-export const CODEX_EGRESS_ALLOWLIST: readonly string[] =
-  subscriptionEngineDef("codex")?.egressAllowlist ?? [];
 
 /**
  * Pick the engine for a resolved model — delegates to the shared registry

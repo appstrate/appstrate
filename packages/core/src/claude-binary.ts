@@ -30,7 +30,13 @@
  * no dependency on the Agent SDK.
  */
 
-import { createRequire } from "node:module";
+import {
+  buildIsolatedSubprocessEnv,
+  makeScopeResolver,
+  type BinaryResolver,
+} from "./subprocess-env.ts";
+
+export type { BinaryResolver };
 
 const SDK_SCOPE = "@anthropic-ai/claude-agent-sdk";
 
@@ -57,42 +63,10 @@ export function buildClaudeSdkEnv(opts: {
   placeholderToken: string;
   extra?: Record<string, string>;
 }): Record<string, string> {
-  // Forward the proxy vars so the spawned `claude` binary's native tools
-  // (Bash/WebFetch) egress through the sidecar forward-proxy — the same
-  // outbound isolation the Pi runner gets. Without these the subprocess would
-  // reach the internet directly, bypassing the sidecar's allowlist/MITM.
-  // Both casings: curl/libcurl read lowercase, Node/Bun read uppercase.
-  const passthrough = [
-    "PATH",
-    "HOME",
-    "TMPDIR",
-    "TEMP",
-    "TMP",
-    "LANG",
-    "LC_ALL",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "no_proxy",
-  ];
-  const env: Record<string, string> = {};
-  for (const key of passthrough) {
-    const value = process.env[key];
-    if (value) env[key] = value;
-  }
-  // The container sets only the uppercase proxy vars; mirror them to lowercase
-  // so curl/wget (which prefer lowercase) inside native Bash also egress through
-  // the sidecar. Mirror lowercase→uppercase too for completeness.
-  for (const [upper, lower] of [
-    ["HTTP_PROXY", "http_proxy"],
-    ["HTTPS_PROXY", "https_proxy"],
-    ["NO_PROXY", "no_proxy"],
-  ] as const) {
-    if (env[upper] && !env[lower]) env[lower] = env[upper];
-    if (env[lower] && !env[upper]) env[upper] = env[lower];
-  }
+  // Curated, secret-free base (proxy vars mirrored across casings so native
+  // Bash/WebFetch egress through the sidecar forward-proxy — the same outbound
+  // isolation the Pi runner gets); see `subprocess-env.ts`.
+  const env = buildIsolatedSubprocessEnv();
   // Keep the subscription binary quiet and non-self-updating in a server.
   env.DISABLE_AUTOUPDATER = "1";
   env.DISABLE_TELEMETRY = "1";
@@ -112,32 +86,13 @@ export function buildClaudeSdkEnv(opts: {
 }
 
 /**
- * A module-specifier resolver — `require.resolve`-shaped. Injected so the
- * algorithm is unit-testable without the 200 MB binaries on disk, and so each
- * consumer can anchor resolution at its own `node_modules` scope.
- */
-export type BinaryResolver = (specifier: string) => string;
-
-/**
- * Build a {@link BinaryResolver} anchored at the caller's module scope.
- *
- * The `@anthropic-ai/claude-agent-sdk-<platform>-<arch>` packages are
- * *optional dependencies of the main SDK*, so the package manager co-locates
- * them with it (a sibling in the store), NOT in the caller's own
- * `node_modules`. A plain `require.resolve` anchored at the caller therefore
- * can't see them — we must hop through the main SDK first, exactly as the SDK
- * does internally when it self-resolves its binary.
- *
- * Pass `import.meta.url` from the consuming module so the first hop
- * (`require.resolve('@anthropic-ai/claude-agent-sdk')`) resolves against the
- * scope where that consumer actually installed the SDK.
+ * Build a {@link BinaryResolver} anchored at the caller's module scope, hopping
+ * through `@anthropic-ai/claude-agent-sdk` first (the per-arch binary packages
+ * are its optional deps — co-located with it, not the caller). Pass
+ * `import.meta.url` from the consuming module. See {@link makeScopeResolver}.
  */
 export function makeSdkScopeResolver(metaUrl: string): BinaryResolver {
-  const base = createRequire(metaUrl);
-  return (specifier: string): string => {
-    const sdkEntry = base.resolve(SDK_SCOPE);
-    return createRequire(sdkEntry).resolve(specifier);
-  };
+  return makeScopeResolver(SDK_SCOPE, metaUrl);
 }
 
 /**

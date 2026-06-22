@@ -31,11 +31,24 @@ export interface SubscriptionEngineDef {
   /** Human-readable provider name for user-facing messages. */
   label: string;
   /**
-   * Per-run egress allowlist for engines that hold the REAL subscription token
-   * in-container (the binary talks to the upstream directly, so its outbound
-   * traffic must be locked to the vendor's hosts — suffix-matched). Absent when
-   * the engine never exposes the real token to the sandbox (e.g. the Claude
-   * Agent SDK, whose token is swapped server-side by the gateway).
+   * How the sidecar delivers the subscription credential to the run:
+   *
+   * - `"oauth"` — the official binary points at the sidecar's `/llm` gateway,
+   *   which swaps the placeholder bearer for the real token server-side. The
+   *   real token never enters the agent container, so egress need not be locked.
+   * - `"vend"` — the binary talks to the upstream DIRECTLY (it ignores any
+   *   base-URL override), so the sidecar cannot reverse-proxy it. The runner
+   *   GETs the real token once from `/credential-vend` into the container; the
+   *   real token therefore lives in-container and its egress MUST be locked to
+   *   the vendor's hosts ({@link egressAllowlist}) as the sole compensating
+   *   control.
+   *
+   * Invariant: `sidecarAuthMode === "vend"` iff {@link egressAllowlist} is set.
+   */
+  sidecarAuthMode: "oauth" | "vend";
+  /**
+   * Per-run egress allowlist for `"vend"` engines that hold the REAL token
+   * in-container (suffix-matched). Required for vend, absent for oauth.
    */
   egressAllowlist?: readonly string[];
 }
@@ -45,15 +58,19 @@ export interface SubscriptionEngineDef {
  * entry here, paired with its gateway + engine implementation.
  */
 export const SUBSCRIPTION_ENGINES: readonly SubscriptionEngineDef[] = [
-  { providerId: "claude-code", engine: "claude", label: "Claude Code" },
+  // Claude Agent SDK: the sidecar `/llm` gateway swaps the bearer server-side,
+  // so the real token never enters the container — no egress lock needed.
+  { providerId: "claude-code", engine: "claude", label: "Claude Code", sidecarAuthMode: "oauth" },
   {
     providerId: "codex",
     engine: "codex",
     label: "Codex",
     // The Codex CLI holds the real token in-container (it ignores
-    // `chatgpt_base_url` and talks to chatgpt.com directly), so its egress is
-    // locked to OpenAI's hosts only — `chatgpt.com` (backend) + `openai.com`
-    // (auth/api, suffix-matched). Everything else is refused.
+    // `chatgpt_base_url` and talks to chatgpt.com directly), so the token is
+    // vended into the container and its egress is locked to OpenAI's hosts only
+    // — `chatgpt.com` (backend) + `openai.com` (auth/api, suffix-matched).
+    // Everything else is refused.
+    sidecarAuthMode: "vend",
     egressAllowlist: ["chatgpt.com", "openai.com"],
   },
 ] as const;

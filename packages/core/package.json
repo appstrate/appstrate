@@ -82,7 +82,8 @@
     "./jwt": "./src/jwt.ts",
     "./credential-template": "./src/credential-template.ts",
     "./dedupe-label": "./src/dedupe-label.ts",
-    "./subscription-engines": "./src/subscription-engines.ts"
+    "./subscription-engines": "./src/subscription-engines.ts",
+    "./subprocess-env": "./src/subprocess-env.ts"
   },
   "dependencies": {
     "@afps-spec/schema": "^0.6.1",

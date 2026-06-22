@@ -34,10 +34,16 @@
  * resolver, so `@appstrate/core` gains no dependency on the Codex CLI.
  */
 
-import { createRequire } from "node:module";
 import { mkdtemp, writeFile, readdir, stat, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  buildIsolatedSubprocessEnv,
+  makeScopeResolver,
+  type BinaryResolver,
+} from "./subprocess-env.ts";
+
+export type { BinaryResolver };
 
 const CODEX_SCOPE = "@openai/codex";
 
@@ -324,34 +330,9 @@ export function buildCodexEnv(opts: {
   codexHome: string;
   extra?: Record<string, string>;
 }): Record<string, string> {
-  const passthrough = [
-    "PATH",
-    "HOME",
-    "TMPDIR",
-    "TEMP",
-    "TMP",
-    "LANG",
-    "LC_ALL",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "no_proxy",
-  ];
-  const env: Record<string, string> = {};
-  for (const key of passthrough) {
-    const value = process.env[key];
-    if (value) env[key] = value;
-  }
-  for (const [upper, lower] of [
-    ["HTTP_PROXY", "http_proxy"],
-    ["HTTPS_PROXY", "https_proxy"],
-    ["NO_PROXY", "no_proxy"],
-  ] as const) {
-    if (env[upper] && !env[lower]) env[lower] = env[upper];
-    if (env[lower] && !env[upper]) env[upper] = env[lower];
-  }
+  // Curated, secret-free base with proxy vars mirrored across casings; see
+  // `subprocess-env.ts`.
+  const env = buildIsolatedSubprocessEnv();
   // Keep the subprocess quiet + non-self-updating on a server.
   env.CODEX_DISABLE_UPDATE_CHECK = "1";
   // `extra` merged first; CODEX_HOME re-asserted LAST so it can't be redirected
@@ -361,22 +342,14 @@ export function buildCodexEnv(opts: {
   return merged;
 }
 
-/** A module-specifier resolver — `require.resolve`-shaped. Injected so the
- * package matrix is unit-testable without the binaries on disk. */
-export type BinaryResolver = (specifier: string) => string;
-
 /**
- * Build a {@link BinaryResolver} anchored at the caller's module scope. The
- * per-arch `@openai/codex-<plat>-<arch>` packages are optional dependencies of
- * `@openai/codex`, so they sit beside it in the store — we hop through the main
- * package first (exactly as the CLI's own shim does).
+ * Build a {@link BinaryResolver} anchored at the caller's module scope, hopping
+ * through `@openai/codex` first (the per-arch binary packages are its optional
+ * deps — co-located with it, not the caller). Pass `import.meta.url` from the
+ * consuming module. See {@link makeScopeResolver}.
  */
 export function makeCodexScopeResolver(metaUrl: string): BinaryResolver {
-  const base = createRequire(metaUrl);
-  return (specifier: string): string => {
-    const cliEntry = base.resolve(CODEX_SCOPE);
-    return createRequire(cliEntry).resolve(specifier);
-  };
+  return makeScopeResolver(CODEX_SCOPE, metaUrl);
 }
 
 /**
