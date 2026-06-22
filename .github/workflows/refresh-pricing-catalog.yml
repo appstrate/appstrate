@@ -28,6 +28,14 @@ jobs:
       - name: Refresh catalog (apply)
         run: bun scripts/refresh-pricing-catalog.ts --apply
 
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Format generated files
+        # The generator writes JSON that does not match Prettier style;
+        # without this the drift PR breaks the Check workflow's format:check.
+        run: bunx prettier --write "apps/api/src/data/**"
+
       - name: Check for drift
         id: drift
         run: |
