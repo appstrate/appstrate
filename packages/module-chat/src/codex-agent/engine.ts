@@ -30,6 +30,7 @@
  */
 
 import { rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from "ai";
 import {
   buildCodexEnv,
@@ -44,8 +45,22 @@ import {
 } from "@appstrate/core/codex-binary";
 import { CodexUiStreamMapper } from "./ui-stream-mapper.ts";
 import { acquireCodexSlot } from "./concurrency.ts";
+import { chatCapacityResponse } from "../concurrency-gate.ts";
 import { buildTranscriptPrompt } from "../transcript.ts";
 import { logger } from "../logger.ts";
+
+/** mkdtemp prefix for the chat codex token home — also swept at boot. */
+export const CODEX_CHAT_HOME_PREFIX = "codex-chat-";
+
+/**
+ * Base dir for the chat codex `auth.json` home. The chat engine runs on the
+ * platform host (not a container), so prefer a RAM-backed dir (`/dev/shm`) when
+ * present — the real token is then never written to a physical disk at rest.
+ * Falls back to the OS temp dir (e.g. macOS dev, where `/dev/shm` is absent).
+ */
+export function codexChatHomeBase(): string | undefined {
+  return existsSync("/dev/shm") ? "/dev/shm" : undefined;
+}
 
 /**
  * Resolve the `codex` binary. Order: explicit `CODEX_BINARY_PATH` override →
@@ -81,32 +96,6 @@ export interface CodexAgentChatInput {
 }
 
 /**
- * Returned (instead of a stream) when the engine is at its subprocess cap, so
- * the client backs off rather than the instance forking unbounded binaries.
- */
-function capacityResponse(): Response {
-  const retryAfterSeconds = 5;
-  return new Response(
-    JSON.stringify({
-      type: "https://docs.appstrate.dev/errors/chat-capacity",
-      title: "Too Many Requests",
-      status: 429,
-      detail:
-        "Le service de chat Codex est temporairement saturé. Réessayez dans quelques instants.",
-      code: "chat_capacity",
-      retry_after: retryAfterSeconds,
-    }),
-    {
-      status: 429,
-      headers: {
-        "content-type": "application/problem+json",
-        "retry-after": String(retryAfterSeconds),
-      },
-    },
-  );
-}
-
-/**
  * Run one chat turn through the Codex CLI and return a UI-message-stream
  * Response (identical wire contract to the other engines).
  */
@@ -116,7 +105,7 @@ export function runCodexAgentChat(input: CodexAgentChatInput): Response {
   const binary = resolveBinary();
 
   const slot = acquireCodexSlot();
-  if (!slot) return capacityResponse();
+  if (!slot) return chatCapacityResponse("Codex");
 
   const mapper = new CodexUiStreamMapper();
 
@@ -137,9 +126,12 @@ export function runCodexAgentChat(input: CodexAgentChatInput): Response {
 
         // Vend the real subscription credential server-side (first-party). The
         // CLI needs the genuine token in auth.json — it calls chatgpt.com
-        // directly and ignores chatgpt_base_url for its models-manager.
+        // directly and ignores chatgpt_base_url for its models-manager. The vend
+        // honours the client's abort signal so a disconnect during the vend
+        // window cancels it instead of vending + immediately killing a child.
         const vend = await fetch(input.credentialUrl, {
           headers: { authorization: `Bearer ${input.loopbackToken}` },
+          signal: input.abortSignal,
         });
         if (!vend.ok) {
           writer.write({
@@ -154,10 +146,18 @@ export function runCodexAgentChat(input: CodexAgentChatInput): Response {
         }
         const cred = (await vend.json()) as VendedCodexCredential;
 
+        // Client gone between vend and spawn — don't write the token to disk or
+        // fork the binary at all.
+        if (input.abortSignal.aborted) {
+          writer.write(mapper.finishChunk());
+          return;
+        }
+
         home = await writeCodexAuthHome({
           credential: cred,
           nowMs: Date.now(),
-          prefix: "codex-chat-",
+          prefix: CODEX_CHAT_HOME_PREFIX,
+          baseDir: codexChatHomeBase(),
         });
 
         child = Bun.spawn(
@@ -201,7 +201,7 @@ export function runCodexAgentChat(input: CodexAgentChatInput): Response {
             .catch(() => "");
           logger.warn("codex chat exited non-zero", {
             exitCode,
-            stderr: redactSecrets(stderr).slice(0, 500),
+            stderr: redactSecrets(stderr, [cred.access_token]).slice(0, 500),
           });
           writer.write({ type: "error", errorText: input.onError(undefined) });
         }

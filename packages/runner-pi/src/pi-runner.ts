@@ -40,12 +40,14 @@ import {
 } from "./pi-sdk.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
+import { getErrorMessage } from "@appstrate/core/errors";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   emptyRunResult,
   reduceEvents,
   truncateToolResult,
   toolResultByteLimit,
+  zeroTokenUsage,
   type RunError,
   type RunOptions,
   type Runner,
@@ -249,7 +251,7 @@ export class PiRunner implements Runner {
         // finally block decides.
         throw err;
       }
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       await emit({
         type: "appstrate.error",
         timestamp: Date.now(),
@@ -283,6 +285,11 @@ export class PiRunner implements Runner {
     if (terminalError) {
       result.status = "failed";
       result.error = terminalError;
+    } else {
+      // Set success explicitly (don't leave it for the ingestion layer to
+      // infer) so the runner is the single source of truth on BOTH branches —
+      // matching the Claude + Codex runners.
+      result.status = "success";
     }
     attachAccumulators(result);
     // Drain pending bridge fires BEFORE finalize. Finalize closes the
@@ -611,14 +618,8 @@ export function installSessionBridge(
   sink: InternalSink,
   runId: string,
 ): SessionBridgeHandle {
-  // Token usage accumulator across all assistant turns. Snake-case to
-  // match the canonical `TokenUsage` shape — no remap at emit time.
-  const totalUsage: TokenUsage = {
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_creation_input_tokens: 0,
-    cache_read_input_tokens: 0,
-  };
+  // Token usage accumulator across all assistant turns (shared zero-shape).
+  const totalUsage: TokenUsage = zeroTokenUsage();
   let totalCost = 0;
 
   // Terminal verdict tracking. Updated on every assistant `message_end`,

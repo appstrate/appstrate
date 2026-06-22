@@ -2,7 +2,8 @@
 // Copyright 2026 Appstrate
 
 import { describe, expect, it } from "bun:test";
-import { readFile, stat, rm } from "node:fs/promises";
+import { readFile, stat, rm, mkdtemp, mkdir, writeFile, utimes } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildCodexAuthJson,
@@ -13,8 +14,18 @@ import {
   redactSecrets,
   resolveCodexBinary,
   safeParseJson,
+  sweepStaleCodexHomes,
   writeCodexAuthHome,
 } from "../src/codex-binary.ts";
+
+async function dirExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 describe("codexTargetTriple", () => {
   it("linux is musl (runs on Alpine)", () => {
@@ -118,6 +129,66 @@ describe("writeCodexAuthHome", () => {
   });
 });
 
+describe("writeCodexAuthHome baseDir", () => {
+  it("writes under the supplied baseDir (RAM-backed home for the chat path)", async () => {
+    const base = await mkdtemp(join(tmpdir(), "codex-base-"));
+    try {
+      const home = await writeCodexAuthHome({
+        credential: { access_token: "tok" },
+        nowMs: 1_700_000_000_000,
+        prefix: "codex-chat-",
+        baseDir: base,
+      });
+      expect(home.startsWith(base)).toBe(true);
+      expect(await readFile(join(home, "auth.json"), "utf8")).toContain("tok");
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("sweepStaleCodexHomes", () => {
+  it("removes only prefix-matching dirs older than maxAge, keeps fresh + foreign", async () => {
+    const base = await mkdtemp(join(tmpdir(), "codex-sweep-"));
+    const now = 1_700_000_000_000;
+    const stale = join(base, "codex-chat-stale");
+    const fresh = join(base, "codex-chat-fresh");
+    const foreign = join(base, "other-keepme");
+    await mkdir(stale);
+    await mkdir(fresh);
+    await mkdir(foreign);
+    await writeFile(join(stale, "auth.json"), "{}");
+    // Backdate the stale dir 2h; leave fresh + foreign current.
+    const old = new Date(now - 2 * 60 * 60 * 1000);
+    await utimes(stale, old, old);
+    try {
+      const removed = await sweepStaleCodexHomes({
+        baseDir: base,
+        prefix: "codex-chat-",
+        maxAgeMs: 60 * 60 * 1000,
+        nowMs: now,
+      });
+      expect(removed).toBe(1);
+      expect(await dirExists(stale)).toBe(false);
+      expect(await dirExists(fresh)).toBe(true);
+      expect(await dirExists(foreign)).toBe(true);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it("returns 0 when the base dir is absent (no /dev/shm) — never throws", async () => {
+    expect(
+      await sweepStaleCodexHomes({
+        baseDir: join(tmpdir(), "codex-does-not-exist-xyz"),
+        prefix: "codex-chat-",
+        maxAgeMs: 1000,
+        nowMs: Date.now(),
+      }),
+    ).toBe(0);
+  });
+});
+
 describe("buildCodexEnv", () => {
   it("sets CODEX_HOME and cannot be overridden by extra", () => {
     const env = buildCodexEnv({ codexHome: "/run/codex", extra: { CODEX_HOME: "/evil" } });
@@ -148,6 +219,17 @@ describe("redactSecrets", () => {
     expect(clean).not.toContain("zzz999YYY888www777");
     // Both occurrences collapse to the redacted form.
     expect(clean.match(/Bearer \[REDACTED\]/g)).toHaveLength(2);
+  });
+
+  it("redacts a known secret VALUE even when it has no Bearer/JWT/sk- shape", () => {
+    const token = "abcdef0123456789xyz"; // non-JWT, non-sk-, no Bearer prefix
+    const clean = redactSecrets(`leaked raw token ${token} in output`, [token]);
+    expect(clean).not.toContain(token);
+    expect(clean).toContain("[REDACTED]");
+  });
+  it("ignores short/empty known secrets (no over-redaction of innocuous text)", () => {
+    const msg = "exit code 7 at line 7";
+    expect(redactSecrets(msg, ["7", ""])).toBe(msg);
   });
 
   it("redacts sk-ant- subscription keys", () => {

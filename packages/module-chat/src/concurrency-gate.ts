@@ -68,3 +68,30 @@ export function createConcurrencyGate(
     active: () => active,
   };
 }
+
+/**
+ * RFC 9457 `429` returned (instead of a stream) when a chat engine is at its
+ * subprocess cap, so the client backs off rather than the instance forking
+ * unbounded binaries. Shared by both subscription engines — only the service
+ * label in the detail differs.
+ */
+export function chatCapacityResponse(serviceLabel: string): Response {
+  const retryAfterSeconds = 5;
+  return new Response(
+    JSON.stringify({
+      type: "https://docs.appstrate.dev/errors/chat-capacity",
+      title: "Too Many Requests",
+      status: 429,
+      detail: `Le service de chat ${serviceLabel} est temporairement saturé. Réessayez dans quelques instants.`,
+      code: "chat_capacity",
+      retry_after: retryAfterSeconds,
+    }),
+    {
+      status: 429,
+      headers: {
+        "content-type": "application/problem+json",
+        "retry-after": String(retryAfterSeconds),
+      },
+    },
+  );
+}

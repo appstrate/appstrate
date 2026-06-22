@@ -38,12 +38,7 @@
 
 import { rm } from "node:fs/promises";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
-import {
-  reduceEvents,
-  emptyRunResult,
-  type RunError,
-  type RunResult,
-} from "@appstrate/afps-runtime/runner";
+import { reduceEvents, type RunError, type RunResult } from "@appstrate/afps-runtime/runner";
 import type { Runner, RunOptions } from "@appstrate/afps-runtime/runner";
 import {
   buildCodexEnv,
@@ -224,7 +219,7 @@ export class CodexAgentRunner implements Runner {
           .catch(() => "");
         error = {
           code: "adapter_error",
-          message: `The Codex CLI exited with code ${exitCode}${stderr ? `: ${redactSecrets(stderr).slice(0, 500)}` : ""}`,
+          message: `The Codex CLI exited with code ${exitCode}${stderr ? `: ${redactSecrets(stderr, [cred.access_token]).slice(0, 500)}` : ""}`,
         };
         await emit({ type: "appstrate.error", timestamp: now(), runId, message: error.message });
       }
@@ -246,9 +241,12 @@ export class CodexAgentRunner implements Runner {
       }
       const message = getErrorMessage(err);
       await emit({ type: "appstrate.error", timestamp: now(), runId, message });
-      const result = emptyRunResult();
+      // reduceEvents (not emptyRunResult) so any partial canonical output the
+      // agent emitted before the throw — memory.added / output.emitted /
+      // log.written — survives into the failed result, matching the Pi + Claude
+      // runners and the in-try non-zero-exit branch above.
+      const result = reduceEvents(events, { error: { code: "adapter_error", message } });
       result.status = "failed";
-      result.error = { code: "adapter_error", message };
       result.usage = mapper.usage();
       result.cost = computeCodexCost(mapper.usage(), this.opts.modelCost);
       result.durationMs = now() - startTime;

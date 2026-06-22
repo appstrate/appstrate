@@ -24,17 +24,12 @@ import { openPlatformMcp } from "./platform-mcp.ts";
 import { createWaitForRunTool } from "./wait-for-run.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
+import { engineForProvider } from "@appstrate/core/subscription-engines";
 import { runClaudeAgentChat } from "./claude-agent/engine.ts";
 import { runCodexAgentChat } from "./codex-agent/engine.ts";
 import { RENDER_HTML_DESCRIPTION, renderHtmlInputShape } from "./render-html-spec.ts";
 
 const MAX_STEPS = 16;
-
-/** Credential provider id of the Claude subscription — routed to the Agent SDK engine. */
-const CLAUDE_CODE_PROVIDER_ID = "claude-code";
-
-/** Credential provider id of the Codex (ChatGPT) subscription — routed to the codex CLI engine. */
-const CODEX_PROVIDER_ID = "codex";
 
 /**
  * TTL for the engine path's loopback bearer. The Agent SDK bakes it into the
@@ -178,11 +173,16 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   const mcpHeaders: Record<string, string> = { ...headers };
   if (applicationId) mcpHeaders["x-application-id"] = applicationId;
 
+  // The provider→engine binding is the shared registry's call (same mapping the
+  // run launcher uses), so chat + runs can never disagree on which engine a
+  // subscription runs on.
+  const engine = engineForProvider(chosen.providerId ?? "");
+
   // Claude subscription → official Claude Agent SDK engine (clean/sanctioned),
   // NOT the ai-sdk → forging proxy. The SDK opens its own MCP connection, so we
   // close the probe client (used only for reachability + instructions) and hand
   // the engine the MCP endpoint + a turn-scoped loopback bearer for the gateway.
-  if (chosen.providerId === CLAUDE_CODE_PROVIDER_ID) {
+  if (engine === "claude") {
     const platformMcp = mcp
       ? { url: `${origin}/api/mcp/o/${encodeURIComponent(orgId)}`, headers: mcpHeaders }
       : undefined;
@@ -208,7 +208,7 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   // fingerprint; the gateway swaps the placeholder bearer for the real token.
   // Conversational MVP — no platform MCP tools wired yet (codex's own coding
   // sandbox is read-only here), so close the probe client.
-  if (chosen.providerId === CODEX_PROVIDER_ID) {
+  if (engine === "codex") {
     await mcp?.close();
     return runCodexAgentChat({
       messages,

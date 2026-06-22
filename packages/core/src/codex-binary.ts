@@ -35,7 +35,7 @@
  */
 
 import { createRequire } from "node:module";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile, readdir, stat, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -58,10 +58,21 @@ function b64url(value: object): string {
  * real subscription token in its `auth.json`; its stderr is therefore treated as
  * potentially secret-bearing (defense-in-depth — the CLI is not expected to echo
  * the bearer, but we never persist its stderr unredacted). Strips `Bearer`
- * tokens, JWTs, and `sk-`-style keys.
+ * tokens, JWTs, and `sk-`-style keys by SHAPE, plus any caller-supplied known
+ * secret values by VALUE (so a future non-JWT token shape echoed bare is still
+ * caught — pass the vended `access_token`).
  */
-export function redactSecrets(text: string): string {
-  return text
+export function redactSecrets(text: string, knownSecrets: readonly string[] = []): string {
+  let out = text;
+  // Value-based redaction first: exact known secrets, longest-first so a token
+  // that contains a shorter one is fully masked. Guard against short/empty
+  // values that would over-redact innocuous substrings.
+  for (const secret of [...knownSecrets]
+    .filter((s) => s && s.length >= 8)
+    .sort((a, b) => b.length - a.length)) {
+    out = out.split(secret).join("[REDACTED]");
+  }
+  return out
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
     .replace(/eyJ[A-Za-z0-9._-]{10,}/g, "[REDACTED_JWT]")
     .replace(/\bsk-[A-Za-z0-9-]{16,}/g, "[REDACTED_KEY]");
@@ -140,6 +151,11 @@ export interface VendedCodexCredential {
  * has ONE audited implementation. The caller owns teardown — `rm(home, …)` in
  * its own `finally` — since only the caller knows the subprocess lifetime.
  *
+ * `baseDir` defaults to the OS temp dir; the host-resident chat path passes a
+ * RAM-backed dir (e.g. `/dev/shm`) so the real token is never written to a
+ * physical disk at rest. (The containerised runner keeps the default — its temp
+ * dir is wiped with the ephemeral container.)
+ *
  * @returns the absolute path of the created `CODEX_HOME` directory.
  */
 export async function writeCodexAuthHome(opts: {
@@ -147,8 +163,10 @@ export async function writeCodexAuthHome(opts: {
   nowMs: number;
   /** mkdtemp prefix, e.g. `"codex-chat-"` / `"codex-run-"` (for debuggability). */
   prefix?: string;
+  /** Parent dir for the ephemeral home. Defaults to {@link tmpdir}. */
+  baseDir?: string;
 }): Promise<string> {
-  const home = await mkdtemp(join(tmpdir(), opts.prefix ?? "codex-"));
+  const home = await mkdtemp(join(opts.baseDir ?? tmpdir(), opts.prefix ?? "codex-"));
   await writeFile(
     join(home, "auth.json"),
     JSON.stringify(
@@ -161,6 +179,43 @@ export async function writeCodexAuthHome(opts: {
     { mode: 0o600 },
   );
   return home;
+}
+
+/**
+ * Best-effort sweep of stale `codex-*` credential homes left behind by an
+ * ungraceful kill (SIGKILL/OOM between {@link writeCodexAuthHome} and the
+ * caller's `finally`). A real token can otherwise sit at rest until reboot.
+ * Removes every `${prefix}*` dir under `baseDir` older than `maxAgeMs`. Called
+ * at host boot. Never throws — a missing dir or a racing teardown is ignored.
+ *
+ * @returns the number of stale homes removed.
+ */
+export async function sweepStaleCodexHomes(opts: {
+  baseDir: string;
+  prefix: string;
+  maxAgeMs: number;
+  nowMs: number;
+}): Promise<number> {
+  let removed = 0;
+  let entries: string[];
+  try {
+    entries = await readdir(opts.baseDir);
+  } catch {
+    return 0; // baseDir absent (e.g. no /dev/shm) — nothing to sweep.
+  }
+  for (const name of entries) {
+    if (!name.startsWith(opts.prefix)) continue;
+    const path = join(opts.baseDir, name);
+    try {
+      const info = await stat(path);
+      if (opts.nowMs - info.mtimeMs < opts.maxAgeMs) continue;
+      await rm(path, { recursive: true, force: true });
+      removed += 1;
+    } catch {
+      // Racing teardown or permission — skip.
+    }
+  }
+  return removed;
 }
 
 /**

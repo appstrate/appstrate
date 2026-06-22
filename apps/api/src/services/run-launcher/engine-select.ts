@@ -17,34 +17,31 @@
  */
 
 import type { LlmProxyOauthConfig, ModelSwap } from "@appstrate/core/sidecar-types";
+import {
+  engineForProvider,
+  isSubscriptionEngine,
+  subscriptionEngineDef,
+  type RunEngine,
+} from "@appstrate/core/subscription-engines";
 
-/** The in-container agent engine for a run. */
-export type RunEngine = "pi" | "claude" | "codex";
-
-/** Provider id of the Claude Pro/Max/Team subscription credential. */
-const CLAUDE_CODE_PROVIDER_ID = "claude-code";
-/** Provider id of the Codex (ChatGPT Plus/Pro/Business) subscription credential. */
-const CODEX_PROVIDER_ID = "codex";
+export type { RunEngine };
 
 /**
- * Per-run egress allowlist for a `codex` run's forward proxy. The Codex CLI
- * holds the real subscription token in-container (it talks to the upstream
- * directly), so its outbound traffic is locked to OpenAI's hosts only —
- * `chatgpt.com` (the Codex backend) and `openai.com` (auth/api, suffix-matched).
- * Every other destination is refused, so the token cannot be exfiltrated. The
- * platform host stays reachable regardless (HMAC-scoped sink traffic).
+ * Per-run egress allowlist for a `codex` run's forward proxy — sourced from the
+ * provider→engine registry (the single place that knows codex holds the real
+ * token in-container and must be locked to OpenAI's hosts). The platform host
+ * stays reachable regardless (HMAC-scoped sink traffic).
  */
-export const CODEX_EGRESS_ALLOWLIST: readonly string[] = ["chatgpt.com", "openai.com"];
+export const CODEX_EGRESS_ALLOWLIST: readonly string[] =
+  subscriptionEngineDef("codex")?.egressAllowlist ?? [];
 
 /**
- * Pick the engine for a resolved model. `claude-code` → `"claude"` (official
- * Claude Agent SDK), `codex` → `"codex"` (official Codex CLI); everything else →
- * `"pi"`. Pure for unit testing.
+ * Pick the engine for a resolved model — delegates to the shared registry
+ * ({@link engineForProvider}) so chat + runs agree. `claude-code` → `"claude"`,
+ * `codex` → `"codex"`, everything else → `"pi"`. Pure for unit testing.
  */
 export function selectRunEngine(resolved: { providerId: string }): RunEngine {
-  if (resolved.providerId === CLAUDE_CODE_PROVIDER_ID) return "claude";
-  if (resolved.providerId === CODEX_PROVIDER_ID) return "codex";
-  return "pi";
+  return engineForProvider(resolved.providerId);
 }
 
 /**
@@ -70,15 +67,13 @@ export class UnrunnableOauthProviderError extends Error {
  * `codex` engine. Any other subscription resolves to the `pi` engine, which has
  * no forging path — so we refuse. Throws {@link UnrunnableOauthProviderError}.
  */
-const SUBSCRIPTION_ENGINES: ReadonlySet<RunEngine> = new Set(["claude", "codex"]);
-
 export function assertRunnableOnEngine(params: {
   engine: RunEngine;
   providerId: string;
   isOauthCredential: boolean;
 }): void {
   const { engine, providerId, isOauthCredential } = params;
-  if (isOauthCredential && !SUBSCRIPTION_ENGINES.has(engine)) {
+  if (isOauthCredential && !isSubscriptionEngine(engine)) {
     throw new UnrunnableOauthProviderError(providerId);
   }
 }
