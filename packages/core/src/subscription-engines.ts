@@ -1,20 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Single source of truth for the provider → execution-engine binding.
+ * Provider → execution-engine binding — a CONTRIBUTED registry.
  *
  * A model provider runs on one of three engines: the generic `pi` loop (every
- * API-key provider), or one of the two ToS-clean subscription engines that
- * drive the vendor's OFFICIAL binary so it signs its own client fingerprint —
- * `claude` (Claude Agent SDK, for the `claude-code` subscription) and `codex`
- * (Codex CLI, for the `codex` subscription). There is deliberately no
- * fingerprint-forging fallback: a subscription with no such engine is rejected,
- * never forged.
+ * API-key provider, and the default for anything unregistered), or a
+ * subscription engine that drives a vendor's OFFICIAL binary so it signs its
+ * own client fingerprint (no forging). Core ships ZERO subscription bindings:
+ * the `claude` (Claude Agent SDK) and `codex` (Codex CLI) bindings are
+ * contributed at boot by their opt-in provider modules (`@appstrate/module-
+ * claude-code`, `@appstrate/module-codex`) via the `subscriptionEngine` field
+ * on their {@link ModelProviderDefinition}. With those modules absent (the OSS
+ * default), this registry stays empty and every provider resolves to `"pi"` —
+ * core carries no subscription-engine machinery.
  *
  * Both axes — agent **runs** (run-launcher) and **chat** (module-chat) — and the
- * llm-proxy subscription gateways read this one mapping, so the "which provider
- * runs on which engine" decision (and the codex egress allowlist + the
- * human-facing label) cannot drift between them.
+ * llm-proxy subscription gateways read this one registry by provider id, so the
+ * "which provider runs on which engine" decision (plus the egress allowlist +
+ * the human-facing label) cannot drift between them.
+ *
+ * Population is idempotent and happens once at boot, driven by
+ * `registerModelProvider` (apps/api): when a provider definition carries a
+ * `subscriptionEngine` binding, the platform registers it here. Tests that
+ * exercise the read functions in isolation seed the registry directly via
+ * {@link registerSubscriptionEngine} and clear it with
+ * {@link resetSubscriptionEnginesForTesting}.
  */
 
 /** The execution engine for a resolved model. */
@@ -23,13 +33,14 @@ export type RunEngine = "pi" | "claude" | "codex";
 /** A subscription engine — one that drives a vendor's official binary. */
 export type SubscriptionRunEngine = Exclude<RunEngine, "pi">;
 
-export interface SubscriptionEngineDef {
-  /** Credential provider id (e.g. `"claude-code"`, `"codex"`). */
-  providerId: string;
+/**
+ * The engine binding a provider module contributes (on its
+ * {@link ModelProviderDefinition.subscriptionEngine}). Carries no provider id /
+ * label — those come from the provider definition itself at registration.
+ */
+export interface SubscriptionEngineBinding {
   /** Engine that drives this provider's official binary. */
   engine: SubscriptionRunEngine;
-  /** Human-readable provider name for user-facing messages. */
-  label: string;
   /**
    * How the sidecar delivers the subscription credential to the run:
    *
@@ -63,49 +74,49 @@ export interface SubscriptionEngineDef {
   nativeOutput?: boolean;
 }
 
+/** A registered binding plus the identity (provider id + label) it was registered under. */
+export interface SubscriptionEngineDef extends SubscriptionEngineBinding {
+  /** Credential provider id (e.g. `"claude-code"`, `"codex"`). */
+  providerId: string;
+  /** Human-readable provider name for user-facing messages. */
+  label: string;
+}
+
+const BY_PROVIDER = new Map<string, SubscriptionEngineDef>();
+
 /**
- * The subscription engines. Adding a new ToS-clean subscription provider is one
- * entry here, paired with its gateway + engine implementation.
+ * Contribute a subscription-engine binding for a provider. Idempotent for an
+ * identical re-registration (same engine) so boot can run more than once in a
+ * single process; throws on a CONFLICTING re-registration (same provider id,
+ * different engine) — that would mean two modules disagree on a provider's
+ * engine, exactly the drift this single registry exists to prevent.
  */
-export const SUBSCRIPTION_ENGINES: readonly SubscriptionEngineDef[] = [
-  // Claude Agent SDK: the sidecar `/llm` gateway swaps the bearer server-side,
-  // so the real token never enters the container — no egress lock needed.
-  {
-    providerId: "claude-code",
-    engine: "claude",
-    label: "Claude Code",
-    sidecarAuthMode: "oauth",
-    // The Claude SDK emits the structured deliverable via `outputFormat` →
-    // `structured_output`; the run must not also be offered the MCP `output`.
-    nativeOutput: true,
-  },
-  {
-    providerId: "codex",
-    engine: "codex",
-    label: "Codex",
-    // The Codex CLI holds the real token in-container (it ignores
-    // `chatgpt_base_url` and talks to chatgpt.com directly), so the token is
-    // vended into the container and its egress is locked to OpenAI's hosts only
-    // — `chatgpt.com` (backend) + `openai.com` (auth/api, suffix-matched).
-    // Everything else is refused.
-    sidecarAuthMode: "vend",
-    egressAllowlist: ["chatgpt.com", "openai.com"],
-  },
-] as const;
+export function registerSubscriptionEngine(def: SubscriptionEngineDef): void {
+  const existing = BY_PROVIDER.get(def.providerId);
+  if (existing && existing.engine !== def.engine) {
+    throw new Error(
+      `Subscription engine for provider ${JSON.stringify(def.providerId)} is already ` +
+        `registered as ${JSON.stringify(existing.engine)} — cannot re-register as ` +
+        `${JSON.stringify(def.engine)}. Two modules disagree on this provider's engine.`,
+    );
+  }
+  BY_PROVIDER.set(def.providerId, def);
+}
 
-const BY_PROVIDER = new Map<string, SubscriptionEngineDef>(
-  SUBSCRIPTION_ENGINES.map((def) => [def.providerId, def]),
-);
+/** Clear all contributed bindings. Test-only — never call in production code. */
+export function resetSubscriptionEnginesForTesting(): void {
+  BY_PROVIDER.clear();
+}
 
 /**
- * The engine for a provider id: its subscription engine, or `"pi"` for every
- * API-key provider. Pure.
+ * The engine for a provider id: its contributed subscription engine, or `"pi"`
+ * for every API-key / unregistered provider. Pure read.
  */
 export function engineForProvider(providerId: string): RunEngine {
   return BY_PROVIDER.get(providerId)?.engine ?? "pi";
 }
 
-/** The subscription-engine definition for a provider id, or `undefined`. Pure. */
+/** The subscription-engine definition for a provider id, or `undefined`. Pure read. */
 export function subscriptionEngineDef(providerId: string): SubscriptionEngineDef | undefined {
   return BY_PROVIDER.get(providerId);
 }
@@ -115,16 +126,18 @@ export function isSubscriptionEngine(engine: RunEngine): engine is SubscriptionR
   return engine !== "pi";
 }
 
-const NATIVE_OUTPUT_ENGINES = new Set<RunEngine>(
-  SUBSCRIPTION_ENGINES.filter((d) => d.nativeOutput).map((d) => d.engine),
-);
-
 /**
  * True iff `engine` materialises the structured deliverable natively (see
- * {@link SubscriptionEngineDef.nativeOutput}). The launcher uses this to decide
- * whether to serve the MCP `output` runtime tool to a run — native-output
- * engines must not be offered it. Pure; `"pi"` is always false.
+ * {@link SubscriptionEngineBinding.nativeOutput}). The launcher uses this to
+ * decide whether to serve the MCP `output` runtime tool to a run — native-output
+ * engines must not be offered it. `"pi"` is always false. Reads the contributed
+ * registry: an engine counts as native-output iff at least one registered
+ * provider on that engine declared it.
  */
 export function engineHasNativeOutput(engine: RunEngine): boolean {
-  return NATIVE_OUTPUT_ENGINES.has(engine);
+  if (engine === "pi") return false;
+  for (const def of BY_PROVIDER.values()) {
+    if (def.engine === engine && def.nativeOutput) return true;
+  }
+  return false;
 }

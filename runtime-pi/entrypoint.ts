@@ -47,10 +47,12 @@ import {
   type AppstrateCtxProvider,
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { ClaudeAgentRunner } from "@appstrate/runner-claude";
-import { CodexAgentRunner } from "@appstrate/runner-codex";
-import { resolveClaudeCodeBinary, makeSdkScopeResolver } from "@appstrate/core/claude-binary";
-import { resolveCodexBinary, makeCodexScopeResolver } from "@appstrate/core/codex-binary";
+// The subscription runners (claude/codex) are DYNAMICALLY imported inside their
+// build functions, gated by RUN_ENGINE — a `pi` run never loads them, and a
+// slim OSS image built without these packages (ISO6) still boots for pi. Only
+// the types are statically referenced (erased at runtime).
+import type { ClaudeAgentRunner } from "@appstrate/runner-claude";
+import type { CodexAgentRunner } from "@appstrate/runner-codex";
 import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import {
   BUNDLE_FORMAT_VERSION,
@@ -761,13 +763,18 @@ function runOutputSchema(): Record<string, unknown> | null {
   }
 }
 
-function buildClaudeAgentRunner(): ClaudeAgentRunner {
+async function buildClaudeAgentRunner(): Promise<ClaudeAgentRunner> {
   if (!sidecarUrl) {
     // A claude-code run is always OAuth → always sidecar-backed (the gateway
     // that injects the real bearer). No sidecar means a launcher bug; fail loud
     // rather than calling the upstream unauthenticated.
     throw new Error("Claude engine selected but no sidecar is attached (no /llm gateway).");
   }
+  // Dynamic import: loaded ONLY for a claude run, so a pi/codex run (or a slim
+  // image without @appstrate/runner-claude) never resolves the Agent SDK.
+  const { ClaudeAgentRunner } = await import("@appstrate/runner-claude");
+  const { resolveClaudeCodeBinary, makeSdkScopeResolver } =
+    await import("@appstrate/runner-claude/binary");
   const base = sidecarUrl.replace(/\/$/, "");
   const outputSchema = runOutputSchema();
   return new ClaudeAgentRunner({
@@ -800,12 +807,17 @@ function buildClaudeAgentRunner(): ClaudeAgentRunner {
  * sidecar's per-run egress allowlist. Nothing is forged (the binary signs its
  * own fingerprint).
  */
-function buildCodexAgentRunner(): CodexAgentRunner {
+async function buildCodexAgentRunner(): Promise<CodexAgentRunner> {
   if (!sidecarUrl) {
     // A codex run is always OAuth → always sidecar-backed (the vend endpoint
     // that hands over the real token). No sidecar means a launcher bug.
     throw new Error("Codex engine selected but no sidecar is attached (no /credential-vend).");
   }
+  // Dynamic import: loaded ONLY for a codex run, so a pi/claude run (or a slim
+  // image without @appstrate/runner-codex) never resolves the Codex package.
+  const { CodexAgentRunner } = await import("@appstrate/runner-codex");
+  const { resolveCodexBinary, makeCodexScopeResolver } =
+    await import("@appstrate/runner-codex/binary");
   const base = sidecarUrl.replace(/\/$/, "");
   // Resolve order: explicit CODEX_BINARY_PATH → the bundled per-arch package →
   // bare `codex` on PATH (the image also symlinks the binary onto PATH as a
@@ -865,18 +877,30 @@ const piEventSink: typeof bridgedSink = runtimeDrainer
   : bridgedSink;
 
 const startTime = Date.now();
+
+// Graceful shutdown: a container stop sends SIGTERM (then SIGKILL after a grace
+// period). Convert it to an AbortSignal threaded into runner.run so the runner
+// can unwind its cleanup (codex `rm(CODEX_HOME)`, claude aborting the SDK query,
+// pi cancelling tool calls) BEFORE the hard kill lands — instead of being torn
+// down mid-write with a leaked token home.
+const runAbort = new AbortController();
+const onTerminate = () => runAbort.abort();
+process.once("SIGTERM", onTerminate);
+process.once("SIGINT", onTerminate);
+
 try {
   const runner =
     runEngine === "claude"
-      ? buildClaudeAgentRunner()
+      ? await buildClaudeAgentRunner()
       : runEngine === "codex"
-        ? buildCodexAgentRunner()
+        ? await buildCodexAgentRunner()
         : buildPiRunner();
 
   await runner.run({
     bundle: runnerBundle,
     context,
     eventSink: runEngine === "pi" ? piEventSink : bridgedSink,
+    signal: runAbort.signal,
   });
   heartbeat.stop();
   await mcpClient?.close().catch(() => {});

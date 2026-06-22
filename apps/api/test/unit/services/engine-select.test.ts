@@ -1,12 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect } from "bun:test";
+import { afterAll, beforeAll, describe, it, expect } from "bun:test";
+import {
+  registerSubscriptionEngine,
+  resetSubscriptionEnginesForTesting,
+} from "@appstrate/core/subscription-engines";
 import {
   selectRunEngine,
   assertRunnableOnEngine,
+  assertSubscriptionEngineIsolation,
+  SubscriptionRequiresDockerError,
   buildOauthSidecarLlm,
   UnrunnableOauthProviderError,
 } from "../../../src/services/run-launcher/engine-select.ts";
+
+// The engine registry is contributed at boot by the provider modules; seed the
+// two reference bindings so these pure-unit assertions have data to resolve.
+beforeAll(() => {
+  resetSubscriptionEnginesForTesting();
+  registerSubscriptionEngine({
+    providerId: "claude-code",
+    label: "Claude Code",
+    engine: "claude",
+    sidecarAuthMode: "oauth",
+    nativeOutput: true,
+  });
+  registerSubscriptionEngine({
+    providerId: "codex",
+    label: "Codex",
+    engine: "codex",
+    sidecarAuthMode: "vend",
+    egressAllowlist: ["chatgpt.com", "openai.com"],
+  });
+});
+afterAll(() => resetSubscriptionEnginesForTesting());
 
 describe("selectRunEngine", () => {
   it("routes claude-code to the Claude engine (official Agent SDK)", () => {
@@ -80,5 +107,40 @@ describe("buildOauthSidecarLlm", () => {
       authMode: "oauth",
       modelSwap,
     });
+  });
+});
+
+describe("assertSubscriptionEngineIsolation", () => {
+  it("rejects a claude-code subscription run under the process orchestrator", () => {
+    expect(() =>
+      assertSubscriptionEngineIsolation({
+        providerId: "claude-code",
+        orchestratorMode: "process",
+      }),
+    ).toThrow(SubscriptionRequiresDockerError);
+  });
+
+  it("rejects a codex subscription run under the process orchestrator", () => {
+    expect(() =>
+      assertSubscriptionEngineIsolation({ providerId: "codex", orchestratorMode: "process" }),
+    ).toThrow(SubscriptionRequiresDockerError);
+  });
+
+  it("allows a claude-code subscription run under docker", () => {
+    expect(() =>
+      assertSubscriptionEngineIsolation({
+        providerId: "claude-code",
+        orchestratorMode: "docker",
+      }),
+    ).not.toThrow();
+  });
+
+  it("allows an API-key provider under either orchestrator mode", () => {
+    expect(() =>
+      assertSubscriptionEngineIsolation({ providerId: "openai", orchestratorMode: "process" }),
+    ).not.toThrow();
+    expect(() =>
+      assertSubscriptionEngineIsolation({ providerId: "openai", orchestratorMode: "docker" }),
+    ).not.toThrow();
   });
 });

@@ -5,9 +5,9 @@
  * ClaudeAgentRunner — AFPS {@link Runner} backed by the official
  * `@anthropic-ai/claude-agent-sdk`.
  *
- * The ToS-clean counterpart of the Pi runner for `claude-code` (Claude
- * subscription) runs. It drives the Agent SDK `query()` IN-PROCESS under Bun
- * (via the prebuilt native binary — `@appstrate/core/claude-binary`), pointed
+ * The official-binary (no-forging) counterpart of the Pi runner for
+ * `claude-code` (Claude subscription) runs. It drives the Agent SDK `query()` IN-PROCESS under Bun
+ * (via the prebuilt native binary — `./claude-binary.ts`), pointed
  * at the sidecar's non-forging credential-injection gateway
  * (`ANTHROPIC_BASE_URL`). Unlike the Pi path, NOTHING here forges the Claude
  * Code fingerprint — the official binary signs its own identity, which is the
@@ -41,7 +41,7 @@ import {
   type Runner,
   type RunResult,
 } from "@appstrate/afps-runtime/runner";
-import { buildClaudeSdkEnv } from "@appstrate/core/claude-binary";
+import { buildClaudeSdkEnv } from "./claude-binary.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { drainAndEmitInto, type RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { SdkRunEventMapper, type SdkRunMessage } from "./sdk-event-mapper.ts";
@@ -55,7 +55,7 @@ export interface ClaudeQueryInput {
 export type ClaudeQueryFn = (input: ClaudeQueryInput) => AsyncIterable<SdkRunMessage>;
 
 export interface ClaudeAgentRunnerOptions {
-  /** Absolute path to the prebuilt `claude` binary (`@appstrate/core/claude-binary`). */
+  /** Absolute path to the prebuilt `claude` binary (`./claude-binary.ts`). */
   binaryPath: string;
   /** Real upstream model id (e.g. `claude-haiku-4-5`) — NOT the platform model label. */
   modelId: string;
@@ -243,6 +243,9 @@ export class ClaudeAgentRunner implements Runner {
       // absent — consumers would default it, but a thrown SDK stream is
       // unambiguously a failure).
       result.status = "failed";
+      // Stamp the tokens already spent before the throw (the SDK never emitted
+      // its authoritative `result`, so without this they'd be lost as zero).
+      result.usage = mapper.liveUsageSnapshot();
       await eventSink.finalize(result);
       return;
     }
@@ -288,6 +291,9 @@ export class ClaudeAgentRunner implements Runner {
         code: "no_result",
         message: "The Claude Agent SDK stream ended without a result message",
       };
+      // No authoritative usage either — stamp what the assistant turns spent so
+      // the run still records the tokens already consumed.
+      result.usage = mapper.liveUsageSnapshot();
     }
 
     await eventSink.finalize(result);

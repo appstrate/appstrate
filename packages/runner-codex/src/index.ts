@@ -18,4 +18,4 @@ export {
   type CodexSpawnFn,
 } from "./codex-agent-runner.ts";
 export { CodexRunEventMapper, computeCodexCost, type CodexModelCost } from "./run-event-mapper.ts";
-export type { CodexEvent, CodexUsage } from "@appstrate/core/codex-binary";
+export type { CodexEvent, CodexUsage } from "./codex-binary.ts";

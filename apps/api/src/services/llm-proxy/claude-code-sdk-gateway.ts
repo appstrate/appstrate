@@ -11,11 +11,13 @@
  *   - **No forging.** The Agent SDK drives the official `claude` binary,
  *     which signs the request with the legitimate Claude Code client
  *     identity itself. This gateway forges nothing — no "You are Claude Code"
- *     prelude, no fingerprint headers. It is the SANCTIONED path — Anthropic's
- *     Help Center allows third-party apps on the Agent SDK with a Claude
- *     subscription. We only swap the bearer for the real subscription token +
- *     add the OAuth beta. (This is the chat-side twin of the runner's sidecar
- *     `oauth` mode.)
+ *     prelude, no fingerprint headers. We only swap the bearer for the real
+ *     subscription token + add the OAuth beta. (This is the chat-side twin of
+ *     the runner's sidecar `oauth` mode.) This is an official-binary path, NOT
+ *     a compliance certification: powering a product with a personal Claude
+ *     subscription needs prior Anthropic approval, the policy flipped repeatedly
+ *     in 2026, and it is an operator opt-in grey-zone choice. See
+ *     docs/architecture/SUBSCRIPTION_COMPLIANCE.md.
  *   - **No body rewrite.** The SDK sends the real upstream model id and its
  *     own system prompt; we forward the body verbatim. The preset id comes
  *     from the URL (it carries the credential + cost), not `body.model`.
@@ -24,14 +26,16 @@
  *     subscription token is resolved here, server-side, and never enters the
  *     binary's environment.
  *
- * FIRST-PARTY ONLY — same trust boundary as the in-container sidecar: a
- * personal subscription is never spendable through an API key or external token.
+ * LOOPBACK ONLY — driven exclusively by the chat module's in-process loopback
+ * bearer (not API keys, not dashboard tokens), so a personal subscription is
+ * never spendable as a bare non-official-client proxy. See lib/bearer-only.ts.
  */
 
 import type { Context } from "hono";
 import { anthropicMessagesAdapter } from "./anthropic.ts";
 import { forwardMeteredResponse } from "./metering.ts";
 import { make410AuthTranslator, resolveSubscriptionToken } from "./subscription-token.ts";
+import { markCredentialNeedsReconnection } from "../model-providers/credentials.ts";
 import { buildLlmProxyPrincipal } from "./types.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
@@ -193,6 +197,27 @@ export async function handleClaudeCodeSdkGateway(
       error: getErrorMessage(err),
     });
     throw err;
+  }
+
+  // Upstream rejected the subscription token (revoked / scope changed) — not
+  // just a refresh-time 410. Flag the credential needs-reconnection (so the
+  // dashboard prompts a reconnect, same end state as the 410 path) and hand the
+  // SDK an Anthropic-native auth error it surfaces as an actionable reconnect
+  // message, instead of forwarding a raw 401/403 the chat can't interpret.
+  if ((upstream.status === 401 || upstream.status === 403) && resolved.credentialId) {
+    logger.warn("claude-code-sdk gateway: upstream rejected subscription token", {
+      presetId,
+      status: upstream.status,
+    });
+    await markCredentialNeedsReconnection(orgId, resolved.credentialId).catch((err) =>
+      logger.error("claude-code-sdk gateway: failed to flag credential needs-reconnection", {
+        credentialId: resolved.credentialId,
+        error: getErrorMessage(err),
+      }),
+    );
+    // Drain the upstream body so the connection can be reused.
+    await upstream.body?.cancel().catch(() => undefined);
+    return anthropicAuthErrorResponse();
   }
 
   // Forward + meter (no alias-swap, no response-cache for the subscription path).

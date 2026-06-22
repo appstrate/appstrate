@@ -49,13 +49,27 @@ describe("OSS-mode module loading", () => {
     resetModules();
   });
 
-  it("default registry is the OSS module set — cloud is never auto-loaded", () => {
+  it("default registry is the OSS module set — cloud + subscription modules never auto-loaded", () => {
     const previous = process.env.MODULES;
     setModulesEnv(undefined);
     try {
-      // Defaults: built-in OSS modules + the two reference OAuth-provider
-      // modules (@appstrate/module-codex for ChatGPT/Codex,
-      // @appstrate/module-claude-code for Claude Pro/Max/Team).
+      // Default: built-in OSS modules ONLY (API-key surface). The two
+      // reference OAuth-subscription modules (@appstrate/module-codex,
+      // @appstrate/module-claude-code) are OPT-IN — a personal subscription
+      // powering a product is an operator-owned grey-zone, so the OSS default
+      // ships neither. See docs/architecture/SUBSCRIPTION_COMPLIANCE.md.
+      expect(getModuleRegistry()).toEqual(["oidc", "webhooks", "mcp", "core-providers"]);
+    } finally {
+      setModulesEnv(previous);
+    }
+  });
+
+  it("subscription modules load only when explicitly appended to MODULES", () => {
+    const previous = process.env.MODULES;
+    setModulesEnv(
+      "oidc,webhooks,mcp,core-providers,@appstrate/module-codex,@appstrate/module-claude-code",
+    );
+    try {
       expect(getModuleRegistry()).toEqual([
         "oidc",
         "webhooks",

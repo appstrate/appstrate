@@ -27,6 +27,7 @@ import { parseProxyRequest } from "./helpers.ts";
 import { forwardMeteredResponse } from "./metering.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
 
@@ -75,7 +76,7 @@ export class LlmProxyModelApiMismatchError extends Error {
  * supported subscription is `claude-code`, served by its own dedicated SDK
  * gateway (`claude-code-sdk-gateway.ts`), where the official Claude Agent SDK
  * signs its own client fingerprint. Any other subscription has no
- * ToS-compliant chat path.
+ * official-binary chat path (so no path here — this gateway never forges).
  */
 export class LlmProxyUnsupportedSubscriptionError extends Error {
   constructor(public readonly providerId: string) {
@@ -151,6 +152,16 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   }
 
   const upstreamUrl = joinUpstreamUrl(resolved.baseUrl, inputs.upstreamPath);
+
+  // SSRF defence-in-depth: an openai-compatible provider lets an org configure
+  // an arbitrary baseUrl, so refuse to proxy to a private/loopback/link-local
+  // target before we ever fetch. Literal-blocklist check (no DNS resolve) — the
+  // documented fail-closed consumer of `@appstrate/core/ssrf`.
+  if (isBlockedUrl(upstreamUrl)) {
+    logger.error("llm-proxy: refused blocked upstream (SSRF)", { presetId, upstreamUrl });
+    throw invalidRequest(`Refusing to proxy to a blocked address: ${resolved.baseUrl}`);
+  }
+
   const upstreamHeaders = inputs.adapter.buildUpstreamHeaders(
     inputs.incomingHeaders,
     resolved.apiKey,

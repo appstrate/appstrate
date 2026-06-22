@@ -41,30 +41,35 @@ export function assertBearerOnly(authMethod: string | undefined, surfaceName: st
 }
 
 /**
- * The strictly first-party interactive auth methods — the platform's own
- * surfaces acting for a logged-in operator. Subscription LLM routes accept
- * ONLY these: an API key (headless, third-party-distributable) must never
- * be able to spend a personal ChatGPT/Claude subscription, while the org's
- * own members using the org's own dashboard/chat may (same trust boundary
- * as the in-container sidecar that already serves these credentials to
- * runs).
+ * The ONLY auth method allowed to drive a subscription LLM gateway: the chat
+ * module's in-process loopback bearer. The effective gate is the loopback HMAC
+ * secret (process-local, never persisted/transmitted — see
+ * packages/module-chat/src/loopback-auth.ts), which only a server-constructed
+ * request carries.
+ *
+ * `oauth2-dashboard` is deliberately EXCLUDED: a logged-in org member could
+ * otherwise point a normal dashboard token at the gateway and use it as a raw
+ * subscription proxy — driving the upstream as a NON-official client. That
+ * defeats the whole "the official binary signs its own fingerprint" argument,
+ * since the gateway forges nothing and would then relay arbitrary client
+ * traffic on the subscription. Restricting to `chat-loopback` keeps the
+ * subscription reachable only through the official Claude Agent SDK path.
+ *
+ * Widening this set, or persisting/exporting the loopback secret, breaks the
+ * invariant that a personal subscription is never spendable as a bare proxy.
  */
-// NOTE: for `chat-loopback`, the effective subscription gate is the loopback
-// HMAC secret (process-local, never persisted/transmitted — see
-// packages/module-chat/src/loopback-auth.ts), not this route check. Anything
-// that persists/exports that secret, or widens this set, breaks the invariant
-// that a personal subscription is never spendable by a third party.
-export const FIRST_PARTY_AUTH_METHODS: ReadonlySet<string> = new Set([
-  "oauth2-dashboard",
-  "chat-loopback",
-]);
+const LOOPBACK_ONLY_AUTH_METHODS: ReadonlySet<string> = new Set(["chat-loopback"]);
 
-/** Throw `forbidden(...)` unless the auth method is first-party interactive. */
-export function assertFirstPartyOnly(authMethod: string | undefined, surfaceName: string): void {
+/**
+ * Throw `forbidden(...)` unless the caller is the chat loopback bearer. Still
+ * rejects cookie sessions / unknown strategies via {@link assertBearerOnly}
+ * first, then narrows to loopback-only.
+ */
+export function assertLoopbackOnly(authMethod: string | undefined, surfaceName: string): void {
   assertBearerOnly(authMethod, surfaceName);
-  if (!authMethod || !FIRST_PARTY_AUTH_METHODS.has(authMethod)) {
+  if (!authMethod || !LOOPBACK_ONLY_AUTH_METHODS.has(authMethod)) {
     throw forbidden(
-      `${surfaceName} is restricted to first-party interactive callers — subscription credentials are never spendable through API keys or external tokens`,
+      `${surfaceName} is restricted to the chat loopback caller — subscription credentials are never spendable through API keys, dashboard tokens, or external tokens`,
     );
   }
 }

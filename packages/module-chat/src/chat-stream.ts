@@ -25,7 +25,6 @@ import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
 import { engineForProvider } from "@appstrate/core/subscription-engines";
 import { runClaudeAgentChat } from "./claude-agent/engine.ts";
-import { runCodexAgentChat } from "./codex-agent/engine.ts";
 
 const MAX_STEPS = 16;
 
@@ -33,26 +32,19 @@ const MAX_STEPS = 16;
 // MCP server instructions (emitted by apps/api/src/modules/mcp/router.ts). We
 // split on this exact literal to drop the index — several KB re-sent on every
 // step — for providers without a prompt cache, where it would be re-sent
-// uncached every step: Mistral and the Codex engine (the codex CLI is a fresh
-// subprocess per turn, so nothing is cached). Cached providers (Claude SDK,
-// Anthropic via cache_control, OpenAI auto-prefix) keep it. If this literal
-// drifts from the server's, the index simply stays — degraded cost, never a
-// failure.
+// uncached every step: Mistral. Cached providers (Claude SDK, Anthropic via
+// cache_control, OpenAI auto-prefix) keep it. If this literal drifts from the
+// server's, the index simply stays — degraded cost, never a failure.
 const OPERATION_INDEX_HEADING = "## Operation index";
 
 /**
  * Strip the trailing operation index from the system prompt for providers
  * without a prompt cache, where the multi-KB index would be re-sent uncached on
- * every step: the Codex engine (fresh subprocess per turn) and Mistral. Everyone
- * else keeps it. Tools are unaffected — the agent always has search_operations
- * for discovery when the index is absent.
+ * every step: Mistral. Everyone else keeps it. Tools are unaffected — the agent
+ * always has search_operations for discovery when the index is absent.
  */
-export function applyOperationIndexPolicy(
-  system: string,
-  engine: string,
-  apiShape: string,
-): string {
-  const drop = engine === "codex" || apiShape === "mistral-conversations";
+export function applyOperationIndexPolicy(system: string, apiShape: string): string {
+  const drop = apiShape === "mistral-conversations";
   if (drop && system.includes(OPERATION_INDEX_HEADING)) {
     return system.slice(0, system.indexOf(OPERATION_INDEX_HEADING)).trimEnd();
   }
@@ -189,21 +181,20 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
 
   // The provider→engine binding is the shared registry's call (same mapping the
   // run launcher uses), so chat + runs can never disagree on which engine a
-  // subscription runs on.
+  // subscription runs on. Codex maps to engine "codex" but is agent-only — it
+  // is filtered out of the chat model list (CHAT_USABLE_FAMILIES), so only
+  // "claude" and "pi" reach here.
   const engine = engineForProvider(chosen.providerId ?? "");
 
-  system = applyOperationIndexPolicy(system, engine, chosen.apiShape);
+  system = applyOperationIndexPolicy(system, chosen.apiShape);
 
-  // Subscription engines (claude → Claude Agent SDK, codex → Codex CLI): both
-  // are clean/sanctioned official binaries that open their OWN MCP connection,
-  // so the prep is identical — close the probe client (used only for
-  // reachability + instructions), point the engine at the platform MCP endpoint
-  // + forwarded headers, and mint one turn-scoped loopback bearer for the
-  // gateway. (For codex the operation index was already stripped by
-  // applyOperationIndexPolicy — no prompt cache → it relies on
-  // search_operations.) Only the per-engine call (field names + gateway path)
-  // differs below.
-  if (engine === "claude" || engine === "codex") {
+  // Claude subscription engine (Claude Agent SDK): drives the official binary,
+  // which opens its OWN MCP connection — so close the probe client (used only
+  // for reachability + instructions), point the engine at the platform MCP
+  // endpoint + forwarded headers, and mint one turn-scoped loopback bearer for
+  // the credential-injection gateway (which swaps it server-side; the real
+  // subscription token never enters this process or the spawned binary's env).
+  if (engine === "claude") {
     const platformMcp = mcp
       ? { url: `${origin}/api/mcp/o/${encodeURIComponent(orgId)}`, headers: mcpHeaders }
       : undefined;
@@ -212,24 +203,12 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
       { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
       { ttlMs: ENGINE_LOOPBACK_TTL_MS },
     );
-    if (engine === "claude") {
-      return runClaudeAgentChat({
-        messages,
-        system,
-        modelId: chosen.modelId,
-        gatewayBaseUrl: `${origin}/api/llm-proxy/claude-code-sdk/${encodeURIComponent(chosen.id)}`,
-        placeholderToken: loopbackToken,
-        platformMcp,
-        abortSignal: c.req.raw.signal,
-        onError: clientErrorMessage,
-      });
-    }
-    return runCodexAgentChat({
+    return runClaudeAgentChat({
       messages,
       system,
       modelId: chosen.modelId,
-      credentialUrl: `${origin}/api/llm-proxy/codex-sdk/${encodeURIComponent(chosen.id)}`,
-      loopbackToken,
+      gatewayBaseUrl: `${origin}/api/llm-proxy/claude-code-sdk/${encodeURIComponent(chosen.id)}`,
+      placeholderToken: loopbackToken,
       platformMcp,
       abortSignal: c.req.raw.signal,
       onError: clientErrorMessage,

@@ -148,6 +148,36 @@ describe("CodexAgentRunner.run", () => {
     expect(h.result?.error?.message).toBe("nope");
   });
 
+  it("succeeds when a transient turn.failed is followed by a turn.completed + clean exit", async () => {
+    // Last-turn-authoritative (C7): the CLI hit a recoverable error mid-run,
+    // retried, completed, and exited 0 — the run is a success, not a failure.
+    const child: CodexChild = {
+      stdout: ndjsonStream([
+        JSON.stringify({ type: "turn.failed", error: { message: "transient 503" } }),
+        JSON.stringify({ type: "turn.started" }),
+        JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "ok" } }),
+        JSON.stringify({ type: "turn.completed", usage: { input_tokens: 4, output_tokens: 2 } }),
+      ]),
+      stderr: emptyStream(),
+      exited: Promise.resolve(0),
+      kill() {},
+    };
+    const h = makeSink();
+    const runner = new CodexAgentRunner({
+      binaryPath: "/fake/codex",
+      modelId: "gpt-5.5",
+      systemPrompt: "",
+      credentialUrl: "http://sidecar:8080/credential-vend",
+      cwd: "/workspace",
+      fetchFn: vendFetch({ access_token: "tok" }),
+      spawn: () => child,
+    });
+    await runner.run({ bundle, context: ctx, eventSink: h.sink });
+    expect(h.result?.status).toBe("success");
+    expect(h.result?.error).toBeUndefined();
+    expect(h.result?.usage).toMatchObject({ input_tokens: 4, output_tokens: 2 });
+  });
+
   it("fails with the credential error when the vend endpoint returns 410", async () => {
     const h = makeSink();
     let spawned = false;

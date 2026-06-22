@@ -34,7 +34,7 @@ import {
   buildIsolatedSubprocessEnv,
   makeScopeResolver,
   type BinaryResolver,
-} from "./subprocess-env.ts";
+} from "@appstrate/core/subprocess-env";
 
 export type { BinaryResolver };
 

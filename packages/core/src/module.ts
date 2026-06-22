@@ -16,6 +16,7 @@ import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
+import type { SubscriptionEngineBinding } from "./subscription-engines.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -694,6 +695,19 @@ export interface ModelProviderDefinition {
    * returned (or nothing if the hook is absent).
    */
   requiredIdentityClaims?: readonly (keyof ModelProviderIdentity)[];
+
+  /**
+   * Subscription-engine binding — set ONLY by OAuth-subscription providers
+   * whose runs/chat execute on a vendor's OFFICIAL binary instead of the
+   * generic `pi` loop (e.g. `claude-code` → Claude Agent SDK, `codex` → Codex
+   * CLI). When present, the platform contributes it to the core subscription-
+   * engine registry at registration ({@link registerSubscriptionEngine}), so
+   * run-launcher + chat + the llm-proxy gateways resolve this provider's engine
+   * by id. API-key providers omit it (they run on `pi`). Keeping the binding on
+   * the provider definition is what lets core ship zero hardcoded subscription
+   * machinery — disable the module and the engine vanishes with it.
+   */
+  subscriptionEngine?: SubscriptionEngineBinding;
 }
 
 // ---------------------------------------------------------------------------

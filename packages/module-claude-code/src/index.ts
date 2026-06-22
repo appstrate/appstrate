@@ -131,6 +131,14 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // Claude Agent SDK (the `claude` runner engine), whose binary signs its own
   // client fingerprint. The sidecar's OAuth mode only swaps the bearer + ensures
   // the OAuth beta — see `runtime-pi/sidecar/app.ts` and `engine-select.ts`.
+  //
+  // Engine binding contributed to the core subscription-engine registry at
+  // registration: runs + chat execute on the Claude Agent SDK (official binary,
+  // no forging). `oauth` — the sidecar `/llm` gateway swaps the bearer
+  // server-side, so the real token never enters the container. `nativeOutput` —
+  // the SDK emits the structured deliverable via `outputFormat` →
+  // `structured_output`, so the run must NOT also be offered the MCP `output`.
+  subscriptionEngine: { engine: "claude", sidecarAuthMode: "oauth", nativeOutput: true },
   hooks: claudeCodeHooks,
 };
 

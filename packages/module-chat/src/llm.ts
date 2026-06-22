@@ -101,9 +101,9 @@ export function proxyTarget(family: string): { kind: ProxyKind; suffix: string }
       return { kind: "openai-compatible", suffix: "/openai-completions/v1" };
     case "mistral-conversations":
       return { kind: "openai-compatible", suffix: "/mistral-conversations/v1" };
-    // Codex (openai-codex-responses) is intentionally absent: it has no
-    // llm-proxy route and is refused upstream of here by the codex guard in
-    // chat-stream.ts, so it must never resolve to a proxy target.
+    // Codex (openai-codex-responses) is intentionally absent: it is not a chat
+    // family (excluded from CHAT_USABLE_FAMILIES) and has no llm-proxy route, so
+    // it must never resolve to a proxy target.
     default:
       return null;
   }

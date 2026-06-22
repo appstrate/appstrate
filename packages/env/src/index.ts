@@ -319,18 +319,17 @@ const envSchema = z
 
     // Modules (comma-separated specifiers). API-key LLM calls are routed
     // directly to the upstream provider — retry is handled by the Pi SDK
-    // natively (Retry-After honoring + jitter). The defaults are the
-    // built-in OSS modules plus the two reference OAuth-provider modules:
-    // `@appstrate/module-codex` (ChatGPT/Codex) and
-    // `@appstrate/module-claude-code` (Claude Pro/Max/Team) — remove
-    // either to drop that provider surface. `MODULES=none` boots with
-    // zero modules (the only sentinel — `""` coalesces to unset, i.e.
-    // the default set, per the compose `${VAR:-}` pattern).
-    MODULES: z
-      .string()
-      .default(
-        "oidc,webhooks,mcp,core-providers,@appstrate/module-codex,@appstrate/module-claude-code",
-      ),
+    // natively (Retry-After honoring + jitter). The default set is the
+    // built-in OSS modules ONLY. The two reference OAuth-subscription modules
+    // — `@appstrate/module-codex` (ChatGPT/Codex) and
+    // `@appstrate/module-claude-code` (Claude Pro/Max/Team) — are OPT-IN: a
+    // personal subscription powering a product is an operator-owned grey-zone
+    // (see docs/architecture/SUBSCRIPTION_COMPLIANCE.md), so the OSS default
+    // ships neither. Append them to enable subscription providers/engines.
+    // `MODULES=none` boots with zero modules (the only sentinel — `""`
+    // coalesces to unset, i.e. the default set, per the compose `${VAR:-}`
+    // pattern).
+    MODULES: z.string().default("oidc,webhooks,mcp,core-providers"),
 
     // App
     APP_URL: z.string().default("http://localhost:3000"),

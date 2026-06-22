@@ -26,6 +26,10 @@
  */
 
 import type { ModelProviderDefinition } from "@appstrate/core/module";
+import {
+  registerSubscriptionEngine,
+  resetSubscriptionEnginesForTesting,
+} from "@appstrate/core/subscription-engines";
 import { hasCatalog, lookupCatalogModel } from "../pricing-catalog.ts";
 
 // ---------------------------------------------------------------------------
@@ -56,6 +60,20 @@ export function registerModelProvider(def: ModelProviderDefinition): void {
   }
   validateCatalogReferences(def);
   _byId.set(def.providerId, def);
+
+  // Contribute the provider's execution-engine binding to the core
+  // subscription-engine registry (run-launcher + chat + gateways resolve the
+  // engine by provider id). API-key providers omit `subscriptionEngine` and run
+  // on `pi`; only OAuth-subscription providers (claude-code, codex) carry one.
+  // This is what keeps core free of hardcoded subscription machinery — the
+  // binding lives with the opt-in module that registers the provider.
+  if (def.subscriptionEngine) {
+    registerSubscriptionEngine({
+      ...def.subscriptionEngine,
+      providerId: def.providerId,
+      label: def.displayName,
+    });
+  }
 }
 
 /**
@@ -108,6 +126,7 @@ export function registerModelProviders(defs: readonly ModelProviderDefinition[])
  */
 export function resetModelProviders(): void {
   _byId.clear();
+  resetSubscriptionEnginesForTesting();
 }
 
 // ---------------------------------------------------------------------------

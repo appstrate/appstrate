@@ -5,11 +5,13 @@
  * CodexAgentRunner — AFPS {@link Runner} backed by the official OpenAI Codex
  * CLI (`codex exec --json`).
  *
- * The ToS-clean counterpart of the Pi runner for `codex` (ChatGPT Plus/Pro/
- * Business subscription) runs, and the agents-axis twin of the chat's
- * `codex-agent` engine. It drives the official `codex` binary as a subprocess —
- * the binary signs its OWN client fingerprint (`originator: codex_exec`) and
- * sends its own `chatgpt-account-id`, so NOTHING is forged.
+ * The official-binary (no-forging) counterpart of the Pi runner for `codex`
+ * (ChatGPT Plus/Pro/Business subscription) runs. Codex is agent-only — it has
+ * no chat surface (its token can't be safely held host-side). It drives the
+ * official `codex` binary as a subprocess — the binary signs its OWN client
+ * fingerprint (`originator: codex_exec`) and sends its own `chatgpt-account-id`,
+ * so NOTHING is forged. Subscription use is an operator opt-in grey-zone (see
+ * docs/architecture/SUBSCRIPTION_COMPLIANCE.md).
  *
  * Why a token VEND (not a reverse-proxy gateway like the Claude runner): the
  * Codex CLI's models-manager calls `chatgpt.com` VERBATIM, ignoring
@@ -51,7 +53,7 @@ import {
   type CodexEvent,
   type CodexHttpMcpServer,
   type VendedCodexCredential,
-} from "@appstrate/core/codex-binary";
+} from "./codex-binary.ts";
 import { drainAndEmitInto, type RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { CodexRunEventMapper, computeCodexCost, type CodexModelCost } from "./run-event-mapper.ts";
@@ -61,8 +63,12 @@ export interface CodexChild {
   stdout: ReadableStream<Uint8Array>;
   stderr: ReadableStream<Uint8Array>;
   readonly exited: Promise<number>;
-  kill(): void;
+  /** SIGTERM by default; pass `9` (SIGKILL) to force-kill after the grace window. */
+  kill(signal?: number): void;
 }
+
+/** Grace period between SIGTERM and the SIGKILL escalation on abort. */
+const ABORT_KILL_GRACE_MS = 5_000;
 
 /** Injectable spawner — defaults to {@link Bun.spawn} (narrowed). */
 export type CodexSpawnFn = (
@@ -71,7 +77,7 @@ export type CodexSpawnFn = (
 ) => CodexChild;
 
 export interface CodexAgentRunnerOptions {
-  /** Absolute path to the prebuilt `codex` binary (`@appstrate/core/codex-binary`). */
+  /** Absolute path to the prebuilt `codex` binary (`./codex-binary.ts`). */
   binaryPath: string;
   /** Real upstream model id (e.g. `gpt-5.5`) — NOT the platform model label. */
   modelId: string;
@@ -141,6 +147,49 @@ const defaultSpawn: CodexSpawnFn = (cmd, opts) =>
     stderr: "pipe",
   }) as unknown as CodexChild;
 
+/** Max bytes of stderr tail retained for a non-zero-exit diagnostic. */
+const MAX_STDERR_TAIL_BYTES = 128 * 1024;
+
+interface StreamTail {
+  /** Resolves once the stream is fully drained (or errored). */
+  readonly done: Promise<void>;
+  /** The captured tail (last {@link MAX_STDERR_TAIL_BYTES}); await-safe after `done`. */
+  text(): Promise<string>;
+}
+
+/**
+ * Drain a byte stream CONCURRENTLY into a bounded tail buffer, starting
+ * immediately. The codex CLI can emit verbose stderr while we consume stdout;
+ * if stderr is left unread its OS pipe buffer (~64 KB) fills and the child
+ * BLOCKS on write — a deadlock, since it then never closes stdout/exits. Draining
+ * it in parallel keeps the pipe clear; we keep only the tail for diagnostics.
+ */
+function drainStreamTail(stream: ReadableStream<Uint8Array>, maxBytes: number): StreamTail {
+  let buf = "";
+  const decoder = new TextDecoder();
+  const clamp = () => {
+    if (buf.length > maxBytes) buf = buf.slice(buf.length - maxBytes);
+  };
+  const done = (async () => {
+    const reader = stream.getReader();
+    try {
+      for (;;) {
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) break;
+        if (value) {
+          buf += decoder.decode(value, { stream: true });
+          clamp();
+        }
+      }
+      buf += decoder.decode();
+      clamp();
+    } finally {
+      reader.releaseLock();
+    }
+  })();
+  return { done, text: async () => (await done.catch(() => undefined), buf) };
+}
+
 export class CodexAgentRunner implements Runner {
   readonly name = "codex-agent-runner";
 
@@ -179,12 +228,24 @@ export class CodexAgentRunner implements Runner {
 
     let home: string | undefined;
     let child: CodexChild | undefined;
+    let stderrTail: StreamTail | undefined;
     const onAbort = () => {
       try {
-        child?.kill();
+        child?.kill(); // SIGTERM — let codex flush + exit cleanly first.
       } catch {
         // already exited
       }
+      // Escalate to SIGKILL if it ignores SIGTERM past the grace window (a
+      // wedged codex must not outlive an abort). Unref'd so this timer never
+      // keeps the process alive; a no-op throw if the child already exited.
+      const killTimer = setTimeout(() => {
+        try {
+          child?.kill(9);
+        } catch {
+          // already exited
+        }
+      }, ABORT_KILL_GRACE_MS);
+      (killTimer as unknown as { unref?: () => void }).unref?.();
     };
     if (signal) signal.addEventListener("abort", onAbort, { once: true });
 
@@ -241,6 +302,14 @@ export class CodexAgentRunner implements Runner {
 
       if (signal?.aborted) onAbort();
 
+      // Drain stderr CONCURRENTLY with stdout from the moment of spawn — leaving
+      // it unread risks a pipe-buffer deadlock (see drainStreamTail). We keep
+      // only the tail, read on a non-zero exit for the failure diagnostic.
+      stderrTail = drainStreamTail(
+        child.stderr as unknown as ReadableStream<Uint8Array>,
+        MAX_STDERR_TAIL_BYTES,
+      );
+
       // 4. Map the NDJSON event stream → RunEvents, draining journaled runtime
       //    events at item-completion boundaries (a runtime tool only journals
       //    once its handler has run, i.e. at `item.completed`). Draining on
@@ -271,9 +340,10 @@ export class CodexAgentRunner implements Runner {
         status = "success";
       } else {
         status = "failed";
-        const stderr = await new Response(child.stderr as unknown as ReadableStream<Uint8Array>)
-          .text()
-          .catch(() => "");
+        // Read the concurrently-drained tail (NOT child.stderr directly — it was
+        // already consumed by the drain, and reading it post-exit risked the
+        // deadlock the drain exists to prevent).
+        const stderr = stderrTail ? await stderrTail.text() : "";
         error = {
           code: "adapter_error",
           message: `The Codex CLI exited with code ${exitCode}${stderr ? `: ${redactSecrets(stderr, [cred.access_token]).slice(0, 500)}` : ""}`,
@@ -313,6 +383,9 @@ export class CodexAgentRunner implements Runner {
       await eventSink.finalize(result);
     } finally {
       if (signal) signal.removeEventListener("abort", onAbort);
+      // Let the stderr drain settle so its reader unwinds (no dangling lock /
+      // unhandled rejection) regardless of how we exited the try.
+      if (stderrTail) await stderrTail.done.catch(() => undefined);
       if (home) await rm(home, { recursive: true, force: true }).catch(() => undefined);
     }
   }

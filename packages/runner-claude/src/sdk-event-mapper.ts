@@ -173,6 +173,17 @@ export class SdkRunEventMapper {
     return this.terminalState;
   }
 
+  /**
+   * Snapshot of usage accumulated from assistant turns SO FAR. Used to stamp a
+   * best-effort usage figure on a run that FAILED before the SDK emitted its
+   * authoritative `result` message (a thrown stream or a stream that ended
+   * without a result) — so the tokens already spent are still billed/recorded
+   * instead of being lost as zero.
+   */
+  liveUsageSnapshot(): TokenUsage {
+    return { ...this.liveUsage };
+  }
+
   private mapAssistant(msg: SdkAssistantMessage): RunEvent[] {
     const events: RunEvent[] = [];
     const ts = this.now();

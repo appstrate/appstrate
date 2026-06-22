@@ -35,7 +35,7 @@ import {
   type RunError,
   type TokenUsage,
 } from "@appstrate/afps-runtime/runner";
-import type { CodexEvent, CodexUsage } from "@appstrate/core/codex-binary";
+import type { CodexEvent, CodexUsage } from "./codex-binary.ts";
 
 /** Per-token cost rates for the resolved model (USD per 1e6 tokens). */
 export interface CodexModelCost {
@@ -173,6 +173,11 @@ export class CodexRunEventMapper {
   }
 
   private mapTurnCompleted(usage: CodexUsage | undefined): RunEvent[] {
+    // Last-turn-authoritative: a turn that COMPLETES clears any earlier
+    // turn.failed — the CLI recovered and carried on, so a transient mid-run
+    // failure is not terminal (mirrors the Pi/Claude runners reading only the
+    // final turn's verdict; see memory run-status-runner-authoritative).
+    this.failureState = null;
     if (usage) {
       // The CLI reports cumulative usage per turn; the latest is authoritative.
       this.liveUsage.input_tokens = usage.input_tokens ?? 0;

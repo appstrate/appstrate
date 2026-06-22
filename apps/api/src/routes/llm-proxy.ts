@@ -24,11 +24,10 @@
  *     forging any client identity — the chat's official Claude Agent SDK signs
  *     the legit Claude Code fingerprint itself. See
  *     services/llm-proxy/claude-code-sdk-gateway.ts.
- *   - The Codex (ChatGPT) subscription (`codex`) is served by the
- *     `/codex-sdk/:presetId/*` gateway, which swaps the placeholder bearer for
- *     the real subscription token + stamps the real chatgpt-account-id — again
- *     WITHOUT forging any client identity (the official `codex` CLI signs its
- *     own fingerprint). See services/llm-proxy/codex-sdk-gateway.ts.
+ *   - The Codex (ChatGPT) subscription (`codex`) is NOT served here: it has no
+ *     chat surface (its token can't be safely held host-side) and runs only as
+ *     a docker-isolated agent, which vends its credential through the sidecar's
+ *     `/credential-vend` endpoint. See docs/architecture/SUBSCRIPTION_COMPLIANCE.md.
  *   - The generic gateway (`proxyLlmCall`) forges nothing, so an
  *     OAuth-subscription model with no dedicated CLI gateway is refused with
  *     `LlmProxyUnsupportedSubscriptionError`. Connect an API-key provider.
@@ -56,7 +55,7 @@ import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest } from "../lib/errors.ts";
-import { assertBearerOnly, assertFirstPartyOnly } from "../lib/bearer-only.ts";
+import { assertBearerOnly, assertLoopbackOnly } from "../lib/bearer-only.ts";
 import { recordLlmLatency } from "../observability/index.ts";
 import {
   proxyLlmCall,
@@ -68,7 +67,6 @@ import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
 import { handleClaudeCodeSdkGateway } from "../services/llm-proxy/claude-code-sdk-gateway.ts";
-import { handleCodexSdkGateway } from "../services/llm-proxy/codex-sdk-gateway.ts";
 import type { LlmProxyAdapter } from "../services/llm-proxy/types.ts";
 import { buildLlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
@@ -121,15 +119,17 @@ export function createLlmProxyRouter() {
     );
   }
 
-  // Claude Code subscription SDK gateway — FIRST-PARTY ONLY. The chat module's
+  // Claude Code subscription SDK gateway — LOOPBACK ONLY. The chat module's
   // official Claude Agent SDK points `ANTHROPIC_BASE_URL` here; the gateway
   // injects the real subscription token without forging any client identity
   // (the SDK's own binary signs the legit Claude Code fingerprint). A wildcard
   // path forwards whatever upstream subpath the SDK appends
   // (`/v1/messages`, …). The bare-preset route catches the SDK's connectivity
-  // probe. See services/llm-proxy/claude-code-sdk-gateway.ts.
+  // probe. Restricted to the chat loopback caller (not dashboard tokens) so the
+  // subscription can't be driven as a bare non-official-client proxy. See
+  // services/llm-proxy/claude-code-sdk-gateway.ts.
   const sdkGateway = async (c: Context<AppEnv>): Promise<Response> => {
-    assertFirstPartyOnly(c.get("authMethod"), "Claude Code SDK gateway");
+    assertLoopbackOnly(c.get("authMethod"), "Claude Code SDK gateway");
     return handleClaudeCodeSdkGateway(c, limits.max_request_bytes);
   };
   for (const path of ["/claude-code-sdk/:presetId/*", "/claude-code-sdk/:presetId"]) {
@@ -140,22 +140,6 @@ export function createLlmProxyRouter() {
       sdkGateway,
     );
   }
-
-  // Codex (ChatGPT) subscription credential vend — FIRST-PARTY ONLY. The chat
-  // module's codex engine GETs the resolved subscription token here (the CLI
-  // needs the real token in its auth.json — it can't be pointed at a forwarding
-  // gateway, see codex-sdk-gateway.ts). Forges nothing; the official CLI signs
-  // its own fingerprint and talks to chatgpt.com directly.
-  const codexVend = async (c: Context<AppEnv>): Promise<Response> => {
-    assertFirstPartyOnly(c.get("authMethod"), "Codex credential vend");
-    return handleCodexSdkGateway(c);
-  };
-  router.get(
-    "/codex-sdk/:presetId",
-    rateLimit(limits.rate_per_min),
-    requirePermission("llm-proxy", "call"),
-    codexVend,
-  );
 
   return router;
 }

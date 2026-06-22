@@ -252,6 +252,18 @@ const codexProvider: ModelProviderDefinition = {
   // credential whose token doesn't carry this claim — failing at import
   // time is louder than silently persisting a dead credential.
   requiredIdentityClaims: ["accountId"],
+  // Engine binding contributed to the core subscription-engine registry at
+  // registration: agent runs execute on the Codex CLI (official binary, no
+  // forging). `vend` — the CLI ignores `chatgpt_base_url` and talks to
+  // chatgpt.com directly, so the sidecar can't reverse-proxy it; the real token
+  // is vended into the container and its egress is locked to OpenAI's hosts
+  // (`chatgpt.com` backend + `openai.com` auth/api, suffix-matched) as the sole
+  // compensating control. Codex is agent-only — no chat surface.
+  subscriptionEngine: {
+    engine: "codex",
+    sidecarAuthMode: "vend",
+    egressAllowlist: ["chatgpt.com", "openai.com"],
+  },
 };
 
 // ---------------------------------------------------------------------------

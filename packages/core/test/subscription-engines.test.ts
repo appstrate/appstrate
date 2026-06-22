@@ -1,16 +1,75 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import {
-  SUBSCRIPTION_ENGINES,
   engineForProvider,
   engineHasNativeOutput,
   isSubscriptionEngine,
+  registerSubscriptionEngine,
+  resetSubscriptionEnginesForTesting,
   subscriptionEngineDef,
 } from "../src/subscription-engines.ts";
 
+// Core ships ZERO subscription bindings — the registry is contributed at boot
+// by the opt-in provider modules. Seed the two reference bindings the way
+// `registerModelProvider` does, so the read functions have data to resolve.
+beforeAll(() => {
+  resetSubscriptionEnginesForTesting();
+  registerSubscriptionEngine({
+    providerId: "claude-code",
+    label: "Claude Code",
+    engine: "claude",
+    sidecarAuthMode: "oauth",
+    nativeOutput: true,
+  });
+  registerSubscriptionEngine({
+    providerId: "codex",
+    label: "Codex",
+    engine: "codex",
+    sidecarAuthMode: "vend",
+    egressAllowlist: ["chatgpt.com", "openai.com"],
+  });
+});
+
+afterAll(() => resetSubscriptionEnginesForTesting());
+
+describe("registry is empty until contributed", () => {
+  it("resolves everything to pi before any registration", () => {
+    resetSubscriptionEnginesForTesting();
+    expect(engineForProvider("claude-code")).toBe("pi");
+    expect(engineForProvider("codex")).toBe("pi");
+    expect(subscriptionEngineDef("claude-code")).toBeUndefined();
+    // Re-seed for the rest of the suite (beforeAll already ran once).
+    registerSubscriptionEngine({
+      providerId: "claude-code",
+      label: "Claude Code",
+      engine: "claude",
+      sidecarAuthMode: "oauth",
+      nativeOutput: true,
+    });
+    registerSubscriptionEngine({
+      providerId: "codex",
+      label: "Codex",
+      engine: "codex",
+      sidecarAuthMode: "vend",
+      egressAllowlist: ["chatgpt.com", "openai.com"],
+    });
+  });
+
+  it("rejects a conflicting re-registration (same id, different engine)", () => {
+    expect(() =>
+      registerSubscriptionEngine({
+        providerId: "claude-code",
+        label: "Claude Code",
+        engine: "codex",
+        sidecarAuthMode: "oauth",
+      }),
+    ).toThrow();
+  });
+});
+
 describe("engineForProvider", () => {
-  it("maps the subscription providers to their engines", () => {
+  it("maps the contributed subscription providers to their engines", () => {
     expect(engineForProvider("claude-code")).toBe("claude");
     expect(engineForProvider("codex")).toBe("codex");
   });
@@ -45,18 +104,8 @@ describe("isSubscriptionEngine", () => {
   });
 });
 
-describe("SUBSCRIPTION_ENGINES registry", () => {
-  it("has unique provider ids, each a non-pi engine", () => {
-    const ids = SUBSCRIPTION_ENGINES.map((d) => d.providerId);
-    expect(new Set(ids).size).toBe(ids.length);
-    for (const def of SUBSCRIPTION_ENGINES) expect(def.engine).not.toBe("pi");
-  });
-});
-
 describe("engineHasNativeOutput", () => {
   it("is true only for engines that materialise output natively (claude)", () => {
-    // Claude emits the deliverable via the SDK's outputFormat → the launcher
-    // must NOT serve it the MCP `output` tool.
     expect(engineHasNativeOutput("claude")).toBe(true);
   });
   it("is false for engines that take output through the MCP tool (codex, pi)", () => {

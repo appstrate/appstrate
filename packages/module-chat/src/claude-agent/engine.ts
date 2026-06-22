@@ -2,7 +2,9 @@
 
 /**
  * Claude Agent SDK chat engine — the `claude-code` (Claude subscription) path
- * of the chat, the clean/sanctioned counterpart to the `ai-sdk` engine.
+ * of the chat, the official-binary (no-forging) counterpart to the `ai-sdk`
+ * engine. Subscription use is an operator opt-in grey-zone, not a ToS
+ * certification (see docs/architecture/SUBSCRIPTION_COMPLIANCE.md).
  *
  * It drives the official `@anthropic-ai/claude-agent-sdk` `query()` IN-PROCESS
  * under Bun (via the prebuilt native binary — see binary.ts), pointed at the
@@ -22,7 +24,7 @@
  */
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { buildClaudeSdkEnv } from "@appstrate/core/claude-binary";
+import { buildClaudeSdkEnv } from "@appstrate/runner-claude/binary";
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from "ai";
 import { resolveClaudeCodeBinary } from "./binary.ts";
 import { SdkUiStreamMapper, type ClaudeSdkMessage } from "./ui-stream-mapper.ts";
@@ -33,6 +35,14 @@ import { logger } from "../logger.ts";
 
 /** Upper bound on agent turns per chat message (mirrors the ai-sdk path's MAX_STEPS). */
 const MAX_TURNS = 16;
+
+/**
+ * Wall-clock deadline for one chat turn. `maxTurns` bounds the agent loop, but a
+ * single turn wedged on a stuck upstream or a hung MCP call would otherwise hold
+ * the `claude` subprocess + a concurrency slot open indefinitely. On the deadline
+ * we abort the controller (kills the subprocess, frees the slot via the finally).
+ */
+const TURN_DEADLINE_MS = 5 * 60_000;
 
 export interface ClaudeAgentChatInput {
   /** Full thread from the client (assistant-ui sends every turn). */
@@ -55,7 +65,7 @@ export interface ClaudeAgentChatInput {
 
 /**
  * Curated environment for the spawned `claude` binary. Thin wrapper over the
- * shared `@appstrate/core/claude-binary` builder (single source for the
+ * shared `@appstrate/runner-claude/binary` builder (single source for the
  * credential-isolation posture shared with the agent runner); keeps the chat's
  * positional signature for its existing call site + tests.
  */
@@ -100,6 +110,12 @@ export function runClaudeAgentChat(input: ClaudeAgentChatInput): Response {
   if (input.abortSignal.aborted) controller.abort();
   else input.abortSignal.addEventListener("abort", () => controller.abort(), { once: true });
 
+  // Wall-clock deadline: abort a turn wedged on a stuck upstream/MCP so it can't
+  // pin the subprocess + slot open. Unref'd so it never keeps the process alive;
+  // cleared in the execute finally on normal completion.
+  const deadline = setTimeout(() => controller.abort(), TURN_DEADLINE_MS);
+  (deadline as unknown as { unref?: () => void }).unref?.();
+
   const mapper = new SdkUiStreamMapper();
 
   const stream = createUIMessageStream({
@@ -139,6 +155,7 @@ export function runClaudeAgentChat(input: ClaudeAgentChatInput): Response {
         }
         writer.write(mapper.finishChunk());
       } finally {
+        clearTimeout(deadline);
         slot.release();
       }
     },

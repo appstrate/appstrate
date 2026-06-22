@@ -28,9 +28,14 @@ reimplementation of either vendor's wire protocol for subscription auth.
 | Provider      | Chat                                                    | Agents (sandboxed run)                               |
 | ------------- | ------------------------------------------------------- | ---------------------------------------------------- |
 | `claude-code` | `@anthropic-ai/claude-agent-sdk` `query()` (in-process) | `ClaudeAgentRunner` → official `claude` binary       |
-| `codex`       | `runCodexAgentChat` → official `@openai/codex` binary   | `CodexAgentRunner` → official `@openai/codex` binary |
+| `codex`       | _none_ — agent-only (no chat surface)                   | `CodexAgentRunner` → official `@openai/codex` binary |
 
-Anchors: `packages/module-chat/src/{claude-agent,codex-agent}/engine.ts`,
+Codex has **no chat surface**: its subscription token can't be safely held
+host-side (the CLI talks to chatgpt.com directly, so the chat host would hold the
+real token), so it runs only as a docker-isolated agent. The Claude subscription
+is chat-usable because its gateway swaps the bearer server-side.
+
+Anchors: `packages/module-chat/src/claude-agent/engine.ts`,
 `packages/runner-claude/`, `packages/runner-codex/`, `runtime-pi/entrypoint.ts`
 (`buildClaudeAgentRunner` / `buildCodexAgentRunner`).
 
@@ -99,6 +104,21 @@ opt into subscription providers deliberately (via `MODULES`) and own that choice
 - As of 2026-06-21 this path is aligned with Anthropic's stated position, but it
   flipped four times this year.
 - For production/team automation Anthropic itself recommends **API-key billing**.
+
+> **Anthropic's own Agent SDK docs (quoted verbatim, observed 2026-06-22):**
+>
+> "Unless previously approved, Anthropic does not allow third party developers to
+> offer claude.ai login or rate limits for their products, including agents built
+> on the Claude Agent SDK. Please use the API key authentication methods described
+> in this document instead."
+
+This is the crux: an operator pointing Appstrate's chat/runner at a **personal**
+Claude subscription is acting as a third-party product offering claude.ai login —
+which Anthropic permits only with **prior approval**. Appstrate forges no client
+identity (the official `claude` binary signs its own), but that does NOT confer
+approval. Treat the subscription engines as an operator-owned grey-zone choice,
+not a sanctioned integration, and re-verify the quote against the live docs
+(§4) before relying on it — the wording and policy have changed repeatedly.
 
 ### 2.2 OpenAI / `codex` — a documented grey zone
 

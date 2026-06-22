@@ -41,7 +41,7 @@ import {
   buildIsolatedSubprocessEnv,
   makeScopeResolver,
   type BinaryResolver,
-} from "./subprocess-env.ts";
+} from "@appstrate/core/subprocess-env";
 
 export type { BinaryResolver };
 
@@ -97,7 +97,11 @@ export function redactSecrets(text: string, knownSecrets: readonly string[] = []
  * syntactically-valid UNSIGNED (`alg:none`) JWT, local-only and never transmitted,
  * with a far-future `exp` so the CLI never tries to refresh (a refresh would hit
  * the real OpenAI auth server with a bogus refresh token and fail). The real
- * `chatgpt_account_id` is written verbatim when the credential carries it.
+ * `chatgpt_account_id` is written verbatim when the credential carries it. The
+ * `alg:none` token forges no identity upstream: it never leaves the container,
+ * exists only to satisfy the CLI's local boot parse, and deliberately withholds
+ * any refresh capability from the sandbox. The genuine outbound identity is the
+ * real `access_token` the official binary sends itself.
  *
  * Pure (the caller passes `now`) so it is unit-testable and free of the
  * Date.now() ambient-clock dependency.

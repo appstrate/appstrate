@@ -29,9 +29,11 @@ import { buildRuntimePiEnv } from "@appstrate/runner-pi";
 import {
   selectRunEngine,
   assertRunnableOnEngine,
+  assertSubscriptionEngineIsolation,
   buildOauthSidecarLlm,
   subscriptionEngineDef,
 } from "./engine-select.ts";
+import { getExecutionMode } from "../../infra/mode.ts";
 import { engineHasNativeOutput } from "@appstrate/core/subscription-engines";
 import {
   getOrchestrator,
@@ -138,6 +140,16 @@ async function runPlatformContainerImpl(
   // is NOT a spawn failure) must not also emit a spawn data point.
   let spawnRecorded = false;
   try {
+    // Fail-closed BEFORE provisioning any isolation boundary: a subscription
+    // AGENT run (claude-code → Claude Agent SDK, codex → Codex CLI) must execute
+    // under the docker orchestrator. The process orchestrator runs in-host and
+    // would expose the subscription credential to the API process. API-key
+    // providers are unaffected.
+    assertSubscriptionEngineIsolation({
+      providerId: llmConfig.providerId,
+      orchestratorMode: getExecutionMode(),
+    });
+
     boundary = await orch.createIsolationBoundary(runId);
 
     const llmApiKey = llmConfig.apiKey;

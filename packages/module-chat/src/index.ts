@@ -21,9 +21,7 @@
  * so the assistant pilots the platform with the caller's own permissions.
  */
 
-import { tmpdir } from "node:os";
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
-import { sweepStaleCodexHomes } from "@appstrate/core/codex-binary";
 import {
   createChatRouter,
   createSessionSchema,
@@ -33,12 +31,7 @@ import {
 } from "./routes.ts";
 import { chatPaths, chatComponentSchemas } from "./openapi.ts";
 import { chatLoopbackStrategy } from "./loopback-auth.ts";
-import { CODEX_CHAT_HOME_PREFIX, codexChatHomeBase } from "./codex-agent/engine.ts";
-import { logger } from "./logger.ts";
 import { z } from "zod";
-
-/** Max age of a codex chat token home before the boot sweep reclaims it. */
-const STALE_CODEX_HOME_MS = 60 * 60 * 1000;
 
 declare module "@appstrate/core/permissions" {
   interface ModuleResources {
@@ -54,20 +47,6 @@ const chatModule: AppstrateModule = {
     // No workers: chat is request-driven. Wire the platform rate limiter
     // into the router (POST /api/chat fans out into metered LLM traffic).
     setRateLimitFactory((maxPerMinute) => ctx.services.http.rateLimit(maxPerMinute));
-
-    // Reclaim any codex chat token homes leaked by an ungraceful kill on a
-    // prior boot (SIGKILL/OOM between writeCodexAuthHome and its finally). Sweep
-    // both the RAM-backed base (when present) and the OS temp fallback.
-    const bases = new Set([tmpdir(), codexChatHomeBase()].filter((b): b is string => Boolean(b)));
-    for (const baseDir of bases) {
-      const removed = await sweepStaleCodexHomes({
-        baseDir,
-        prefix: CODEX_CHAT_HOME_PREFIX,
-        maxAgeMs: STALE_CODEX_HOME_MS,
-        nowMs: Date.now(),
-      }).catch(() => 0);
-      if (removed > 0) logger.warn("chat: swept stale codex token homes", { baseDir, removed });
-    }
   },
 
   createRouter() {

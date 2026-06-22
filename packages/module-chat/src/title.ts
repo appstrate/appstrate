@@ -9,9 +9,9 @@
  * first few messages here; we run a short completion and return the title.
  *
  * Same inference wiring as chat-stream (resolveModel + mintLoopbackToken +
- * streamText). We reuse streamText (not generateText) because the first-party
- * Codex proxy route only serves the streaming shape; `await result.text`
- * collapses it to the final string.
+ * streamText). We reuse streamText (not generateText) because the subscription
+ * gateway routes only serve the streaming shape; `await result.text` collapses
+ * it to the final string.
  */
 
 import type { Context } from "hono";

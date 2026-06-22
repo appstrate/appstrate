@@ -491,7 +491,7 @@ export interface IntegrationSpawnSpec {
  *
  *   - `api_key`: the agent SDK builds the auth header with a placeholder and
  *     the sidecar swaps the placeholder for the real key.
- *   - `oauth`: the ToS-clean OAuth path for an agent driver that signs its OWN
+ *   - `oauth`: the no-forging OAuth path for an agent driver that signs its OWN
  *     provider fingerprint (the official Claude Agent SDK binary). The sidecar
  *     fetches a fresh access token from the platform
  *     (`GET /internal/oauth-token/:credentialId`), swaps the request bearer for
@@ -551,7 +551,7 @@ export interface LlmProxyApiKeyConfig {
 }
 
 /**
- * OAuth mode — the ToS-clean path for an agent driver that signs its OWN
+ * OAuth mode — the no-forging path for an agent driver that signs its OWN
  * provider fingerprint (the official Claude Agent SDK binary).
  *
  * The sidecar forges nothing: no identity headers, no `system`-prepend /
