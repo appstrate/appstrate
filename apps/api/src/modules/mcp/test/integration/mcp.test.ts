@@ -372,6 +372,12 @@ describe("mcp tool round-trip", () => {
     expect(typeof instructions).toBe("string");
     expect(instructions).toContain("Appstrate");
     expect(instructions).toContain("@appstrate");
+    // The generated operation index is appended under this exact heading; the
+    // chat splits on the same literal to strip it for uncached/no-tool
+    // providers (see applyOperationIndexPolicy in module-chat). Keep in sync.
+    expect(instructions).toContain("## Operation index");
+    // ...and the index actually lists operations under it.
+    expect(instructions!.split("## Operation index")[1]).toContain("- listAgents");
   });
 });
 

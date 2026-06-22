@@ -8,7 +8,10 @@
  * ≈ 72K tokens), so instead we expose a tiny fixed surface and let the model
  * discover on demand:
  *
- *   - `search_operations`   — keyword/tag search over the catalog
+ *   - `search_operations`   — keyword/tag search over the catalog; a keyword
+ *                             hit also returns the top match's full schema as
+ *                             `best_match`, so the common single-target case
+ *                             skips the separate describe step
  *   - `describe_operation`  — full input schema for one operation
  *   - `invoke_operation`    — execute one operation
  *
@@ -156,13 +159,39 @@ function scoreOperation(op: CatalogOperation, tokens: string[]): number {
   return score;
 }
 
+/**
+ * The full, invoke-ready definition of one operation: parameters, request body,
+ * responses, and every referenced component schema inlined. This is the payload
+ * `describe_operation` returns, and it is also embedded as `search_operations`'
+ * `best_match` so a clear single-hit search needs no follow-up describe call.
+ */
+export function describePayload(
+  op: CatalogOperation,
+  componentSchemas: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    operation_id: op.operationId,
+    method: op.method,
+    path: op.pathTemplate,
+    path_params: op.pathParams,
+    summary: op.summary,
+    description: op.description,
+    parameters: op.operation.parameters ?? [],
+    request_body: op.operation.requestBody ?? null,
+    responses: op.operation.responses ?? {},
+    referenced_schemas: collectReferencedSchemas(op.operation, componentSchemas),
+  };
+}
+
 function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "search_operations",
     description:
       "Search the Appstrate API for operations by keyword and/or tag. Returns matching " +
       "operationIds with their HTTP method, path, and summary. Use this first to discover " +
-      "which operation to call, then describe_operation for its input schema.",
+      "which operation to call. For a keyword search, the response also includes a " +
+      "`best_match` carrying the top result's full input schema — when it matches your " +
+      "intent you can call invoke_operation directly, no describe_operation needed.",
     annotations: {
       title: "Search API operations",
       readOnlyHint: true,
@@ -189,7 +218,7 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
-    const { operations } = getCatalog();
+    const { operations, componentSchemas } = getCatalog();
     const query = asString(args.query)?.trim().toLowerCase() ?? "";
     const tag = asString(args.tag)?.toLowerCase();
     const rawLimit = typeof args.limit === "number" ? args.limit : DEFAULT_SEARCH_LIMIT;
@@ -211,6 +240,14 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
       resultCount: scored.length,
     });
 
+    // For a keyword search with at least one hit, embed the top match's full
+    // invoke-ready definition so the common single-target case needs no
+    // follow-up describe_operation call. Only the top result carries the
+    // schema, to keep the response bounded; the rest stay compact.
+    const top = scored[0];
+    const bestMatch =
+      tokens.length > 0 && top ? describePayload(top.op, componentSchemas) : undefined;
+
     return textResult({
       count: scored.length,
       total: matches.length,
@@ -221,6 +258,7 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
         summary: op.summary,
         tags: op.tags,
       })),
+      best_match: bestMatch,
     });
   };
 
@@ -243,7 +281,12 @@ function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
     inputSchema: {
       type: "object",
       properties: {
-        operation_id: { type: "string", description: "The operationId from search_operations." },
+        operation_id: {
+          type: "string",
+          description:
+            "The operationId, as returned by search_operations (or already known). Not " +
+            "needed when search_operations already returned a matching best_match.",
+        },
       },
       required: ["operation_id"],
     },
@@ -273,18 +316,7 @@ function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
       operationId,
     });
 
-    return textResult({
-      operation_id: op.operationId,
-      method: op.method,
-      path: op.pathTemplate,
-      path_params: op.pathParams,
-      summary: op.summary,
-      description: op.description,
-      parameters: op.operation.parameters ?? [],
-      request_body: op.operation.requestBody ?? null,
-      responses: op.operation.responses ?? {},
-      referenced_schemas: collectReferencedSchemas(op.operation, componentSchemas),
-    });
+    return textResult(describePayload(op, componentSchemas));
   };
 
   return { descriptor, handler };

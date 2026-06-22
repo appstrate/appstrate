@@ -31,6 +31,35 @@ import { RENDER_HTML_DESCRIPTION, renderHtmlInputShape } from "./render-html-spe
 
 const MAX_STEPS = 16;
 
+// Heading that fences the generated operation index at the tail of the platform
+// MCP server instructions (emitted by apps/api/src/modules/mcp/router.ts). We
+// split on this exact literal to drop the index — several KB re-sent on every
+// step — for providers where it doesn't pay: Mistral (no prompt caching) and
+// the Codex engine (no platform tools wired, so the index is dead weight).
+// Cached providers (Claude SDK, Anthropic via cache_control, OpenAI auto-prefix)
+// keep it. If this literal drifts from the server's, the index simply stays —
+// degraded cost, never a failure.
+const OPERATION_INDEX_HEADING = "## Operation index";
+
+/**
+ * Strip the trailing operation index from the system prompt for providers where
+ * it isn't worth its tokens: the Codex engine (no platform tools, so the index
+ * is unusable) and Mistral (no prompt caching, so the multi-KB index would be
+ * re-sent uncached on every step). Everyone else keeps it. The agent always has
+ * search_operations as a fallback when the index is absent.
+ */
+export function applyOperationIndexPolicy(
+  system: string,
+  engine: string,
+  apiShape: string,
+): string {
+  const drop = engine === "codex" || apiShape === "mistral-conversations";
+  if (drop && system.includes(OPERATION_INDEX_HEADING)) {
+    return system.slice(0, system.indexOf(OPERATION_INDEX_HEADING)).trimEnd();
+  }
+  return system;
+}
+
 /**
  * TTL for the engine path's loopback bearer. The Agent SDK bakes it into the
  * spawned binary's env once, so it must outlive the whole turn (up to
@@ -178,6 +207,8 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   // subscription runs on.
   const engine = engineForProvider(chosen.providerId ?? "");
 
+  system = applyOperationIndexPolicy(system, engine, chosen.apiShape);
+
   // Claude subscription → official Claude Agent SDK engine (clean/sanctioned),
   // NOT the ai-sdk → forging proxy. The SDK opens its own MCP connection, so we
   // close the probe client (used only for reachability + instructions) and hand
@@ -234,8 +265,21 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   try {
     const result = streamText({
       model,
-      system,
-      messages: await convertToModelMessages(messages),
+      // System rides as a cached message part rather than the `system` field:
+      // the platform MCP instructions now carry a generated operation index
+      // (several KB, re-sent on every one of the up-to-MAX_STEPS inference
+      // calls in a turn). OpenAI auto-caches the prefix and the Claude Agent
+      // SDK path caches on its own; the ai-sdk Anthropic providers need an
+      // explicit cache_control breakpoint or they'd pay the index in full each
+      // step. Harmless for non-Anthropic models (providerOptions is namespaced).
+      messages: [
+        {
+          role: "system",
+          content: system,
+          providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+        },
+        ...(await convertToModelMessages(messages)),
+      ],
       tools: mcp
         ? {
             ...mcp.tools,

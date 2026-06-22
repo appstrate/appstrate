@@ -60,6 +60,7 @@ export interface OperationCatalog {
 }
 
 let cached: OperationCatalog | null = null;
+let cachedIndex: string | null = null;
 
 const PATH_PARAM_RE = /\{([^}]+)\}/g;
 
@@ -151,6 +152,40 @@ export function getCatalog(): OperationCatalog {
 /** Reset the cached catalog. Tests only. */
 export function resetCatalog(): void {
   cached = null;
+  cachedIndex = null;
+}
+
+/**
+ * A compact, generated index of every operation, grouped by tag:
+ *
+ *   ## Agents
+ *   - listAgents — List agents in the organization
+ *   - runAgent — Trigger an agent run
+ *
+ * Method/path are deliberately omitted (they come from describe_operation or
+ * search_operations' best_match); this is a discovery aid that lets a client
+ * pick an operationId directly, skipping a search_operations round-trip. It is
+ * fully derived from the live catalog and memoized, so it grows with the API
+ * surface without any hand maintenance.
+ */
+export function buildOperationIndex(): string {
+  if (cachedIndex !== null) return cachedIndex;
+
+  const { operations } = getCatalog();
+  const byTag = new Map<string, string[]>();
+  for (const op of operations.values()) {
+    const tag = op.tags[0] ?? "Other";
+    const line = `- ${op.operationId}${op.summary ? ` — ${op.summary}` : ""}`;
+    (byTag.get(tag) ?? byTag.set(tag, []).get(tag)!).push(line);
+  }
+
+  const sections = [...byTag.keys()].sort().map((tag) => {
+    const lines = byTag.get(tag)!.sort();
+    return `## ${tag}\n${lines.join("\n")}`;
+  });
+
+  cachedIndex = sections.join("\n\n");
+  return cachedIndex;
 }
 
 const SCHEMA_REF_PREFIX = "#/components/schemas/";

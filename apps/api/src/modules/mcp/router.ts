@@ -46,6 +46,7 @@ import type { AppEnv } from "../../types/index.ts";
 import { getPlatformApp } from "../../lib/platform-app.ts";
 import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "./audiences.ts";
 import { buildMcpTools, FORWARDED_AUTH_HEADERS, type Dispatch, type McpObserver } from "./tools.ts";
+import { buildOperationIndex } from "./catalog.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 /** Path prefix owning the per-org sub-tree. `:org` is the organization id. */
@@ -110,14 +111,18 @@ const MCP_RATE_LIMIT_PER_MIN = 120;
 
 /**
  * Server `instructions` injected into the client's system prompt at
- * `initialize`. Deliberately meta and maintenance-free: it carries ONLY the
- * cross-cutting context the tool descriptions and per-operation OpenAPI
- * schemas can't (purpose, entity model, the `@` scope rule, async-run +
- * SSE-not-callable behaviour). It never lists tools, counts, tags, or
- * endpoints — those are discovered at runtime, so the surface can grow
- * without touching this text.
+ * `initialize`. Carries the cross-cutting context the tool descriptions and
+ * per-operation OpenAPI schemas can't (purpose, entity model, the `@` scope
+ * rule, async-run + SSE-not-callable behaviour), plus a GENERATED operation
+ * index (`buildOperationIndex()`) so a client can pick an operationId directly
+ * and skip a search_operations round-trip.
+ *
+ * Still maintenance-free: the index is derived from the live catalog, so the
+ * surface grows without editing this text. describe_operation (or
+ * search_operations' best_match) remains the source of truth for input schemas.
  */
-const SERVER_INSTRUCTIONS = `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you discover and call any operation of the Appstrate REST API — their own descriptions tell you how. Never guess an operationId or body shape; the describe step is the source of truth, and the surface is not fixed — if a capability might exist, search for it.
+function buildServerInstructions(): string {
+  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you discover and call any operation of the Appstrate REST API — their own descriptions tell you how. The operation index at the end of these instructions lists EVERY operation by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, then call describe_operation for its input schema and invoke_operation to run it. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema.
 
 ## Core model
 Organization → Applications (id \`app_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe_operation shows which; always keep the \`@\`, and the \`/\` when it's a single param.
@@ -128,7 +133,18 @@ This MCP server is scoped to ONE organization — the one this endpoint serves �
 ## Beyond the per-operation schemas
 - Runs are asynchronous: triggering one returns the created run resource (use its \`id\`), then it moves pending→running→success|failed|timeout|cancelled. To wait for completion, call the run get operation with \`query: { wait: true }\` — the server long-polls up to ~55 s and returns the run when it goes terminal; a still-non-terminal response just means call it again (no sleep needed).
 - Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
-- Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.`;
+- Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.
+
+${OPERATION_INDEX_HEADING}
+${buildOperationIndex()}`;
+}
+
+// The index is the LAST section of the instructions, fenced by this exact
+// heading. The chat (packages/module-chat/src/chat-stream.ts) splits on the
+// same literal to drop the index for providers where it isn't worth its tokens
+// (no prompt cache, or no platform tools). If the two ever drift, the chat just
+// stops stripping — the index stays in context, never a crash.
+const OPERATION_INDEX_HEADING = "## Operation index";
 
 function forwardAuthHeaders(src: Headers): Headers {
   const out = new Headers();
@@ -307,7 +323,7 @@ export function createMcpRouter(): Hono<AppEnv> {
     const server = createMcpServer(
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
-      { instructions: SERVER_INSTRUCTIONS },
+      { instructions: buildServerInstructions() },
     );
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
