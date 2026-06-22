@@ -72,6 +72,7 @@ import { parseRuntimeEnv, RuntimeEnvError } from "./env.ts";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 import {
   createRuntimeEventDrainer,
+  drainAndEmitInto,
   type RuntimeEventDrainer,
 } from "@appstrate/core/runtime-event-drain";
 import { provisionWorkspace, provisionDocuments, type ProvisionDeps } from "./provision.ts";
@@ -528,15 +529,16 @@ if (sidecarUrl) {
       // journaled; the drainer pulls them on the run sink after each forwarded
       // call — uniform with the Claude + Codex runners, no `_meta` trust.
       //
-      // No final drain on the Pi path (unlike claude/codex): Pi makes each tool
-      // call itself and drains in the SAME `execute()` right after `callTool`
-      // resolves. The sidecar appends the events synchronously inside the
-      // wrapped handler BEFORE sending its response, so by the time `callTool`
-      // resolves they are already journaled and the immediate drain captures
-      // them — there is no "last tool's events land after the stream ends" gap
-      // that claude/codex (which observe an async stream) must backstop. A drain
-      // in this entrypoint would also run AFTER PiRunner's internal finalize,
-      // too late to emit. Do NOT add one.
+      // Pi drains each tool call inline in `execute()` right after `callTool`
+      // resolves — the sidecar appends the events synchronously inside the
+      // wrapped handler BEFORE responding, so the per-call drain always captures
+      // them in time (no "events land after the stream ends" gap that
+      // claude/codex must backstop). What the per-call drain CANNOT cover is a
+      // transient localhost failure of the LAST call's single best-effort drain
+      // (no subsequent call retries it). The retrying final drain for that case
+      // is injected via `piEventSink` (below): PiRunner owns its finalize, so a
+      // drain placed after `runner.run()` would be too late — wrapping the sink
+      // runs it BEFORE the stdout-bridge merges its aggregate into the POST.
       const factories = await buildMcpDirectFactories({
         mcp: mcpClient,
         runId: AGENT_RUN_ID,
@@ -837,6 +839,31 @@ function buildCodexAgentRunner(): CodexAgentRunner {
   });
 }
 
+// Pi-path final drain. Pi drains each tool call inline (see the note in the
+// factories block above), but the LAST call's single best-effort drain has no
+// subsequent call to retry a transient localhost failure — unlike claude/codex,
+// which own a retrying final drain inside `run()`. PiRunner owns its finalize,
+// so we inject the final drain by wrapping the sink: drain-until-empty +
+// bounded retry through the SAME bridged sink the per-call drains use, so the
+// stdout-bridge folds any straggler into its aggregate BEFORE merging it into
+// the finalize POST. Best-effort (`final: true`) — never flips an
+// already-decided run. Pi only: claude/codex already drain finally in `run()`.
+const piEventSink: typeof bridgedSink = runtimeDrainer
+  ? {
+      handle: (event) => bridgedSink.handle(event),
+      finalize: async (result) => {
+        await drainAndEmitInto({
+          drainer: runtimeDrainer,
+          emit: (e) => bridgedSink.handle(e as RunEvent),
+          now: Date.now,
+          runId: AGENT_RUN_ID!,
+          final: true,
+        });
+        await bridgedSink.finalize(result);
+      },
+    }
+  : bridgedSink;
+
 const startTime = Date.now();
 try {
   const runner =
@@ -849,7 +876,7 @@ try {
   await runner.run({
     bundle: runnerBundle,
     context,
-    eventSink: bridgedSink,
+    eventSink: runEngine === "pi" ? piEventSink : bridgedSink,
   });
   heartbeat.stop();
   await mcpClient?.close().catch(() => {});

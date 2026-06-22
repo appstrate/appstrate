@@ -43,7 +43,7 @@ import {
 } from "@appstrate/afps-runtime/runner";
 import { buildClaudeSdkEnv } from "@appstrate/core/claude-binary";
 import { getErrorMessage } from "@appstrate/core/errors";
-import type { RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
+import { drainAndEmitInto, type RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { SdkRunEventMapper, type SdkRunMessage } from "./sdk-event-mapper.ts";
 
 /** Input to the injectable `query` driver — the subset of the SDK call we issue. */
@@ -165,25 +165,11 @@ export class ClaudeAgentRunner implements Runner {
     // `result.structured_output` via `outputFormat` (constrained decoding), and
     // is re-emitted once below — it must not double-emit. No-op when no drainer.
     const drainer = this.opts.drainer;
-    const drainAndEmit = async (final = false): Promise<void> => {
-      if (!drainer) return;
-      for (const e of await drainer.drain(final ? { final: true } : undefined)) {
-        const event = { timestamp: now(), ...(e as Record<string, unknown>), runId } as RunEvent;
-        if (final) {
-          // Best-effort: the run's verdict is already decided by this point, so
-          // a dead sink at the final drain must NOT throw out of run() and flip
-          // a succeeded run to failed (a truly dead sink surfaces via finalize).
-          // Intermediate-mode emit failures still propagate and fail the run.
-          try {
-            await emit(event);
-          } catch {
-            /* swallowed: run outcome decided elsewhere */
-          }
-        } else {
-          await emit(event);
-        }
-      }
-    };
+    // Shared drain+stamp+emit (see `@appstrate/core/runtime-event-drain`): one
+    // cadence + best-effort-at-finalize contract for all three runners, so it
+    // cannot drift between them.
+    const drainAndEmit = (final = false): Promise<void> =>
+      drainAndEmitInto({ drainer, emit: (e) => emit(e as RunEvent), now, runId, final });
 
     const mcpServers: Record<string, unknown> = {};
     if (this.opts.sidecarMcp) {
@@ -270,13 +256,21 @@ export class ClaudeAgentRunner implements Runner {
 
     // Native structured deliverable → one `output.emitted` so the reducer sets
     // RunResult.output (no `output` runtime tool is involved on this path).
+    // Best-effort emit, like the final drain above: `emit` pushes onto `events`
+    // BEFORE awaiting the sink, so `reduceEvents` + the finalize POST already
+    // carry the output; a dead sink here must not throw out and flip an
+    // otherwise-succeeded run to failed (a truly dead sink surfaces at finalize).
     if (terminal?.structuredOutput !== undefined) {
-      await emit({
-        type: "output.emitted",
-        timestamp: now(),
-        runId,
-        data: terminal.structuredOutput,
-      });
+      try {
+        await emit({
+          type: "output.emitted",
+          timestamp: now(),
+          runId,
+          data: terminal.structuredOutput,
+        });
+      } catch {
+        /* swallowed: run outcome decided elsewhere */
+      }
     }
 
     const result: RunResult = events.length === 0 ? emptyRunResult() : reduceEvents(events);

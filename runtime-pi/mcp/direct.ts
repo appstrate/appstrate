@@ -34,7 +34,7 @@ import {
   spillResourcesToWorkspace,
   type RuntimeEventEmitter,
 } from "@appstrate/runner-pi";
-import type { RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
+import { drainAndEmitInto, type RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { buildApiUploadToolFactory } from "./api-upload-extension.ts";
 import { resolveApiCallBody, ApiCallBodyResolveError } from "./api-call-body-resolver.ts";
 import { shapeApiCallResponse } from "./api-call-response-resolver.ts";
@@ -243,16 +243,15 @@ function buildIntegrationToolFactories(
           // sink — uniform with the Claude + Codex runners, single source of
           // truth, no trust in the result `_meta`. A drain is a cheap localhost
           // round-trip and a no-op when the journal is empty (e.g. integration
-          // tools, which journal nothing).
-          if (opts.drainer) {
-            for (const ev of await opts.drainer.drain()) {
-              opts.emit({
-                ...(ev as Parameters<RuntimeEventEmitter>[0]),
-                runId: opts.runId,
-                timestamp: Date.now(),
-              });
-            }
-          }
+          // tools, which journal nothing). The shared helper preserves each
+          // event's journaled `timestamp` (it no longer gets overwritten with
+          // the drain-time wall clock, matching the Claude + Codex runners).
+          await drainAndEmitInto({
+            drainer: opts.drainer,
+            emit: (ev) => opts.emit(ev as Parameters<RuntimeEventEmitter>[0]),
+            now: Date.now,
+            runId: opts.runId,
+          });
           // api_call: surface the upstream HTTP status (otherwise dropped
           // with `_meta`) and honour `responseMode.toFile` — writing the body
           // to the agent-chosen workspace path and returning a file

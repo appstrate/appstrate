@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { createRuntimeEventDrainer, type DrainLogger } from "../src/runtime-event-drain.ts";
+import {
+  createRuntimeEventDrainer,
+  drainAndEmitInto,
+  type DrainLogger,
+  type RuntimeEventDrainer,
+} from "../src/runtime-event-drain.ts";
 import type { RuntimeToolEvent } from "../src/runtime-tool-defs.ts";
 
 /** A scriptable fetch: each entry is the JSON body returned for the next call. */
@@ -151,5 +156,81 @@ describe("createRuntimeEventDrainer — truncation signal", () => {
     expect(lines.some((l) => l.level === "error" && l.msg === "runtime_events_truncated")).toBe(
       true,
     );
+  });
+});
+
+/** A drainer stub that yields fixed batches per call (one per `drain()`). */
+function stubDrainer(batches: RuntimeToolEvent[][]): RuntimeEventDrainer {
+  let i = 0;
+  return {
+    drain: async () => batches[i++] ?? [],
+  };
+}
+
+describe("drainAndEmitInto", () => {
+  it("is a no-op when no drainer is wired", async () => {
+    const emitted: RuntimeToolEvent[] = [];
+    await drainAndEmitInto({
+      drainer: undefined,
+      emit: (e) => {
+        emitted.push(e);
+      },
+      now: () => 999,
+      runId: "run_1",
+    });
+    expect(emitted).toEqual([]);
+  });
+
+  it("stamps runId and preserves the event's own (journaled) timestamp", async () => {
+    const emitted: RuntimeToolEvent[] = [];
+    await drainAndEmitInto({
+      drainer: stubDrainer([[{ type: "memory.added", timestamp: 111, text: "x" }]]),
+      emit: (e) => {
+        emitted.push(e);
+      },
+      now: () => 999,
+      runId: "run_1",
+    });
+    expect(emitted).toEqual([{ type: "memory.added", timestamp: 111, text: "x", runId: "run_1" }]);
+  });
+
+  it("falls back to now() only when the event carries no timestamp", async () => {
+    const emitted: RuntimeToolEvent[] = [];
+    await drainAndEmitInto({
+      drainer: stubDrainer([[{ type: "log.written" } as RuntimeToolEvent]]),
+      emit: (e) => {
+        emitted.push(e);
+      },
+      now: () => 999,
+      runId: "run_1",
+    });
+    expect(emitted[0]!.timestamp).toBe(999);
+  });
+
+  it("propagates an emit failure in intermediate mode (fails the run)", async () => {
+    await expect(
+      drainAndEmitInto({
+        drainer: stubDrainer([[{ type: "log.written", timestamp: 1 }]]),
+        emit: () => {
+          throw new Error("dead sink");
+        },
+        now: () => 0,
+        runId: "run_1",
+      }),
+    ).rejects.toThrow("dead sink");
+  });
+
+  it("swallows an emit failure in final mode (run verdict already decided)", async () => {
+    await expect(
+      drainAndEmitInto({
+        drainer: stubDrainer([[{ type: "memory.added", timestamp: 1 }]]),
+        emit: () => {
+          throw new Error("dead sink");
+        },
+        now: () => 0,
+        runId: "run_1",
+        final: true,
+      }),
+    ).resolves.toBeUndefined();
   });
 });

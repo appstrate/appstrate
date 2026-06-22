@@ -52,7 +52,7 @@ import {
   type CodexHttpMcpServer,
   type VendedCodexCredential,
 } from "@appstrate/core/codex-binary";
-import type { RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
+import { drainAndEmitInto, type RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { CodexRunEventMapper, computeCodexCost, type CodexModelCost } from "./run-event-mapper.ts";
 
@@ -171,25 +171,11 @@ export class CodexAgentRunner implements Runner {
     // journal. A drain is cheap on localhost and a no-op when the journal is
     // empty; over-draining never misses a boundary. No-op when no drainer wired.
     const drainer = this.opts.drainer;
-    const drainAndEmit = async (final = false): Promise<void> => {
-      if (!drainer) return;
-      for (const e of await drainer.drain(final ? { final: true } : undefined)) {
-        const event = { timestamp: now(), ...(e as Record<string, unknown>), runId } as RunEvent;
-        if (final) {
-          // Best-effort: the run's verdict is already decided by this point, so
-          // a dead sink at the final drain must NOT throw out of run() and flip
-          // a succeeded run to failed (a truly dead sink surfaces via finalize).
-          // Intermediate-mode emit failures still propagate and fail the run.
-          try {
-            await emit(event);
-          } catch {
-            /* swallowed: run outcome decided elsewhere */
-          }
-        } else {
-          await emit(event);
-        }
-      }
-    };
+    // Shared drain+stamp+emit (see `@appstrate/core/runtime-event-drain`): one
+    // cadence + best-effort-at-finalize contract for all three runners, so it
+    // cannot drift between them.
+    const drainAndEmit = (final = false): Promise<void> =>
+      drainAndEmitInto({ drainer, emit: (e) => emit(e as RunEvent), now, runId, final });
 
     let home: string | undefined;
     let child: CodexChild | undefined;

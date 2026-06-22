@@ -15,9 +15,12 @@
  *
  * The drainer NEVER throws and NEVER fails a run: a network hiccup mid-stream
  * is retried on the next drain; an unreachable journal at finalize is logged
- * loud (`runtime_events_incomplete`) and tolerated — the structured `output`
- * is re-validated at finalize, and log/note/pin/report are cosmetic, so
- * dropping a run over an undrained log would be disproportionate.
+ * loud (`runtime_events_incomplete`) and tolerated. The structured `output` is
+ * re-validated at finalize (a lost `output` therefore fails the run there, not
+ * silently); `log`/`report` are cosmetic. `note`/`pin` (`memory.added`/
+ * `pinned.set`) persist across runs and are NOT re-derivable, so the final
+ * drain's bounded retry is their compensating control — but still best-effort:
+ * dropping a whole run over one undrained event would be disproportionate.
  */
 
 import type { RuntimeToolEvent } from "./runtime-tool-defs.ts";
@@ -174,4 +177,58 @@ export function createRuntimeEventDrainer(
   }
 
   return { drain };
+}
+
+export interface DrainAndEmitOptions {
+  /**
+   * The run's drainer, or `undefined` when the run has no runtime tools — in
+   * which case this is a no-op (resolves immediately without a network call).
+   */
+  drainer: RuntimeEventDrainer | undefined;
+  /**
+   * Emit one drained event on the run's single sink. Each event is stamped with
+   * `runId` and a `timestamp` (see below) before being passed here.
+   */
+  emit: (event: RuntimeToolEvent) => Promise<void> | void;
+  /** Clock for the fallback timestamp. */
+  now: () => number;
+  /** Run id stamped onto every emitted event. */
+  runId: string;
+  /**
+   * Final drain before finalize: drain-until-empty + bounded retry, and emit
+   * each event BEST-EFFORT — the run's verdict is already decided by this
+   * point, so a dead sink here must NOT throw out of the caller and flip a
+   * succeeded run to failed (a truly dead sink surfaces via finalize). In the
+   * default (intermediate) mode emit failures propagate and fail the run.
+   */
+  final?: boolean;
+}
+
+/**
+ * Drain the journal once and re-emit every pulled event on the run's sink,
+ * stamped with `runId` and a `timestamp`. The single drain+stamp+emit step
+ * shared by all three runners (pi / claude / codex) so the cadence and the
+ * best-effort-at-finalize contract cannot drift between them.
+ *
+ * Timestamp precedence: `{ timestamp: now(), ...event, runId }` — the event's
+ * OWN production-time stamp (set by `withEvents` when the sidecar journals it)
+ * wins; `now()` only fills one in if the event somehow lacks it. This keeps the
+ * canonical event time stable across engines rather than overwriting it with
+ * each runner's drain-time wall clock.
+ */
+export async function drainAndEmitInto(opts: DrainAndEmitOptions): Promise<void> {
+  const { drainer, emit, now, runId, final } = opts;
+  if (!drainer) return;
+  for (const e of await drainer.drain(final ? { final: true } : undefined)) {
+    const event: RuntimeToolEvent = { timestamp: now(), ...e, runId };
+    if (final) {
+      try {
+        await emit(event);
+      } catch {
+        /* swallowed: run outcome decided elsewhere */
+      }
+    } else {
+      await emit(event);
+    }
+  }
 }
