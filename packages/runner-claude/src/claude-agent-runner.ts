@@ -168,7 +168,20 @@ export class ClaudeAgentRunner implements Runner {
     const drainAndEmit = async (final = false): Promise<void> => {
       if (!drainer) return;
       for (const e of await drainer.drain(final ? { final: true } : undefined)) {
-        await emit({ timestamp: now(), ...(e as Record<string, unknown>), runId } as RunEvent);
+        const event = { timestamp: now(), ...(e as Record<string, unknown>), runId } as RunEvent;
+        if (final) {
+          // Best-effort: the run's verdict is already decided by this point, so
+          // a dead sink at the final drain must NOT throw out of run() and flip
+          // a succeeded run to failed (a truly dead sink surfaces via finalize).
+          // Intermediate-mode emit failures still propagate and fail the run.
+          try {
+            await emit(event);
+          } catch {
+            /* swallowed: run outcome decided elsewhere */
+          }
+        } else {
+          await emit(event);
+        }
       }
     };
 

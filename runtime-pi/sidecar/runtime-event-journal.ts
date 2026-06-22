@@ -91,8 +91,12 @@ export class RuntimeEventJournal {
 /**
  * Wrap each runtime-tool def so its handler runs ONCE, journals the canonical
  * events it produced, and returns the tool result to the agent with ONLY the
- * events sub-key removed from `_meta` (any other `_meta` key — e.g. the
- * `api_call` upstream-meta — is preserved; the `_meta` object itself is kept).
+ * events sub-key removed from `_meta`. The strip is defensive: it preserves any
+ * other `_meta` key and keeps the `_meta` object itself, so a future runtime
+ * tool that attaches additional `_meta` is unaffected. (Today only runtime-tool
+ * defs are wrapped here — integration tools like `{ns}__api_call`, which carry
+ * their own upstream `_meta`, pass through a different path and are never
+ * wrapped — so no non-events `_meta` key reaches this code yet.)
  *
  * After this wrap the events ride exclusively through the journal → drain →
  * single-sink path: no runner reads `result._meta` for runtime tools anymore,

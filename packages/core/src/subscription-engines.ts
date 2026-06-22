@@ -51,6 +51,16 @@ export interface SubscriptionEngineDef {
    * in-container (suffix-matched). Required for vend, absent for oauth.
    */
   egressAllowlist?: readonly string[];
+  /**
+   * True iff this engine materialises the structured deliverable NATIVELY (its
+   * binary emits `output` directly — e.g. the Claude SDK's `outputFormat` →
+   * `structured_output`) rather than via the platform's MCP `output` runtime
+   * tool. When set, the launcher MUST NOT serve the MCP `output` tool to the
+   * run (two output mechanisms would be ambiguous and could double-emit); the
+   * output JSON Schema still reaches the runner for the native path. Engines
+   * without this capability (codex, pi) take `output` through the MCP tool.
+   */
+  nativeOutput?: boolean;
 }
 
 /**
@@ -60,7 +70,15 @@ export interface SubscriptionEngineDef {
 export const SUBSCRIPTION_ENGINES: readonly SubscriptionEngineDef[] = [
   // Claude Agent SDK: the sidecar `/llm` gateway swaps the bearer server-side,
   // so the real token never enters the container — no egress lock needed.
-  { providerId: "claude-code", engine: "claude", label: "Claude Code", sidecarAuthMode: "oauth" },
+  {
+    providerId: "claude-code",
+    engine: "claude",
+    label: "Claude Code",
+    sidecarAuthMode: "oauth",
+    // The Claude SDK emits the structured deliverable via `outputFormat` →
+    // `structured_output`; the run must not also be offered the MCP `output`.
+    nativeOutput: true,
+  },
   {
     providerId: "codex",
     engine: "codex",
@@ -95,4 +113,18 @@ export function subscriptionEngineDef(providerId: string): SubscriptionEngineDef
 /** True iff `engine` is a subscription engine (drives a vendor's official binary). */
 export function isSubscriptionEngine(engine: RunEngine): engine is SubscriptionRunEngine {
   return engine !== "pi";
+}
+
+const NATIVE_OUTPUT_ENGINES = new Set<RunEngine>(
+  SUBSCRIPTION_ENGINES.filter((d) => d.nativeOutput).map((d) => d.engine),
+);
+
+/**
+ * True iff `engine` materialises the structured deliverable natively (see
+ * {@link SubscriptionEngineDef.nativeOutput}). The launcher uses this to decide
+ * whether to serve the MCP `output` runtime tool to a run — native-output
+ * engines must not be offered it. Pure; `"pi"` is always false.
+ */
+export function engineHasNativeOutput(engine: RunEngine): boolean {
+  return NATIVE_OUTPUT_ENGINES.has(engine);
 }

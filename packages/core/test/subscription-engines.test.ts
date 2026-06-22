@@ -4,6 +4,7 @@ import { describe, expect, it } from "bun:test";
 import {
   SUBSCRIPTION_ENGINES,
   engineForProvider,
+  engineHasNativeOutput,
   isSubscriptionEngine,
   subscriptionEngineDef,
 } from "../src/subscription-engines.ts";
@@ -49,5 +50,17 @@ describe("SUBSCRIPTION_ENGINES registry", () => {
     const ids = SUBSCRIPTION_ENGINES.map((d) => d.providerId);
     expect(new Set(ids).size).toBe(ids.length);
     for (const def of SUBSCRIPTION_ENGINES) expect(def.engine).not.toBe("pi");
+  });
+});
+
+describe("engineHasNativeOutput", () => {
+  it("is true only for engines that materialise output natively (claude)", () => {
+    // Claude emits the deliverable via the SDK's outputFormat → the launcher
+    // must NOT serve it the MCP `output` tool.
+    expect(engineHasNativeOutput("claude")).toBe(true);
+  });
+  it("is false for engines that take output through the MCP tool (codex, pi)", () => {
+    expect(engineHasNativeOutput("codex")).toBe(false);
+    expect(engineHasNativeOutput("pi")).toBe(false);
   });
 });

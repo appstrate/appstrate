@@ -32,6 +32,7 @@ import {
   buildOauthSidecarLlm,
   subscriptionEngineDef,
 } from "./engine-select.ts";
+import { engineHasNativeOutput } from "@appstrate/core/subscription-engines";
 import {
   getOrchestrator,
   type ContainerOrchestrator,
@@ -244,10 +245,13 @@ async function runPlatformContainerImpl(
       );
     }
 
-    // Claude does `output` natively (see runtimeTools note below) → strip it
-    // from the tools the sidecar serves so the model sees a single output path.
-    const sidecarRuntimeTools =
-      engine === "claude" ? plan.runtimeTools?.filter((t) => t !== "output") : plan.runtimeTools;
+    // Native-output engines (e.g. claude) materialise `output` themselves →
+    // strip it from the tools the sidecar serves so the model sees a single
+    // output path. Driven by the engine's declared capability, NOT a hardcoded
+    // engine id, so a future native-output provider needs no launcher edit.
+    const sidecarRuntimeTools = engineHasNativeOutput(engine)
+      ? plan.runtimeTools?.filter((t) => t !== "output")
+      : plan.runtimeTools;
 
     const sidecarSpec: SidecarLaunchSpec = {
       runToken: plan.runToken ?? "",
