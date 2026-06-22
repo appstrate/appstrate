@@ -50,6 +50,73 @@ describe("CodexUiStreamMapper", () => {
     expect(m.resultMeta()?.isError).toBe(true);
     expect(m.finishChunk().finishReason).toBe("error");
   });
+
+  // Real shapes captured from `codex exec --json` calling the platform MCP.
+  it("maps an mcp_tool_call (start → completed) to tool-input/-output chunks", () => {
+    const m = new CodexUiStreamMapper();
+    expect(
+      m.map({
+        type: "item.started",
+        item: {
+          id: "item_1",
+          type: "mcp_tool_call",
+          server: "platform",
+          tool: "search_operations",
+          arguments: { query: "agents", limit: 10 },
+          status: "in_progress",
+        },
+      }),
+    ).toEqual([
+      { type: "tool-input-start", toolCallId: "item_1", toolName: "search_operations" },
+      {
+        type: "tool-input-available",
+        toolCallId: "item_1",
+        toolName: "search_operations",
+        input: { query: "agents", limit: 10 },
+      },
+    ]);
+    expect(
+      m.map({
+        type: "item.completed",
+        item: {
+          id: "item_1",
+          type: "mcp_tool_call",
+          tool: "search_operations",
+          result: { content: [{ type: "text", text: "{...}" }] },
+          status: "completed",
+        },
+      }),
+    ).toEqual([
+      {
+        type: "tool-output-available",
+        toolCallId: "item_1",
+        output: { content: [{ type: "text", text: "{...}" }] },
+      },
+    ]);
+  });
+
+  it("maps a failed/cancelled mcp_tool_call to tool-output-error", () => {
+    const m = new CodexUiStreamMapper();
+    expect(
+      m.map({
+        type: "item.completed",
+        item: {
+          id: "item_4",
+          type: "mcp_tool_call",
+          tool: "invoke_operation",
+          result: null,
+          error: { message: "user cancelled MCP tool call" },
+          status: "failed",
+        },
+      }),
+    ).toEqual([
+      {
+        type: "tool-output-error",
+        toolCallId: "item_4",
+        errorText: "user cancelled MCP tool call",
+      },
+    ]);
+  });
 });
 
 describe("buildCodexPrompt", () => {

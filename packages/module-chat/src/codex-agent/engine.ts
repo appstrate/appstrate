@@ -10,10 +10,14 @@
  * onto the same AI SDK UI message stream the other engines emit
  * (see ui-stream-mapper.ts) so the chat client is engine-agnostic.
  *
- * Security posture (mirrors claude-agent):
- *   - `-s read-only`: the codex sandbox may read but never write/execute against
- *     the host — a chat must not get host mutation. It runs in a throwaway empty
- *     working directory.
+ * Security posture (mirrors claude-agent's `tools: [] + bypassPermissions`):
+ *   - The platform MCP tools are the ONLY capabilities the model gets: codex's
+ *     built-in shell tool is disabled (`--disable shell_tool`), and each MCP call
+ *     is re-checked against the caller's RBAC server-side. Codex gates its
+ *     write-capable MCP tool (`invoke_operation`) behind an approval that has no
+ *     approver in this non-interactive turn, so we bypass approvals to keep the
+ *     chat transparent. Defence in depth: in production codex runs inside the API
+ *     container (externally sandboxed) and the subprocess cwd is a throwaway dir.
  *   - The spawned binary's `CODEX_HOME/auth.json` holds only a PLACEHOLDER
  *     bearer (the turn-scoped chat-loopback token, sent verbatim by the CLI);
  *     the gateway swaps it for the real subscription token + stamps the real
@@ -245,8 +249,18 @@ export function runCodexAgentChat(input: CodexAgentChatInput): Response {
             "exec",
             "--json",
             "--skip-git-repo-check",
-            "-s",
-            "read-only",
+            // Codex gates write-capable MCP tools (e.g. `invoke_operation`) behind
+            // an approval that has no approver in this non-interactive turn — and
+            // neither `approval_policy` nor any per-server config lifts it, only the
+            // full bypass does. We pair the bypass with disabling codex's built-in
+            // shell tool so the ONLY capabilities left are our platform MCP tools,
+            // each re-checked against the caller's RBAC server-side — mirroring the
+            // Claude engine's `tools: [] + bypassPermissions`. Defence in depth: in
+            // production codex runs inside the API container (externally sandboxed)
+            // and the subprocess cwd is a throwaway empty dir.
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--disable",
+            "shell_tool",
             "-m",
             input.modelId,
             buildCodexPrompt(input.messages, input.system),
