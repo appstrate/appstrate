@@ -37,7 +37,7 @@ import {
 import { Button } from "./button.tsx";
 import { MarkdownText } from "./markdown-text.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
-import { WaitForRunToolUI, RenderHtmlToolUI, InvokeOperationToolUI } from "./tool-uis.tsx";
+import { InvokeOperationToolUI } from "./tool-uis.tsx";
 
 export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
   return (
@@ -46,8 +46,6 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
       style={{ ["--thread-max-width" as string]: "42rem" }}
     >
       {/* Register the rich tool cards (these render nothing themselves). */}
-      <WaitForRunToolUI />
-      <RenderHtmlToolUI />
       <InvokeOperationToolUI />
 
       {/* Empty: composer centered mid-screen for a strong first impression.
@@ -269,8 +267,8 @@ function ToolGroup({
 
 // Module-level so the helper's memo fingerprint keeps the group tree stable
 // across re-renders. Adjacent tool calls coalesce under "group-tools", except
-// tool UIs marked `display: "standalone"` (e.g. render_html artifacts), which
-// get an empty path and render outside the pli.
+// tool UIs marked `display: "standalone"`, which get an empty path and render
+// outside the pli.
 const groupToolCalls = groupPartByType({
   "tool-call": ["group-tools"],
   "standalone-tool-call": [],

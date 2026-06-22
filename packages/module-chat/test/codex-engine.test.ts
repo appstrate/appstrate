@@ -95,23 +95,23 @@ describe("CodexUiStreamMapper", () => {
       item: {
         id: "t1",
         type: "mcp_tool_call",
-        tool: "render_html",
-        arguments: { code: "<h1/>" },
+        tool: "describe_operation",
+        arguments: { operation_id: "runAgent" },
         status: "completed",
-        result: { content: [{ type: "text", text: '{"rendered":true}' }] },
+        result: { content: [{ type: "text", text: "{}" }] },
       },
     });
     expect(out).toEqual([
       {
         type: "tool-input-available",
         toolCallId: "t1",
-        toolName: "render_html",
-        input: { code: "<h1/>" },
+        toolName: "describe_operation",
+        input: { operation_id: "runAgent" },
       },
       {
         type: "tool-output-available",
         toolCallId: "t1",
-        output: [{ type: "text", text: '{"rendered":true}' }],
+        output: [{ type: "text", text: "{}" }],
       },
     ]);
   });

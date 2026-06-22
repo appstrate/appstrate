@@ -12,9 +12,8 @@
  *
  * Security posture:
  *   - `tools: []` disables ALL built-in tools (Bash/Edit/Write/…) — a chat must
- *     never get host execution. Only our MCP servers (platform meta-tools +
- *     render_html/wait_for_run) are exposed; `bypassPermissions` auto-approves
- *     just those.
+ *     never get host execution. Only the platform HTTP MCP (meta-tools) is
+ *     exposed; `bypassPermissions` auto-approves just those.
  *   - The spawned binary gets a CURATED env (no platform secrets), with only a
  *     placeholder bearer; the real subscription token is injected by the
  *     gateway, server-side.
@@ -26,7 +25,6 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { buildClaudeSdkEnv } from "@appstrate/core/claude-binary";
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from "ai";
 import { resolveClaudeCodeBinary } from "./binary.ts";
-import { createLocalToolsServer, type LocalToolsContext } from "./local-tools.ts";
 import { SdkUiStreamMapper, type ClaudeSdkMessage } from "./ui-stream-mapper.ts";
 import { acquireClaudeSlot } from "./concurrency.ts";
 import { chatCapacityResponse } from "../concurrency-gate.ts";
@@ -49,8 +47,6 @@ export interface ClaudeAgentChatInput {
   placeholderToken: string;
   /** Platform HTTP MCP server (meta-tools), omitted when the mcp module is off. */
   platformMcp?: { url: string; headers: Record<string, string> };
-  /** Context for the in-process tools (origin + forwarded RBAC headers). */
-  localTools: LocalToolsContext;
   /** Aborts the SDK query when the client disconnects. */
   abortSignal: AbortSignal;
   /** Maps a thrown error to a client-safe message (AI SDK masks errors by default). */
@@ -71,22 +67,19 @@ export function buildSdkEnv(
 }
 
 /**
- * Build the `mcpServers` config: always the in-process local tools, plus the
- * platform HTTP MCP when available. (Typed loosely — the SDK's McpServerConfig
- * union is broad and not re-exported conveniently.)
+ * Build the `mcpServers` config: the platform HTTP MCP when available, else
+ * none. (Typed loosely — the SDK's McpServerConfig union is broad and not
+ * re-exported conveniently.)
  */
-function buildMcpServers(input: ClaudeAgentChatInput): Record<string, unknown> {
-  const servers: Record<string, unknown> = {
-    appstrate_local: createLocalToolsServer(input.localTools),
-  };
-  if (input.platformMcp) {
-    servers.platform = {
+function buildMcpServers(input: ClaudeAgentChatInput): Record<string, unknown> | undefined {
+  if (!input.platformMcp) return undefined;
+  return {
+    platform: {
       type: "http",
       url: input.platformMcp.url,
       headers: input.platformMcp.headers,
-    };
-  }
-  return servers;
+    },
+  };
 }
 
 /**

@@ -24,7 +24,7 @@
  *
  * Tool-name parity: the SDK prefixes MCP tools as `mcp__<server>__<tool>`.
  * The `ai-sdk` path exposes them unprefixed (`search_operations`,
- * `render_html`, …). We strip the prefix so the client's tool UIs match
+ * `invoke_operation`, …). We strip the prefix so the client's tool UIs match
  * regardless of engine — see {@link stripMcpToolPrefix}.
  */
 

@@ -53,7 +53,7 @@ function sign(payload: string): string {
  * The default 60 s TTL fits the `ai-sdk` path, which re-mints on every proxy
  * call. The Claude Agent SDK path can't — it bakes the bearer into the spawned
  * binary's env once at turn start (`ANTHROPIC_AUTH_TOKEN`), and the turn can
- * run for minutes (multi-step + a blocking `wait_for_run`). It passes a longer
+ * run for minutes (multi-step + blocking run long-polls). It passes a longer
  * `ttlMs` so the token outlives the whole turn. The token stays least-privilege
  * (`llm-proxy:call` + `models:read`), process-local, and only usable on the
  * 127.0.0.1 first-party gateway.

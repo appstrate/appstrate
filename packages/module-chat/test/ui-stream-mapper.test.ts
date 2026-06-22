@@ -20,13 +20,13 @@ const ev = (event: Record<string, unknown>): ClaudeSdkMessage =>
 describe("stripMcpToolPrefix", () => {
   it("strips the mcp__<server>__ prefix", () => {
     expect(stripMcpToolPrefix("mcp__platform__search_operations")).toBe("search_operations");
-    expect(stripMcpToolPrefix("mcp__appstrate_local__render_html")).toBe("render_html");
+    expect(stripMcpToolPrefix("mcp__platform__invoke_operation")).toBe("invoke_operation");
   });
   it("preserves tool names that themselves contain __", () => {
     expect(stripMcpToolPrefix("mcp__platform__a__b")).toBe("a__b");
   });
   it("passes through non-mcp names", () => {
-    expect(stripMcpToolPrefix("wait_for_run")).toBe("wait_for_run");
+    expect(stripMcpToolPrefix("getRun")).toBe("getRun");
   });
 });
 
@@ -61,7 +61,7 @@ describe("SdkUiStreamMapper — tool call + result", () => {
         content_block: {
           type: "tool_use",
           id: "toolu_1",
-          name: "mcp__appstrate_local__render_html",
+          name: "mcp__platform__invoke_operation",
         },
       }),
       ev({
@@ -93,14 +93,14 @@ describe("SdkUiStreamMapper — tool call + result", () => {
 
     expect(chunks).toEqual([
       { type: "start-step" },
-      // tool name is normalized — the client tool UI keys on `render_html`.
-      { type: "tool-input-start", toolCallId: "toolu_1", toolName: "render_html" },
+      // tool name is normalized — the client tool UI keys on `invoke_operation`.
+      { type: "tool-input-start", toolCallId: "toolu_1", toolName: "invoke_operation" },
       { type: "tool-input-delta", toolCallId: "toolu_1", inputTextDelta: '{"code":' },
       { type: "tool-input-delta", toolCallId: "toolu_1", inputTextDelta: '"<h1>hi</h1>"}' },
       {
         type: "tool-input-available",
         toolCallId: "toolu_1",
-        toolName: "render_html",
+        toolName: "invoke_operation",
         input: { code: "<h1>hi</h1>" },
       },
       { type: "finish-step" },
@@ -312,7 +312,7 @@ describe("SdkUiStreamMapper — full turn (captured real shapes)", () => {
         content_block: {
           type: "tool_use",
           id: "toolu_42",
-          name: "mcp__appstrate_local__render_html",
+          name: "mcp__platform__invoke_operation",
         },
       }),
     );
@@ -369,12 +369,12 @@ describe("SdkUiStreamMapper — full turn (captured real shapes)", () => {
       { type: "text-start", id: "1-1" },
       { type: "text-delta", id: "1-1", delta: "Voici." },
       { type: "text-end", id: "1-1" },
-      { type: "tool-input-start", toolCallId: "toolu_42", toolName: "render_html" },
+      { type: "tool-input-start", toolCallId: "toolu_42", toolName: "invoke_operation" },
       { type: "tool-input-delta", toolCallId: "toolu_42", inputTextDelta: '{"html":"<h1>x</h1>"}' },
       {
         type: "tool-input-available",
         toolCallId: "toolu_42",
-        toolName: "render_html",
+        toolName: "invoke_operation",
         input: { html: "<h1>x</h1>" },
       },
       { type: "finish-step" },

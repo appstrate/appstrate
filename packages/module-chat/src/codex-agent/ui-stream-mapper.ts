@@ -13,7 +13,7 @@
  *        · `agent_message` (the assistant answer) → a complete text block
  *        · `reasoning`                            → a complete reasoning block
  *        · `mcp_tool_call`                        → `tool-output-available`/`-error`
- *          (the platform + appstrate_local MCP tools — see mapToolInput/Complete)
+ *          (the platform MCP tools — see mapToolInput/Complete)
  *        · other item types (command_execution, file_change, …) → skipped in
  *          chat (they belong to codex's own coding sandbox, which is read-only
  *          here and irrelevant to a conversational answer)

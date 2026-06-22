@@ -241,16 +241,6 @@ export interface CodexHttpMcpServer {
   headers?: Record<string, string>;
 }
 
-/** A stdio MCP server entry (a local subprocess codex spawns and talks to). */
-export interface CodexStdioMcpServer {
-  /** Executable codex spawns (e.g. the host's `bun`). */
-  command: string;
-  /** Argv after `command` (e.g. the MCP server script path). */
-  args: string[];
-  /** Environment for the spawned server (e.g. origin + forwarded headers). */
-  env?: Record<string, string>;
-}
-
 /**
  * Build the `config.toml` the spawned `codex` binary reads from `CODEX_HOME`
  * to discover its MCP servers. Codex's models-manager can't be reverse-proxied,
@@ -258,18 +248,15 @@ export interface CodexStdioMcpServer {
  * the same tool surface the Claude engine gets through the Agent SDK's
  * `mcpServers`.
  *
- * Two server kinds:
- *   - `platform` (streamable HTTP) — the platform meta-tools at `/api/mcp/o/:org`.
- *     Auth + scoping ride as LITERAL `http_headers` (codex 0.141 sends them
- *     verbatim; the config.toml lives in the same 0600 ephemeral `CODEX_HOME` as
- *     `auth.json`, so the forwarded credential gains no new at-rest surface).
- *   - `appstrate_local` (stdio) — the chat's two non-platform tools
- *     (`render_html` + `wait_for_run`), the parity counterpart of the Claude
- *     engine's in-process `appstrate_local` SDK server.
+ * Emits the `platform` (streamable HTTP) server — the platform meta-tools at
+ * `/api/mcp/o/:org`. Auth + scoping ride as LITERAL `http_headers` (codex 0.141
+ * sends them verbatim; the config.toml lives in the same 0600 ephemeral
+ * `CODEX_HOME` as `auth.json`, so the forwarded credential gains no new at-rest
+ * surface).
  *
- * `default_tools_approval_mode = "approve"` on each server auto-approves its
- * tools so a non-interactive `codex exec` never blocks on a tool prompt (the
- * sandbox flag still governs codex's OWN file/exec tools, independently). The
+ * `default_tools_approval_mode = "approve"` auto-approves the server's tools so
+ * a non-interactive `codex exec` never blocks on a tool prompt (the sandbox flag
+ * still governs codex's OWN file/exec tools, independently). The
  * `experimental_use_rmcp_client` / `[features]` flag is deliberately NOT emitted
  * — it is an unknown field at codex 0.141 (rejected under `--strict-config`),
  * and streamable-HTTP MCP works without it.
@@ -278,7 +265,6 @@ export interface CodexStdioMcpServer {
  */
 export function buildCodexConfigToml(opts: {
   platform?: CodexHttpMcpServer;
-  localTools?: CodexStdioMcpServer;
   /** Cap on the MCP server handshake (seconds). Default 20. */
   startupTimeoutSec?: number;
   /** Cap on a single MCP tool call (seconds). Default 120. */
@@ -305,29 +291,6 @@ export function buildCodexConfigToml(opts: {
         [
           "[mcp_servers.platform.http_headers]",
           ...headerKeys.map((k) => `${tomlBasicString(k)} = ${tomlBasicString(headers[k]!)}`),
-        ].join("\n"),
-      );
-    }
-  }
-
-  if (opts.localTools) {
-    const argsToml = `[${opts.localTools.args.map(tomlBasicString).join(", ")}]`;
-    blocks.push(
-      [
-        "[mcp_servers.appstrate_local]",
-        `command = ${tomlBasicString(opts.localTools.command)}`,
-        `args = ${argsToml}`,
-        `startup_timeout_sec = ${startup}`,
-        `default_tools_approval_mode = "approve"`,
-      ].join("\n"),
-    );
-    const env = opts.localTools.env ?? {};
-    const envKeys = Object.keys(env);
-    if (envKeys.length > 0) {
-      blocks.push(
-        [
-          "[mcp_servers.appstrate_local.env]",
-          ...envKeys.map((k) => `${tomlBasicString(k)} = ${tomlBasicString(env[k]!)}`),
         ].join("\n"),
       );
     }
@@ -536,7 +499,7 @@ export interface CodexEvent {
     type?: string;
     text?: string;
     command?: string;
-    /** mcp_tool_call: the MCP server name (e.g. "platform", "appstrate_local"). */
+    /** mcp_tool_call: the MCP server name (e.g. "platform"). */
     server?: string;
     /** mcp_tool_call: the bare tool name (no `mcp__server__` prefix). */
     tool?: string;

@@ -91,26 +91,36 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   cancelled: { label: "Annulé", cls: "text-muted-foreground" },
 };
 
+/** Platform operations that launch a run; their result carries the new run id. */
+const RUN_LAUNCH_OPS = new Set(["runAgent", "runInline"]);
+
 /**
- * Every run the assistant launched, in order, read from the thread's
- * wait_for_run calls (deduped by runId, latest status kept). Returns a JSON
- * string from the selector (stable primitive — avoids re-render loops).
+ * Every run the assistant launched, in order, discovered from the thread's
+ * `invoke_operation` calls to a run-launch operation (runAgent / runInline). The
+ * run id only exists in the call RESULT (the run is created server-side), and
+ * the result shape differs per engine (MCP CallToolResult / Anthropic
+ * tool_result / codex structured_content), so we match the id off the
+ * stringified result — engine-agnostic. Live status comes from `fetchRun` in the
+ * card, not here. Returns a JSON string from the selector (stable primitive —
+ * avoids re-render loops).
  */
 export function useThreadRuns(): { runId: string; status?: string }[] {
   const encoded = useAuiState((s) => {
     const messages = s.thread.messages ?? [];
-    const status = new Map<string, string | undefined>();
     const order: string[] = [];
+    const seen = new Set<string>();
     for (const m of messages) {
       for (const p of m?.content ?? []) {
-        if (!p || p.type !== "tool-call" || p.toolName !== "wait_for_run") continue;
-        const runId = (p.args as { run_id?: string } | undefined)?.run_id;
-        if (!runId) continue;
-        if (!status.has(runId)) order.push(runId);
-        status.set(runId, (p.result as { status?: string } | undefined)?.status);
+        if (!p || p.type !== "tool-call" || p.toolName !== "invoke_operation") continue;
+        const opId = (p.args as { operation_id?: string } | undefined)?.operation_id;
+        if (!opId || !RUN_LAUNCH_OPS.has(opId)) continue;
+        const runId = /run_[A-Za-z0-9]+/.exec(JSON.stringify(p.result ?? ""))?.[0];
+        if (!runId || seen.has(runId)) continue;
+        seen.add(runId);
+        order.push(runId);
       }
     }
-    return JSON.stringify(order.map((runId) => ({ runId, status: status.get(runId) })));
+    return JSON.stringify(order.map((runId) => ({ runId })));
   });
   return JSON.parse(encoded) as { runId: string; status?: string }[];
 }

@@ -30,7 +30,6 @@ import { Thread } from "./thread.tsx";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { makeThreadListAdapter } from "./thread-list-adapter.tsx";
 import { ModelSelect, fetchModels, type OrgModelOption } from "./model-select.tsx";
-import { ArtifactPanelContext, ArtifactPanel, type Artifact } from "./artifact-panel.tsx";
 import { AgentRunPanel, useThreadRuns } from "./agent-run-panel.tsx";
 
 export interface ChatContext {
@@ -183,17 +182,10 @@ export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
   // into a left drawer toggled from the card header.
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Right rail: closed by default — opens on the header toggle, when an agent
-  // run goes active (see AutoOpenAgentPanel), or when an artifact opens.
+  // Right rail: closed by default — opens on the header toggle or when an agent
+  // run goes active (see AutoOpenAgentPanel).
   const [panelCollapsed, setPanelCollapsed] = useState(true);
-  const [artifact, setArtifact] = useState<Artifact | null>(null);
   const openPanel = useCallback(() => setPanelCollapsed(false), []);
-  // Stable identity: it's passed as the ArtifactPanelContext value, so a fresh
-  // closure each render would re-render every consumer.
-  const openArtifact = useCallback((a: Artifact) => {
-    setArtifact(a);
-    setPanelCollapsed(false);
-  }, []);
 
   const [models, setModels] = useState<OrgModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(() =>
@@ -246,96 +238,89 @@ export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <ArtifactPanelContext.Provider value={openArtifact}>
-        {/* Auto-opens the rail when the conversation launches an agent. */}
-        <AutoOpenAgentPanel onActiveRun={openPanel} />
-        {/* One continuous surface: sidebar · chat · rail share the same
+      {/* Auto-opens the rail when the conversation launches an agent. */}
+      <AutoOpenAgentPanel onActiveRun={openPanel} />
+      {/* One continuous surface: sidebar · chat · rail share the same
             background, separated by hairline borders (no floating cards). */}
-        <div className="bg-background flex h-full w-full">
-          <aside className="hidden w-64 shrink-0 flex-col border-r md:flex">
-            <ThreadList />
-          </aside>
+      <div className="bg-background flex h-full w-full">
+        <aside className="hidden w-64 shrink-0 flex-col border-r md:flex">
+          <ThreadList />
+        </aside>
 
-          {/* Mobile: thread-list drawer (closes on backdrop click or selection) */}
-          {mobileOpen && (
-            <div className="fixed inset-0 z-40 md:hidden">
-              <div
-                className="absolute inset-0 bg-black/40"
-                onClick={() => setMobileOpen(false)}
-                aria-hidden
-              />
-              <aside
-                className="bg-background absolute inset-y-0 left-0 flex w-72 max-w-[85%] flex-col border-r shadow-xl"
-                onClickCapture={(e) => {
-                  if ((e.target as HTMLElement).closest("button")) setMobileOpen(false);
-                }}
-              >
-                <ThreadList />
-              </aside>
+        {/* Mobile: thread-list drawer (closes on backdrop click or selection) */}
+        {mobileOpen && (
+          <div className="fixed inset-0 z-40 md:hidden">
+            <div
+              className="absolute inset-0 bg-black/40"
+              onClick={() => setMobileOpen(false)}
+              aria-hidden
+            />
+            <aside
+              className="bg-background absolute inset-y-0 left-0 flex w-72 max-w-[85%] flex-col border-r shadow-xl"
+              onClickCapture={(e) => {
+                if ((e.target as HTMLElement).closest("button")) setMobileOpen(false);
+              }}
+            >
+              <ThreadList />
+            </aside>
+          </div>
+        )}
+
+        {/* Chat column */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+            <button
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label="Conversations"
+              className="hover:bg-accent -ml-1 rounded-md p-1.5 md:hidden"
+            >
+              <PanelLeftIcon className="size-5" />
+            </button>
+            {/* Active conversation title + actions (rename/delete) */}
+            <div className="min-w-0 flex-1">
+              <ActiveConversationTitle />
+            </div>
+            <button
+              type="button"
+              onClick={() => setPanelCollapsed((v) => !v)}
+              aria-label={panelCollapsed ? "Ouvrir le panneau" : "Fermer le panneau"}
+              title={panelCollapsed ? "Ouvrir le panneau" : "Fermer le panneau"}
+              className="text-muted-foreground hover:text-foreground hover:bg-accent hidden rounded-md p-1.5 lg:inline-flex"
+            >
+              <PanelRightIcon className="size-5" />
+            </button>
+          </div>
+          {toolsAvailable === false && (
+            <div
+              role="status"
+              className="flex shrink-0 items-center gap-2 border-b bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-400"
+            >
+              <InfoIcon className="size-3.5 shrink-0" />
+              <span>
+                Aucun outil disponible — le module <code>mcp</code> n'est pas actif. Le chat répond
+                en conversation simple (pas d'agents, runs ni recherche).
+              </span>
             </div>
           )}
-
-          {/* Chat column */}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-              <button
-                type="button"
-                onClick={() => setMobileOpen(true)}
-                aria-label="Conversations"
-                className="hover:bg-accent -ml-1 rounded-md p-1.5 md:hidden"
-              >
-                <PanelLeftIcon className="size-5" />
-              </button>
-              {/* Active conversation title + actions (rename/delete) */}
-              <div className="min-w-0 flex-1">
-                <ActiveConversationTitle />
-              </div>
-              <button
-                type="button"
-                onClick={() => setPanelCollapsed((v) => !v)}
-                aria-label={panelCollapsed ? "Ouvrir le panneau" : "Fermer le panneau"}
-                title={panelCollapsed ? "Ouvrir le panneau" : "Fermer le panneau"}
-                className="text-muted-foreground hover:text-foreground hover:bg-accent hidden rounded-md p-1.5 lg:inline-flex"
-              >
-                <PanelRightIcon className="size-5" />
-              </button>
-            </div>
-            {toolsAvailable === false && (
-              <div
-                role="status"
-                className="flex shrink-0 items-center gap-2 border-b bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-400"
-              >
-                <InfoIcon className="size-3.5 shrink-0" />
-                <span>
-                  Aucun outil disponible — le module <code>mcp</code> n'est pas actif. Le chat
-                  répond en conversation simple (pas d'agents, runs ni recherche).
-                </span>
-              </div>
-            )}
-            <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
-              <Thread
-                composerSlot={
-                  <ModelSelect models={models} selectedId={selectedModel} onSelect={selectModel} />
-                }
-              />
-            </main>
-          </div>
-
-          {/* Right rail (desktop only): an explicitly-opened artifact wins;
-              otherwise the launched agent's run panel. Hidden until opened. */}
-          {!panelCollapsed &&
-            (artifact ? (
-              <div className="hidden w-[44%] max-w-[720px] min-w-[380px] shrink-0 border-l lg:flex">
-                <ArtifactPanel artifact={artifact} onClose={() => setArtifact(null)} />
-              </div>
-            ) : (
-              <AgentRunPanel
-                getHeaders={getHeaders}
-                railClass="hidden w-80 shrink-0 flex-col border-l lg:flex"
-              />
-            ))}
+          <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            <Thread
+              composerSlot={
+                <ModelSelect models={models} selectedId={selectedModel} onSelect={selectModel} />
+              }
+            />
+          </main>
         </div>
-      </ArtifactPanelContext.Provider>
+
+        {/* Right rail (desktop only): the launched agent's run panel.
+              Hidden until opened. */}
+        {!panelCollapsed && (
+          <AgentRunPanel
+            getHeaders={getHeaders}
+            railClass="hidden w-80 shrink-0 flex-col border-l lg:flex"
+          />
+        )}
+      </div>
     </AssistantRuntimeProvider>
   );
 }

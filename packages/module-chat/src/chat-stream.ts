@@ -15,38 +15,37 @@
  */
 
 import type { Context } from "hono";
-import { streamText, convertToModelMessages, stepCountIs, tool, type UIMessage } from "ai";
+import { streamText, convertToModelMessages, stepCountIs, type UIMessage } from "ai";
 import { z } from "zod";
 import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
 import { logger } from "./logger.ts";
 import { listModels, pickModel, modelFromFamily, resolveDefaultApplicationId } from "./llm.ts";
 import { openPlatformMcp } from "./platform-mcp.ts";
-import { createWaitForRunTool } from "./wait-for-run.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
 import { engineForProvider } from "@appstrate/core/subscription-engines";
 import { runClaudeAgentChat } from "./claude-agent/engine.ts";
 import { runCodexAgentChat } from "./codex-agent/engine.ts";
-import { RENDER_HTML_DESCRIPTION, renderHtmlInputShape } from "./render-html-spec.ts";
 
 const MAX_STEPS = 16;
 
 // Heading that fences the generated operation index at the tail of the platform
 // MCP server instructions (emitted by apps/api/src/modules/mcp/router.ts). We
 // split on this exact literal to drop the index — several KB re-sent on every
-// step — for providers where it doesn't pay: Mistral (no prompt caching) and
-// the Codex engine (no platform tools wired, so the index is dead weight).
-// Cached providers (Claude SDK, Anthropic via cache_control, OpenAI auto-prefix)
-// keep it. If this literal drifts from the server's, the index simply stays —
-// degraded cost, never a failure.
+// step — for providers without a prompt cache, where it would be re-sent
+// uncached every step: Mistral and the Codex engine (the codex CLI is a fresh
+// subprocess per turn, so nothing is cached). Cached providers (Claude SDK,
+// Anthropic via cache_control, OpenAI auto-prefix) keep it. If this literal
+// drifts from the server's, the index simply stays — degraded cost, never a
+// failure.
 const OPERATION_INDEX_HEADING = "## Operation index";
 
 /**
- * Strip the trailing operation index from the system prompt for providers where
- * it isn't worth its tokens: the Codex engine (no platform tools, so the index
- * is unusable) and Mistral (no prompt caching, so the multi-KB index would be
- * re-sent uncached on every step). Everyone else keeps it. The agent always has
- * search_operations as a fallback when the index is absent.
+ * Strip the trailing operation index from the system prompt for providers
+ * without a prompt cache, where the multi-KB index would be re-sent uncached on
+ * every step: the Codex engine (fresh subprocess per turn) and Mistral. Everyone
+ * else keeps it. Tools are unaffected — the agent always has search_operations
+ * for discovery when the index is absent.
  */
 export function applyOperationIndexPolicy(
   system: string,
@@ -63,36 +62,22 @@ export function applyOperationIndexPolicy(
 /**
  * TTL for the engine path's loopback bearer. The Agent SDK bakes it into the
  * spawned binary's env once, so it must outlive the whole turn (up to
- * MAX_STEPS turns, each able to block on a `wait_for_run` long-poll). 30 min
+ * MAX_STEPS turns, each able to long-poll a run's status for ~55 s). 30 min
  * is a generous ceiling for a single interactive turn.
  */
 const ENGINE_LOOPBACK_TTL_MS = 30 * 60_000;
 
 const SYSTEM_PROMPT = `You are Appstrate's assistant. You help the user operate their Appstrate instance — discovering and running agents, inspecting runs, scheduling, searching their documents — through the available tools.
 
-Use the tools to ground every action: search for the right operation, read its schema, then invoke it. Never invent an operationId or argument shape. Runs are asynchronous — after triggering one, call \`wait_for_run\` with the returned runId and let it block until completion; never poll getRun in a loop yourself. Cite what the tools return; do not fabricate results.
+Use the tools to ground every action: search for the right operation, read its schema, then invoke it. Never invent an operationId or argument shape. Runs are asynchronous — after triggering one, call the run-get operation with \`query: { wait: true }\` to long-poll the platform until the run is terminal (it returns after ~55s; if still running, call it again); never busy-poll in a tight loop yourself. Cite what the tools return; do not fabricate results.
 
-When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.
-
-When the best answer is a self-contained visual — a chart, a diagram, a mockup, a small interactive demo — call \`render_html\` with one complete HTML document (inline CSS/JS only; no external network). It renders sandboxed in the user's browser as a live artifact. Use it for things worth *seeing*, not for prose or code the user just wants to read.`;
+When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.`;
 
 // Fallback when the platform MCP module isn't reachable (e.g. `mcp` absent
 // from MODULES). The chat keeps working for plain conversation — it just has
 // no instance tools — so the prompt drops the tool-grounding instructions and
 // tells the model to be upfront about the limitation.
 const NO_TOOLS_SYSTEM_PROMPT = `You are Appstrate's assistant. Right now your instance tools are unavailable because the platform MCP module is not active, so you cannot search operations, run agents, inspect runs, or schedule. Answer the user's questions directly and conversationally. If the user asks for an action that needs those tools, say plainly that tools are disabled until the \`mcp\` module is enabled, rather than pretending to act.`;
-
-/**
- * Client-rendered artifact tool. The `execute` is a no-op ack so the model
- * keeps streaming after the call; the HTML lives in the call args and the
- * browser renders it sandboxed (see RenderHtmlToolUI). No server work, no
- * Appstrate capability — pure front rendering.
- */
-const renderHtmlTool = tool({
-  description: RENDER_HTML_DESCRIPTION,
-  inputSchema: z.object(renderHtmlInputShape),
-  execute: async () => ({ rendered: true }),
-});
 
 // The client (assistant-ui / useChat) posts the full thread plus optional
 // session/model/context extras. `messages` are UIMessages; we keep validation
@@ -143,7 +128,7 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   // the caller's own credentials (full RBAC fidelity on tool calls).
   //
   // The token lives 60 s, but a turn fans out into many inference calls over
-  // up to MAX_STEPS steps (with wait_for_run blocking for minutes between
+  // up to MAX_STEPS steps (with a run long-poll blocking for ~55s between
   // them), so we hand resolveModel a *minter* — the provider re-mints a fresh
   // bearer on every proxy call. The static header below is for the one-shot
   // calls (listModels) that fire immediately on this same line.
@@ -228,7 +213,6 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
         { ttlMs: ENGINE_LOOPBACK_TTL_MS },
       ),
       platformMcp,
-      localTools: { origin, headers: mcpHeaders },
       abortSignal: c.req.raw.signal,
       onError: clientErrorMessage,
     });
@@ -257,7 +241,6 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
         { ttlMs: ENGINE_LOOPBACK_TTL_MS },
       ),
       platformMcp,
-      localTools: { origin, headers: mcpHeaders },
       abortSignal: c.req.raw.signal,
       onError: clientErrorMessage,
     });
@@ -288,13 +271,7 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
         },
         ...(await convertToModelMessages(messages)),
       ],
-      tools: mcp
-        ? {
-            ...mcp.tools,
-            wait_for_run: createWaitForRunTool(mcp.tools),
-            render_html: renderHtmlTool,
-          }
-        : { render_html: renderHtmlTool },
+      tools: mcp ? mcp.tools : undefined,
       stopWhen: stepCountIs(MAX_STEPS),
       abortSignal: c.req.raw.signal,
       onStepFinish: ({ toolCalls, toolResults, finishReason, usage }) => {

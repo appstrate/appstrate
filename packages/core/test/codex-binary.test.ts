@@ -327,28 +327,7 @@ describe("buildCodexConfigToml", () => {
     expect(toml).toContain('"x-application-id" = "app_1"');
   });
 
-  it("emits a stdio appstrate_local server with command/args/env", () => {
-    const toml = buildCodexConfigToml({
-      localTools: {
-        command: "/usr/bin/bun",
-        args: ["/abs/local-tools-stdio.ts"],
-        env: {
-          APPSTRATE_ORIGIN: "http://127.0.0.1:3000",
-          APPSTRATE_MCP_HEADERS: '{"Cookie":"s=1"}',
-        },
-      },
-    });
-    expect(toml).toContain("[mcp_servers.appstrate_local]");
-    expect(toml).toContain('command = "/usr/bin/bun"');
-    expect(toml).toContain('args = ["/abs/local-tools-stdio.ts"]');
-    expect(toml).toContain('default_tools_approval_mode = "approve"');
-    expect(toml).toContain("[mcp_servers.appstrate_local.env]");
-    expect(toml).toContain('"APPSTRATE_ORIGIN" = "http://127.0.0.1:3000"');
-    // Embedded JSON value: the quotes inside must be TOML-escaped.
-    expect(toml).toContain('"APPSTRATE_MCP_HEADERS" = "{\\"Cookie\\":\\"s=1\\"}"');
-  });
-
-  it("escapes backslashes and quotes in values", () => {
+  it("escapes backslashes and quotes in header values", () => {
     const toml = buildCodexConfigToml({
       platform: { url: "http://x/y", headers: { H: 'a"b\\c' } },
     });
@@ -356,10 +335,7 @@ describe("buildCodexConfigToml", () => {
   });
 
   it("never emits the rmcp [features] flag (unknown at codex 0.141)", () => {
-    const toml = buildCodexConfigToml({
-      platform: { url: "http://x/y" },
-      localTools: { command: "bun", args: ["s.ts"] },
-    });
+    const toml = buildCodexConfigToml({ platform: { url: "http://x/y" } });
     expect(toml).not.toContain("experimental_use_rmcp_client");
     expect(toml).not.toContain("[features]");
   });

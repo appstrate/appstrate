@@ -40,8 +40,8 @@ interface ResolveArgs {
   /**
    * Re-mints the loopback bearer on every proxy call. The `headers` bearer is
    * minted once and expires after 60 s — but a single turn fans out into many
-   * inference calls across up to `MAX_STEPS` steps, with `wait_for_run` able to
-   * block for minutes in between. Without a fresh mint per call, a long turn
+   * inference calls across up to `MAX_STEPS` steps, with a run long-poll able to
+   * block for ~55s in between. Without a fresh mint per call, a long turn
    * hits the proxy with an expired token → 401 Unauthorized mid-stream.
    */
   mintAuth: () => string;
