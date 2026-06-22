@@ -67,6 +67,7 @@ import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
 import { handleClaudeCodeSdkGateway } from "../services/llm-proxy/claude-code-sdk-gateway.ts";
+import { listSubscriptionEngines, type RunEngine } from "@appstrate/core/subscription-engines";
 import type { LlmProxyAdapter } from "../services/llm-proxy/types.ts";
 import { buildLlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
@@ -119,26 +120,44 @@ export function createLlmProxyRouter() {
     );
   }
 
-  // Claude Code subscription SDK gateway — LOOPBACK ONLY. The chat module's
-  // official Claude Agent SDK points `ANTHROPIC_BASE_URL` here; the gateway
-  // injects the real subscription token without forging any client identity
-  // (the SDK's own binary signs the legit Claude Code fingerprint). A wildcard
-  // path forwards whatever upstream subpath the SDK appends
-  // (`/v1/messages`, …). The bare-preset route catches the SDK's connectivity
-  // probe. Restricted to the chat loopback caller (not dashboard tokens) so the
-  // subscription can't be driven as a bare non-official-client proxy. See
-  // services/llm-proxy/claude-code-sdk-gateway.ts.
-  const sdkGateway = async (c: Context<AppEnv>): Promise<Response> => {
-    assertLoopbackOnly(c.get("authMethod"), "Claude Code SDK gateway");
-    return handleClaudeCodeSdkGateway(c, limits.max_request_bytes);
+  // Subscription SDK gateways — credential-injection proxies the chat points an
+  // official vendor binary at (e.g. the Claude Agent SDK's `ANTHROPIC_BASE_URL`).
+  // Unlike the protocol adapters above they forge nothing — the binary signs its
+  // own client identity; we only swap the placeholder bearer for the real
+  // subscription token, server-side.
+  //
+  // Mounted DATA-DRIVEN from the contributed subscription-engine registry: with
+  // no subscription module loaded the registry is empty and NO gateway route
+  // exists. The route PATH derives from the provider id, so apps/api hardcodes no
+  // vendor slug. Only `oauth`-delivery engines get a chat gateway (`vend` engines
+  // — codex — are agent-only, no chat surface). The handler stays platform
+  // llm-proxy infra (peer of the protocol adapters); this map binds an engine to
+  // its handler, the one unavoidable vendor reference (the handler is our code).
+  // LOOPBACK ONLY — driven only by the chat loopback bearer (not API keys /
+  // dashboard tokens), so a subscription can't be spent as a bare proxy.
+  const subscriptionGateways: Partial<
+    Record<RunEngine, (c: Context<AppEnv>, maxBytes: number) => Promise<Response>>
+  > = {
+    claude: handleClaudeCodeSdkGateway,
   };
-  for (const path of ["/claude-code-sdk/:presetId/*", "/claude-code-sdk/:presetId"]) {
-    router.all(
-      path,
-      rateLimit(limits.rate_per_min),
-      requirePermission("llm-proxy", "call"),
-      sdkGateway,
-    );
+  for (const def of listSubscriptionEngines()) {
+    if (def.sidecarAuthMode !== "oauth") continue;
+    const handler = subscriptionGateways[def.engine];
+    if (!handler) continue;
+    const gateway = async (c: Context<AppEnv>): Promise<Response> => {
+      assertLoopbackOnly(c.get("authMethod"), `${def.label} SDK gateway`);
+      return handler(c, limits.max_request_bytes);
+    };
+    // Wildcard forwards whatever upstream subpath the SDK appends (`/v1/messages`,
+    // …); the bare-preset route catches the SDK's connectivity probe.
+    for (const path of [`/${def.providerId}-sdk/:presetId/*`, `/${def.providerId}-sdk/:presetId`]) {
+      router.all(
+        path,
+        rateLimit(limits.rate_per_min),
+        requirePermission("llm-proxy", "call"),
+        gateway,
+      );
+    }
   }
 
   return router;

@@ -109,6 +109,16 @@ export function resetSubscriptionEnginesForTesting(): void {
 }
 
 /**
+ * All contributed subscription-engine definitions (insertion order). Lets the
+ * platform mount its subscription surfaces data-driven from what the active
+ * modules registered — with no subscription module loaded this is empty, so the
+ * platform mounts nothing vendor-specific.
+ */
+export function listSubscriptionEngines(): readonly SubscriptionEngineDef[] {
+  return [...BY_PROVIDER.values()];
+}
+
+/**
  * The engine for a provider id: its contributed subscription engine, or `"pi"`
  * for every API-key / unregistered provider. Pure read.
  */

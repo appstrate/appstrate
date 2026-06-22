@@ -72,8 +72,9 @@ export function createConcurrencyGate(
 /**
  * RFC 9457 `429` returned (instead of a stream) when a chat engine is at its
  * subprocess cap, so the client backs off rather than the instance forking
- * unbounded binaries. Shared by both subscription engines — only the service
- * label in the detail differs.
+ * unbounded binaries. Engine-agnostic — the service label in the detail is the
+ * only per-engine variation (today only the Claude subscription engine spawns a
+ * capped subprocess; the ai-sdk path is in-process).
  */
 export function chatCapacityResponse(serviceLabel: string): Response {
   const retryAfterSeconds = 5;
