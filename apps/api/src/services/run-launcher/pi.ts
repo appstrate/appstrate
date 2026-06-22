@@ -244,6 +244,11 @@ async function runPlatformContainerImpl(
       );
     }
 
+    // Claude does `output` natively (see runtimeTools note below) → strip it
+    // from the tools the sidecar serves so the model sees a single output path.
+    const sidecarRuntimeTools =
+      engine === "claude" ? plan.runtimeTools?.filter((t) => t !== "output") : plan.runtimeTools;
+
     const sidecarSpec: SidecarLaunchSpec = {
       runToken: plan.runToken ?? "",
       proxyUrl: plan.proxyUrl ?? undefined,
@@ -268,8 +273,15 @@ async function runPlatformContainerImpl(
       // hosts as in-process MCP tools — unified with the integration tool
       // surface. The no-sidecar path reads the same selection from the
       // bundle manifest instead.
-      ...(plan.runtimeTools && plan.runtimeTools.length > 0
-        ? { runtimeTools: plan.runtimeTools }
+      //
+      // Claude takes the structured deliverable NATIVELY (SDK `outputFormat` →
+      // `structured_output`), so it must NOT also be offered an MCP `output`
+      // tool — two output mechanisms would be ambiguous for the model and the
+      // runner would drain a journaled `output.emitted` on top of the native
+      // one. Strip `output` from what the sidecar serves for claude runs; the
+      // schema still reaches the runner via OUTPUT_SCHEMA for the native path.
+      ...(sidecarRuntimeTools && sidecarRuntimeTools.length > 0
+        ? { runtimeTools: sidecarRuntimeTools }
         : {}),
     };
 

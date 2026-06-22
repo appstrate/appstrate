@@ -122,7 +122,7 @@ export function createRuntimeEventDrainer(
     return batch.events;
   }
 
-  async function drain(opts?: DrainOptions): Promise<RuntimeToolEvent[]> {
+  async function runDrain(opts?: DrainOptions): Promise<RuntimeToolEvent[]> {
     if (!opts?.final) {
       // Intermediate: a single best-effort pull. A failure is retried on the
       // next boundary's drain — never throw, never block the stream.
@@ -151,6 +151,26 @@ export function createRuntimeEventDrainer(
       if (events.length === 0) return collected;
       collected.push(...events);
     }
+  }
+
+  // Serialize drains. The cursor is read-then-advanced inside `runDrain`, and
+  // the endpoint is non-consuming, so two overlapping `drain()` calls would
+  // both fetch from the same cursor and emit the same events twice (the Pi
+  // runner forwards tool calls that the SDK may dispatch in parallel). Chain
+  // every call onto the previous one so only one drain is ever in flight.
+  let tail: Promise<unknown> = Promise.resolve();
+  function drain(opts?: DrainOptions): Promise<RuntimeToolEvent[]> {
+    const result = tail.then(
+      () => runDrain(opts),
+      () => runDrain(opts),
+    );
+    // The chain link must never reject (a prior drain's failure shouldn't
+    // poison the next); `runDrain` already never throws, but guard anyway.
+    tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   return { drain };

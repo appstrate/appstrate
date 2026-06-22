@@ -109,6 +109,35 @@ describe("createRuntimeEventDrainer — final mode", () => {
   });
 });
 
+describe("createRuntimeEventDrainer — concurrent drains", () => {
+  it("serializes overlapping drains so no event is emitted twice", async () => {
+    // A slow fetch that resolves on the next microtask-ish tick, so two drains
+    // kicked off together would overlap if not serialized. The journal yields
+    // a, b on the first read after cursor 0, then nothing.
+    let calls = 0;
+    const fn = (async (url: string | URL) => {
+      const after = Number(new URL(String(url)).searchParams.get("after"));
+      calls += 1;
+      await sleep(5);
+      const body =
+        after === 0 ? { events: [ev("a"), ev("b")], cursor: 2 } : { events: [], cursor: 2 };
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof fetch;
+    const d = createRuntimeEventDrainer({ url: "http://sidecar:8088/runtime-events", fetch: fn });
+
+    const [first, second] = await Promise.all([d.drain(), d.drain()]);
+    const messages = [...first, ...second].map((e) => (e as Record<string, unknown>).message);
+    // a, b appear exactly once across both drains — the second saw the advanced
+    // cursor, not the same batch.
+    expect(messages.sort()).toEqual(["a", "b"]);
+    expect(calls).toBe(2);
+  });
+});
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 describe("createRuntimeEventDrainer — truncation signal", () => {
   it("logs runtime_events_truncated when the journal evicted past the cursor", async () => {
     const { fn } = scriptedFetch([{ events: [ev("late")], cursor: 12, firstSeq: 5 }]);
