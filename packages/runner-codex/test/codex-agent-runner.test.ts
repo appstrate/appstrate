@@ -223,37 +223,30 @@ describe("CodexAgentRunner.run", () => {
     expect(configToml).toContain('"Host" = "sidecar"');
   });
 
-  it("reconstructs a runtime tool's canonical RunEvent from the observed mcp_tool_call args", async () => {
-    // Codex calls the sidecar-served `log` tool; its `--json` stream carries the
-    // args but drops the result `_meta`. The runner replays the shared pure
-    // handler on the args to emit `log.written` on the run's sink.
+  it("emits journaled runtime events drained from the sidecar with the run id stamped", async () => {
+    // The sidecar executes `log` once and journals `log.written`; the runner
+    // drains the journal at a step boundary and re-emits on its single sink.
     const child: CodexChild = {
       stdout: ndjsonStream([
         JSON.stringify({
-          type: "item.started",
-          item: {
-            id: "t0",
-            type: "mcp_tool_call",
-            tool: "log",
-            arguments: { level: "info", message: "hello from codex" },
-            status: "in_progress",
-          },
-        }),
-        JSON.stringify({
           type: "item.completed",
-          item: {
-            id: "t0",
-            type: "mcp_tool_call",
-            tool: "log",
-            status: "completed",
-            result: { content: [{ type: "text", text: "Logged [info]: hello from codex" }] },
-          },
+          item: { type: "mcp_tool_call", tool: "log", status: "completed" },
         }),
         JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }),
       ]),
       stderr: emptyStream(),
       exited: Promise.resolve(0),
       kill() {},
+    };
+    let finalDrained = false;
+    let yielded = false;
+    const drainer = {
+      async drain(opts?: { final?: boolean }) {
+        if (opts?.final) finalDrained = true;
+        if (yielded) return [];
+        yielded = true;
+        return [{ type: "log.written", level: "info", message: "hello from codex" }] as never;
+      },
     };
     const h = makeSink();
     const runner = new CodexAgentRunner({
@@ -263,7 +256,7 @@ describe("CodexAgentRunner.run", () => {
       credentialUrl: "http://sidecar:8080/credential-vend",
       cwd: "/workspace",
       sidecarMcp: { url: "http://sidecar:8080/mcp" },
-      runtimeTools: ["log"],
+      drainer,
       fetchFn: vendFetch({ access_token: "tok" }),
       spawn: () => child,
       now: () => 1_700_000_000_000,
@@ -277,26 +270,22 @@ describe("CodexAgentRunner.run", () => {
     expect(logged?.message).toBe("hello from codex");
     expect(logged?.level).toBe("info");
     expect(logged?.runId).toBe("run_1");
-    // The shared handler stamps its own production timestamp (Date.now()).
     expect(typeof logged?.timestamp).toBe("number");
+    // The final drain (drain-until-empty) runs before finalize.
+    expect(finalDrained).toBe(true);
   });
 
-  it("does not reconstruct an event for a failed runtime tool call", async () => {
+  it("runs without a drainer (no runtime tools) and never reads result _meta", async () => {
     const child: CodexChild = {
       stdout: ndjsonStream([
         JSON.stringify({
-          type: "item.started",
+          type: "item.completed",
           item: {
-            id: "t0",
             type: "mcp_tool_call",
             tool: "log",
-            arguments: { level: "info", message: "x" },
-            status: "in_progress",
+            status: "completed",
+            result: { content: [], _meta: { "dev.appstrate/events": [{ type: "log.written" }] } },
           },
-        }),
-        JSON.stringify({
-          type: "item.completed",
-          item: { id: "t0", type: "mcp_tool_call", tool: "log", status: "failed" },
         }),
         JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1 } }),
       ]),
@@ -312,11 +301,12 @@ describe("CodexAgentRunner.run", () => {
       credentialUrl: "http://sidecar:8080/credential-vend",
       cwd: "/workspace",
       sidecarMcp: { url: "http://sidecar:8080/mcp" },
-      runtimeTools: ["log"],
       fetchFn: vendFetch({ access_token: "tok" }),
       spawn: () => child,
     });
     await runner.run({ bundle, context: ctx, eventSink: h.sink });
+    // No drainer wired and `_meta` is never inspected → no runtime event surfaces.
     expect(h.events.some((e) => e.type === "log.written")).toBe(false);
+    expect(h.result?.status).toBe("success");
   });
 });

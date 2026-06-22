@@ -52,11 +52,7 @@ import {
   type CodexHttpMcpServer,
   type VendedCodexCredential,
 } from "@appstrate/core/codex-binary";
-import {
-  buildRuntimeToolDefs,
-  reEmitRuntimeToolEvents,
-  type RuntimeToolDef,
-} from "@appstrate/core/runtime-tool-defs";
+import { drainAndEmitInto, type RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { CodexRunEventMapper, computeCodexCost, type CodexModelCost } from "./run-event-mapper.ts";
 
@@ -99,16 +95,14 @@ export interface CodexAgentRunnerOptions {
    */
   sidecarMcp?: CodexHttpMcpServer;
   /**
-   * Agent-selected runtime tools (`manifest.runtime_tools`) — the SAME set the
-   * sidecar serves over `/mcp`. The runner re-derives each runtime tool's
-   * canonical RunEvent locally from the observed `mcp_tool_call` args (codex's
-   * `exec --json` stream drops the MCP result `_meta` the events ride in, so —
-   * unlike Pi/Claude — the runner cannot re-emit from the result; it replays the
-   * shared pure handler instead). Empty/absent → no runtime tools.
+   * Runtime-event drainer (`@appstrate/core/runtime-event-drain`). The sidecar
+   * executes each runtime tool (log/note/pin/report/output) ONCE and journals
+   * its canonical events; this runner drains them at each NDJSON step boundary
+   * (codex's `exec --json` stream never surfaces the MCP result `_meta` the
+   * events would otherwise ride in) and re-emits on the run's single sink.
+   * Omit when the run has no runtime tools (nothing to drain).
    */
-  runtimeTools?: readonly string[];
-  /** Output JSON Schema (when the agent declares `output.schema`) — drives the `output` runtime tool. */
-  outputSchema?: Record<string, unknown> | null;
+  drainer?: RuntimeEventDrainer;
   /** Per-million-token cost rates for equivalent-cost reporting; cost is 0 when absent. */
   modelCost?: CodexModelCost | null;
   /** Extra curated env merged into the spawned binary's environment. */
@@ -170,20 +164,18 @@ export class CodexAgentRunner implements Runner {
 
     const mapper = new CodexRunEventMapper(runId, now);
 
-    // Runtime tools (log/note/pin/report/output) the sidecar also serves over
-    // `/mcp`: the runner replays each one's shared PURE handler on the observed
-    // call args to reconstruct the canonical RunEvent codex drops, then emits it
-    // on the run's single sink (see `reemitRuntimeTool`). Built once per run.
-    const runtimeDefs = new Map<string, RuntimeToolDef>();
-    if (this.opts.runtimeTools?.length || this.opts.outputSchema) {
-      for (const def of buildRuntimeToolDefs({
-        ...(this.opts.runtimeTools ? { runtimeTools: this.opts.runtimeTools } : {}),
-        outputSchema: this.opts.outputSchema ?? null,
-      })) {
-        runtimeDefs.set(def.descriptor.name, def);
-      }
-    }
-    const pendingRuntimeArgs = new Map<string, unknown>();
+    // Runtime tools (log/note/pin/report/output) are executed ONCE by the
+    // sidecar, which journals their canonical events. Drain the journal at each
+    // NDJSON step boundary and re-emit on the run's single sink — codex never
+    // surfaces the MCP result `_meta`, so the events come exclusively from the
+    // journal. A drain is cheap on localhost and a no-op when the journal is
+    // empty; over-draining never misses a boundary. No-op when no drainer wired.
+    const drainer = this.opts.drainer;
+    // Shared drain+stamp+emit (see `@appstrate/core/runtime-event-drain`): one
+    // cadence + best-effort-at-finalize contract for all three runners, so it
+    // cannot drift between them.
+    const drainAndEmit = (final = false): Promise<void> =>
+      drainAndEmitInto({ drainer, emit: (e) => emit(e as RunEvent), now, runId, final });
 
     let home: string | undefined;
     let child: CodexChild | undefined;
@@ -249,15 +241,23 @@ export class CodexAgentRunner implements Runner {
 
       if (signal?.aborted) onAbort();
 
-      // 4. Map the NDJSON event stream → RunEvents.
+      // 4. Map the NDJSON event stream → RunEvents, draining journaled runtime
+      //    events at item-completion boundaries (a runtime tool only journals
+      //    once its handler has run, i.e. at `item.completed`). Draining on
+      //    every NDJSON line would fire hundreds of empty round-trips on a
+      //    chatty stream; the final drain below backstops any straggler.
       for await (const line of readNdjsonLines(child.stdout)) {
         const ev = safeParseJson<CodexEvent>(line);
         if (!ev) continue;
-        await this.reemitRuntimeTool(ev, runtimeDefs, pendingRuntimeArgs, runId, now, emit);
         for (const event of mapper.map(ev)) await emit(event);
+        if (ev.type === "item.completed") await drainAndEmit();
       }
 
       const exitCode = await child.exited;
+
+      // Final drain (drain-until-empty + bounded retry): the sidecar is torn
+      // down right after finalize, so the last tool's events must be pulled now.
+      await drainAndEmit(true);
 
       // 5. Terminal verdict (runner-authoritative): a recorded turn.failed/error
       //    wins; otherwise the process exit code decides.
@@ -298,6 +298,9 @@ export class CodexAgentRunner implements Runner {
       }
       const message = getErrorMessage(err);
       await emit({ type: "appstrate.error", timestamp: now(), runId, message });
+      // Best-effort final drain: a mid-run throw may leave journaled events the
+      // agent produced before failing (memory.added / log.written / output).
+      await drainAndEmit(true);
       // reduceEvents (not emptyRunResult) so any partial canonical output the
       // agent emitted before the throw — memory.added / output.emitted /
       // log.written — survives into the failed result, matching the Pi + Claude
@@ -311,68 +314,6 @@ export class CodexAgentRunner implements Runner {
     } finally {
       if (signal) signal.removeEventListener("abort", onAbort);
       if (home) await rm(home, { recursive: true, force: true }).catch(() => undefined);
-    }
-  }
-
-  /**
-   * Reconstruct a runtime tool's canonical RunEvent(s) from an observed
-   * `mcp_tool_call` and emit them on the run's sink.
-   *
-   * Codex's `exec --json` stream exposes a tool result's `content` /
-   * `structured_content` but DROPS the MCP `_meta` field the canonical events
-   * ride in (unlike the Pi MCP transport / the Claude in-process host, which
-   * preserve `_meta` and re-emit it). The sidecar still EXECUTES the tool (the
-   * model saw its text result), but the runner never sees the events. So the
-   * runner replays the SAME shared, PURE handler (`@appstrate/core/runtime-tool-defs`)
-   * on the observed call args to reconstruct them — no side effect is duplicated
-   * (the handler only packages args into events; the reducer applies the effect
-   * once at finalize), and they land on the run's single, correctly-sequenced
-   * sink. Args are captured at `item.started` and replayed at a successful
-   * `item.completed`; a failed call (or a replay error) emits nothing.
-   */
-  private async reemitRuntimeTool(
-    ev: CodexEvent,
-    defs: Map<string, RuntimeToolDef>,
-    pending: Map<string, unknown>,
-    runId: string,
-    now: () => number,
-    emit: (event: RunEvent) => Promise<void>,
-  ): Promise<void> {
-    if (defs.size === 0) return;
-    const item = ev.item;
-    if (!item || item.type !== "mcp_tool_call" || typeof item.tool !== "string") return;
-    const def = defs.get(item.tool);
-    if (!def) return;
-
-    if (ev.type === "item.started") {
-      if (typeof item.id === "string" && item.arguments !== undefined) {
-        pending.set(item.id, item.arguments);
-      }
-      return;
-    }
-    if (ev.type !== "item.completed") return;
-
-    const id = typeof item.id === "string" ? item.id : undefined;
-    const args = item.arguments ?? (id ? pending.get(id) : undefined);
-    if (id) pending.delete(id);
-    // A failed tool call produced no canonical effect — nothing to reconstruct.
-    if (item.status === "failed") return;
-
-    try {
-      const result = await def.handler(args);
-      // Collect through the trust-boundary allowlist, then await-emit each so
-      // re-emitted events keep the run's sink ordering (the allowlist drops any
-      // non-canonical type a handler might return).
-      const collected: RunEvent[] = [];
-      reEmitRuntimeToolEvents(result._meta, (e) => {
-        // Stamp runId (handlers are run-agnostic; the sink routes by runId) and
-        // default the timestamp, mirroring the mapper's own events.
-        collected.push({ timestamp: now(), ...(e as Record<string, unknown>), runId } as RunEvent);
-      });
-      for (const e of collected) await emit(e);
-    } catch {
-      // A replay failure must never fail the run — the tool's text result
-      // already reached the model; only the reconstructed event is lost.
     }
   }
 }

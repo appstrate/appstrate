@@ -89,14 +89,13 @@ describe("ClaudeAgentRunner — happy path", () => {
     expect(types).toContain("output.emitted");
   });
 
-  it("passes outputFormat, the runtime-tools sdk server, native tools, and curated env", async () => {
+  it("passes outputFormat, the sidecar MCP server (no in-process server), native tools, and curated env", async () => {
     const { fn, calls } = fakeQuery([
       { type: "result", subtype: "success", is_error: false, usage: {} },
     ]);
     await new ClaudeAgentRunner(
       baseOpts({
         query: fn,
-        runtimeTools: ["log", "output"],
         outputSchema: { type: "object", properties: { x: { type: "number" } } },
         sidecarMcp: { url: "http://sidecar:8088/mcp", headers: { Host: "sidecar" } },
         maxTurns: 42,
@@ -108,13 +107,14 @@ describe("ClaudeAgentRunner — happy path", () => {
       type: "json_schema",
       schema: { type: "object", properties: { x: { type: "number" } } },
     });
-    // Runtime tools hosted in-process (sdk instance); integrations via sidecar http.
-    expect(opts.mcpServers.appstrate_runtime.type).toBe("sdk");
+    // All tools (integrations + runtime tools) come from the sidecar `/mcp` —
+    // no in-process MCP server is registered anymore.
     expect(opts.mcpServers.appstrate).toEqual({
       type: "http",
       url: "http://sidecar:8088/mcp",
       headers: { Host: "sidecar" },
     });
+    expect(Object.keys(opts.mcpServers)).toEqual(["appstrate"]);
     // Native tools enabled by default → no `tools: []` opt-out key.
     expect(opts.tools).toBeUndefined();
     expect(opts.maxTurns).toBe(42);
@@ -226,6 +226,76 @@ describe("ClaudeAgentRunner — cancellation", () => {
       }),
     ).rejects.toThrow();
     expect(m.result).toBeNull();
+  });
+});
+
+describe("ClaudeAgentRunner — runtime-event drain", () => {
+  // The sidecar executes `log` once and journals `log.written`; the runner
+  // drains the journal after a message boundary and re-emits on its sink (the
+  // SDK drops the result `_meta`, so the journal is the only source).
+  const messages: SdkRunMessage[] = [
+    {
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "t1",
+            name: "mcp__appstrate__log",
+            input: { level: "info", message: "hi from claude" },
+          },
+        ],
+      },
+    },
+    {
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "t1", is_error: false }] },
+    },
+    { type: "result", subtype: "success", is_error: false, usage: {} },
+  ];
+
+  it("emits journaled runtime events drained from the sidecar with the run id stamped", async () => {
+    const { fn } = fakeQuery(messages);
+    let finalDrained = false;
+    let yielded = false;
+    const drainer = {
+      async drain(opts?: { final?: boolean }) {
+        if (opts?.final) finalDrained = true;
+        if (yielded) return [];
+        yielded = true;
+        return [{ type: "log.written", level: "info", message: "hi from claude" }] as never;
+      },
+    };
+    const m = memorySink();
+    await new ClaudeAgentRunner(
+      baseOpts({
+        query: fn,
+        drainer,
+        sidecarMcp: { url: "http://sidecar:8088/mcp", headers: { Host: "sidecar" } },
+      }),
+    ).run({ context: ctx, eventSink: m.sink, bundle: undefined as never });
+
+    const written = m.events.find((e) => e.type === "log.written") as
+      | (RunEvent & { level?: string; message?: string })
+      | undefined;
+    expect(written).toBeDefined();
+    expect(written?.message).toBe("hi from claude");
+    expect(written?.level).toBe("info");
+    expect(written?.runId).toBe("run_1");
+    expect(finalDrained).toBe(true);
+  });
+
+  it("runs without a drainer (no runtime tools) and emits no runtime events", async () => {
+    const { fn } = fakeQuery(messages);
+    const m = memorySink();
+    await new ClaudeAgentRunner(
+      baseOpts({
+        query: fn,
+        sidecarMcp: { url: "http://sidecar:8088/mcp", headers: { Host: "sidecar" } },
+      }),
+    ).run({ context: ctx, eventSink: m.sink, bundle: undefined as never });
+    expect(m.events.some((e) => e.type === "log.written")).toBe(false);
+    expect(m.result?.status).toBe("success");
   });
 });
 // `buildClaudeSdkEnv` is shared infra — its tests live in

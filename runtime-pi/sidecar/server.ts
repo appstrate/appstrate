@@ -14,6 +14,7 @@ import {
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import { buildRuntimeToolDefs } from "@appstrate/core/runtime-tool-defs";
+import { RuntimeEventJournal, journalRuntimeToolDefs } from "./runtime-event-journal.ts";
 
 /** Parse the agent-selected runtime tools forwarded as `RUNTIME_TOOLS_JSON`. */
 function readRuntimeToolsFromEnv(): string[] {
@@ -259,11 +260,20 @@ const runtimeDeps = buildSidecarRuntimeDeps({
 // hosted in-process as MCP tools on the agent-facing `/mcp` surface — the
 // same transport every other tool uses, so they are no longer Pi-SDK
 // extensions. Static for the run's lifetime (selection + output schema are
-// fixed at boot). Re-emission of their canonical events happens agent-side.
-const runtimeToolDefs = buildRuntimeToolDefs({
-  runtimeTools: readRuntimeToolsFromEnv(),
-  outputSchema: readOutputSchemaFromEnv(),
-}) as unknown as AppstrateToolDefinition[];
+// fixed at boot).
+//
+// Each def is wrapped so its handler runs ONCE and its canonical events are
+// journaled (the events sub-key is then stripped from the tool result). The
+// runner drains `GET /runtime-events` and re-emits on its single sink — one
+// execution, transport-agnostic, no `_meta` reliance.
+const runtimeEventJournal = new RuntimeEventJournal();
+const runtimeToolDefs = journalRuntimeToolDefs(
+  buildRuntimeToolDefs({
+    runtimeTools: readRuntimeToolsFromEnv(),
+    outputSchema: readOutputSchemaFromEnv(),
+  }),
+  runtimeEventJournal,
+) as unknown as AppstrateToolDefinition[];
 
 let integrationTools: AppstrateToolDefinition[] = [];
 const specs = readIntegrationSpecsFromEnv();
@@ -328,6 +338,7 @@ const app = createApp({
   additionalMcpToolsProvider: () => [...runtimeToolDefs, ...integrationTools],
   integrationBootPromise,
   integrationBootReportProvider: () => integrationBootReport,
+  runtimeEventJournal,
 });
 
 logger.info("Sidecar proxy listening", { port, integrationsDeclared: specs?.length ?? 0 });

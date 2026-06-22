@@ -19,9 +19,9 @@
  * terminal verdict do NOT come through here:
  *   - the deliverable is read natively off `result.structured_output` by the
  *     runner (Phase-0 spike `OUTPUT_NATIVE_OK`),
- *   - runtime-tool events are emitted directly to the sink by the in-process
- *     MCP handlers (spike `INSTANCE_OK`; `_meta` over HTTP MCP is dropped —
- *     spike `META_DROPPED`),
+ *   - runtime-tool events are journaled by the sidecar (single execution) and
+ *     drained by the runner on its sink — the SDK's HTTP MCP client drops the
+ *     result `_meta` those events would otherwise ride in (spike `META_DROPPED`),
  *   - the terminal status/usage/cost is captured from the `result` message via
  *     {@link SdkRunEventMapper.terminal}.
  *

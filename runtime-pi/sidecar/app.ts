@@ -2,7 +2,8 @@
 
 import { Hono, type Context } from "hono";
 import pLimit, { type LimitFunction } from "p-limit";
-import { mountMcp } from "./mcp.ts";
+import { mountMcp, validateMcpHostHeader } from "./mcp.ts";
+import { RuntimeEventJournal } from "./runtime-event-journal.ts";
 import type { ApiCallDeps } from "./credential-proxy.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { BlobStore } from "./blob-store.ts";
@@ -99,6 +100,14 @@ export interface AppDeps {
    * tests / sidecars launched without integrations.
    */
   integrationBootReportProvider?: () => IntegrationBootReport;
+  /**
+   * Per-run runtime-event journal. The runtime-tool defs (`server.ts`) are
+   * wrapped to journal their canonical events on a single handler execution;
+   * the `GET /runtime-events` endpoint serves them to whichever runner is
+   * draining. Omitted by tests / sidecars without runtime tools → the endpoint
+   * answers an empty batch.
+   */
+  runtimeEventJournal?: RuntimeEventJournal;
 }
 
 /**
@@ -762,6 +771,21 @@ export function createApp(deps: AppDeps): Hono {
   // `bootIntegrations` (when `server.ts` pre-builds them) so the
   // in-process api_call server and the outer resource provider use the
   // same blob store.
+  // Runtime-event drain surface — the runner (pi/claude/codex) pulls the
+  // canonical events the sidecar journaled while executing runtime tools, and
+  // re-emits them on its single run-event sink. Same `Host: sidecar` posture as
+  // `/mcp` (the per-run Docker network is the boundary; no token). An empty
+  // journal (no runtime tools selected) answers an empty batch.
+  app.get("/runtime-events", (c) => {
+    const denied = validateMcpHostHeader(c.req.raw);
+    if (denied) return denied;
+    const journal = deps.runtimeEventJournal;
+    if (!journal) return c.json({ events: [], cursor: 0, firstSeq: 1 });
+    const after = Number.parseInt(c.req.query("after") ?? "0", 10);
+    const cursor = Number.isFinite(after) && after >= 0 ? after : 0;
+    return c.json(journal.after(cursor));
+  });
+
   const { blobStore, tokenBudget, apiCallLimit, proxyDeps } =
     deps.runtimeDeps ?? buildSidecarRuntimeDeps(deps);
   mountMcp(app, {

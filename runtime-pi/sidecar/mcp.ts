@@ -144,7 +144,7 @@ function jsonRpcErrorResponse(status: number, code: number, message: string): Re
   });
 }
 
-function validateMcpHostHeader(req: Request): Response | undefined {
+export function validateMcpHostHeader(req: Request): Response | undefined {
   const hostHeader = req.headers.get("host");
   if (!hostHeader) {
     return jsonRpcErrorResponse(403, -32000, "Invalid Host header: <missing>");

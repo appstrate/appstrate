@@ -70,6 +70,11 @@ import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-tra
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
 import { parseRuntimeEnv, RuntimeEnvError } from "./env.ts";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
+import {
+  createRuntimeEventDrainer,
+  drainAndEmitInto,
+  type RuntimeEventDrainer,
+} from "@appstrate/core/runtime-event-drain";
 import { provisionWorkspace, provisionDocuments, type ProvisionDeps } from "./provision.ts";
 
 /**
@@ -422,6 +427,30 @@ await progress(
 
 const sidecarUrl = env.sidecarUrl;
 
+// Shared runtime-event drainer (one per run, in-memory cursor). The sidecar
+// executes each runtime tool ONCE and journals its canonical events; every
+// runner drains this on its single sink (pi after each forwarded tool call,
+// claude/codex after each stream step + a final drain). One instance so the
+// cursor stays consistent across intermediate + final drains. Undefined when no
+// sidecar is attached (no journal to drain — the in-process Pi extension path
+// emits its own events).
+const runtimeDrainer: RuntimeEventDrainer | undefined = sidecarUrl
+  ? createRuntimeEventDrainer({
+      url: `${sidecarUrl.replace(/\/$/, "")}/runtime-events`,
+      headers: { Host: "sidecar" },
+      logger: {
+        warn: (msg, data) =>
+          process.stdout.write(
+            `${JSON.stringify({ level: "warn", event: msg, ...(data ?? {}) })}\n`,
+          ),
+        error: (msg, data) =>
+          process.stdout.write(
+            `${JSON.stringify({ level: "error", event: msg, ...(data ?? {}) })}\n`,
+          ),
+      },
+    })
+  : undefined;
+
 // Engine selection. Set by the launcher's `RUN_ENGINE` container env
 // (`container-env.ts`) — `"claude"` for a `claude-code` subscription run,
 // the Pi default for everything else (and the absent var). The Claude engine
@@ -495,11 +524,26 @@ if (sidecarUrl) {
     try {
       // `buildMcpDirectFactories` registers `run_history` and
       // `recall_memory`, plus one forwarding factory per namespaced
-      // integration tool (including the generic `{ns}__api_call`).
+      // integration tool (including the generic `{ns}__api_call`). Runtime
+      // tools (log/note/pin/report/output) are executed once by the sidecar and
+      // journaled; the drainer pulls them on the run sink after each forwarded
+      // call — uniform with the Claude + Codex runners, no `_meta` trust.
+      //
+      // Pi drains each tool call inline in `execute()` right after `callTool`
+      // resolves — the sidecar appends the events synchronously inside the
+      // wrapped handler BEFORE responding, so the per-call drain always captures
+      // them in time (no "events land after the stream ends" gap that
+      // claude/codex must backstop). What the per-call drain CANNOT cover is a
+      // transient localhost failure of the LAST call's single best-effort drain
+      // (no subsequent call retries it). The retrying final drain for that case
+      // is injected via `piEventSink` (below): PiRunner owns its finalize, so a
+      // drain placed after `runner.run()` would be too late — wrapping the sink
+      // runs it BEFORE the stdout-bridge merges its aggregate into the POST.
       const factories = await buildMcpDirectFactories({
         mcp: mcpClient,
         runId: AGENT_RUN_ID,
         workspace: WORKSPACE,
+        ...(runtimeDrainer ? { drainer: runtimeDrainer } : {}),
         emit: (event) => {
           void bridgedSink.handle(event as RunEvent);
         },
@@ -707,15 +751,6 @@ function buildPiRunner(): PiRunner {
  * (log/note/pin/report) are hosted in-process by the runner; `output` is native
  * via the SDK's `outputFormat`.
  */
-/** Runtime tools the root agent selected (`manifest.runtime_tools`). Shared by
- * the claude + codex subscription runners — both expose the same tool surface. */
-function rootRuntimeTools(): string[] | undefined {
-  const rootManifest = bundle
-    ? (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
-    : undefined;
-  return rootManifest?.runtime_tools;
-}
-
 /** The agent's declared output JSON Schema (`OUTPUT_SCHEMA` env), or null. */
 function runOutputSchema(): Record<string, unknown> | null {
   if (!process.env.OUTPUT_SCHEMA) return null;
@@ -734,7 +769,6 @@ function buildClaudeAgentRunner(): ClaudeAgentRunner {
     throw new Error("Claude engine selected but no sidecar is attached (no /llm gateway).");
   }
   const base = sidecarUrl.replace(/\/$/, "");
-  const runtimeTools = rootRuntimeTools();
   const outputSchema = runOutputSchema();
   return new ClaudeAgentRunner({
     binaryPath: resolveClaudeCodeBinary({ resolve: makeSdkScopeResolver(import.meta.url) }),
@@ -745,7 +779,9 @@ function buildClaudeAgentRunner(): ClaudeAgentRunner {
     baseUrl: `${base}/llm`,
     placeholderToken: env.modelApiKey ?? "placeholder",
     cwd: WORKSPACE,
-    ...(runtimeTools ? { runtimeTools } : {}),
+    // Runtime tools are journaled by the sidecar and drained here; `output`
+    // stays native (SDK `outputFormat` → structured_output).
+    ...(runtimeDrainer ? { drainer: runtimeDrainer } : {}),
     outputSchema,
     // Integrations + api_call + run_history + recall_memory over the sidecar's
     // stateless Streamable-HTTP `/mcp`. `Host: sidecar` satisfies the sidecar's
@@ -771,8 +807,6 @@ function buildCodexAgentRunner(): CodexAgentRunner {
     throw new Error("Codex engine selected but no sidecar is attached (no /credential-vend).");
   }
   const base = sidecarUrl.replace(/\/$/, "");
-  const runtimeTools = rootRuntimeTools();
-  const outputSchema = runOutputSchema();
   // Resolve order: explicit CODEX_BINARY_PATH → the bundled per-arch package →
   // bare `codex` on PATH (the image also symlinks the binary onto PATH as a
   // belt-and-suspenders). Mirrors the chat engine's fallback chain.
@@ -793,8 +827,9 @@ function buildCodexAgentRunner(): CodexAgentRunner {
     credentialUrl: `${base}/credential-vend`,
     cwd: WORKSPACE,
     modelCost: env.modelCost,
-    ...(runtimeTools ? { runtimeTools } : {}),
-    outputSchema,
+    // Runtime tools (incl. `output`) are journaled by the sidecar and drained
+    // here — codex's `--json` stream never surfaces the MCP result `_meta`.
+    ...(runtimeDrainer ? { drainer: runtimeDrainer } : {}),
     // Same platform tool surface the Claude runner gets: integrations +
     // api_call + run_history + recall_memory + the agent-selected runtime tools,
     // over the sidecar's stateless Streamable-HTTP `/mcp`. `Host: sidecar`
@@ -803,6 +838,31 @@ function buildCodexAgentRunner(): CodexAgentRunner {
     sidecarMcp: { url: `${base}/mcp`, headers: { Host: "sidecar" } },
   });
 }
+
+// Pi-path final drain. Pi drains each tool call inline (see the note in the
+// factories block above), but the LAST call's single best-effort drain has no
+// subsequent call to retry a transient localhost failure — unlike claude/codex,
+// which own a retrying final drain inside `run()`. PiRunner owns its finalize,
+// so we inject the final drain by wrapping the sink: drain-until-empty +
+// bounded retry through the SAME bridged sink the per-call drains use, so the
+// stdout-bridge folds any straggler into its aggregate BEFORE merging it into
+// the finalize POST. Best-effort (`final: true`) — never flips an
+// already-decided run. Pi only: claude/codex already drain finally in `run()`.
+const piEventSink: typeof bridgedSink = runtimeDrainer
+  ? {
+      handle: (event) => bridgedSink.handle(event),
+      finalize: async (result) => {
+        await drainAndEmitInto({
+          drainer: runtimeDrainer,
+          emit: (e) => bridgedSink.handle(e as RunEvent),
+          now: Date.now,
+          runId: AGENT_RUN_ID!,
+          final: true,
+        });
+        await bridgedSink.finalize(result);
+      },
+    }
+  : bridgedSink;
 
 const startTime = Date.now();
 try {
@@ -816,7 +876,7 @@ try {
   await runner.run({
     bundle: runnerBundle,
     context,
-    eventSink: bridgedSink,
+    eventSink: runEngine === "pi" ? piEventSink : bridgedSink,
   });
   heartbeat.stop();
   await mcpClient?.close().catch(() => {});

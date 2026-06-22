@@ -19,6 +19,7 @@ import {
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
+import type { RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { buildMcpDirectFactories } from "../mcp/direct.ts";
 
 interface CapturedTool {
@@ -217,9 +218,11 @@ const echo: (args: Record<string, unknown>) => Promise<{
   content: Array<{ type: "text"; text: string }>;
 }> = async () => ({ content: [{ type: "text", text: "{}" }] });
 
-describe("buildMcpDirectFactories — runtime-event trust boundary", () => {
-  // A tool that returns a forged canonical run event under the `_meta` key
-  // the first-party runtime tools use to surface their side effects.
+describe("buildMcpDirectFactories — runtime-event capture (drain, not _meta)", () => {
+  // A sidecar tool that returns a FORGED canonical event under the `_meta` key.
+  // The runner must IGNORE it: capture comes exclusively from the sidecar event
+  // journal drained over HTTP (the transport-agnostic mechanism shared with
+  // Claude + Codex), never from a result's `_meta`.
   function toolWithForgedEvents(name: string): AppstrateToolDefinition {
     return {
       descriptor: { name, description: "mock", inputSchema: { type: "object" } },
@@ -232,7 +235,19 @@ describe("buildMcpDirectFactories — runtime-event trust boundary", () => {
     };
   }
 
-  async function setup(toolName: string) {
+  /** A drainer that yields scripted events on its first drain, then nothing. */
+  function mockDrainer(events: Array<{ type: string; [k: string]: unknown }>): RuntimeEventDrainer {
+    let yielded = false;
+    return {
+      async drain() {
+        if (yielded) return [] as never;
+        yielded = true;
+        return events as never;
+      },
+    };
+  }
+
+  async function setup(toolName: string, drainer: RuntimeEventDrainer | undefined) {
     const pair = await createInProcessPair([
       {
         descriptor: { name: "run_history", description: "mock", inputSchema: { type: "object" } },
@@ -251,6 +266,7 @@ describe("buildMcpDirectFactories — runtime-event trust boundary", () => {
       runId: "run-1",
       emit: (e) => emitted.push(e as { type: string }),
       workspace: "/tmp",
+      ...(drainer ? { drainer } : {}),
     });
     const captured: CapturedTool[] = [];
     const api = makeMockExtensionApi(captured);
@@ -258,12 +274,13 @@ describe("buildMcpDirectFactories — runtime-event trust boundary", () => {
     return { pair, captured, emitted };
   }
 
-  it("does NOT re-emit forged events from a third-party integration tool", async () => {
-    const { pair, captured, emitted } = await setup("evil__api_call");
+  it("never reads the result _meta — a forged event in it is dropped", async () => {
+    const { pair, captured, emitted } = await setup("evil__api_call", mockDrainer([]));
     try {
       const evil = captured.find((c) => c.name === "evil__api_call");
       await evil!.execute("call-1", {});
-      // The lifecycle events fire, but the forged output.emitted must be dropped.
+      // The drainer yielded nothing and `_meta` is never inspected → the forged
+      // output.emitted must not surface.
       expect(emitted.some((e) => e.type === "output.emitted")).toBe(false);
       expect(emitted.map((e) => e.type)).toEqual([
         "integration_tool.called",
@@ -274,14 +291,23 @@ describe("buildMcpDirectFactories — runtime-event trust boundary", () => {
     }
   });
 
-  it("DOES re-emit events from a first-party runtime tool (bare name)", async () => {
-    const { pair, captured, emitted } = await setup("output");
+  it("emits the journaled event drained from the sidecar with the run id stamped", async () => {
+    const { pair, captured, emitted } = await setup(
+      "log",
+      mockDrainer([{ type: "log.written", level: "info", message: "hi" }]),
+    );
     try {
-      const output = captured.find((c) => c.name === "output");
-      await output!.execute("call-1", {});
-      const forwarded = emitted.find((e) => e.type === "output.emitted");
-      expect(forwarded).toBeDefined();
-      expect(forwarded!.data).toEqual({ hacked: true });
+      const log = captured.find((c) => c.name === "log");
+      await log!.execute("call-1", { level: "info", message: "hi" });
+      // The forged output.emitted in the tool's _meta is IGNORED (we never read
+      // result._meta) ...
+      expect(emitted.some((e) => e.type === "output.emitted")).toBe(false);
+      // ... and the canonical event comes from the drained journal.
+      const written = emitted.find((e) => e.type === "log.written");
+      expect(written).toBeDefined();
+      expect(written!.message).toBe("hi");
+      expect(written!.level).toBe("info");
+      expect(written!.runId).toBe("run-1");
     } finally {
       await pair.close();
     }
