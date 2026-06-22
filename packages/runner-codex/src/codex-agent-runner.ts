@@ -41,14 +41,22 @@ import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import { reduceEvents, type RunError, type RunResult } from "@appstrate/afps-runtime/runner";
 import type { Runner, RunOptions } from "@appstrate/afps-runtime/runner";
 import {
+  buildCodexConfigToml,
   buildCodexEnv,
   readNdjsonLines,
   redactSecrets,
   safeParseJson,
   writeCodexAuthHome,
+  writeCodexConfig,
   type CodexEvent,
+  type CodexHttpMcpServer,
   type VendedCodexCredential,
 } from "@appstrate/core/codex-binary";
+import {
+  buildRuntimeToolDefs,
+  reEmitRuntimeToolEvents,
+  type RuntimeToolDef,
+} from "@appstrate/core/runtime-tool-defs";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { CodexRunEventMapper, computeCodexCost, type CodexModelCost } from "./run-event-mapper.ts";
 
@@ -81,6 +89,26 @@ export interface CodexAgentRunnerOptions {
   credentialUrl: string;
   /** Working directory for the binary's native file/exec tools (the run workspace). */
   cwd: string;
+  /**
+   * Platform tool surface — the sidecar's stateless Streamable-HTTP `/mcp`
+   * (integrations + `api_call` + `run_history` + `recall_memory` + the
+   * agent-selected runtime tools). Written into codex's `config.toml` as a
+   * `[mcp_servers.platform]` entry so the CLI's MCP client reaches the same
+   * tools the Claude runner gets through the Agent SDK's `mcpServers`. Omit to
+   * run codex with no platform tools (native sandbox tools only).
+   */
+  sidecarMcp?: CodexHttpMcpServer;
+  /**
+   * Agent-selected runtime tools (`manifest.runtime_tools`) — the SAME set the
+   * sidecar serves over `/mcp`. The runner re-derives each runtime tool's
+   * canonical RunEvent locally from the observed `mcp_tool_call` args (codex's
+   * `exec --json` stream drops the MCP result `_meta` the events ride in, so —
+   * unlike Pi/Claude — the runner cannot re-emit from the result; it replays the
+   * shared pure handler instead). Empty/absent → no runtime tools.
+   */
+  runtimeTools?: readonly string[];
+  /** Output JSON Schema (when the agent declares `output.schema`) — drives the `output` runtime tool. */
+  outputSchema?: Record<string, unknown> | null;
   /** Per-million-token cost rates for equivalent-cost reporting; cost is 0 when absent. */
   modelCost?: CodexModelCost | null;
   /** Extra curated env merged into the spawned binary's environment. */
@@ -142,6 +170,21 @@ export class CodexAgentRunner implements Runner {
 
     const mapper = new CodexRunEventMapper(runId, now);
 
+    // Runtime tools (log/note/pin/report/output) the sidecar also serves over
+    // `/mcp`: the runner replays each one's shared PURE handler on the observed
+    // call args to reconstruct the canonical RunEvent codex drops, then emits it
+    // on the run's single sink (see `reemitRuntimeTool`). Built once per run.
+    const runtimeDefs = new Map<string, RuntimeToolDef>();
+    if (this.opts.runtimeTools?.length || this.opts.outputSchema) {
+      for (const def of buildRuntimeToolDefs({
+        ...(this.opts.runtimeTools ? { runtimeTools: this.opts.runtimeTools } : {}),
+        outputSchema: this.opts.outputSchema ?? null,
+      })) {
+        runtimeDefs.set(def.descriptor.name, def);
+      }
+    }
+    const pendingRuntimeArgs = new Map<string, unknown>();
+
     let home: string | undefined;
     let child: CodexChild | undefined;
     const onAbort = () => {
@@ -167,6 +210,19 @@ export class CodexAgentRunner implements Runner {
 
       // 2. Write the ephemeral CODEX_HOME/auth.json (real token, 0600).
       home = await writeCodexAuthHome({ credential: cred, nowMs: now(), prefix: "codex-run-" });
+
+      // 2b. Write config.toml pointing codex's MCP client at the sidecar `/mcp`
+      //     (integrations + api_call + run_history + recall_memory + runtime
+      //     tools). The CLI auto-detects streamable HTTP from the url; auth +
+      //     host scoping ride as literal http_headers. Same 0600 home as
+      //     auth.json — no new at-rest credential surface. No-op when no
+      //     sidecar MCP is configured.
+      await writeCodexConfig({
+        home,
+        toml: buildCodexConfigToml({
+          ...(this.opts.sidecarMcp ? { platform: this.opts.sidecarMcp } : {}),
+        }),
+      });
 
       // 3. Spawn the official binary. No `chatgpt_base_url` (it talks to the
       //    upstream directly; egress is locked by the sidecar allowlist). The
@@ -197,6 +253,7 @@ export class CodexAgentRunner implements Runner {
       for await (const line of readNdjsonLines(child.stdout)) {
         const ev = safeParseJson<CodexEvent>(line);
         if (!ev) continue;
+        await this.reemitRuntimeTool(ev, runtimeDefs, pendingRuntimeArgs, runId, now, emit);
         for (const event of mapper.map(ev)) await emit(event);
       }
 
@@ -254,6 +311,68 @@ export class CodexAgentRunner implements Runner {
     } finally {
       if (signal) signal.removeEventListener("abort", onAbort);
       if (home) await rm(home, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Reconstruct a runtime tool's canonical RunEvent(s) from an observed
+   * `mcp_tool_call` and emit them on the run's sink.
+   *
+   * Codex's `exec --json` stream exposes a tool result's `content` /
+   * `structured_content` but DROPS the MCP `_meta` field the canonical events
+   * ride in (unlike the Pi MCP transport / the Claude in-process host, which
+   * preserve `_meta` and re-emit it). The sidecar still EXECUTES the tool (the
+   * model saw its text result), but the runner never sees the events. So the
+   * runner replays the SAME shared, PURE handler (`@appstrate/core/runtime-tool-defs`)
+   * on the observed call args to reconstruct them — no side effect is duplicated
+   * (the handler only packages args into events; the reducer applies the effect
+   * once at finalize), and they land on the run's single, correctly-sequenced
+   * sink. Args are captured at `item.started` and replayed at a successful
+   * `item.completed`; a failed call (or a replay error) emits nothing.
+   */
+  private async reemitRuntimeTool(
+    ev: CodexEvent,
+    defs: Map<string, RuntimeToolDef>,
+    pending: Map<string, unknown>,
+    runId: string,
+    now: () => number,
+    emit: (event: RunEvent) => Promise<void>,
+  ): Promise<void> {
+    if (defs.size === 0) return;
+    const item = ev.item;
+    if (!item || item.type !== "mcp_tool_call" || typeof item.tool !== "string") return;
+    const def = defs.get(item.tool);
+    if (!def) return;
+
+    if (ev.type === "item.started") {
+      if (typeof item.id === "string" && item.arguments !== undefined) {
+        pending.set(item.id, item.arguments);
+      }
+      return;
+    }
+    if (ev.type !== "item.completed") return;
+
+    const id = typeof item.id === "string" ? item.id : undefined;
+    const args = item.arguments ?? (id ? pending.get(id) : undefined);
+    if (id) pending.delete(id);
+    // A failed tool call produced no canonical effect — nothing to reconstruct.
+    if (item.status === "failed") return;
+
+    try {
+      const result = await def.handler(args);
+      // Collect through the trust-boundary allowlist, then await-emit each so
+      // re-emitted events keep the run's sink ordering (the allowlist drops any
+      // non-canonical type a handler might return).
+      const collected: RunEvent[] = [];
+      reEmitRuntimeToolEvents(result._meta, (e) => {
+        // Stamp runId (handlers are run-agnostic; the sink routes by runId) and
+        // default the timestamp, mirroring the mapper's own events.
+        collected.push({ timestamp: now(), ...(e as Record<string, unknown>), runId } as RunEvent);
+      });
+      for (const e of collected) await emit(e);
+    } catch {
+      // A replay failure must never fail the run — the tool's text result
+      // already reached the model; only the reconstructed event is lost.
     }
   }
 }

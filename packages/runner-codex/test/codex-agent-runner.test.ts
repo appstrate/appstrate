@@ -2,6 +2,8 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { CodexAgentRunner, type CodexChild } from "../src/codex-agent-runner.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
@@ -189,5 +191,132 @@ describe("CodexAgentRunner.run", () => {
     await runner.run({ bundle, context: ctx, eventSink: h.sink });
     expect(h.result?.status).toBe("failed");
     expect(h.result?.error?.message).toMatch(/exited with code 3/);
+  });
+
+  it("writes a config.toml pointing codex at the sidecar /mcp when sidecarMcp is set", async () => {
+    let configToml: string | undefined;
+    const child: CodexChild = {
+      stdout: emptyStream(),
+      stderr: emptyStream(),
+      exited: Promise.resolve(0),
+      kill() {},
+    };
+    const h = makeSink();
+    const runner = new CodexAgentRunner({
+      binaryPath: "/fake/codex",
+      modelId: "gpt-5.5",
+      systemPrompt: "",
+      credentialUrl: "http://sidecar:8080/credential-vend",
+      cwd: "/workspace",
+      sidecarMcp: { url: "http://sidecar:8080/mcp", headers: { Host: "sidecar" } },
+      fetchFn: vendFetch({ access_token: "tok" }),
+      spawn: (_cmd, opts) => {
+        // config.toml is written into CODEX_HOME before spawn.
+        configToml = readFileSync(join(opts.env.CODEX_HOME!, "config.toml"), "utf8");
+        return child;
+      },
+    });
+    await runner.run({ bundle, context: ctx, eventSink: h.sink });
+    expect(configToml).toContain("[mcp_servers.platform]");
+    expect(configToml).toContain('url = "http://sidecar:8080/mcp"');
+    expect(configToml).toContain("[mcp_servers.platform.http_headers]");
+    expect(configToml).toContain('"Host" = "sidecar"');
+  });
+
+  it("reconstructs a runtime tool's canonical RunEvent from the observed mcp_tool_call args", async () => {
+    // Codex calls the sidecar-served `log` tool; its `--json` stream carries the
+    // args but drops the result `_meta`. The runner replays the shared pure
+    // handler on the args to emit `log.written` on the run's sink.
+    const child: CodexChild = {
+      stdout: ndjsonStream([
+        JSON.stringify({
+          type: "item.started",
+          item: {
+            id: "t0",
+            type: "mcp_tool_call",
+            tool: "log",
+            arguments: { level: "info", message: "hello from codex" },
+            status: "in_progress",
+          },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "t0",
+            type: "mcp_tool_call",
+            tool: "log",
+            status: "completed",
+            result: { content: [{ type: "text", text: "Logged [info]: hello from codex" }] },
+          },
+        }),
+        JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }),
+      ]),
+      stderr: emptyStream(),
+      exited: Promise.resolve(0),
+      kill() {},
+    };
+    const h = makeSink();
+    const runner = new CodexAgentRunner({
+      binaryPath: "/fake/codex",
+      modelId: "gpt-5.5",
+      systemPrompt: "",
+      credentialUrl: "http://sidecar:8080/credential-vend",
+      cwd: "/workspace",
+      sidecarMcp: { url: "http://sidecar:8080/mcp" },
+      runtimeTools: ["log"],
+      fetchFn: vendFetch({ access_token: "tok" }),
+      spawn: () => child,
+      now: () => 1_700_000_000_000,
+    });
+    await runner.run({ bundle, context: ctx, eventSink: h.sink });
+
+    const logged = h.events.find((e) => e.type === "log.written") as
+      | (RunEvent & { level?: string; message?: string })
+      | undefined;
+    expect(logged).toBeDefined();
+    expect(logged?.message).toBe("hello from codex");
+    expect(logged?.level).toBe("info");
+    expect(logged?.runId).toBe("run_1");
+    // The shared handler stamps its own production timestamp (Date.now()).
+    expect(typeof logged?.timestamp).toBe("number");
+  });
+
+  it("does not reconstruct an event for a failed runtime tool call", async () => {
+    const child: CodexChild = {
+      stdout: ndjsonStream([
+        JSON.stringify({
+          type: "item.started",
+          item: {
+            id: "t0",
+            type: "mcp_tool_call",
+            tool: "log",
+            arguments: { level: "info", message: "x" },
+            status: "in_progress",
+          },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: { id: "t0", type: "mcp_tool_call", tool: "log", status: "failed" },
+        }),
+        JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1 } }),
+      ]),
+      stderr: emptyStream(),
+      exited: Promise.resolve(0),
+      kill() {},
+    };
+    const h = makeSink();
+    const runner = new CodexAgentRunner({
+      binaryPath: "/fake/codex",
+      modelId: "gpt-5.5",
+      systemPrompt: "",
+      credentialUrl: "http://sidecar:8080/credential-vend",
+      cwd: "/workspace",
+      sidecarMcp: { url: "http://sidecar:8080/mcp" },
+      runtimeTools: ["log"],
+      fetchFn: vendFetch({ access_token: "tok" }),
+      spawn: () => child,
+    });
+    await runner.run({ bundle, context: ctx, eventSink: h.sink });
+    expect(h.events.some((e) => e.type === "log.written")).toBe(false);
   });
 });

@@ -707,6 +707,25 @@ function buildPiRunner(): PiRunner {
  * (log/note/pin/report) are hosted in-process by the runner; `output` is native
  * via the SDK's `outputFormat`.
  */
+/** Runtime tools the root agent selected (`manifest.runtime_tools`). Shared by
+ * the claude + codex subscription runners — both expose the same tool surface. */
+function rootRuntimeTools(): string[] | undefined {
+  const rootManifest = bundle
+    ? (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
+    : undefined;
+  return rootManifest?.runtime_tools;
+}
+
+/** The agent's declared output JSON Schema (`OUTPUT_SCHEMA` env), or null. */
+function runOutputSchema(): Record<string, unknown> | null {
+  if (!process.env.OUTPUT_SCHEMA) return null;
+  try {
+    return JSON.parse(process.env.OUTPUT_SCHEMA) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 function buildClaudeAgentRunner(): ClaudeAgentRunner {
   if (!sidecarUrl) {
     // A claude-code run is always OAuth → always sidecar-backed (the gateway
@@ -715,17 +734,8 @@ function buildClaudeAgentRunner(): ClaudeAgentRunner {
     throw new Error("Claude engine selected but no sidecar is attached (no /llm gateway).");
   }
   const base = sidecarUrl.replace(/\/$/, "");
-  const rootManifest = bundle
-    ? (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
-    : undefined;
-  let outputSchema: Record<string, unknown> | null = null;
-  if (process.env.OUTPUT_SCHEMA) {
-    try {
-      outputSchema = JSON.parse(process.env.OUTPUT_SCHEMA) as Record<string, unknown>;
-    } catch {
-      outputSchema = null;
-    }
-  }
+  const runtimeTools = rootRuntimeTools();
+  const outputSchema = runOutputSchema();
   return new ClaudeAgentRunner({
     binaryPath: resolveClaudeCodeBinary({ resolve: makeSdkScopeResolver(import.meta.url) }),
     modelId: env.modelId,
@@ -735,7 +745,7 @@ function buildClaudeAgentRunner(): ClaudeAgentRunner {
     baseUrl: `${base}/llm`,
     placeholderToken: env.modelApiKey ?? "placeholder",
     cwd: WORKSPACE,
-    ...(rootManifest?.runtime_tools ? { runtimeTools: rootManifest.runtime_tools } : {}),
+    ...(runtimeTools ? { runtimeTools } : {}),
     outputSchema,
     // Integrations + api_call + run_history + recall_memory over the sidecar's
     // stateless Streamable-HTTP `/mcp`. `Host: sidecar` satisfies the sidecar's
@@ -761,6 +771,8 @@ function buildCodexAgentRunner(): CodexAgentRunner {
     throw new Error("Codex engine selected but no sidecar is attached (no /credential-vend).");
   }
   const base = sidecarUrl.replace(/\/$/, "");
+  const runtimeTools = rootRuntimeTools();
+  const outputSchema = runOutputSchema();
   // Resolve order: explicit CODEX_BINARY_PATH → the bundled per-arch package →
   // bare `codex` on PATH (the image also symlinks the binary onto PATH as a
   // belt-and-suspenders). Mirrors the chat engine's fallback chain.
@@ -781,6 +793,14 @@ function buildCodexAgentRunner(): CodexAgentRunner {
     credentialUrl: `${base}/credential-vend`,
     cwd: WORKSPACE,
     modelCost: env.modelCost,
+    ...(runtimeTools ? { runtimeTools } : {}),
+    outputSchema,
+    // Same platform tool surface the Claude runner gets: integrations +
+    // api_call + run_history + recall_memory + the agent-selected runtime tools,
+    // over the sidecar's stateless Streamable-HTTP `/mcp`. `Host: sidecar`
+    // satisfies the sidecar's host-header gate. (Codex's egress lock governs its
+    // DIRECT chatgpt.com traffic; internal sidecar traffic is separate.)
+    sidecarMcp: { url: `${base}/mcp`, headers: { Host: "sidecar" } },
   });
 }
 
