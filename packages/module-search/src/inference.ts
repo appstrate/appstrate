@@ -29,7 +29,6 @@ import {
 } from "@huggingface/transformers";
 import type { Logger } from "@appstrate/core/logger";
 
-export const EMBEDDING_DIMENSIONS = 768;
 const EMBED_MODEL = process.env.SEARCH_EMBED_MODEL ?? "nomic-ai/nomic-embed-text-v1.5";
 const RERANK_MODEL = process.env.SEARCH_RERANK_MODEL ?? "";
 /** Batch size for indexing-time embedding (CPU-friendly). */

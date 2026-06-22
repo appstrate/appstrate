@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Lean port of onyx/indexing/chunker.py — sentence-aware chunking with a
-// token budget, title prefix + metadata suffix capped at 25% of the chunk,
-// no overlap. Ported from the appstrate-ws retrieval spike
-// (packages/retrieval/src/chunker.ts), itself a TypeScript port of Onyx.
+// token budget, title prefix, no overlap. Ported from the appstrate-ws
+// retrieval spike (packages/retrieval/src/chunker.ts), itself a TypeScript
+// port of Onyx.
 // Copyright (c) 2023-present DanswerAI, Inc. (MIT).
 
 export const DEFAULT_MAX_CHUNK_SIZE = 512;
-export const MAX_METADATA_PERCENTAGE = 0.25;
 export const CHUNK_MIN_CONTENT = 256;
 export const BLURB_SIZE = 128;
 export const RETURN_SEPARATOR = "\n\r\n";
@@ -23,7 +22,6 @@ export const approximateTokens: TokenCounter = (text) => Math.ceil(text.length /
 export interface ChunkerInput {
   title: string | null;
   content: string;
-  metadata?: Record<string, string | string[]>;
 }
 
 export interface DocAwareChunk {
@@ -32,36 +30,11 @@ export interface DocAwareChunk {
   content: string;
   blurb: string;
   titlePrefix: string;
-  metadataSuffixSemantic: string;
-  metadataSuffixKeyword: string;
 }
 
-/** Indexed `content` field: title + content + keyword metadata variant. */
+/** Indexed `content` field: title prefix + raw content. */
 export function enrichedContentForIndex(chunk: DocAwareChunk): string {
-  return `${chunk.titlePrefix}${chunk.content}${chunk.metadataSuffixKeyword}`;
-}
-
-export function metadataSuffixes(
-  metadata: Record<string, string | string[]> | undefined,
-  includeSeparator = false,
-): { semantic: string; keyword: string } {
-  if (!metadata || Object.keys(metadata).length === 0) return { semantic: "", keyword: "" };
-  let semantic = "Metadata:\n";
-  const values: string[] = [];
-  for (const [key, value] of Object.entries(metadata)) {
-    const valueStr = Array.isArray(value) ? value.join(", ") : value;
-    if (Array.isArray(value)) values.push(...value);
-    else values.push(value);
-    semantic += `\t${key} - ${valueStr}\n`;
-  }
-  const result = { semantic: semantic.trim(), keyword: values.join(" ") };
-  if (includeSeparator) {
-    return {
-      semantic: RETURN_SEPARATOR + result.semantic,
-      keyword: RETURN_SEPARATOR + result.keyword,
-    };
-  }
-  return result;
+  return `${chunk.titlePrefix}${chunk.content}`;
 }
 
 /**
@@ -128,7 +101,6 @@ export interface ChunkerOptions {
   countTokens?: TokenCounter;
   chunkTokenLimit?: number;
   blurbSize?: number;
-  includeMetadata?: boolean;
 }
 
 /** Port of Chunker._handle_single_document (lean). */
@@ -136,31 +108,16 @@ export function chunkDocument(doc: ChunkerInput, opts: ChunkerOptions = {}): Doc
   const countTokens = opts.countTokens ?? approximateTokens;
   const chunkTokenLimit = opts.chunkTokenLimit ?? DEFAULT_MAX_CHUNK_SIZE;
   const blurbSize = opts.blurbSize ?? BLURB_SIZE;
-  const includeMetadata = opts.includeMetadata ?? true;
 
   const title = doc.title ? extractBlurb(doc.title, countTokens, blurbSize) : "";
   let titlePrefix = title ? title + RETURN_SEPARATOR : "";
   const titleTokens = countTokens(titlePrefix);
 
-  const suffixes = includeMetadata
-    ? metadataSuffixes(doc.metadata, true)
-    : { semantic: "", keyword: "" };
-  const metadataSuffixKeyword = suffixes.keyword;
-  let metadataSuffixSemantic = suffixes.semantic;
-  let metadataTokens = countTokens(metadataSuffixSemantic);
-
-  // Metadata must never overwhelm the chunk content.
-  if (metadataTokens >= chunkTokenLimit * MAX_METADATA_PERCENTAGE) {
-    metadataSuffixSemantic = "";
-    metadataTokens = 0;
-  }
-
-  let contentTokenLimit = chunkTokenLimit - titleTokens - metadataTokens;
+  let contentTokenLimit = chunkTokenLimit - titleTokens;
   // Not enough room left for real content — index bare chunks instead.
   if (contentTokenLimit <= CHUNK_MIN_CONTENT) {
     contentTokenLimit = chunkTokenLimit;
     titlePrefix = "";
-    metadataSuffixSemantic = "";
   }
 
   const pieces = splitBySentences(doc.content, contentTokenLimit, countTokens);
@@ -169,7 +126,5 @@ export function chunkDocument(doc: ChunkerInput, opts: ChunkerOptions = {}): Doc
     content,
     blurb: extractBlurb(content, countTokens, blurbSize),
     titlePrefix,
-    metadataSuffixSemantic,
-    metadataSuffixKeyword,
   }));
 }
