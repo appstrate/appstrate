@@ -39,9 +39,10 @@ import {
   resolveCodexBinary,
   safeParseJson,
   writeCodexAuthHome,
+  type CodexEvent,
   type VendedCodexCredential,
 } from "@appstrate/core/codex-binary";
-import { CodexUiStreamMapper, type CodexEvent } from "./ui-stream-mapper.ts";
+import { CodexUiStreamMapper } from "./ui-stream-mapper.ts";
 import { acquireCodexSlot } from "./concurrency.ts";
 import { buildTranscriptPrompt } from "../transcript.ts";
 import { logger } from "../logger.ts";

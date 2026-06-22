@@ -30,8 +30,6 @@
 import type { UIMessageChunk } from "ai";
 import type { CodexEvent, CodexUsage } from "@appstrate/core/codex-binary";
 
-export type { CodexEvent, CodexUsage };
-
 export interface CodexResultMeta {
   isError: boolean;
   errorText?: string;

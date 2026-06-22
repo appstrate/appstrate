@@ -51,15 +51,11 @@ import {
   redactSecrets,
   safeParseJson,
   writeCodexAuthHome,
+  type CodexEvent,
   type VendedCodexCredential,
 } from "@appstrate/core/codex-binary";
 import { getErrorMessage } from "@appstrate/core/errors";
-import {
-  CodexRunEventMapper,
-  computeCodexCost,
-  type CodexEvent,
-  type CodexModelCost,
-} from "./run-event-mapper.ts";
+import { CodexRunEventMapper, computeCodexCost, type CodexModelCost } from "./run-event-mapper.ts";
 
 /** Subprocess handle shape (Bun.spawn) — the minimum the runner drives. */
 export interface CodexChild {

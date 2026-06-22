@@ -37,8 +37,6 @@ import {
 } from "@appstrate/afps-runtime/runner";
 import type { CodexEvent, CodexUsage } from "@appstrate/core/codex-binary";
 
-export type { CodexEvent, CodexUsage };
-
 /** Per-token cost rates for the resolved model (USD per 1e6 tokens). */
 export interface CodexModelCost {
   input: number;
