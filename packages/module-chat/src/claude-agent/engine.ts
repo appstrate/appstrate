@@ -29,37 +29,11 @@ import { resolveClaudeCodeBinary } from "./binary.ts";
 import { createLocalToolsServer, type LocalToolsContext } from "./local-tools.ts";
 import { SdkUiStreamMapper, type ClaudeSdkMessage } from "./ui-stream-mapper.ts";
 import { acquireClaudeSlot } from "./concurrency.ts";
+import { capacityResponse } from "../engine-capacity.ts";
 import { logger } from "../logger.ts";
 
 /** Upper bound on agent turns per chat message (mirrors the ai-sdk path's MAX_STEPS). */
 const MAX_TURNS = 16;
-
-/**
- * Returned (instead of a stream) when the engine is at its subprocess cap, so
- * the client backs off rather than the instance forking unbounded binaries.
- * A 429 problem+json — `useChat` surfaces it as a turn error.
- */
-function capacityResponse(): Response {
-  const retryAfterSeconds = 5;
-  return new Response(
-    JSON.stringify({
-      type: "https://docs.appstrate.dev/errors/chat-capacity",
-      title: "Too Many Requests",
-      status: 429,
-      detail:
-        "Le service de chat Claude est temporairement saturé. Réessayez dans quelques instants.",
-      code: "chat_capacity",
-      retry_after: retryAfterSeconds,
-    }),
-    {
-      status: 429,
-      headers: {
-        "content-type": "application/problem+json",
-        "retry-after": String(retryAfterSeconds),
-      },
-    },
-  );
-}
 
 export interface ClaudeAgentChatInput {
   /** Full thread from the client (assistant-ui sends every turn). */
@@ -147,7 +121,7 @@ export function runClaudeAgentChat(input: ClaudeAgentChatInput): Response {
 
   // Bound the number of concurrent `claude` subprocesses per instance.
   const slot = acquireClaudeSlot();
-  if (!slot) return capacityResponse();
+  if (!slot) return capacityResponse("Claude");
 
   const controller = new AbortController();
   if (input.abortSignal.aborted) controller.abort();

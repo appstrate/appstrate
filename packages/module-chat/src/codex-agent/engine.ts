@@ -41,6 +41,7 @@ import {
 } from "@appstrate/core/codex-binary";
 import { CodexUiStreamMapper, type CodexEvent } from "./ui-stream-mapper.ts";
 import { acquireCodexSlot } from "./concurrency.ts";
+import { capacityResponse } from "../engine-capacity.ts";
 import { logger } from "../logger.ts";
 
 /**
@@ -101,32 +102,6 @@ export interface CodexAgentChatInput {
   onError: (error: unknown) => string;
 }
 
-/**
- * Returned (instead of a stream) when the engine is at its subprocess cap, so
- * the client backs off rather than the instance forking unbounded binaries.
- */
-function capacityResponse(): Response {
-  const retryAfterSeconds = 5;
-  return new Response(
-    JSON.stringify({
-      type: "https://docs.appstrate.dev/errors/chat-capacity",
-      title: "Too Many Requests",
-      status: 429,
-      detail:
-        "Le service de chat Codex est temporairement saturé. Réessayez dans quelques instants.",
-      code: "chat_capacity",
-      retry_after: retryAfterSeconds,
-    }),
-    {
-      status: 429,
-      headers: {
-        "content-type": "application/problem+json",
-        "retry-after": String(retryAfterSeconds),
-      },
-    },
-  );
-}
-
 /** Flatten the UI thread + system persona into a single prompt for `codex exec`. */
 export function buildCodexPrompt(messages: UIMessage[], system: string): string {
   const textOf = (m: UIMessage): string =>
@@ -184,7 +159,7 @@ export function runCodexAgentChat(input: CodexAgentChatInput): Response {
   const binary = resolveBinary();
 
   const slot = acquireCodexSlot();
-  if (!slot) return capacityResponse();
+  if (!slot) return capacityResponse("Codex");
 
   const mapper = new CodexUiStreamMapper();
 
