@@ -59,6 +59,13 @@ interface SdkToolResultBlock {
 }
 type SdkContentBlock = SdkTextBlock | SdkToolUseBlock | SdkToolResultBlock | { type: string };
 
+/** A tool call observed to completion — name, the args passed, and outcome. */
+export interface CompletedToolCall {
+  name: string;
+  input: unknown;
+  isError: boolean;
+}
+
 /** Anthropic usage counters — already snake_case, maps 1:1 onto {@link TokenUsage}. */
 export interface SdkUsage {
   input_tokens?: number;
@@ -149,11 +156,30 @@ function assistantErrorMessage(error: SdkAssistantMessage["error"]): string | un
 export class SdkRunEventMapper {
   private readonly liveUsage = zeroTokenUsage();
   private terminalState: SdkTerminal | null = null;
+  // Tool-call observation for runtime-tool replay capture: the `tool_use`
+  // (name + args) and the matching `tool_result` (success/error) arrive in
+  // separate SDK messages, so we hold the args by `tool_use_id` until the
+  // result lands, then surface the completed call for the runner to replay.
+  private readonly pendingToolInputs = new Map<string, { name: string; input: unknown }>();
+  private completedCalls: CompletedToolCall[] = [];
 
   constructor(
     private readonly runId: string,
     private readonly now: () => number = Date.now,
   ) {}
+
+  /**
+   * Drain the tool calls that completed since the last drain — each with its
+   * tool name, the args the model passed, and whether the result errored. The
+   * Claude runner filters these to first-party runtime tools and replays the
+   * shared pure handler to reconstruct their canonical events (the SDK's HTTP
+   * MCP client drops the result `_meta` those events would otherwise ride in).
+   */
+  drainCompletedToolCalls(): CompletedToolCall[] {
+    const calls = this.completedCalls;
+    this.completedCalls = [];
+    return calls;
+  }
 
   map(msg: SdkRunMessage): RunEvent[] {
     switch (msg.type) {
@@ -204,6 +230,10 @@ export class SdkRunEventMapper {
     for (const b of blocks) {
       if (b.type !== "tool_use") continue;
       const tool = b as SdkToolUseBlock;
+      // Hold (name, args) by id for runtime-tool replay once the result lands.
+      if (tool.id !== undefined && tool.name !== undefined) {
+        this.pendingToolInputs.set(tool.id, { name: tool.name, input: tool.input });
+      }
       events.push({
         type: "appstrate.progress",
         timestamp: ts,
@@ -241,6 +271,15 @@ export class SdkRunEventMapper {
       if (b.type !== "tool_result") continue;
       const r = b as SdkToolResultBlock;
       const isError = r.is_error === true;
+      // Match the result back to its `tool_use` args and surface the completed
+      // call for the runner's runtime-tool replay.
+      if (r.tool_use_id !== undefined) {
+        const pending = this.pendingToolInputs.get(r.tool_use_id);
+        if (pending) {
+          this.completedCalls.push({ name: pending.name, input: pending.input, isError });
+          this.pendingToolInputs.delete(r.tool_use_id);
+        }
+      }
       events.push({
         type: "appstrate.progress",
         timestamp: ts,

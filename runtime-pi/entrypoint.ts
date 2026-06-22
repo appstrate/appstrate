@@ -70,6 +70,7 @@ import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-tra
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
 import { parseRuntimeEnv, RuntimeEnvError } from "./env.ts";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
+import { buildRuntimeToolDefMap } from "@appstrate/core/runtime-tool-defs";
 import { provisionWorkspace, provisionDocuments, type ProvisionDeps } from "./provision.ts";
 
 /**
@@ -496,10 +497,19 @@ if (sidecarUrl) {
       // `buildMcpDirectFactories` registers `run_history` and
       // `recall_memory`, plus one forwarding factory per namespaced
       // integration tool (including the generic `{ns}__api_call`).
+      // The agent's selected runtime tools, indexed for transport-agnostic
+      // replay capture (shared with the Claude + Codex runners): when the LLM
+      // calls one, `buildMcpDirectFactories` replays the local pure handler on
+      // the args instead of trusting the sidecar result's `_meta`.
+      const piRuntimeTools = rootRuntimeTools();
       const factories = await buildMcpDirectFactories({
         mcp: mcpClient,
         runId: AGENT_RUN_ID,
         workspace: WORKSPACE,
+        runtimeDefs: buildRuntimeToolDefMap({
+          ...(piRuntimeTools ? { runtimeTools: piRuntimeTools } : {}),
+          outputSchema: runOutputSchema(),
+        }),
         emit: (event) => {
           void bridgedSink.handle(event as RunEvent);
         },

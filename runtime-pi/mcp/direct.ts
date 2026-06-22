@@ -34,8 +34,7 @@ import {
   spillResourcesToWorkspace,
   type RuntimeEventEmitter,
 } from "@appstrate/runner-pi";
-import { reEmitRuntimeToolEvents } from "@appstrate/core/runtime-tool-defs";
-import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
+import { replayRuntimeToolEvents, type RuntimeToolDef } from "@appstrate/core/runtime-tool-defs";
 import { buildApiUploadToolFactory } from "./api-upload-extension.ts";
 import { resolveApiCallBody, ApiCallBodyResolveError } from "./api-call-body-resolver.ts";
 import { shapeApiCallResponse } from "./api-call-response-resolver.ts";
@@ -63,6 +62,18 @@ interface BuildMcpDirectFactoriesOptions {
    * credential-isolated sidecar.
    */
   workspace: string;
+  /**
+   * The agent's selected first-party runtime tools (`log`/`note`/`pin`/`report`/
+   * `output`), indexed by bare name — the SAME defs the sidecar serves. When a
+   * forwarded tool call matches one, its canonical events are reconstructed by
+   * replaying the local pure handler on the observed args (see
+   * `replayRuntimeToolEvents`) rather than trusting the sidecar result's
+   * `_meta`. This is the transport-agnostic capture shared with the Claude +
+   * Codex runners, and it removes any trust in a result's `_meta`. Absent/empty
+   * → no runtime tools (the map is also the first-party allowlist: integration
+   * tools are namespaced `{ns}__{tool}` and never match).
+   */
+  runtimeDefs?: Map<string, RuntimeToolDef>;
 }
 
 /**
@@ -228,16 +239,19 @@ function buildIntegrationToolFactories(
             isError: result.isError === true,
             timestamp: Date.now(),
           });
-          // Trust boundary: re-emit canonical runtime-tool events ONLY for the
-          // first-party platform runtime tools (output/log/note/pin/report),
-          // which the sidecar hosts in-process and advertises under their bare
-          // names. Every third-party integration tool is namespaced
-          // `{ns}__{tool}` (so its name can never satisfy
-          // `isSelectableRuntimeTool`); forwarding its `_meta` would let a
-          // malicious/compromised integration forge run events
-          // (output.emitted, pinned.set, …). For those, the meta is ignored.
-          if (isSelectableRuntimeTool(tool.name)) {
-            reEmitRuntimeToolEvents(result._meta, opts.emit);
+          // First-party runtime tools (output/log/note/pin/report): reconstruct
+          // their canonical events by replaying the LOCAL pure handler on the
+          // observed args — the transport-agnostic capture shared with the
+          // Claude + Codex runners. We deliberately ignore the sidecar result's
+          // `_meta`: trusting it would let any bare-named tool forge run
+          // events, and the local replay is authoritative regardless of
+          // transport. The `runtimeDefs` map IS the first-party allowlist —
+          // integration tools are namespaced `{ns}__{tool}` and never match.
+          const runtimeDef = opts.runtimeDefs?.get(tool.name);
+          if (runtimeDef && result.isError !== true) {
+            for (const ev of await replayRuntimeToolEvents(runtimeDef, args)) {
+              opts.emit({ runId: opts.runId, timestamp: Date.now(), ...ev });
+            }
           }
           // api_call: surface the upstream HTTP status (otherwise dropped
           // with `_meta`) and honour `responseMode.toFile` — writing the body

@@ -18,10 +18,5 @@ export {
   type SdkRunMessage,
   type SdkTerminal,
   type SdkUsage,
+  type CompletedToolCall,
 } from "./sdk-event-mapper.ts";
-export {
-  buildRuntimeToolDefinitions,
-  buildRuntimeToolsMcpServer,
-  type RuntimeToolsMcp,
-  type RuntimeToolsMcpOptions,
-} from "./runtime-tools-mcp.ts";

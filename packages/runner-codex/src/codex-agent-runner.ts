@@ -53,8 +53,8 @@ import {
   type VendedCodexCredential,
 } from "@appstrate/core/codex-binary";
 import {
-  buildRuntimeToolDefs,
-  reEmitRuntimeToolEvents,
+  buildRuntimeToolDefMap,
+  replayRuntimeToolEvents,
   type RuntimeToolDef,
 } from "@appstrate/core/runtime-tool-defs";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -174,15 +174,13 @@ export class CodexAgentRunner implements Runner {
     // `/mcp`: the runner replays each one's shared PURE handler on the observed
     // call args to reconstruct the canonical RunEvent codex drops, then emits it
     // on the run's single sink (see `reemitRuntimeTool`). Built once per run.
-    const runtimeDefs = new Map<string, RuntimeToolDef>();
-    if (this.opts.runtimeTools?.length || this.opts.outputSchema) {
-      for (const def of buildRuntimeToolDefs({
-        ...(this.opts.runtimeTools ? { runtimeTools: this.opts.runtimeTools } : {}),
-        outputSchema: this.opts.outputSchema ?? null,
-      })) {
-        runtimeDefs.set(def.descriptor.name, def);
-      }
-    }
+    const runtimeDefs: Map<string, RuntimeToolDef> =
+      this.opts.runtimeTools?.length || this.opts.outputSchema
+        ? buildRuntimeToolDefMap({
+            ...(this.opts.runtimeTools ? { runtimeTools: this.opts.runtimeTools } : {}),
+            outputSchema: this.opts.outputSchema ?? null,
+          })
+        : new Map();
     const pendingRuntimeArgs = new Map<string, unknown>();
 
     let home: string | undefined;
@@ -359,17 +357,12 @@ export class CodexAgentRunner implements Runner {
     if (item.status === "failed") return;
 
     try {
-      const result = await def.handler(args);
-      // Collect through the trust-boundary allowlist, then await-emit each so
-      // re-emitted events keep the run's sink ordering (the allowlist drops any
-      // non-canonical type a handler might return).
-      const collected: RunEvent[] = [];
-      reEmitRuntimeToolEvents(result._meta, (e) => {
-        // Stamp runId (handlers are run-agnostic; the sink routes by runId) and
-        // default the timestamp, mirroring the mapper's own events.
-        collected.push({ timestamp: now(), ...(e as Record<string, unknown>), runId } as RunEvent);
-      });
-      for (const e of collected) await emit(e);
+      // Shared transport-agnostic capture: replay the pure handler on the args.
+      // Stamp runId (handlers are run-agnostic; the sink routes by runId) +
+      // default the timestamp, mirroring the mapper's own events.
+      for (const e of await replayRuntimeToolEvents(def, args)) {
+        await emit({ timestamp: now(), ...(e as Record<string, unknown>), runId } as RunEvent);
+      }
     } catch {
       // A replay failure must never fail the run — the tool's text result
       // already reached the model; only the reconstructed event is lost.

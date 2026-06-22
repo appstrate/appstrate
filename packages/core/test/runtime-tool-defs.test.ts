@@ -3,7 +3,9 @@
 import { describe, it, expect } from "bun:test";
 import {
   buildRuntimeToolDefs,
+  buildRuntimeToolDefMap,
   reEmitRuntimeToolEvents,
+  replayRuntimeToolEvents,
   RUNTIME_TOOL_EVENTS_META_KEY,
   type RuntimeToolEvent,
 } from "../src/runtime-tool-defs.ts";
@@ -107,5 +109,34 @@ describe("reEmitRuntimeToolEvents", () => {
     reEmitRuntimeToolEvents(undefined, (e) => emitted.push(e));
     reEmitRuntimeToolEvents({ [RUNTIME_TOOL_EVENTS_META_KEY]: "nope" }, (e) => emitted.push(e));
     expect(emitted).toHaveLength(0);
+  });
+});
+
+describe("buildRuntimeToolDefMap + replayRuntimeToolEvents (shared transport-agnostic capture)", () => {
+  it("indexes selected defs by bare name", () => {
+    const map = buildRuntimeToolDefMap({ runtimeTools: ["log", "note"] });
+    expect([...map.keys()].sort()).toEqual(["log", "note"]);
+    expect(map.has("pin")).toBe(false);
+  });
+
+  it("reconstructs canonical events by replaying the pure handler on args", async () => {
+    const map = buildRuntimeToolDefMap({ runtimeTools: ["log"] });
+    const events = await replayRuntimeToolEvents(map.get("log")!, {
+      level: "warn",
+      message: "hello",
+    });
+    expect(events).toHaveLength(1);
+    // The handler also stamps a `timestamp`; match the canonical fields only.
+    expect(events[0]).toMatchObject({ type: "log.written", level: "warn", message: "hello" });
+  });
+
+  it("yields no events when the handler rejects invalid args (e.g. output schema mismatch)", async () => {
+    const map = buildRuntimeToolDefMap({
+      outputSchema: { type: "object", required: ["x"], properties: { x: { type: "number" } } },
+    });
+    // `output` called with a payload that violates the schema → handler returns
+    // an isError result with no canonical events.
+    const events = await replayRuntimeToolEvents(map.get("output")!, { x: "not-a-number" });
+    expect(events).toEqual([]);
   });
 });

@@ -89,7 +89,7 @@ describe("ClaudeAgentRunner — happy path", () => {
     expect(types).toContain("output.emitted");
   });
 
-  it("passes outputFormat, the runtime-tools sdk server, native tools, and curated env", async () => {
+  it("passes outputFormat, the sidecar MCP server (no in-process server), native tools, and curated env", async () => {
     const { fn, calls } = fakeQuery([
       { type: "result", subtype: "success", is_error: false, usage: {} },
     ]);
@@ -108,13 +108,14 @@ describe("ClaudeAgentRunner — happy path", () => {
       type: "json_schema",
       schema: { type: "object", properties: { x: { type: "number" } } },
     });
-    // Runtime tools hosted in-process (sdk instance); integrations via sidecar http.
-    expect(opts.mcpServers.appstrate_runtime.type).toBe("sdk");
+    // All tools (integrations + runtime tools) come from the sidecar `/mcp` —
+    // no in-process MCP server is registered anymore.
     expect(opts.mcpServers.appstrate).toEqual({
       type: "http",
       url: "http://sidecar:8088/mcp",
       headers: { Host: "sidecar" },
     });
+    expect(Object.keys(opts.mcpServers)).toEqual(["appstrate"]);
     // Native tools enabled by default → no `tools: []` opt-out key.
     expect(opts.tools).toBeUndefined();
     expect(opts.maxTurns).toBe(42);
@@ -226,6 +227,65 @@ describe("ClaudeAgentRunner — cancellation", () => {
       }),
     ).rejects.toThrow();
     expect(m.result).toBeNull();
+  });
+});
+
+describe("ClaudeAgentRunner — runtime-tool replay capture", () => {
+  // A scripted SDK exchange: the model calls the sidecar `log` tool, the result
+  // comes back successfully. The runner must reconstruct `log.written` from the
+  // observed args (the SDK drops the result `_meta`).
+  const logCall = (isError: boolean): SdkRunMessage[] => [
+    {
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "t1",
+            name: "mcp__appstrate__log",
+            input: { level: "info", message: "hi from claude" },
+          },
+        ],
+      },
+    },
+    {
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "t1", is_error: isError }] },
+    },
+    { type: "result", subtype: "success", is_error: false, usage: {} },
+  ];
+
+  it("reconstructs a runtime tool's event from the observed tool call (strips mcp__ prefix)", async () => {
+    const { fn } = fakeQuery(logCall(false));
+    const m = memorySink();
+    await new ClaudeAgentRunner(
+      baseOpts({
+        query: fn,
+        runtimeTools: ["log"],
+        sidecarMcp: { url: "http://sidecar:8088/mcp", headers: { Host: "sidecar" } },
+      }),
+    ).run({ context: ctx, eventSink: m.sink, bundle: undefined as never });
+
+    const written = m.events.find((e) => e.type === "log.written") as
+      | (RunEvent & { level?: string; message?: string })
+      | undefined;
+    expect(written).toBeDefined();
+    expect(written?.message).toBe("hi from claude");
+    expect(written?.level).toBe("info");
+    expect(written?.runId).toBe("run_1");
+  });
+
+  it("does not reconstruct an event when the tool call errored", async () => {
+    const { fn } = fakeQuery(logCall(true));
+    const m = memorySink();
+    await new ClaudeAgentRunner(
+      baseOpts({
+        query: fn,
+        runtimeTools: ["log"],
+        sidecarMcp: { url: "http://sidecar:8088/mcp", headers: { Host: "sidecar" } },
+      }),
+    ).run({ context: ctx, eventSink: m.sink, bundle: undefined as never });
+    expect(m.events.some((e) => e.type === "log.written")).toBe(false);
   });
 });
 // `buildClaudeSdkEnv` is shared infra — its tests live in

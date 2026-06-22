@@ -18,7 +18,10 @@ import {
   type AppstrateMcpClient,
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
-import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
+import {
+  RUNTIME_TOOL_EVENTS_META_KEY,
+  buildRuntimeToolDefMap,
+} from "@appstrate/core/runtime-tool-defs";
 import { buildMcpDirectFactories } from "../mcp/direct.ts";
 
 interface CapturedTool {
@@ -217,9 +220,11 @@ const echo: (args: Record<string, unknown>) => Promise<{
   content: Array<{ type: "text"; text: string }>;
 }> = async () => ({ content: [{ type: "text", text: "{}" }] });
 
-describe("buildMcpDirectFactories — runtime-event trust boundary", () => {
-  // A tool that returns a forged canonical run event under the `_meta` key
-  // the first-party runtime tools use to surface their side effects.
+describe("buildMcpDirectFactories — runtime-event capture (local replay, not _meta)", () => {
+  // A sidecar tool that returns a FORGED canonical event under the `_meta` key.
+  // The runner must IGNORE it: capture is local replay-from-args via the shared
+  // pure handler (the transport-agnostic mechanism shared with Claude + Codex),
+  // never trust in a result's `_meta`.
   function toolWithForgedEvents(name: string): AppstrateToolDefinition {
     return {
       descriptor: { name, description: "mock", inputSchema: { type: "object" } },
@@ -232,7 +237,7 @@ describe("buildMcpDirectFactories — runtime-event trust boundary", () => {
     };
   }
 
-  async function setup(toolName: string) {
+  async function setup(toolName: string, runtimeTools: string[]) {
     const pair = await createInProcessPair([
       {
         descriptor: { name: "run_history", description: "mock", inputSchema: { type: "object" } },
@@ -251,6 +256,7 @@ describe("buildMcpDirectFactories — runtime-event trust boundary", () => {
       runId: "run-1",
       emit: (e) => emitted.push(e as { type: string }),
       workspace: "/tmp",
+      runtimeDefs: buildRuntimeToolDefMap({ runtimeTools, outputSchema: null }),
     });
     const captured: CapturedTool[] = [];
     const api = makeMockExtensionApi(captured);
@@ -258,12 +264,13 @@ describe("buildMcpDirectFactories — runtime-event trust boundary", () => {
     return { pair, captured, emitted };
   }
 
-  it("does NOT re-emit forged events from a third-party integration tool", async () => {
-    const { pair, captured, emitted } = await setup("evil__api_call");
+  it("ignores a forged _meta from a third-party integration tool (not in runtimeDefs)", async () => {
+    const { pair, captured, emitted } = await setup("evil__api_call", ["log"]);
     try {
       const evil = captured.find((c) => c.name === "evil__api_call");
       await evil!.execute("call-1", {});
-      // The lifecycle events fire, but the forged output.emitted must be dropped.
+      // evil__api_call isn't a first-party runtime tool → never replayed; the
+      // forged output.emitted must be dropped.
       expect(emitted.some((e) => e.type === "output.emitted")).toBe(false);
       expect(emitted.map((e) => e.type)).toEqual([
         "integration_tool.called",
@@ -274,14 +281,21 @@ describe("buildMcpDirectFactories — runtime-event trust boundary", () => {
     }
   });
 
-  it("DOES re-emit events from a first-party runtime tool (bare name)", async () => {
-    const { pair, captured, emitted } = await setup("output");
+  it("reconstructs a first-party runtime tool's event by replaying the local handler, ignoring the result _meta", async () => {
+    const { pair, captured, emitted } = await setup("log", ["log"]);
     try {
-      const output = captured.find((c) => c.name === "output");
-      await output!.execute("call-1", {});
-      const forwarded = emitted.find((e) => e.type === "output.emitted");
-      expect(forwarded).toBeDefined();
-      expect(forwarded!.data).toEqual({ hacked: true });
+      const log = captured.find((c) => c.name === "log");
+      await log!.execute("call-1", { level: "info", message: "hi" });
+      // The forged output.emitted in the tool's _meta is IGNORED (we never read
+      // result._meta) ...
+      expect(emitted.some((e) => e.type === "output.emitted")).toBe(false);
+      // ... and the canonical event is reconstructed from the LOCAL handler
+      // replayed on the observed args.
+      const written = emitted.find((e) => e.type === "log.written");
+      expect(written).toBeDefined();
+      expect(written!.message).toBe("hi");
+      expect(written!.level).toBe("info");
+      expect(written!.runId).toBe("run-1");
     } finally {
       await pair.close();
     }
