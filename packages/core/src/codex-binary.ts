@@ -219,6 +219,133 @@ export async function sweepStaleCodexHomes(opts: {
 }
 
 /**
+ * Escape a string as a TOML basic string (double-quoted). Escapes the backslash
+ * and quote, plus the control chars TOML requires (`\n`/`\r`/`\t`). Sufficient
+ * for the values we emit (URLs, header values, env values, paths) — none of
+ * which carry exotic control characters.
+ */
+function tomlBasicString(value: string): string {
+  return `"${value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/\t/g, "\\t")}"`;
+}
+
+/** A streamable-HTTP MCP server entry (the platform meta-tools surface). */
+export interface CodexHttpMcpServer {
+  /** Endpoint URL — codex auto-detects streamable HTTP transport from `url`. */
+  url: string;
+  /** Literal HTTP headers sent with every MCP request (auth + scoping). */
+  headers?: Record<string, string>;
+}
+
+/** A stdio MCP server entry (a local subprocess codex spawns and talks to). */
+export interface CodexStdioMcpServer {
+  /** Executable codex spawns (e.g. the host's `bun`). */
+  command: string;
+  /** Argv after `command` (e.g. the MCP server script path). */
+  args: string[];
+  /** Environment for the spawned server (e.g. origin + forwarded headers). */
+  env?: Record<string, string>;
+}
+
+/**
+ * Build the `config.toml` the spawned `codex` binary reads from `CODEX_HOME`
+ * to discover its MCP servers. Codex's models-manager can't be reverse-proxied,
+ * but its MCP client is independent — so this is how the codex engine reaches
+ * the same tool surface the Claude engine gets through the Agent SDK's
+ * `mcpServers`.
+ *
+ * Two server kinds:
+ *   - `platform` (streamable HTTP) — the platform meta-tools at `/api/mcp/o/:org`.
+ *     Auth + scoping ride as LITERAL `http_headers` (codex 0.141 sends them
+ *     verbatim; the config.toml lives in the same 0600 ephemeral `CODEX_HOME` as
+ *     `auth.json`, so the forwarded credential gains no new at-rest surface).
+ *   - `appstrate_local` (stdio) — the chat's two non-platform tools
+ *     (`render_html` + `wait_for_run`), the parity counterpart of the Claude
+ *     engine's in-process `appstrate_local` SDK server.
+ *
+ * `default_tools_approval_mode = "approve"` on each server auto-approves its
+ * tools so a non-interactive `codex exec` never blocks on a tool prompt (the
+ * sandbox flag still governs codex's OWN file/exec tools, independently). The
+ * `experimental_use_rmcp_client` / `[features]` flag is deliberately NOT emitted
+ * — it is an unknown field at codex 0.141 (rejected under `--strict-config`),
+ * and streamable-HTTP MCP works without it.
+ *
+ * Pure (no IO) so it is unit-testable; {@link writeCodexConfig} does the write.
+ */
+export function buildCodexConfigToml(opts: {
+  platform?: CodexHttpMcpServer;
+  localTools?: CodexStdioMcpServer;
+  /** Cap on the MCP server handshake (seconds). Default 20. */
+  startupTimeoutSec?: number;
+  /** Cap on a single MCP tool call (seconds). Default 120. */
+  toolTimeoutSec?: number;
+}): string {
+  const startup = opts.startupTimeoutSec ?? 20;
+  const toolTimeout = opts.toolTimeoutSec ?? 120;
+  const blocks: string[] = [];
+
+  if (opts.platform) {
+    blocks.push(
+      [
+        "[mcp_servers.platform]",
+        `url = ${tomlBasicString(opts.platform.url)}`,
+        `startup_timeout_sec = ${startup}`,
+        `tool_timeout_sec = ${toolTimeout}`,
+        `default_tools_approval_mode = "approve"`,
+      ].join("\n"),
+    );
+    const headers = opts.platform.headers ?? {};
+    const headerKeys = Object.keys(headers);
+    if (headerKeys.length > 0) {
+      blocks.push(
+        [
+          "[mcp_servers.platform.http_headers]",
+          ...headerKeys.map((k) => `${tomlBasicString(k)} = ${tomlBasicString(headers[k]!)}`),
+        ].join("\n"),
+      );
+    }
+  }
+
+  if (opts.localTools) {
+    const argsToml = `[${opts.localTools.args.map(tomlBasicString).join(", ")}]`;
+    blocks.push(
+      [
+        "[mcp_servers.appstrate_local]",
+        `command = ${tomlBasicString(opts.localTools.command)}`,
+        `args = ${argsToml}`,
+        `startup_timeout_sec = ${startup}`,
+        `default_tools_approval_mode = "approve"`,
+      ].join("\n"),
+    );
+    const env = opts.localTools.env ?? {};
+    const envKeys = Object.keys(env);
+    if (envKeys.length > 0) {
+      blocks.push(
+        [
+          "[mcp_servers.appstrate_local.env]",
+          ...envKeys.map((k) => `${tomlBasicString(k)} = ${tomlBasicString(env[k]!)}`),
+        ].join("\n"),
+      );
+    }
+  }
+
+  return blocks.length > 0 ? `${blocks.join("\n\n")}\n` : "";
+}
+
+/**
+ * Write a `config.toml` into an existing ephemeral `CODEX_HOME` (mode 0600,
+ * same posture as `auth.json`). No-op when `toml` is empty (no MCP servers).
+ */
+export async function writeCodexConfig(opts: { home: string; toml: string }): Promise<void> {
+  if (!opts.toml) return;
+  await writeFile(join(opts.home, "config.toml"), opts.toml, { mode: 0o600 });
+}
+
+/**
  * Curated environment for a spawned `codex` binary. Like
  * {@link ./claude-binary.ts}'s `buildClaudeSdkEnv`, this deliberately does NOT
  * forward the full `process.env` (that would leak platform secrets). It sets
@@ -404,7 +531,25 @@ export interface CodexUsage {
 export interface CodexEvent {
   type: string;
   thread_id?: string;
-  item?: { id?: string; type?: string; text?: string; command?: string; [k: string]: unknown };
+  item?: {
+    id?: string;
+    type?: string;
+    text?: string;
+    command?: string;
+    /** mcp_tool_call: the MCP server name (e.g. "platform", "appstrate_local"). */
+    server?: string;
+    /** mcp_tool_call: the bare tool name (no `mcp__server__` prefix). */
+    tool?: string;
+    /** mcp_tool_call: the call arguments (JsonValue; defaults to `{}`). */
+    arguments?: unknown;
+    /** mcp_tool_call (completed): the MCP CallToolResult payload. */
+    result?: { content?: unknown[]; structured_content?: unknown } | null;
+    /** mcp_tool_call (failed): the error. */
+    error?: { message?: string } | null;
+    /** mcp_tool_call: "in_progress" | "completed" | "failed". */
+    status?: string;
+    [k: string]: unknown;
+  };
   usage?: CodexUsage;
   error?: { message?: string } | string;
   message?: string;

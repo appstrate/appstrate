@@ -235,11 +235,17 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   }
 
   // Codex (ChatGPT) subscription → official `codex` CLI engine (clean/sanctioned),
-  // pointed at the non-forging codex-sdk gateway. The CLI signs its own
-  // fingerprint; the gateway swaps the placeholder bearer for the real token.
-  // Conversational MVP — no platform MCP tools wired yet (codex's own coding
-  // sandbox is read-only here), so close the probe client.
+  // credential vended first-party (the CLI's models-manager can't be proxied).
+  // The CLI's MCP client IS independent, so — like the claude branch — we hand
+  // the engine the platform MCP endpoint + forwarded headers; the engine writes
+  // them into codex's config.toml (the SDK opens its own connection, so we close
+  // this probe client, used only for reachability + instructions). The operation
+  // index was already stripped for codex by applyOperationIndexPolicy (no prompt
+  // cache → it relies on search_operations instead).
   if (engine === "codex") {
+    const platformMcp = mcp
+      ? { url: `${origin}/api/mcp/o/${encodeURIComponent(orgId)}`, headers: mcpHeaders }
+      : undefined;
     await mcp?.close();
     return runCodexAgentChat({
       messages,
@@ -250,6 +256,8 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
         { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
         { ttlMs: ENGINE_LOOPBACK_TTL_MS },
       ),
+      platformMcp,
+      localTools: { origin, headers: mcpHeaders },
       abortSignal: c.req.raw.signal,
       onError: clientErrorMessage,
     });

@@ -8,9 +8,12 @@
  * The CLI emits (codex-cli 0.141, `codex exec --json`):
  *   - `thread.started` { thread_id }            — ignored (framing is per-turn)
  *   - `turn.started`                            → `start-step`
+ *   - `item.started`   { item: { type: "mcp_tool_call", … } } → `tool-input-available`
  *   - `item.completed` { item: { id, type, text } }
  *        · `agent_message` (the assistant answer) → a complete text block
  *        · `reasoning`                            → a complete reasoning block
+ *        · `mcp_tool_call`                        → `tool-output-available`/`-error`
+ *          (the platform + appstrate_local MCP tools — see mapToolInput/Complete)
  *        · other item types (command_execution, file_change, …) → skipped in
  *          chat (they belong to codex's own coding sandbox, which is read-only
  *          here and irrelevant to a conversational answer)
@@ -41,6 +44,8 @@ export class CodexUiStreamMapper {
   private step = 0;
   private fallbackId = 0;
   private result: CodexResultMeta | null = null;
+  /** MCP tool-call ids whose `tool-input-available` chunk was already emitted. */
+  private readonly toolInputSeen = new Set<string>();
 
   /** The opening `start` chunk (engine writes this before iterating). */
   startChunk(messageId: string): UIMessageChunk {
@@ -52,7 +57,12 @@ export class CodexUiStreamMapper {
       case "turn.started":
         this.step += 1;
         return [{ type: "start-step" }];
+      case "item.started":
+        // Only MCP tool calls need an early chunk (input as soon as the call
+        // starts). Text/reasoning items carry their full text on item.completed.
+        return ev.item?.type === "mcp_tool_call" ? this.mapToolInput(ev.item) : [];
       case "item.completed":
+        if (ev.item?.type === "mcp_tool_call") return this.mapToolComplete(ev.item);
         return this.mapItem(ev.item);
       case "turn.completed":
         this.result = { isError: false, finishReason: "stop", usage: ev.usage };
@@ -87,9 +97,48 @@ export class CodexUiStreamMapper {
         { type: "text-end", id },
       ];
     }
-    // command_execution / file_change / mcp_tool_call / todo_list / … —
-    // codex's sandboxed coding surface, not part of a conversational answer.
+    // command_execution / file_change / todo_list / … — codex's sandboxed
+    // coding surface, not part of a conversational answer. (mcp_tool_call is
+    // handled separately — see mapToolInput / mapToolComplete.)
     return [];
+  }
+
+  /**
+   * `item.started` for an `mcp_tool_call` → a `tool-input-available` chunk so
+   * the client renders the call (the same React tool UI the ai-sdk/Claude paths
+   * use). Codex's `tool` field is the bare tool name (no `mcp__server__`
+   * prefix), so it matches the client UIs directly — no stripping needed.
+   */
+  private mapToolInput(item: CodexEvent["item"]): UIMessageChunk[] {
+    const id = item?.id;
+    const toolName = item?.tool;
+    if (!id || !toolName || this.toolInputSeen.has(id)) return [];
+    this.toolInputSeen.add(id);
+    return [
+      { type: "tool-input-available", toolCallId: id, toolName, input: item?.arguments ?? {} },
+    ];
+  }
+
+  /**
+   * `item.completed` for an `mcp_tool_call` → a `tool-output-available` (or
+   * `tool-output-error`) chunk. If `item.started` was missed, the input chunk is
+   * emitted first so the tool still renders.
+   */
+  private mapToolComplete(item: CodexEvent["item"]): UIMessageChunk[] {
+    const id = item?.id;
+    if (!id) return [];
+    const chunks = this.mapToolInput(item); // no-op if already emitted
+    if (item?.status === "failed" || item?.error) {
+      chunks.push({
+        type: "tool-output-error",
+        toolCallId: id,
+        errorText: item?.error?.message ?? "MCP tool call failed.",
+      });
+      return chunks;
+    }
+    const output = item?.result?.structured_content ?? item?.result?.content ?? null;
+    chunks.push({ type: "tool-output-available", toolCallId: id, output });
+    return chunks;
   }
 
   private errorText(ev: CodexEvent): string {

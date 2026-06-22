@@ -25,14 +25,26 @@
  *   - The curated env (`@appstrate/core/codex-binary`) carries no platform
  *     secrets and routes outbound traffic through the forward proxy when set.
  *
+ * Tools (parity with the claude-agent engine, which wires `mcpServers` on the
+ * SDK): codex's MCP client is independent of its un-proxyable models-manager, so
+ * a `config.toml` written into `CODEX_HOME` points it at two MCP servers —
+ * `platform` (streamable HTTP → the meta-tools at `/api/mcp/o/:org`, with the
+ * caller's forwarded headers, RBAC re-applied server-side) and `appstrate_local`
+ * (stdio → render_html + wait_for_run, see local-tools-stdio.ts). Both
+ * auto-approve their tools (`default_tools_approval_mode = "approve"`) so the
+ * non-interactive `exec` never blocks; the `-s read-only` sandbox is independent
+ * and still walls off codex's OWN file/exec tools.
+ *
  * Token usage is driver-authoritative: read from the CLI's `turn.completed`
  * event and surfaced in the finish chunk's metadata.
  */
 
 import { rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from "ai";
 import {
+  buildCodexConfigToml,
   buildCodexEnv,
   makeCodexScopeResolver,
   readNdjsonLines,
@@ -40,6 +52,7 @@ import {
   resolveCodexBinary,
   safeParseJson,
   writeCodexAuthHome,
+  writeCodexConfig,
   type CodexEvent,
   type VendedCodexCredential,
 } from "@appstrate/core/codex-binary";
@@ -89,11 +102,26 @@ export interface CodexAgentChatInput {
   credentialUrl: string;
   /** Loopback bearer authorizing the vend GET (resolved to the caller's identity). */
   loopbackToken: string;
+  /**
+   * Platform HTTP MCP server (meta-tools at `/api/mcp/o/:org`), omitted when the
+   * `mcp` module is off. Wired into codex via `config.toml` as a streamable-HTTP
+   * server with the caller's forwarded headers (RBAC fidelity).
+   */
+  platformMcp?: { url: string; headers: Record<string, string> };
+  /**
+   * Context for the local tools (`render_html` + `wait_for_run`), served to
+   * codex by a spawned stdio MCP server (local-tools-stdio.ts) — the parity
+   * counterpart of the Claude engine's in-process `appstrate_local` server.
+   */
+  localTools: { origin: string; headers: Record<string, string> };
   /** Aborts the codex subprocess when the client disconnects. */
   abortSignal: AbortSignal;
   /** Maps a thrown error to a client-safe message. */
   onError: (error: unknown) => string;
 }
+
+/** Absolute path to the stdio local-tools MCP server script (spawned by codex). */
+const LOCAL_TOOLS_SCRIPT = fileURLToPath(new URL("./local-tools-stdio.ts", import.meta.url));
 
 /**
  * Run one chat turn through the Codex CLI and return a UI-message-stream
@@ -158,6 +186,28 @@ export function runCodexAgentChat(input: CodexAgentChatInput): Response {
           nowMs: Date.now(),
           prefix: CODEX_CHAT_HOME_PREFIX,
           baseDir: codexChatHomeBase(),
+        });
+
+        // Write the MCP config alongside auth.json (same 0600 ephemeral home):
+        //   - `platform` (streamable HTTP) → the platform meta-tools, with the
+        //     caller's forwarded headers as literal http_headers (RBAC fidelity).
+        //   - `appstrate_local` (stdio) → render_html + wait_for_run, served by a
+        //     bun subprocess codex spawns (this host's bun = process.execPath).
+        // Both auto-approve their tools so the non-interactive `exec` never blocks
+        // (the `-s read-only` sandbox still governs codex's OWN file/exec tools).
+        await writeCodexConfig({
+          home,
+          toml: buildCodexConfigToml({
+            platform: input.platformMcp,
+            localTools: {
+              command: process.execPath,
+              args: [LOCAL_TOOLS_SCRIPT],
+              env: {
+                APPSTRATE_ORIGIN: input.localTools.origin,
+                APPSTRATE_MCP_HEADERS: JSON.stringify(input.localTools.headers),
+              },
+            },
+          }),
         });
 
         child = Bun.spawn(

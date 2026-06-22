@@ -50,6 +50,96 @@ describe("CodexUiStreamMapper", () => {
     expect(m.resultMeta()?.isError).toBe(true);
     expect(m.finishChunk().finishReason).toBe("error");
   });
+
+  it("maps an mcp_tool_call: input on item.started, output on item.completed", () => {
+    const m = new CodexUiStreamMapper();
+    expect(
+      m.map({
+        type: "item.started",
+        item: {
+          id: "t0",
+          type: "mcp_tool_call",
+          server: "platform",
+          tool: "search_operations",
+          arguments: { query: "run agent" },
+          status: "in_progress",
+        },
+      }),
+    ).toEqual([
+      {
+        type: "tool-input-available",
+        toolCallId: "t0",
+        toolName: "search_operations",
+        input: { query: "run agent" },
+      },
+    ]);
+    expect(
+      m.map({
+        type: "item.completed",
+        item: {
+          id: "t0",
+          type: "mcp_tool_call",
+          server: "platform",
+          tool: "search_operations",
+          status: "completed",
+          result: { content: [{ type: "text", text: "{}" }], structured_content: { count: 3 } },
+        },
+      }),
+    ).toEqual([{ type: "tool-output-available", toolCallId: "t0", output: { count: 3 } }]);
+  });
+
+  it("emits input before output when item.started was missed", () => {
+    const m = new CodexUiStreamMapper();
+    const out = m.map({
+      type: "item.completed",
+      item: {
+        id: "t1",
+        type: "mcp_tool_call",
+        tool: "render_html",
+        arguments: { code: "<h1/>" },
+        status: "completed",
+        result: { content: [{ type: "text", text: '{"rendered":true}' }] },
+      },
+    });
+    expect(out).toEqual([
+      {
+        type: "tool-input-available",
+        toolCallId: "t1",
+        toolName: "render_html",
+        input: { code: "<h1/>" },
+      },
+      {
+        type: "tool-output-available",
+        toolCallId: "t1",
+        output: [{ type: "text", text: '{"rendered":true}' }],
+      },
+    ]);
+  });
+
+  it("maps a failed mcp_tool_call to tool-output-error", () => {
+    const m = new CodexUiStreamMapper();
+    m.map({
+      type: "item.started",
+      item: {
+        id: "t2",
+        type: "mcp_tool_call",
+        tool: "invoke_operation",
+        arguments: {},
+        status: "in_progress",
+      },
+    });
+    const out = m.map({
+      type: "item.completed",
+      item: {
+        id: "t2",
+        type: "mcp_tool_call",
+        tool: "invoke_operation",
+        status: "failed",
+        error: { message: "403" },
+      },
+    });
+    expect(out).toEqual([{ type: "tool-output-error", toolCallId: "t2", errorText: "403" }]);
+  });
 });
 
 describe("buildTranscriptPrompt (codex system prefix)", () => {

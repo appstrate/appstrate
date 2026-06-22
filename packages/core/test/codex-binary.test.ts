@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildCodexAuthJson,
+  buildCodexConfigToml,
   buildCodexEnv,
   codexBinaryPackage,
   codexTargetTriple,
@@ -16,6 +17,7 @@ import {
   safeParseJson,
   sweepStaleCodexHomes,
   writeCodexAuthHome,
+  writeCodexConfig,
 } from "../src/codex-binary.ts";
 
 async function dirExists(path: string): Promise<boolean> {
@@ -303,5 +305,105 @@ describe("safeParseJson", () => {
   it("returns null on malformed JSON instead of throwing", () => {
     expect(safeParseJson("{not json")).toBeNull();
     expect(safeParseJson("")).toBeNull();
+  });
+});
+
+describe("buildCodexConfigToml", () => {
+  it("emits a platform HTTP server with literal http_headers + approve", () => {
+    const toml = buildCodexConfigToml({
+      platform: {
+        url: "http://127.0.0.1:3000/api/mcp/o/org_1",
+        headers: { Cookie: "s=abc", "X-Org-Id": "org_1", "x-application-id": "app_1" },
+      },
+    });
+    expect(toml).toContain("[mcp_servers.platform]");
+    expect(toml).toContain('url = "http://127.0.0.1:3000/api/mcp/o/org_1"');
+    expect(toml).toContain('default_tools_approval_mode = "approve"');
+    expect(toml).toContain("startup_timeout_sec = 20");
+    expect(toml).toContain("tool_timeout_sec = 120");
+    expect(toml).toContain("[mcp_servers.platform.http_headers]");
+    expect(toml).toContain('"Cookie" = "s=abc"');
+    expect(toml).toContain('"X-Org-Id" = "org_1"');
+    expect(toml).toContain('"x-application-id" = "app_1"');
+  });
+
+  it("emits a stdio appstrate_local server with command/args/env", () => {
+    const toml = buildCodexConfigToml({
+      localTools: {
+        command: "/usr/bin/bun",
+        args: ["/abs/local-tools-stdio.ts"],
+        env: {
+          APPSTRATE_ORIGIN: "http://127.0.0.1:3000",
+          APPSTRATE_MCP_HEADERS: '{"Cookie":"s=1"}',
+        },
+      },
+    });
+    expect(toml).toContain("[mcp_servers.appstrate_local]");
+    expect(toml).toContain('command = "/usr/bin/bun"');
+    expect(toml).toContain('args = ["/abs/local-tools-stdio.ts"]');
+    expect(toml).toContain('default_tools_approval_mode = "approve"');
+    expect(toml).toContain("[mcp_servers.appstrate_local.env]");
+    expect(toml).toContain('"APPSTRATE_ORIGIN" = "http://127.0.0.1:3000"');
+    // Embedded JSON value: the quotes inside must be TOML-escaped.
+    expect(toml).toContain('"APPSTRATE_MCP_HEADERS" = "{\\"Cookie\\":\\"s=1\\"}"');
+  });
+
+  it("escapes backslashes and quotes in values", () => {
+    const toml = buildCodexConfigToml({
+      platform: { url: "http://x/y", headers: { H: 'a"b\\c' } },
+    });
+    expect(toml).toContain('"H" = "a\\"b\\\\c"');
+  });
+
+  it("never emits the rmcp [features] flag (unknown at codex 0.141)", () => {
+    const toml = buildCodexConfigToml({
+      platform: { url: "http://x/y" },
+      localTools: { command: "bun", args: ["s.ts"] },
+    });
+    expect(toml).not.toContain("experimental_use_rmcp_client");
+    expect(toml).not.toContain("[features]");
+  });
+
+  it("honours custom timeouts and omits empty header/env tables", () => {
+    const toml = buildCodexConfigToml({
+      platform: { url: "http://x/y" },
+      startupTimeoutSec: 5,
+      toolTimeoutSec: 30,
+    });
+    expect(toml).toContain("startup_timeout_sec = 5");
+    expect(toml).toContain("tool_timeout_sec = 30");
+    expect(toml).not.toContain("http_headers");
+  });
+
+  it("returns an empty string when no servers are configured", () => {
+    expect(buildCodexConfigToml({})).toBe("");
+  });
+});
+
+describe("writeCodexConfig", () => {
+  it("writes config.toml 0600 into the home", async () => {
+    const home = await mkdtemp(join(tmpdir(), "codex-cfg-"));
+    try {
+      await writeCodexConfig({
+        home,
+        toml: buildCodexConfigToml({ platform: { url: "http://x/y" } }),
+      });
+      const path = join(home, "config.toml");
+      expect(await readFile(path, "utf8")).toContain("[mcp_servers.platform]");
+      const info = await stat(path);
+      expect(info.mode & 0o777).toBe(0o600);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("is a no-op for an empty toml (no servers)", async () => {
+    const home = await mkdtemp(join(tmpdir(), "codex-cfg-"));
+    try {
+      await writeCodexConfig({ home, toml: "" });
+      expect(await dirExists(join(home, "config.toml"))).toBe(false);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });
