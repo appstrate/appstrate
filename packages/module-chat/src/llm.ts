@@ -32,21 +32,6 @@ export interface OrgModel {
   isDefault?: boolean;
 }
 
-interface ResolveArgs {
-  origin: string;
-  headers: Record<string, string>;
-  /** Caller override; otherwise the org default (or first enabled) is used. */
-  modelId?: string;
-  /**
-   * Re-mints the loopback bearer on every proxy call. The `headers` bearer is
-   * minted once and expires after 60 s — but a single turn fans out into many
-   * inference calls across up to `MAX_STEPS` steps, with `wait_for_run` able to
-   * block for minutes in between. Without a fresh mint per call, a long turn
-   * hits the proxy with an expired token → 401 Unauthorized mid-stream.
-   */
-  mintAuth: () => string;
-}
-
 export async function listModels(
   origin: string,
   headers: Record<string, string>,
@@ -151,23 +136,6 @@ export function modelFromFamily(
         fetch: fetchImpl,
       })(model.id);
   }
-}
-
-export async function resolveModel(args: ResolveArgs): Promise<LanguageModel> {
-  const models = await listModels(args.origin, args.headers);
-  const chosen = pickModel(models, args.modelId);
-  const model = modelFromFamily(chosen, args.origin, args.headers, args.mintAuth);
-  if (!model) {
-    throw invalidRequest(
-      `Model family "${chosen.apiShape}" is not supported by the chat (use openai-completions, anthropic-messages or mistral-conversations).`,
-    );
-  }
-  logger.info("model resolved", {
-    model: chosen.id,
-    modelId: chosen.modelId,
-    family: chosen.apiShape,
-  });
-  return model;
 }
 
 /**
