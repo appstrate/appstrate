@@ -527,6 +527,16 @@ if (sidecarUrl) {
       // tools (log/note/pin/report/output) are executed once by the sidecar and
       // journaled; the drainer pulls them on the run sink after each forwarded
       // call — uniform with the Claude + Codex runners, no `_meta` trust.
+      //
+      // No final drain on the Pi path (unlike claude/codex): Pi makes each tool
+      // call itself and drains in the SAME `execute()` right after `callTool`
+      // resolves. The sidecar appends the events synchronously inside the
+      // wrapped handler BEFORE sending its response, so by the time `callTool`
+      // resolves they are already journaled and the immediate drain captures
+      // them — there is no "last tool's events land after the stream ends" gap
+      // that claude/codex (which observe an async stream) must backstop. A drain
+      // in this entrypoint would also run AFTER PiRunner's internal finalize,
+      // too late to emit. Do NOT add one.
       const factories = await buildMcpDirectFactories({
         mcp: mcpClient,
         runId: AGENT_RUN_ID,
