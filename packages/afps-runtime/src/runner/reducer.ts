@@ -11,8 +11,8 @@
  * contribute to the aggregated result.
  *
  * `foldEvent` is the single switch that knows how each canonical event
- * contributes to the aggregate. Both the batch reducer `reduceEvents`
- * and the incremental `createReducerSink` consume it.
+ * contributes to the aggregate; the batch reducer `reduceEvents` folds the
+ * whole event list through it.
  */
 
 import type { RunEvent } from "@afps-spec/types";

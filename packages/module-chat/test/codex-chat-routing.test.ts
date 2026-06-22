@@ -9,8 +9,11 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { CHAT_USABLE_FAMILIES, CODEX_API_SHAPE } from "../src/chat-families.ts";
+import { CHAT_USABLE_FAMILIES } from "../src/chat-families.ts";
 import { pickModel, proxyTarget, type OrgModel } from "../src/llm.ts";
+
+/** apiShape of the codex (ChatGPT) subscription provider — routed to the codex CLI engine. */
+const CODEX_API_SHAPE = "openai-codex-responses";
 
 const codex: OrgModel = {
   id: "m_codex",

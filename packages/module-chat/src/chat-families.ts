@@ -20,6 +20,3 @@ export const CHAT_USABLE_FAMILIES = new Set([
   "mistral-conversations",
   "openai-codex-responses",
 ]);
-
-/** apiShape of the codex (ChatGPT) subscription provider — routed to the codex CLI engine. */
-export const CODEX_API_SHAPE = "openai-codex-responses";

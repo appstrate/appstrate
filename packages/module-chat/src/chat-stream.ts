@@ -194,52 +194,42 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
 
   system = applyOperationIndexPolicy(system, engine, chosen.apiShape);
 
-  // Claude subscription → official Claude Agent SDK engine (clean/sanctioned),
-  // NOT the ai-sdk → forging proxy. The SDK opens its own MCP connection, so we
-  // close the probe client (used only for reachability + instructions) and hand
-  // the engine the MCP endpoint + a turn-scoped loopback bearer for the gateway.
-  if (engine === "claude") {
+  // Subscription engines (claude → Claude Agent SDK, codex → Codex CLI): both
+  // are clean/sanctioned official binaries that open their OWN MCP connection,
+  // so the prep is identical — close the probe client (used only for
+  // reachability + instructions), point the engine at the platform MCP endpoint
+  // + forwarded headers, and mint one turn-scoped loopback bearer for the
+  // gateway. (For codex the operation index was already stripped by
+  // applyOperationIndexPolicy — no prompt cache → it relies on
+  // search_operations.) Only the per-engine call (field names + gateway path)
+  // differs below.
+  if (engine === "claude" || engine === "codex") {
     const platformMcp = mcp
       ? { url: `${origin}/api/mcp/o/${encodeURIComponent(orgId)}`, headers: mcpHeaders }
       : undefined;
     await mcp?.close();
-    return runClaudeAgentChat({
-      messages,
-      system,
-      modelId: chosen.modelId,
-      gatewayBaseUrl: `${origin}/api/llm-proxy/claude-code-sdk/${encodeURIComponent(chosen.id)}`,
-      placeholderToken: mintLoopbackToken(
-        { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
-        { ttlMs: ENGINE_LOOPBACK_TTL_MS },
-      ),
-      platformMcp,
-      abortSignal: c.req.raw.signal,
-      onError: clientErrorMessage,
-    });
-  }
-
-  // Codex (ChatGPT) subscription → official `codex` CLI engine (clean/sanctioned),
-  // credential vended first-party (the CLI's models-manager can't be proxied).
-  // The CLI's MCP client IS independent, so — like the claude branch — we hand
-  // the engine the platform MCP endpoint + forwarded headers; the engine writes
-  // them into codex's config.toml (the SDK opens its own connection, so we close
-  // this probe client, used only for reachability + instructions). The operation
-  // index was already stripped for codex by applyOperationIndexPolicy (no prompt
-  // cache → it relies on search_operations instead).
-  if (engine === "codex") {
-    const platformMcp = mcp
-      ? { url: `${origin}/api/mcp/o/${encodeURIComponent(orgId)}`, headers: mcpHeaders }
-      : undefined;
-    await mcp?.close();
+    const loopbackToken = mintLoopbackToken(
+      { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
+      { ttlMs: ENGINE_LOOPBACK_TTL_MS },
+    );
+    if (engine === "claude") {
+      return runClaudeAgentChat({
+        messages,
+        system,
+        modelId: chosen.modelId,
+        gatewayBaseUrl: `${origin}/api/llm-proxy/claude-code-sdk/${encodeURIComponent(chosen.id)}`,
+        placeholderToken: loopbackToken,
+        platformMcp,
+        abortSignal: c.req.raw.signal,
+        onError: clientErrorMessage,
+      });
+    }
     return runCodexAgentChat({
       messages,
       system,
       modelId: chosen.modelId,
       credentialUrl: `${origin}/api/llm-proxy/codex-sdk/${encodeURIComponent(chosen.id)}`,
-      loopbackToken: mintLoopbackToken(
-        { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
-        { ttlMs: ENGINE_LOOPBACK_TTL_MS },
-      ),
+      loopbackToken,
       platformMcp,
       abortSignal: c.req.raw.signal,
       onError: clientErrorMessage,
