@@ -62,7 +62,7 @@ Anchors: `packages/module-chat/src/claude-agent/engine.ts`,
   `CODEX_HOME/auth.json` carries the **real** access token and the **real**
   `chatgpt_account_id`. The synthetic `id_token` (`alg:none`) is **local-only**
   CLI-bootstrap data — never transmitted; only the real token is sent as the
-  Bearer (`packages/core/src/codex-binary.ts` → `buildCodexAuthJson`).
+  Bearer (`packages/runner-codex/src/codex-binary.ts` → `buildCodexAuthJson`).
 
 So each upstream sees its own official client's fingerprint plus a genuine,
 per-user subscription token. No impersonation of another client; no pooling —
@@ -78,8 +78,9 @@ the container's egress is **locked** to the provider's hosts:
   no-real-token-in-container invariant (`runtime-pi/sidecar/app.ts`).
 - The forward proxy enforces a per-run egress allowlist (`chatgpt.com`,
   `openai.com`) on top of the always-on SSRF blocklist
-  (`runtime-pi/sidecar/forward-proxy.ts`,
-  `apps/api/src/services/run-launcher/engine-select.ts` → `CODEX_EGRESS_ALLOWLIST`).
+  (`runtime-pi/sidecar/forward-proxy.ts`; the allowlist is contributed by the
+  module — `packages/module-codex/src/index.ts` → `subscriptionEngine.egressAllowlist`
+  — and applied by `apps/api/src/services/run-launcher/pi.ts`).
 - The vended access token is **non-renewable** (no refresh token is handed over)
   and the container is ephemeral.
 

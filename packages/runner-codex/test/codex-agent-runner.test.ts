@@ -97,7 +97,7 @@ describe("CodexAgentRunner.run", () => {
 
     await runner.run({ bundle, context: ctx, eventSink: h.sink });
 
-    // Spawned the official binary with the ToS-clean headless flags.
+    // Spawned the official binary with the documented headless flags.
     expect(spawnedCmd).toEqual([
       "/fake/codex",
       "exec",

@@ -118,48 +118,59 @@ export function runClaudeAgentChat(input: ClaudeAgentChatInput): Response {
 
   const mapper = new SdkUiStreamMapper();
 
-  const stream = createUIMessageStream({
-    onError: input.onError,
-    execute: async ({ writer }) => {
-      // The finally guarantees the slot is freed on success, SDK error, AND
-      // client abort (the for-await unwinds when the controller aborts).
-      try {
-        writer.write(mapper.startChunk(crypto.randomUUID()));
+  try {
+    const stream = createUIMessageStream({
+      onError: input.onError,
+      execute: async ({ writer }) => {
+        // The finally guarantees the slot is freed on success, SDK error, AND
+        // client abort (the for-await unwinds when the controller aborts).
+        try {
+          writer.write(mapper.startChunk(crypto.randomUUID()));
 
-        const response = query({
-          prompt: buildTranscriptPrompt(input.messages),
-          options: {
-            pathToClaudeCodeExecutable: binary,
-            env: buildSdkEnv(input.gatewayBaseUrl, input.placeholderToken),
-            model: input.modelId,
-            systemPrompt: input.system,
-            tools: [], // disable ALL built-ins — chat must not get host execution
-            mcpServers: buildMcpServers(input) as never,
-            includePartialMessages: true,
-            permissionMode: "bypassPermissions",
-            settingSources: [],
-            persistSession: false,
-            maxTurns: MAX_TURNS,
-            abortController: controller,
-          },
-        });
+          const response = query({
+            prompt: buildTranscriptPrompt(input.messages),
+            options: {
+              pathToClaudeCodeExecutable: binary,
+              env: buildSdkEnv(input.gatewayBaseUrl, input.placeholderToken),
+              model: input.modelId,
+              systemPrompt: input.system,
+              tools: [], // disable ALL built-ins — chat must not get host execution
+              mcpServers: buildMcpServers(input) as never,
+              includePartialMessages: true,
+              permissionMode: "bypassPermissions",
+              settingSources: [],
+              persistSession: false,
+              maxTurns: MAX_TURNS,
+              abortController: controller,
+            },
+          });
 
-        for await (const message of response) {
-          for (const chunk of mapper.map(message as ClaudeSdkMessage)) writer.write(chunk);
+          for await (const message of response) {
+            for (const chunk of mapper.map(message as ClaudeSdkMessage)) writer.write(chunk);
+          }
+
+          const meta = mapper.resultMeta();
+          if (meta?.isError) {
+            logger.warn("claude-agent chat turn ended in error", {
+              finishReason: meta.finishReason,
+            });
+            writer.write({ type: "error", errorText: meta.errorText ?? input.onError(undefined) });
+          }
+          writer.write(mapper.finishChunk());
+        } finally {
+          clearTimeout(deadline);
+          slot.release();
         }
+      },
+    });
 
-        const meta = mapper.resultMeta();
-        if (meta?.isError) {
-          logger.warn("claude-agent chat turn ended in error", { finishReason: meta.finishReason });
-          writer.write({ type: "error", errorText: meta.errorText ?? input.onError(undefined) });
-        }
-        writer.write(mapper.finishChunk());
-      } finally {
-        clearTimeout(deadline);
-        slot.release();
-      }
-    },
-  });
-
-  return createUIMessageStreamResponse({ stream });
+    return createUIMessageStreamResponse({ stream });
+  } catch (err) {
+    // `execute` runs lazily on stream consumption, so a synchronous throw from
+    // stream/Response construction means its finally never fires — release the
+    // slot + clear the deadline here so a thrown setup can't leak capacity.
+    clearTimeout(deadline);
+    slot.release();
+    throw err;
+  }
 }

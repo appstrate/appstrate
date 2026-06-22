@@ -39,6 +39,16 @@ jobs:
       - name: Verify lockfile is up to date
         run: git diff --exit-code bun.lock
 
+      # Ban over-claiming ToS language. Subscription use is an operator opt-in
+      # grey-zone, not a certification — source/docs must use the
+      # SUBSCRIPTION_COMPLIANCE.md framing, never assert "ToS-clean" / "SANCTIONED".
+      - name: Guard against over-claiming ToS language
+        run: |
+          if git grep -nE 'ToS-clean|SANCTIONED'; then
+            echo "::error::Forbidden over-claiming ToS language (ToS-clean / SANCTIONED). Use the SUBSCRIPTION_COMPLIANCE.md framing instead."
+            exit 1
+          fi
+
       - name: Run checks
         run: bun run check
         env:

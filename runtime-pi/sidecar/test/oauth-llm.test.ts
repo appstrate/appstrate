@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration coverage for the sidecar's `/llm/*` `oauth` path — the ToS-clean
+ * Integration coverage for the sidecar's `/llm/*` `oauth` path — the no-forge
  * runner mode for a driver that signs its OWN provider fingerprint (the official
  * Claude Agent SDK binary).
  *

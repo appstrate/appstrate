@@ -541,7 +541,7 @@ export function createApp(deps: AppDeps): Hono {
   //     for the real key and forward directly to the upstream provider.
   //     Request/response bodies stream through zero-copy. The Pi SDK
   //     handles retry on 429/5xx natively (Retry-After honoring + jitter).
-  //   - oauth: the ToS-clean path for a driver that signs its OWN provider
+  //   - oauth: the no-forge path for a driver that signs its OWN provider
   //     fingerprint (the official Claude Agent SDK binary). The sidecar
   //     resolves a fresh access token from the platform
   //     (`/internal/oauth-token/:id`), swaps the request bearer for it, and
@@ -630,7 +630,7 @@ export function createApp(deps: AppDeps): Hono {
   // OAuth: resolve the real bearer and ensure the OAuth beta is present, but
   // DO NOT forge — no identity headers, no body transform. The driver (the
   // official Claude Agent SDK binary) signs its own fingerprint; we forward its
-  // user-agent / x-app / anthropic-beta untouched. This is the ToS-clean runner
+  // user-agent / x-app / anthropic-beta untouched. This is the no-forge runner
   // path and the in-container twin of the chat's `claude-code-sdk-gateway`.
   async function handleOauthLlmRequest(
     c: Context,
