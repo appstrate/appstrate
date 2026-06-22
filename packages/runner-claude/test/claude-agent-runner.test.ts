@@ -96,7 +96,6 @@ describe("ClaudeAgentRunner — happy path", () => {
     await new ClaudeAgentRunner(
       baseOpts({
         query: fn,
-        runtimeTools: ["log", "output"],
         outputSchema: { type: "object", properties: { x: { type: "number" } } },
         sidecarMcp: { url: "http://sidecar:8088/mcp", headers: { Host: "sidecar" } },
         maxTurns: 42,
@@ -230,11 +229,11 @@ describe("ClaudeAgentRunner — cancellation", () => {
   });
 });
 
-describe("ClaudeAgentRunner — runtime-tool replay capture", () => {
-  // A scripted SDK exchange: the model calls the sidecar `log` tool, the result
-  // comes back successfully. The runner must reconstruct `log.written` from the
-  // observed args (the SDK drops the result `_meta`).
-  const logCall = (isError: boolean): SdkRunMessage[] => [
+describe("ClaudeAgentRunner — runtime-event drain", () => {
+  // The sidecar executes `log` once and journals `log.written`; the runner
+  // drains the journal after a message boundary and re-emits on its sink (the
+  // SDK drops the result `_meta`, so the journal is the only source).
+  const messages: SdkRunMessage[] = [
     {
       type: "assistant",
       message: {
@@ -250,18 +249,28 @@ describe("ClaudeAgentRunner — runtime-tool replay capture", () => {
     },
     {
       type: "user",
-      message: { content: [{ type: "tool_result", tool_use_id: "t1", is_error: isError }] },
+      message: { content: [{ type: "tool_result", tool_use_id: "t1", is_error: false }] },
     },
     { type: "result", subtype: "success", is_error: false, usage: {} },
   ];
 
-  it("reconstructs a runtime tool's event from the observed tool call (strips mcp__ prefix)", async () => {
-    const { fn } = fakeQuery(logCall(false));
+  it("emits journaled runtime events drained from the sidecar with the run id stamped", async () => {
+    const { fn } = fakeQuery(messages);
+    let finalDrained = false;
+    let yielded = false;
+    const drainer = {
+      async drain(opts?: { final?: boolean }) {
+        if (opts?.final) finalDrained = true;
+        if (yielded) return [];
+        yielded = true;
+        return [{ type: "log.written", level: "info", message: "hi from claude" }] as never;
+      },
+    };
     const m = memorySink();
     await new ClaudeAgentRunner(
       baseOpts({
         query: fn,
-        runtimeTools: ["log"],
+        drainer,
         sidecarMcp: { url: "http://sidecar:8088/mcp", headers: { Host: "sidecar" } },
       }),
     ).run({ context: ctx, eventSink: m.sink, bundle: undefined as never });
@@ -273,19 +282,20 @@ describe("ClaudeAgentRunner — runtime-tool replay capture", () => {
     expect(written?.message).toBe("hi from claude");
     expect(written?.level).toBe("info");
     expect(written?.runId).toBe("run_1");
+    expect(finalDrained).toBe(true);
   });
 
-  it("does not reconstruct an event when the tool call errored", async () => {
-    const { fn } = fakeQuery(logCall(true));
+  it("runs without a drainer (no runtime tools) and emits no runtime events", async () => {
+    const { fn } = fakeQuery(messages);
     const m = memorySink();
     await new ClaudeAgentRunner(
       baseOpts({
         query: fn,
-        runtimeTools: ["log"],
         sidecarMcp: { url: "http://sidecar:8088/mcp", headers: { Host: "sidecar" } },
       }),
     ).run({ context: ctx, eventSink: m.sink, bundle: undefined as never });
     expect(m.events.some((e) => e.type === "log.written")).toBe(false);
+    expect(m.result?.status).toBe("success");
   });
 });
 // `buildClaudeSdkEnv` is shared infra — its tests live in

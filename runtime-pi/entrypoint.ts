@@ -70,7 +70,10 @@ import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-tra
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
 import { parseRuntimeEnv, RuntimeEnvError } from "./env.ts";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
-import { buildRuntimeToolDefMap } from "@appstrate/core/runtime-tool-defs";
+import {
+  createRuntimeEventDrainer,
+  type RuntimeEventDrainer,
+} from "@appstrate/core/runtime-event-drain";
 import { provisionWorkspace, provisionDocuments, type ProvisionDeps } from "./provision.ts";
 
 /**
@@ -423,6 +426,30 @@ await progress(
 
 const sidecarUrl = env.sidecarUrl;
 
+// Shared runtime-event drainer (one per run, in-memory cursor). The sidecar
+// executes each runtime tool ONCE and journals its canonical events; every
+// runner drains this on its single sink (pi after each forwarded tool call,
+// claude/codex after each stream step + a final drain). One instance so the
+// cursor stays consistent across intermediate + final drains. Undefined when no
+// sidecar is attached (no journal to drain — the in-process Pi extension path
+// emits its own events).
+const runtimeDrainer: RuntimeEventDrainer | undefined = sidecarUrl
+  ? createRuntimeEventDrainer({
+      url: `${sidecarUrl.replace(/\/$/, "")}/runtime-events`,
+      headers: { Host: "sidecar" },
+      logger: {
+        warn: (msg, data) =>
+          process.stdout.write(
+            `${JSON.stringify({ level: "warn", event: msg, ...(data ?? {}) })}\n`,
+          ),
+        error: (msg, data) =>
+          process.stdout.write(
+            `${JSON.stringify({ level: "error", event: msg, ...(data ?? {}) })}\n`,
+          ),
+      },
+    })
+  : undefined;
+
 // Engine selection. Set by the launcher's `RUN_ENGINE` container env
 // (`container-env.ts`) — `"claude"` for a `claude-code` subscription run,
 // the Pi default for everything else (and the absent var). The Claude engine
@@ -496,20 +523,15 @@ if (sidecarUrl) {
     try {
       // `buildMcpDirectFactories` registers `run_history` and
       // `recall_memory`, plus one forwarding factory per namespaced
-      // integration tool (including the generic `{ns}__api_call`).
-      // The agent's selected runtime tools, indexed for transport-agnostic
-      // replay capture (shared with the Claude + Codex runners): when the LLM
-      // calls one, `buildMcpDirectFactories` replays the local pure handler on
-      // the args instead of trusting the sidecar result's `_meta`.
-      const piRuntimeTools = rootRuntimeTools();
+      // integration tool (including the generic `{ns}__api_call`). Runtime
+      // tools (log/note/pin/report/output) are executed once by the sidecar and
+      // journaled; the drainer pulls them on the run sink after each forwarded
+      // call — uniform with the Claude + Codex runners, no `_meta` trust.
       const factories = await buildMcpDirectFactories({
         mcp: mcpClient,
         runId: AGENT_RUN_ID,
         workspace: WORKSPACE,
-        runtimeDefs: buildRuntimeToolDefMap({
-          ...(piRuntimeTools ? { runtimeTools: piRuntimeTools } : {}),
-          outputSchema: runOutputSchema(),
-        }),
+        ...(runtimeDrainer ? { drainer: runtimeDrainer } : {}),
         emit: (event) => {
           void bridgedSink.handle(event as RunEvent);
         },
@@ -717,15 +739,6 @@ function buildPiRunner(): PiRunner {
  * (log/note/pin/report) are hosted in-process by the runner; `output` is native
  * via the SDK's `outputFormat`.
  */
-/** Runtime tools the root agent selected (`manifest.runtime_tools`). Shared by
- * the claude + codex subscription runners — both expose the same tool surface. */
-function rootRuntimeTools(): string[] | undefined {
-  const rootManifest = bundle
-    ? (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
-    : undefined;
-  return rootManifest?.runtime_tools;
-}
-
 /** The agent's declared output JSON Schema (`OUTPUT_SCHEMA` env), or null. */
 function runOutputSchema(): Record<string, unknown> | null {
   if (!process.env.OUTPUT_SCHEMA) return null;
@@ -744,7 +757,6 @@ function buildClaudeAgentRunner(): ClaudeAgentRunner {
     throw new Error("Claude engine selected but no sidecar is attached (no /llm gateway).");
   }
   const base = sidecarUrl.replace(/\/$/, "");
-  const runtimeTools = rootRuntimeTools();
   const outputSchema = runOutputSchema();
   return new ClaudeAgentRunner({
     binaryPath: resolveClaudeCodeBinary({ resolve: makeSdkScopeResolver(import.meta.url) }),
@@ -755,7 +767,9 @@ function buildClaudeAgentRunner(): ClaudeAgentRunner {
     baseUrl: `${base}/llm`,
     placeholderToken: env.modelApiKey ?? "placeholder",
     cwd: WORKSPACE,
-    ...(runtimeTools ? { runtimeTools } : {}),
+    // Runtime tools are journaled by the sidecar and drained here; `output`
+    // stays native (SDK `outputFormat` → structured_output).
+    ...(runtimeDrainer ? { drainer: runtimeDrainer } : {}),
     outputSchema,
     // Integrations + api_call + run_history + recall_memory over the sidecar's
     // stateless Streamable-HTTP `/mcp`. `Host: sidecar` satisfies the sidecar's
@@ -781,8 +795,6 @@ function buildCodexAgentRunner(): CodexAgentRunner {
     throw new Error("Codex engine selected but no sidecar is attached (no /credential-vend).");
   }
   const base = sidecarUrl.replace(/\/$/, "");
-  const runtimeTools = rootRuntimeTools();
-  const outputSchema = runOutputSchema();
   // Resolve order: explicit CODEX_BINARY_PATH → the bundled per-arch package →
   // bare `codex` on PATH (the image also symlinks the binary onto PATH as a
   // belt-and-suspenders). Mirrors the chat engine's fallback chain.
@@ -803,8 +815,9 @@ function buildCodexAgentRunner(): CodexAgentRunner {
     credentialUrl: `${base}/credential-vend`,
     cwd: WORKSPACE,
     modelCost: env.modelCost,
-    ...(runtimeTools ? { runtimeTools } : {}),
-    outputSchema,
+    // Runtime tools (incl. `output`) are journaled by the sidecar and drained
+    // here — codex's `--json` stream never surfaces the MCP result `_meta`.
+    ...(runtimeDrainer ? { drainer: runtimeDrainer } : {}),
     // Same platform tool surface the Claude runner gets: integrations +
     // api_call + run_history + recall_memory + the agent-selected runtime tools,
     // over the sidecar's stateless Streamable-HTTP `/mcp`. `Host: sidecar`

@@ -18,10 +18,11 @@
  *     (`OUTPUT_NATIVE_OK`); re-emitted here as one `output.emitted` event so the
  *     reducer populates `RunResult.output`.
  *   - runtime tools (log/note/pin/report) → served by the sidecar `/mcp` like
- *     every other tool; their canonical events are reconstructed by replaying
- *     the shared pure handler on the observed call args (the SDK's HTTP MCP
- *     client drops the result `_meta` the events would ride in — `META_DROPPED`).
- *     This is the transport-agnostic capture shared with the Pi + Codex runners.
+ *     every other tool; the sidecar executes each ONCE and journals its
+ *     canonical events. This runner drains the journal (`drainer`) after each
+ *     SDK message and re-emits on the run's single sink — the SDK's HTTP MCP
+ *     client drops the result `_meta` the events would ride in (`META_DROPPED`),
+ *     so the journal is the only source. Same drain path as the Pi + Codex runners.
  *   - integrations / api_call / run_history / recall_memory → sidecar `/mcp`
  *     over HTTP (tool result `content` survives; only `_meta` is dropped).
  *   - native Bash/Edit/Read/Write → enabled by default (full fidelity in the
@@ -42,22 +43,8 @@ import {
 } from "@appstrate/afps-runtime/runner";
 import { buildClaudeSdkEnv } from "@appstrate/core/claude-binary";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { SdkRunEventMapper, type SdkRunMessage } from "./sdk-event-mapper.ts";
-import {
-  buildRuntimeToolDefMap,
-  replayRuntimeToolEvents,
-  type RuntimeToolDef,
-} from "@appstrate/core/runtime-tool-defs";
-
-/**
- * Strip the SDK's `mcp__<server>__` prefix from a tool name (the sidecar's
- * runtime tools are advertised as `mcp__appstrate__log`, …). Returns the bare
- * name so it can be matched against the runtime-tool def map.
- */
-function stripMcpToolPrefix(name: string): string {
-  const parts = name.split("__");
-  return parts[0] === "mcp" && parts.length >= 3 ? parts.slice(2).join("__") : name;
-}
 
 /** Input to the injectable `query` driver — the subset of the SDK call we issue. */
 export interface ClaudeQueryInput {
@@ -80,8 +67,16 @@ export interface ClaudeAgentRunnerOptions {
   placeholderToken: string;
   /** Working directory for the SDK's native file/exec tools (the run workspace). */
   cwd: string;
-  /** Agent-selected runtime tools (`manifest.runtime_tools`); `output` is native. */
-  runtimeTools?: readonly string[];
+  /**
+   * Runtime-event drainer (`@appstrate/core/runtime-event-drain`). The sidecar
+   * executes each runtime tool (log/note/pin/report) ONCE and journals its
+   * canonical events; this runner drains them after each SDK message (the SDK's
+   * HTTP MCP client drops the result `_meta` the events would otherwise ride in
+   * — `META_DROPPED`) and re-emits on the run's single sink. `output` is NOT in
+   * the journal — Claude takes the structured deliverable natively (see below).
+   * Omit when the run has no runtime tools.
+   */
+  drainer?: RuntimeEventDrainer;
   /** Output JSON Schema → SDK `outputFormat`; absent leaves the run output-less. */
   outputSchema?: Record<string, unknown> | null;
   /** Sidecar `/mcp` (integrations, api_call, run_history, recall_memory). */
@@ -160,19 +155,22 @@ export class ClaudeAgentRunner implements Runner {
 
     const mapper = new SdkRunEventMapper(runId, now);
 
-    // Runtime tools (log/note/pin/report) are served by the sidecar `/mcp` like
-    // every other tool; the runner reconstructs their canonical events by
-    // replaying the shared pure handler on the observed call args (the SDK's
-    // HTTP MCP client drops the result `_meta` those events would otherwise ride
-    // in — `META_DROPPED`). This is the transport-agnostic capture shared with
-    // the Pi + Codex runners. `output` is EXCLUDED: Claude takes the structured
-    // deliverable natively off `result.structured_output` via `outputFormat`
-    // (constrained decoding — strictly better than a tool call), so it never
-    // calls an `output` tool and must not double-emit one here.
-    const runtimeDefs: Map<string, RuntimeToolDef> = this.opts.runtimeTools?.length
-      ? buildRuntimeToolDefMap({ runtimeTools: this.opts.runtimeTools, outputSchema: null })
-      : new Map();
-    runtimeDefs.delete("output");
+    // Runtime tools (log/note/pin/report) are executed ONCE by the sidecar,
+    // which journals their canonical events. Drain the journal after each SDK
+    // message and re-emit on the run's single sink — the SDK's HTTP MCP client
+    // drops the result `_meta` those events would otherwise ride in
+    // (`META_DROPPED`), so the events come exclusively from the journal. A drain
+    // is cheap on localhost and a no-op when empty. `output` is NOT journaled:
+    // Claude takes the structured deliverable natively off
+    // `result.structured_output` via `outputFormat` (constrained decoding), and
+    // is re-emitted once below — it must not double-emit. No-op when no drainer.
+    const drainer = this.opts.drainer;
+    const drainAndEmit = async (final = false): Promise<void> => {
+      if (!drainer) return;
+      for (const e of await drainer.drain(final ? { final: true } : undefined)) {
+        await emit({ timestamp: now(), ...(e as Record<string, unknown>), runId } as RunEvent);
+      }
+    };
 
     const mcpServers: Record<string, unknown> = {};
     if (this.opts.sidecarMcp) {
@@ -223,26 +221,10 @@ export class ClaudeAgentRunner implements Runner {
       });
       for await (const msg of stream) {
         for (const event of mapper.map(msg)) await emit(event);
-        // Reconstruct runtime-tool events from the tool calls that just
-        // completed: replay the shared pure handler on the observed args (the
-        // SDK dropped the result `_meta`). Single sink → sequence intact.
-        for (const call of mapper.drainCompletedToolCalls()) {
-          if (call.isError) continue;
-          const def = runtimeDefs.get(stripMcpToolPrefix(call.name));
-          if (!def) continue;
-          try {
-            for (const ev of await replayRuntimeToolEvents(def, call.input)) {
-              await emit({
-                timestamp: now(),
-                ...(ev as Record<string, unknown>),
-                runId,
-              } as RunEvent);
-            }
-          } catch {
-            // A replay failure must never fail the run — the tool's text result
-            // already reached the model; only the reconstructed event is lost.
-          }
-        }
+        // Drain journaled runtime events at this message boundary (single sink →
+        // sequence intact). The SDK awaits each tool's completion before the
+        // next message, so by the time we drain the tool's events are journaled.
+        await drainAndEmit();
       }
     } catch (err) {
       if (signal?.aborted) {
@@ -252,6 +234,9 @@ export class ClaudeAgentRunner implements Runner {
       }
       const message = getErrorMessage(err);
       await emit({ type: "appstrate.error", timestamp: now(), runId, message });
+      // Best-effort final drain: capture any runtime events journaled before the
+      // SDK stream threw (log/note/pin/report the agent produced mid-run).
+      await drainAndEmit(true);
       const result = reduceEvents(events, {
         error: { message, stack: err instanceof Error ? err.stack : undefined },
       });
@@ -262,6 +247,11 @@ export class ClaudeAgentRunner implements Runner {
       await eventSink.finalize(result);
       return;
     }
+
+    // Final drain (drain-until-empty + bounded retry) before finalize — the
+    // sidecar is torn down right after, so the last tool's journaled events must
+    // be pulled now.
+    await drainAndEmit(true);
 
     const terminal = mapper.terminal();
 

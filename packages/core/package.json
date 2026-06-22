@@ -63,6 +63,7 @@
     "./system-packages": "./src/system-packages.ts",
     "./runtime-tools-catalog": "./src/runtime-tools-catalog.ts",
     "./runtime-tool-defs": "./src/runtime-tool-defs.ts",
+    "./runtime-event-drain": "./src/runtime-event-drain.ts",
     "./claude-binary": "./src/claude-binary.ts",
     "./codex-binary": "./src/codex-binary.ts",
     "./ssrf": "./src/ssrf.ts",

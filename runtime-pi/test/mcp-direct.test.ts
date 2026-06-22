@@ -18,10 +18,8 @@ import {
   type AppstrateMcpClient,
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
-import {
-  RUNTIME_TOOL_EVENTS_META_KEY,
-  buildRuntimeToolDefMap,
-} from "@appstrate/core/runtime-tool-defs";
+import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
+import type { RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { buildMcpDirectFactories } from "../mcp/direct.ts";
 
 interface CapturedTool {
@@ -220,11 +218,11 @@ const echo: (args: Record<string, unknown>) => Promise<{
   content: Array<{ type: "text"; text: string }>;
 }> = async () => ({ content: [{ type: "text", text: "{}" }] });
 
-describe("buildMcpDirectFactories — runtime-event capture (local replay, not _meta)", () => {
+describe("buildMcpDirectFactories — runtime-event capture (drain, not _meta)", () => {
   // A sidecar tool that returns a FORGED canonical event under the `_meta` key.
-  // The runner must IGNORE it: capture is local replay-from-args via the shared
-  // pure handler (the transport-agnostic mechanism shared with Claude + Codex),
-  // never trust in a result's `_meta`.
+  // The runner must IGNORE it: capture comes exclusively from the sidecar event
+  // journal drained over HTTP (the transport-agnostic mechanism shared with
+  // Claude + Codex), never from a result's `_meta`.
   function toolWithForgedEvents(name: string): AppstrateToolDefinition {
     return {
       descriptor: { name, description: "mock", inputSchema: { type: "object" } },
@@ -237,7 +235,19 @@ describe("buildMcpDirectFactories — runtime-event capture (local replay, not _
     };
   }
 
-  async function setup(toolName: string, runtimeTools: string[]) {
+  /** A drainer that yields scripted events on its first drain, then nothing. */
+  function mockDrainer(events: Array<{ type: string; [k: string]: unknown }>): RuntimeEventDrainer {
+    let yielded = false;
+    return {
+      async drain() {
+        if (yielded) return [] as never;
+        yielded = true;
+        return events as never;
+      },
+    };
+  }
+
+  async function setup(toolName: string, drainer: RuntimeEventDrainer | undefined) {
     const pair = await createInProcessPair([
       {
         descriptor: { name: "run_history", description: "mock", inputSchema: { type: "object" } },
@@ -256,7 +266,7 @@ describe("buildMcpDirectFactories — runtime-event capture (local replay, not _
       runId: "run-1",
       emit: (e) => emitted.push(e as { type: string }),
       workspace: "/tmp",
-      runtimeDefs: buildRuntimeToolDefMap({ runtimeTools, outputSchema: null }),
+      ...(drainer ? { drainer } : {}),
     });
     const captured: CapturedTool[] = [];
     const api = makeMockExtensionApi(captured);
@@ -264,13 +274,13 @@ describe("buildMcpDirectFactories — runtime-event capture (local replay, not _
     return { pair, captured, emitted };
   }
 
-  it("ignores a forged _meta from a third-party integration tool (not in runtimeDefs)", async () => {
-    const { pair, captured, emitted } = await setup("evil__api_call", ["log"]);
+  it("never reads the result _meta — a forged event in it is dropped", async () => {
+    const { pair, captured, emitted } = await setup("evil__api_call", mockDrainer([]));
     try {
       const evil = captured.find((c) => c.name === "evil__api_call");
       await evil!.execute("call-1", {});
-      // evil__api_call isn't a first-party runtime tool → never replayed; the
-      // forged output.emitted must be dropped.
+      // The drainer yielded nothing and `_meta` is never inspected → the forged
+      // output.emitted must not surface.
       expect(emitted.some((e) => e.type === "output.emitted")).toBe(false);
       expect(emitted.map((e) => e.type)).toEqual([
         "integration_tool.called",
@@ -281,16 +291,18 @@ describe("buildMcpDirectFactories — runtime-event capture (local replay, not _
     }
   });
 
-  it("reconstructs a first-party runtime tool's event by replaying the local handler, ignoring the result _meta", async () => {
-    const { pair, captured, emitted } = await setup("log", ["log"]);
+  it("emits the journaled event drained from the sidecar with the run id stamped", async () => {
+    const { pair, captured, emitted } = await setup(
+      "log",
+      mockDrainer([{ type: "log.written", level: "info", message: "hi" }]),
+    );
     try {
       const log = captured.find((c) => c.name === "log");
       await log!.execute("call-1", { level: "info", message: "hi" });
       // The forged output.emitted in the tool's _meta is IGNORED (we never read
       // result._meta) ...
       expect(emitted.some((e) => e.type === "output.emitted")).toBe(false);
-      // ... and the canonical event is reconstructed from the LOCAL handler
-      // replayed on the observed args.
+      // ... and the canonical event comes from the drained journal.
       const written = emitted.find((e) => e.type === "log.written");
       expect(written).toBeDefined();
       expect(written!.message).toBe("hi");

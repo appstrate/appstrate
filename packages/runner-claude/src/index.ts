@@ -18,5 +18,4 @@ export {
   type SdkRunMessage,
   type SdkTerminal,
   type SdkUsage,
-  type CompletedToolCall,
 } from "./sdk-event-mapper.ts";
