@@ -10,7 +10,12 @@ import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Sheet, SheetContent, SheetTrigger } from "@appstrate/ui/components/sheet";
 import { Separator } from "@appstrate/ui/components/separator";
-import { useUnreadCount, useMarkRead, useMarkAllRead, useNotifications } from "../hooks/use-notifications";
+import {
+  useUnreadCount,
+  useMarkRead,
+  useMarkAllRead,
+  useNotifications,
+} from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
 import { useIsMobile } from "../hooks/use-mobile";
 import { formatDateField } from "../lib/markdown";

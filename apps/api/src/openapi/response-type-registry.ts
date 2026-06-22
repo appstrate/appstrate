@@ -220,6 +220,16 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   ChatSession:
     "module-chat wire DTO; ISO timestamps, no shared-type (UI uses the generated spec type)",
   ChatMessageEntry: "module-chat opaque history-node wire DTO; no shared-type",
+  // @appstrate/module-storage wire DTOs. storage_disks/storage_objects live in
+  // the core schema but the module exports no shared-type; the Storage UI page
+  // consumes the generated spec type, not a Drizzle shared-type.
+  StorageDisk:
+    "module-storage wire DTO; ISO timestamps, no shared-type (UI uses the generated spec type)",
+  StorageObject:
+    "module-storage wire DTO; ISO timestamps, no shared-type (UI uses the generated spec type)",
+  // @appstrate/module-search wire DTO — a ranked hit; no shared-type, consumed
+  // (by chat/agents via MCP) through the generated spec type.
+  SearchHit: "module-search wire DTO; ranked hit, no shared-type",
 };
 
 /**

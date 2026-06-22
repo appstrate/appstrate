@@ -60,6 +60,8 @@ export const searchPaths = {
         },
       },
       responses: {
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "200": {
           description: "Ranked hits",
           headers: stdHeaders,

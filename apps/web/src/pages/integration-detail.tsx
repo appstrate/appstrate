@@ -49,7 +49,11 @@ import {
   TableHead,
   TableCell,
 } from "@appstrate/ui/components/table";
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@appstrate/ui/components/collapsible";
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@appstrate/ui/components/collapsible";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";

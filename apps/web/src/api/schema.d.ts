@@ -4265,6 +4265,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/anonymize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mask PII in an LLM request body (or arbitrary value) for a run
+         * @description Sidecar-only (palier b2). Auth via Bearer run token. Masks PII for the run's outbound LLM traffic — the platform lends its shared detector while the sidecar holds the run's token↔value mapping (Option S). Provide exactly one of `body` (base64-encoded LLM request body, field-targeted masking) or `value` (arbitrary JSON, deep masking for the tool path), plus the run's current `mapping`. Returns the masked payload + the updated mapping. Restore is NOT here — it needs no detection and the sidecar does it locally.
+         */
+        post: operations["anonymizeForRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/integration-credentials/{scope}/{name}": {
         parameters: {
             query?: never;
@@ -18275,6 +18295,8 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listStorageDisks: {
@@ -18305,6 +18327,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     createStorageDisk: {
@@ -18362,6 +18385,8 @@ export interface operations {
                     "application/json": components["schemas"]["StorageDisk"];
                 };
             };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
         };
     };
     deleteStorageDisk: {
@@ -18392,6 +18417,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Disk not found */
             404: {
                 headers: {
@@ -18439,6 +18465,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Disk not found */
             404: {
                 headers: {
@@ -18479,6 +18506,7 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
         };
     };
     uploadStorageObject: {
@@ -18527,6 +18555,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Disk not found */
             404: {
                 headers: {
@@ -18561,6 +18590,7 @@ export interface operations {
                     "application/json": components["schemas"]["StorageObject"];
                 };
             };
+            403: components["responses"]["Forbidden"];
             /** @description Object not found */
             404: {
                 headers: {
@@ -18598,6 +18628,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             /** @description Object not found */
             404: {
                 headers: {
@@ -18630,6 +18661,7 @@ export interface operations {
                     "application/octet-stream": Blob;
                 };
             };
+            403: components["responses"]["Forbidden"];
             /** @description Object not found or content unavailable */
             404: {
                 headers: {
@@ -19320,6 +19352,51 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    anonymizeForRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Base64-encoded LLM request body (field-targeted masking). */
+                    body?: string;
+                    /** @description Arbitrary JSON value (deep masking, tool path). */
+                    value?: unknown;
+                    /** @description The run's current token→value table (empty on the run's first call). */
+                    mapping?: {
+                        [key: string]: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Masked payload + updated mapping. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Masked body (base64), when `body` was sent. */
+                        body?: string;
+                        /** @description Masked value, when `value` was sent. */
+                        value?: unknown;
+                        mapping: {
+                            [key: string]: string;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     getIntegrationCredentials: {

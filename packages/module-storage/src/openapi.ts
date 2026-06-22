@@ -70,6 +70,7 @@ export const storagePaths = {
         "Lists the org's storage disks. The native default disk is created on first access if missing.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
+        "403": { $ref: "#/components/responses/Forbidden" },
         "200": {
           description: "Disks list",
           headers: stdHeaders,
@@ -150,6 +151,8 @@ export const storagePaths = {
         },
       },
       responses: {
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "201": {
           description: "Disk connected (initial sync run)",
           headers: stdHeaders,
@@ -170,6 +173,7 @@ export const storagePaths = {
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
+        "403": { $ref: "#/components/responses/Forbidden" },
         "200": {
           description: "Sync done",
           headers: stdHeaders,
@@ -203,6 +207,7 @@ export const storagePaths = {
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
+        "403": { $ref: "#/components/responses/Forbidden" },
         "204": { description: "Disk disconnected (objects cascade)" },
         "400": { description: "The default disk cannot be deleted" },
         "404": { description: "Disk not found" },
@@ -225,6 +230,7 @@ export const storagePaths = {
         },
       ],
       responses: {
+        "403": { $ref: "#/components/responses/Forbidden" },
         "200": {
           description: "Objects inventory",
           headers: stdHeaders,
@@ -260,6 +266,7 @@ export const storagePaths = {
         },
       },
       responses: {
+        "403": { $ref: "#/components/responses/Forbidden" },
         "201": {
           description: "Object uploaded",
           headers: stdHeaders,
@@ -282,6 +289,7 @@ export const storagePaths = {
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
+        "403": { $ref: "#/components/responses/Forbidden" },
         "200": {
           description: "Object metadata",
           headers: stdHeaders,
@@ -302,6 +310,7 @@ export const storagePaths = {
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
+        "403": { $ref: "#/components/responses/Forbidden" },
         "204": { description: "Object deleted" },
         "400": { description: "Object lives on a read-only disk" },
         "404": { description: "Object not found" },
@@ -320,6 +329,7 @@ export const storagePaths = {
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
+        "403": { $ref: "#/components/responses/Forbidden" },
         "200": {
           description: "Raw object bytes",
           content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } },
