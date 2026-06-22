@@ -5,7 +5,7 @@ import {
   SdkUiStreamMapper,
   stripMcpToolPrefix,
   type ClaudeSdkMessage,
-} from "../src/claude-agent/ui-stream-mapper.ts";
+} from "../../src/claude-agent/ui-stream-mapper.ts";
 import type { UIMessageChunk } from "ai";
 
 /** Run a sequence of SDK messages through a fresh mapper, collecting chunks. */

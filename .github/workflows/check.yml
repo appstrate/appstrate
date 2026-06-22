@@ -44,7 +44,7 @@ jobs:
       # SUBSCRIPTION_COMPLIANCE.md framing, never assert "ToS-clean" / "SANCTIONED".
       - name: Guard against over-claiming ToS language
         run: |
-          if git grep -nE 'ToS-clean|SANCTIONED'; then
+          if git grep -nE 'ToS-clean|SANCTIONED' -- ':!.github/workflows/check.yml'; then
             echo "::error::Forbidden over-claiming ToS language (ToS-clean / SANCTIONED). Use the SUBSCRIPTION_COMPLIANCE.md framing instead."
             exit 1
           fi

@@ -34,6 +34,33 @@ export type RunEngine = "pi" | "claude" | "codex";
 export type SubscriptionRunEngine = Exclude<RunEngine, "pi">;
 
 /**
+ * One chat turn's inputs, handed to a subscription engine's {@link
+ * SubscriptionEngineBinding.chatHandler}. Deliberately framework-neutral (no
+ * `ai`/UI-stream types) so this contract can live in core: the caller
+ * (module-chat) pre-assembles the transcript into `prompt`, and the handler
+ * returns a web `Response` (the UI-message-stream body). The vendor SDK + its
+ * UI-stream mapping stay entirely inside the provider module.
+ */
+export interface ChatEngineInput {
+  /** Pre-assembled transcript prompt for this turn (caller builds it). */
+  prompt: string;
+  /** System persona (+ MCP instructions + host context), already assembled. */
+  system: string;
+  /** Real upstream model id (e.g. `claude-haiku-4-5`) — NOT the preset id. */
+  modelId: string;
+  /** Credential-injection gateway base URL (`…/<providerId>-sdk/:presetId`). */
+  gatewayBaseUrl: string;
+  /** Placeholder bearer the binary sends; the gateway swaps it server-side. */
+  placeholderToken: string;
+  /** Platform HTTP MCP server (meta-tools); omitted when the mcp module is off. */
+  platformMcp?: { url: string; headers: Record<string, string> };
+  /** Aborts the engine when the client disconnects. */
+  abortSignal: AbortSignal;
+  /** Maps a thrown error to a client-safe message. */
+  onError: (error: unknown) => string;
+}
+
+/**
  * The engine binding a provider module contributes (on its
  * {@link ModelProviderDefinition.subscriptionEngine}). Carries no provider id /
  * label — those come from the provider definition itself at registration.
@@ -72,6 +99,16 @@ export interface SubscriptionEngineBinding {
    * without this capability (codex, pi) take `output` through the MCP tool.
    */
   nativeOutput?: boolean;
+  /**
+   * Chat-turn handler for an engine that has a chat surface. Contributed by the
+   * provider module — which owns the vendor SDK — so dropping the module removes
+   * the chat driver too. module-chat dispatches to this by provider id, exactly
+   * as the run launcher and the llm-proxy gateway read this same registry, so
+   * the three surfaces can't disagree. Engines with no chat surface (codex —
+   * agent-only) omit it, and the generic `ai-sdk`/`pi` chat path is used for
+   * everything unregistered.
+   */
+  chatHandler?: (input: ChatEngineInput) => Response;
 }
 
 /** A registered binding plus the identity (provider id + label) it was registered under. */

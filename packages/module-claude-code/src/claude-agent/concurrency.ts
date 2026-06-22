@@ -8,7 +8,7 @@
  * — capped by `CHAT_CLAUDE_MAX_CONCURRENCY` (positive integer, default 6).
  */
 
-import { createConcurrencyGate, type ConcurrencySlot } from "../concurrency-gate.ts";
+import { createConcurrencyGate, type ConcurrencySlot } from "./concurrency-gate.ts";
 
 const gate = createConcurrencyGate("CHAT_CLAUDE_MAX_CONCURRENCY");
 

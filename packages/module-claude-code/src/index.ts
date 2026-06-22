@@ -35,6 +35,7 @@ import type {
   ModelProviderDefinition,
   ModelProviderHooks,
 } from "@appstrate/core/module";
+import { runClaudeAgentChat } from "./claude-agent/engine.ts";
 
 /**
  * 1-token `/v1/messages` probe to validate a subscription credential and
@@ -138,7 +139,16 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // server-side, so the real token never enters the container. `nativeOutput` —
   // the SDK emits the structured deliverable via `outputFormat` →
   // `structured_output`, so the run must NOT also be offered the MCP `output`.
-  subscriptionEngine: { engine: "claude", sidecarAuthMode: "oauth", nativeOutput: true },
+  // `chatHandler` — this module owns the chat driver too (Claude Agent SDK +
+  // ui-stream mapper live in `./claude-agent/`), contributed here so dropping
+  // the module sheds the chat surface as well; module-chat dispatches to it via
+  // the registry, never importing the vendor SDK.
+  subscriptionEngine: {
+    engine: "claude",
+    sidecarAuthMode: "oauth",
+    nativeOutput: true,
+    chatHandler: runClaudeAgentChat,
+  },
   hooks: claudeCodeHooks,
 };
 

@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { existsSync, statSync } from "node:fs";
-import { resolveClaudeCodeBinary } from "../src/claude-agent/binary.ts";
+import { resolveClaudeCodeBinary } from "../../src/claude-agent/binary.ts";
 
 // The pure per-arch matrix + fall-through logic is covered in
 // `@appstrate/core` (`test/claude-binary.test.ts`). What's left to validate

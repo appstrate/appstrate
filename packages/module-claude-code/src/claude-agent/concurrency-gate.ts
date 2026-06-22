@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Bounded in-process concurrency gate for the subprocess-spawning chat engines
- * (Claude Agent SDK, Codex CLI). Each chat turn on those paths forks a native
- * binary inside the single `apps/api` process — which also serves runs, auth,
- * and everything else — so without a ceiling a burst of concurrent chats would
- * fork an unbounded number of binaries and exhaust memory/CPU for the whole
- * instance. This is a simple counting gate (one counter per instance); when
- * saturated `acquire()` returns `null` so the engine can 429 and the client
- * backs off instead of piling on more subprocesses.
+ * Bounded in-process concurrency gate for the Claude Agent SDK chat engine.
+ * Each `claude-code` chat turn forks a native `claude` binary inside the single
+ * `apps/api` process — which also serves runs, auth, and everything else — so
+ * without a ceiling a burst of concurrent chats would fork an unbounded number
+ * of binaries and exhaust memory/CPU for the whole instance. This is a simple
+ * counting gate (one counter per instance); when saturated `acquire()` returns
+ * `null` so the engine can 429 and the client backs off instead of piling on
+ * more subprocesses.
  *
- * The cap is read from `process.env` (positive integer, default 6) to match the
- * module's existing `CHAT_DEBUG` convention — an opt-in module knob, not a core
- * env-schema field. Each engine instantiates one gate with its own env var.
+ * The cap is read from `process.env` (positive integer, default 6) — an opt-in
+ * module knob, not a core env-schema field. The factory stays generic (one gate
+ * per env var) so a future subprocess engine can instantiate its own.
  */
 
 const DEFAULT_MAX_CONCURRENCY = 6;

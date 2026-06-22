@@ -5,7 +5,7 @@ import {
   acquireClaudeSlot,
   activeClaudeSlots,
   claudeMaxConcurrency,
-} from "../src/claude-agent/concurrency.ts";
+} from "../../src/claude-agent/concurrency.ts";
 
 // The gate is module-level process state; each test fully releases what it
 // takes and restores the env knob so cases don't bleed into one another.

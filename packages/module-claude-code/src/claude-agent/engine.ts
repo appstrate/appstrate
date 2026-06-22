@@ -25,13 +25,15 @@
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { buildClaudeSdkEnv } from "@appstrate/runner-claude/binary";
-import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from "ai";
+import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
+import { createLogger } from "@appstrate/core/logger";
+import type { ChatEngineInput } from "@appstrate/core/subscription-engines";
 import { resolveClaudeCodeBinary } from "./binary.ts";
 import { SdkUiStreamMapper, type ClaudeSdkMessage } from "./ui-stream-mapper.ts";
 import { acquireClaudeSlot } from "./concurrency.ts";
-import { chatCapacityResponse } from "../concurrency-gate.ts";
-import { buildTranscriptPrompt } from "../transcript.ts";
-import { logger } from "../logger.ts";
+import { chatCapacityResponse } from "./concurrency-gate.ts";
+
+const logger = createLogger(process.env.LOG_LEVEL ?? "info");
 
 /** Upper bound on agent turns per chat message (mirrors the ai-sdk path's MAX_STEPS). */
 const MAX_TURNS = 16;
@@ -43,25 +45,6 @@ const MAX_TURNS = 16;
  * we abort the controller (kills the subprocess, frees the slot via the finally).
  */
 const TURN_DEADLINE_MS = 5 * 60_000;
-
-export interface ClaudeAgentChatInput {
-  /** Full thread from the client (assistant-ui sends every turn). */
-  messages: UIMessage[];
-  /** System persona (+ MCP instructions + host context), already assembled. */
-  system: string;
-  /** Real upstream model id (e.g. `claude-haiku-4-5`) — NOT the preset id. */
-  modelId: string;
-  /** ANTHROPIC_BASE_URL: the non-forging gateway, `…/claude-code-sdk/:presetId`. */
-  gatewayBaseUrl: string;
-  /** Placeholder bearer the SDK sends; the gateway swaps it for the real token. */
-  placeholderToken: string;
-  /** Platform HTTP MCP server (meta-tools), omitted when the mcp module is off. */
-  platformMcp?: { url: string; headers: Record<string, string> };
-  /** Aborts the SDK query when the client disconnects. */
-  abortSignal: AbortSignal;
-  /** Maps a thrown error to a client-safe message (AI SDK masks errors by default). */
-  onError: (error: unknown) => string;
-}
 
 /**
  * Curated environment for the spawned `claude` binary. Thin wrapper over the
@@ -81,7 +64,7 @@ export function buildSdkEnv(
  * none. (Typed loosely — the SDK's McpServerConfig union is broad and not
  * re-exported conveniently.)
  */
-function buildMcpServers(input: ClaudeAgentChatInput): Record<string, unknown> | undefined {
+function buildMcpServers(input: ChatEngineInput): Record<string, unknown> | undefined {
   if (!input.platformMcp) return undefined;
   return {
     platform: {
@@ -97,7 +80,7 @@ function buildMcpServers(input: ClaudeAgentChatInput): Record<string, unknown> |
  * Response (identical wire contract to the ai-sdk path's
  * `toUIMessageStreamResponse`).
  */
-export function runClaudeAgentChat(input: ClaudeAgentChatInput): Response {
+export function runClaudeAgentChat(input: ChatEngineInput): Response {
   // Resolve the binary BEFORE reserving a slot so a resolution failure can't
   // leak a slot (it throws straight out, no acquire held).
   const binary = resolveClaudeCodeBinary();
@@ -128,7 +111,7 @@ export function runClaudeAgentChat(input: ClaudeAgentChatInput): Response {
           writer.write(mapper.startChunk(crypto.randomUUID()));
 
           const response = query({
-            prompt: buildTranscriptPrompt(input.messages),
+            prompt: input.prompt,
             options: {
               pathToClaudeCodeExecutable: binary,
               env: buildSdkEnv(input.gatewayBaseUrl, input.placeholderToken),

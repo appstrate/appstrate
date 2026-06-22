@@ -23,8 +23,8 @@ import { listModels, pickModel, modelFromFamily, resolveDefaultApplicationId } f
 import { openPlatformMcp } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
-import { engineForProvider } from "@appstrate/core/subscription-engines";
-import { runClaudeAgentChat } from "./claude-agent/engine.ts";
+import { subscriptionEngineDef } from "@appstrate/core/subscription-engines";
+import { buildTranscriptPrompt } from "./transcript.ts";
 
 const MAX_STEPS = 16;
 
@@ -179,22 +179,25 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   const mcpHeaders: Record<string, string> = { ...headers };
   if (applicationId) mcpHeaders["x-application-id"] = applicationId;
 
-  // The provider→engine binding is the shared registry's call (same mapping the
-  // run launcher uses), so chat + runs can never disagree on which engine a
-  // subscription runs on. Codex maps to engine "codex" but is agent-only — it
-  // is filtered out of the chat model list (CHAT_USABLE_FAMILIES), so only
-  // "claude" and "pi" reach here.
-  const engine = engineForProvider(chosen.providerId ?? "");
+  // Subscription engine with a chat surface — the binding AND its chat driver
+  // are contributed by the provider module via the shared core registry (the
+  // same mapping the run launcher + llm-proxy gateway read), so chat dispatches
+  // by provider id WITHOUT importing any vendor SDK. With the module absent
+  // there is no `chatHandler` and every provider falls through to the generic
+  // ai-sdk path below. Codex maps to a subscription engine too but is agent-only
+  // (filtered from the chat model list by CHAT_USABLE_FAMILIES) and contributes
+  // no chatHandler — so today only the Claude Agent SDK reaches this branch.
+  const subscriptionEngine = subscriptionEngineDef(chosen.providerId ?? "");
 
   system = applyOperationIndexPolicy(system, chosen.apiShape);
 
-  // Claude subscription engine (Claude Agent SDK): drives the official binary,
-  // which opens its OWN MCP connection — so close the probe client (used only
-  // for reachability + instructions), point the engine at the platform MCP
-  // endpoint + forwarded headers, and mint one turn-scoped loopback bearer for
-  // the credential-injection gateway (which swaps it server-side; the real
-  // subscription token never enters this process or the spawned binary's env).
-  if (engine === "claude") {
+  // The official binary opens its OWN MCP connection — so close the probe client
+  // (used only for reachability + instructions), point the engine at the
+  // platform MCP endpoint + forwarded headers, and mint one turn-scoped loopback
+  // bearer for the credential-injection gateway (which swaps it server-side; the
+  // real subscription token never enters this process or the spawned binary's
+  // env). The gateway slug derives from the provider id — no vendor literal.
+  if (subscriptionEngine?.chatHandler) {
     const platformMcp = mcp
       ? { url: `${origin}/api/mcp/o/${encodeURIComponent(orgId)}`, headers: mcpHeaders }
       : undefined;
@@ -203,11 +206,11 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
       { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
       { ttlMs: ENGINE_LOOPBACK_TTL_MS },
     );
-    return runClaudeAgentChat({
-      messages,
+    return subscriptionEngine.chatHandler({
+      prompt: buildTranscriptPrompt(messages),
       system,
       modelId: chosen.modelId,
-      gatewayBaseUrl: `${origin}/api/llm-proxy/claude-code-sdk/${encodeURIComponent(chosen.id)}`,
+      gatewayBaseUrl: `${origin}/api/llm-proxy/${subscriptionEngine.providerId}-sdk/${encodeURIComponent(chosen.id)}`,
       placeholderToken: loopbackToken,
       platformMcp,
       abortSignal: c.req.raw.signal,

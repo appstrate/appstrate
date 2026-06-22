@@ -53,10 +53,20 @@ COPY patches/ patches/
 # flag in bun 1.3.x. Versions stay pinned because resolution still reads the
 # COPY'd bun.lock; lockfile drift is caught by the `git diff --exit-code bun.lock`
 # guard in CI (.github/workflows/check.yml) on every commit.
+# Kill-switch build arg (ToS): the subscription engines' vendor SDKs + CLIs
+# (@anthropic-ai/claude-agent-sdk, @openai/codex) and the runner-claude/
+# runner-codex packages are `optionalDependencies`. `--build-arg
+# INCLUDE_SUBSCRIPTION_ENGINES=false` omits them, producing a pi-only image with
+# zero vendor executable surface (the runtime already gates the runners by
+# RUN_ENGINE, so a pi run never loads them). Default `true` keeps the full image
+# byte-identical. NOTE: the slim (`false`) path is UNVERIFIED here — must be
+# docker-built + booted in CI before relying on it.
+ARG INCLUDE_SUBSCRIPTION_ENGINES=true
 RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
     bun install \
         --filter=appstrate-pi-runtime \
-        --no-progress
+        --no-progress \
+        $([ "$INCLUDE_SUBSCRIPTION_ENGINES" = "false" ] && echo "--omit=optional")
 
 # Pre-bundle the entrypoint to a single .js file. This collapses the
 # 522-module ESM resolution graph (workspace symlinks + nested
@@ -108,6 +118,11 @@ FROM ${BUN_IMAGE} AS runtime
 ARG BUILD_VERSION=unknown
 ARG BUILD_REVISION=unknown
 ARG BUILD_CREATED
+
+# Re-declared in this stage (ARGs are stage-scoped) so the vendor-SDK symlink
+# steps below can be skipped for a pi-only slim image. Default `true` → full
+# image, every step below runs exactly as before.
+ARG INCLUDE_SUBSCRIPTION_ENGINES=true
 
 LABEL org.opencontainers.image.title="Appstrate Pi" \
       org.opencontainers.image.description="AI agent runtime for ephemeral agent runs" \
@@ -256,11 +271,15 @@ RUN mkdir -p node_modules/@mariozechner \
 # (same fix as the Pi pair above). The SDK's per-arch `claude` binary lives
 # beside it in the shared .bun store and `resolveClaudeCodeBinary` hops to it
 # through the SDK's own scope — no separate symlink needed for the binary.
-RUN mkdir -p node_modules/@anthropic-ai \
- && ln -s /runtime/runtime-pi/node_modules/@anthropic-ai/claude-agent-sdk node_modules/@anthropic-ai/claude-agent-sdk \
- && chown -h pi:pi \
-        node_modules/@anthropic-ai \
-        node_modules/@anthropic-ai/claude-agent-sdk
+# Skipped on a slim (`INCLUDE_SUBSCRIPTION_ENGINES=false`) build — the SDK is not
+# installed then, so there is nothing to surface.
+RUN if [ "$INCLUDE_SUBSCRIPTION_ENGINES" = "true" ]; then \
+      mkdir -p node_modules/@anthropic-ai \
+   && ln -s /runtime/runtime-pi/node_modules/@anthropic-ai/claude-agent-sdk node_modules/@anthropic-ai/claude-agent-sdk \
+   && chown -h pi:pi \
+          node_modules/@anthropic-ai \
+          node_modules/@anthropic-ai/claude-agent-sdk; \
+    fi
 
 # The Codex CLI (`@openai/codex`) is a direct dep of `appstrate-pi-runtime`, so
 # bun symlinks it into runtime-pi/node_modules. The bundled entrypoint resolves
@@ -268,19 +287,24 @@ RUN mkdir -p node_modules/@anthropic-ai \
 # SDK above). `resolveCodexBinary` hops through the main package's scope to its
 # per-arch `@openai/codex-<plat>-<arch>` optional-dep sibling (a musl-static
 # binary that runs on Alpine), so no separate symlink is needed for that sibling.
-RUN mkdir -p node_modules/@openai \
- && ln -s /runtime/runtime-pi/node_modules/@openai/codex node_modules/@openai/codex \
- && chown -h pi:pi \
-        node_modules/@openai \
-        node_modules/@openai/codex
+# Skipped on a slim (`INCLUDE_SUBSCRIPTION_ENGINES=false`) build — the CLI is not
+# installed then, so there is nothing to surface.
+RUN if [ "$INCLUDE_SUBSCRIPTION_ENGINES" = "true" ]; then \
+      mkdir -p node_modules/@openai \
+   && ln -s /runtime/runtime-pi/node_modules/@openai/codex node_modules/@openai/codex \
+   && chown -h pi:pi \
+          node_modules/@openai \
+          node_modules/@openai/codex; \
+    fi
 
 # Belt-and-suspenders: also expose the resolved musl `codex` binary on PATH at
 # /usr/local/bin/codex, so the runner's final fallback (bare `codex`) works even
 # if the per-arch scope resolution ever fails. Primary path stays
 # `resolveCodexBinary`; this is a safety net only. Done as root before USER pi.
-RUN set -e; \
-    CODEX_BIN="$(find /runtime/node_modules /runtime/runtime-pi/node_modules -path '*vendor/*-linux-musl/bin/codex' -type f 2>/dev/null | head -1)"; \
-    if [ -n "$CODEX_BIN" ]; then chmod +x "$CODEX_BIN"; ln -sf "$CODEX_BIN" /usr/local/bin/codex; echo "codex binary on PATH -> $CODEX_BIN"; else echo "WARN: codex musl binary not found at build time"; fi
+RUN if [ "$INCLUDE_SUBSCRIPTION_ENGINES" = "true" ]; then set -e; \
+      CODEX_BIN="$(find /runtime/node_modules /runtime/runtime-pi/node_modules -path '*vendor/*-linux-musl/bin/codex' -type f 2>/dev/null | head -1)"; \
+      if [ -n "$CODEX_BIN" ]; then chmod +x "$CODEX_BIN"; ln -sf "$CODEX_BIN" /usr/local/bin/codex; echo "codex binary on PATH -> $CODEX_BIN"; else echo "WARN: codex musl binary not found at build time"; fi; \
+    fi
 
 # Bootstrap sources. Glob is single-level (no recursion into `sidecar/`
 # or `test/`), so adding a new `.ts` file at `runtime-pi/*.ts` is picked

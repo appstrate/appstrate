@@ -337,10 +337,8 @@
         "@ai-sdk/mcp": "^1.0.46",
         "@ai-sdk/openai": "^3.0.68",
         "@ai-sdk/openai-compatible": "^1",
-        "@anthropic-ai/claude-agent-sdk": "~0.3.183",
         "@appstrate/core": "workspace:*",
         "@appstrate/db": "workspace:*",
-        "@appstrate/runner-claude": "workspace:*",
         "@assistant-ui/react": "^0.14.16",
         "@assistant-ui/react-ai-sdk": "^1",
         "@assistant-ui/react-markdown": "^0.14.2",
@@ -364,7 +362,10 @@
       "name": "@appstrate/module-claude-code",
       "version": "0.0.0",
       "dependencies": {
+        "@anthropic-ai/claude-agent-sdk": "~0.3.183",
         "@appstrate/core": "workspace:*",
+        "@appstrate/runner-claude": "workspace:*",
+        "ai": "^6",
       },
     },
     "packages/module-codex": {
@@ -470,15 +471,17 @@
     "runtime-pi": {
       "name": "appstrate-pi-runtime",
       "dependencies": {
-        "@anthropic-ai/claude-agent-sdk": "~0.3.183",
         "@appstrate/afps-runtime": "workspace:*",
         "@appstrate/core": "workspace:*",
         "@appstrate/mcp-transport": "workspace:*",
-        "@appstrate/runner-claude": "workspace:*",
-        "@appstrate/runner-codex": "workspace:*",
         "@appstrate/runner-pi": "workspace:*",
         "@mariozechner/pi-ai": "0.73.1",
         "@mariozechner/pi-coding-agent": "0.73.1",
+      },
+      "optionalDependencies": {
+        "@anthropic-ai/claude-agent-sdk": "~0.3.183",
+        "@appstrate/runner-claude": "workspace:*",
+        "@appstrate/runner-codex": "workspace:*",
         "@openai/codex": "~0.141.0",
       },
     },
