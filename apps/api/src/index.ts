@@ -251,6 +251,21 @@ const shutdown = createShutdownHandler(() => {
 process.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());
 
+// Resilience net: a single request's BACKGROUND async failure must not take down
+// the whole multi-tenant server. The LLM engines (codex/claude) drive a streamed
+// subprocess/SDK whose teardown can throw or reject AFTER the request's own
+// try/catch has returned — e.g. an upstream gateway fetch failing mid-stream. Bun
+// crashes the process on any uncaught exception OR unhandled rejection; we log and
+// KEEP SERVING instead. In-band request failures are still owned by the route
+// error handler — these handlers fire only for what escaped it entirely.
+const fmtErr = (e: unknown): string => (e instanceof Error ? (e.stack ?? e.message) : String(e));
+process.on("unhandledRejection", (reason) => {
+  logger.error("unhandledRejection — process kept alive", { err: fmtErr(reason) });
+});
+process.on("uncaughtException", (err, origin) => {
+  logger.error("uncaughtException — process kept alive", { origin, err: fmtErr(err) });
+});
+
 // Routes
 const userAgentsRouter = createUserAgentsRouter();
 const agentsRouter = createAgentsRouter();
