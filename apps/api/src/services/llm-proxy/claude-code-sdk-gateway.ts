@@ -29,10 +29,9 @@
  */
 
 import type { Context } from "hono";
-import { loadModel, modelNeedsReconnection } from "../org-models.ts";
-import { resolveOAuthTokenForSidecar } from "../model-providers/token-resolver.ts";
 import { anthropicMessagesAdapter } from "./anthropic.ts";
-import { cloneResponseHeaders, recordProxyUsage, tapSseUsage } from "./metering.ts";
+import { forwardMeteredResponse } from "./metering.ts";
+import { resolveSubscriptionToken } from "./subscription-token.ts";
 import type { LlmProxyPrincipal } from "./types.ts";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
@@ -146,31 +145,24 @@ export async function handleClaudeCodeSdkGateway(
     return new Response(null, { status: 200 });
   }
 
-  // Resolve the preset → credential + real model + cost, scoped to the org.
-  // Must be a Claude Code subscription model: this route injects an OAuth
-  // subscription token, which only the claude-code provider may receive.
-  const resolved = await loadModel(orgId, presetId);
-  if (!resolved) {
-    // `loadModel` nulls a model whose OAuth credential is flagged
-    // `needsReconnection` (same as one that's truly disabled/missing). For a
-    // chat user that's the common "subscription expired" case — surface the
-    // actionable reconnect prompt instead of a misleading "not enabled" 400.
-    if (await modelNeedsReconnection(orgId, presetId)) {
-      logger.warn("claude-code-sdk gateway: subscription needs reconnection (pre-flagged)", {
-        presetId,
-      });
-      return anthropicAuthErrorResponse();
-    }
-    throw invalidRequest(`Model preset "${presetId}" is not enabled for this org`);
-  }
-  if (resolved.providerId !== CLAUDE_CODE_PROVIDER_ID) {
-    throw invalidRequest(
-      `Model preset "${presetId}" is not a Claude Code subscription model (provider: ${resolved.providerId})`,
-    );
-  }
-  if (!resolved.credentialId) {
-    throw invalidRequest(`Model preset "${presetId}" has no OAuth credential to resolve`);
-  }
+  // Resolve the preset → credential + real model + cost + a fresh subscription
+  // token, scoped to the org (shared with the Codex vend). Must be a Claude Code
+  // subscription model: this route injects an OAuth subscription token, which
+  // only the claude-code provider may receive. The two reconnect paths
+  // (pre-flagged + refresh-time 410) return an Anthropic-native 401 the SDK
+  // surfaces as an actionable reconnect prompt.
+  const result = await resolveSubscriptionToken({
+    orgId,
+    presetId,
+    expectedProviderId: CLAUDE_CODE_PROVIDER_ID,
+    providerLabel: "Claude Code",
+    authErrorResponse: anthropicAuthErrorResponse,
+    translateAuthError: subscriptionAuthErrorResponse,
+    logLabel: "claude-code-sdk gateway",
+  });
+  if (result instanceof Response) return result;
+  const { resolved, token } = result;
+
   // Defense-in-depth: the claude-code provider pins baseUrl to api.anthropic.com
   // (baseUrlOverridable:false), so this is a no-op today — but it stops the
   // gateway becoming an SSRF hole if that flag is ever flipped, instead of the
@@ -185,24 +177,6 @@ export async function handleClaudeCodeSdkGateway(
     throw invalidRequest(`Request body exceeds the maximum of ${maxRequestBytes} bytes`);
   }
   const rawBody = new Uint8Array(buf);
-
-  // Resolve a fresh subscription token (auto-refresh, Redis-deduped). A
-  // credential needing reconnection throws `gone()` → translate it into an
-  // Anthropic-native 401 the SDK surfaces as an actionable reconnect prompt.
-  let token: Awaited<ReturnType<typeof resolveOAuthTokenForSidecar>>;
-  try {
-    token = await resolveOAuthTokenForSidecar(resolved.credentialId, orgId);
-  } catch (err) {
-    const authError = subscriptionAuthErrorResponse(err);
-    if (authError) {
-      logger.warn("claude-code-sdk gateway: subscription needs reconnection", {
-        presetId,
-        code: err instanceof ApiError ? err.code : undefined,
-      });
-      return authError;
-    }
-    throw err;
-  }
 
   const upstreamUrl = `${resolved.baseUrl.replace(/\/+$/, "")}${subpath}${new URL(c.req.url).search}`;
   const upstreamHeaders = buildSubscriptionHeaders(c.req.raw.headers, token.accessToken);
@@ -228,67 +202,15 @@ export async function handleClaudeCodeSdkGateway(
     throw err;
   }
 
-  // Errors: surface verbatim, never meter (no tokens produced).
-  if (!upstream.ok) {
-    const errorBody = await upstream.text();
-    logger.warn("claude-code-sdk gateway: upstream error", {
-      presetId,
-      status: upstream.status,
-    });
-    return new Response(errorBody, {
-      status: upstream.status,
-      headers: cloneResponseHeaders(upstream.headers),
-    });
-  }
-
-  const isSse = (upstream.headers.get("content-type") ?? "").includes("text/event-stream");
-  if (isSse && upstream.body) {
-    const [clientStream, tapStream] = upstream.body.tee();
-    void tapSseUsage(tapStream, anthropicMessagesAdapter)
-      .then((usage) =>
-        recordProxyUsage({
-          principal,
-          runId,
-          presetId,
-          resolved,
-          usage,
-          durationMs: Date.now() - started,
-        }),
-      )
-      .catch((err: unknown) => {
-        // Metering tap is best-effort and out-of-band of the client stream; a
-        // parse/insert failure must surface in logs, not vanish into an
-        // unhandled rejection (silent usage under-counting otherwise). Mirrors
-        // the core llm-proxy gateway (core.ts).
-        logger.error("claude-code-sdk gateway: SSE usage metering failed", {
-          runId,
-          presetId,
-          error: getErrorMessage(err),
-        });
-      });
-    return new Response(clientStream, {
-      status: upstream.status,
-      headers: cloneResponseHeaders(upstream.headers),
-    });
-  }
-
-  // Non-streaming JSON: buffer once, meter, forward an identical copy.
-  const bodyText = await upstream.text();
-  try {
-    const usage = anthropicMessagesAdapter.parseJsonUsage(JSON.parse(bodyText));
-    await recordProxyUsage({
-      principal,
-      runId,
-      presetId,
-      resolved,
-      usage,
-      durationMs: Date.now() - started,
-    });
-  } catch {
-    // Non-JSON 2xx (unexpected) — forward without metering.
-  }
-  return new Response(bodyText, {
-    status: upstream.status,
-    headers: cloneResponseHeaders(upstream.headers),
-  });
+  // Forward + meter (no alias-swap, no response-cache for the subscription path).
+  return forwardMeteredResponse(
+    upstream,
+    anthropicMessagesAdapter,
+    { principal, runId, presetId, resolved, started },
+    {
+      logLabel: "claude-code-sdk gateway",
+      onUpstreamError: (status) =>
+        logger.warn("claude-code-sdk gateway: upstream error", { presetId, status }),
+    },
+  );
 }

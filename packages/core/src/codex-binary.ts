@@ -11,10 +11,12 @@
  * `chatgpt.com` VERBATIM and ignores any `chatgpt_base_url` override, so — unlike
  * the Claude path — the sidecar cannot reverse-proxy it. Instead the real
  * subscription token is written into `auth.json` and the binary egresses
- * straight to the upstream. This module holds the universal, IO-free parts:
+ * straight to the upstream. This module holds the universal parts:
  *   - the per-arch package matrix (so `bun install` of `@openai/codex` places
  *     the matching binary; we resolve whichever variant is present),
- *   - the `auth.json` builder (ChatGPT-subscription mode), and
+ *   - the `auth.json` builder (ChatGPT-subscription mode) + the thin
+ *     `writeCodexAuthHome` IO wrapper that materialises it into an ephemeral
+ *     `CODEX_HOME`, and
  *   - the curated subprocess env.
  *
  * ToS posture (identical to claude): the official `codex` binary signs its OWN
@@ -33,6 +35,9 @@
  */
 
 import { createRequire } from "node:module";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const CODEX_SCOPE = "@openai/codex";
 
@@ -113,6 +118,49 @@ export function buildCodexAuthJson(opts: {
     },
     last_refresh: new Date(opts.nowMs).toISOString(),
   };
+}
+
+/**
+ * The credential vended to a first-party caller before driving the `codex`
+ * binary — the shape the chat codex-vend endpoint and the runner's
+ * `/credential-vend` both return (snake_case wire). `access_token` is the REAL
+ * subscription token; `account_id` is the credential's `chatgpt_account_id`
+ * when present. Shared so the on-disk-credential contract has one definition.
+ */
+export interface VendedCodexCredential {
+  access_token: string;
+  account_id?: string | null;
+}
+
+/**
+ * Materialise an ephemeral `CODEX_HOME` holding the subscription `auth.json`
+ * the spawned `codex` binary reads. The thin IO wrapper around
+ * {@link buildCodexAuthJson}, shared by the chat engine and the AFPS runner so
+ * the security-sensitive on-disk-credential lifecycle (real token, mode 0600)
+ * has ONE audited implementation. The caller owns teardown — `rm(home, …)` in
+ * its own `finally` — since only the caller knows the subprocess lifetime.
+ *
+ * @returns the absolute path of the created `CODEX_HOME` directory.
+ */
+export async function writeCodexAuthHome(opts: {
+  credential: VendedCodexCredential;
+  nowMs: number;
+  /** mkdtemp prefix, e.g. `"codex-chat-"` / `"codex-run-"` (for debuggability). */
+  prefix?: string;
+}): Promise<string> {
+  const home = await mkdtemp(join(tmpdir(), opts.prefix ?? "codex-"));
+  await writeFile(
+    join(home, "auth.json"),
+    JSON.stringify(
+      buildCodexAuthJson({
+        accessToken: opts.credential.access_token,
+        accountId: opts.credential.account_id,
+        nowMs: opts.nowMs,
+      }),
+    ),
+    { mode: 0o600 },
+  );
+  return home;
 }
 
 /**
@@ -279,6 +327,32 @@ export async function* readNdjsonLines(stream: ReadableStream<Uint8Array>): Asyn
   }
   const tail = (buf + decoder.decode()).trim();
   if (tail) yield tail;
+}
+
+/**
+ * Codex CLI usage counters (`turn.completed.usage`, codex-cli 0.141). Shared
+ * by both codex event mappers (chat UI-stream + AFPS runner) so the CLI wire
+ * contract has one definition.
+ */
+export interface CodexUsage {
+  input_tokens?: number;
+  cached_input_tokens?: number;
+  output_tokens?: number;
+  reasoning_output_tokens?: number;
+}
+
+/**
+ * A single `codex exec --json` NDJSON event (structural — only the fields the
+ * mappers read). A superset of both mappers' needs: `item.command` + the index
+ * signature are used by the runner mapper, the chat mapper reads a subset.
+ */
+export interface CodexEvent {
+  type: string;
+  thread_id?: string;
+  item?: { id?: string; type?: string; text?: string; command?: string; [k: string]: unknown };
+  usage?: CodexUsage;
+  error?: { message?: string } | string;
+  message?: string;
 }
 
 /** Parse one NDJSON line, returning `null` instead of throwing on malformed JSON. */

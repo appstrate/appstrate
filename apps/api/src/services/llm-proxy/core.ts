@@ -22,18 +22,13 @@ import { loadModel, type ResolvedModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
-import { lookupResponse, storeResponse } from "./response-cache.ts";
+import { lookupResponse } from "./response-cache.ts";
 import { parseProxyRequest } from "./helpers.ts";
-import { cloneResponseHeaders, recordProxyUsage, tapSseUsage } from "./metering.ts";
+import { forwardMeteredResponse } from "./metering.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
-import {
-  swapResponseModelJson,
-  createSseModelSwapStream,
-  scrubModelText,
-} from "@appstrate/core/model-swap";
 
 /** Maximum request body the proxy will accept before refusing up-front. */
 const DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
@@ -179,111 +174,21 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     throw err;
   }
 
-  const contentType = upstream.headers.get("content-type") ?? "";
-  const isSse = contentType.includes("text/event-stream");
-
-  // Upstream errors: surface verbatim but DON'T meter them as usage —
-  // the call never produced tokens. We read + rebuild the Response so
-  // `cloneResponseHeaders` can strip `content-length` / `content-encoding`
-  // — Bun already decompressed the body here, so forwarding the
-  // upstream's encoding header would trip the caller's decoder.
-  if (!upstream.ok) {
-    const errorBody = await upstream.text();
-    const headers = cloneResponseHeaders(upstream.headers);
-    // Error bodies are free-form prose that may name the real id ("model
-    // deepseek-chat does not exist") — blind-scrub it back to the alias.
-    const clientBody = swap ? scrubModelText(errorBody, swap) : errorBody;
-    return new Response(clientBody, { status: upstream.status, headers });
-  }
-
-  if (isSse && upstream.body) {
-    const [clientStream, tapStream] = upstream.body.tee();
-    void tapSseUsage(tapStream, inputs.adapter)
-      .then((usage) =>
-        recordProxyUsage({
-          principal: inputs.principal,
-          runId: inputs.runId,
-          presetId,
-          resolved,
-          usage,
-          durationMs: Date.now() - started,
-        }),
-      )
-      .catch((err: unknown) => {
-        // Metering tap is best-effort and out-of-band of the client stream;
-        // a parse/insert failure must surface in logs, not vanish into an
-        // unhandled rejection (silent usage under-counting otherwise).
-        logger.error("llm-proxy: SSE usage metering failed", {
-          runId: inputs.runId,
-          presetId,
-          error: getErrorMessage(err),
-        });
-      });
-    const headers = cloneResponseHeaders(upstream.headers);
-    // Rewrite the echoed real id back to the alias in every SSE frame. The tap
-    // above reads the untouched `tapStream`, so accounting still sees the real
-    // id; only the client-facing copy is swapped.
-    const clientStream2 = swap
-      ? clientStream.pipeThrough(createSseModelSwapStream(swap))
-      : clientStream;
-    return new Response(clientStream2, {
-      status: upstream.status,
-      headers,
-    });
-  }
-
-  // Non-streaming JSON. Read once, parse for usage, forward an identical
-  // copy to the caller (we can't reuse the upstream Response — its body
-  // has been consumed).
-  const bodyText = await upstream.text();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(bodyText);
-  } catch {
-    // Upstream advertised a non-JSON content-type but still returned a
-    // non-SSE body — forward without metering. Scrub any real id from the
-    // free-form body for aliases.
-    const headers = cloneResponseHeaders(upstream.headers);
-    const clientBody = swap ? scrubModelText(bodyText, swap) : bodyText;
-    return new Response(clientBody, { status: upstream.status, headers });
-  }
-
-  const usage = inputs.adapter.parseJsonUsage(parsed);
-  if (usage) {
-    // Non-streaming path: the upstream body is already fully buffered,
-    // so awaiting the metering insert costs ~1ms and removes the
-    // observable race. `recordProxyUsage` swallows its own DB errors (a
-    // failed insert never breaks the call), so awaiting is safe.
-    // Streaming uses `void tapSseUsage(...)` deliberately — the
-    // response is already on the wire before the SSE tap drains.
-    await recordProxyUsage({
-      principal: inputs.principal,
-      runId: inputs.runId,
-      presetId,
-      resolved,
-      usage,
-      durationMs: Date.now() - started,
-    });
-  }
-
-  const headers = cloneResponseHeaders(upstream.headers);
-  // Rewrite the echoed real id back to the alias before the body leaves the
-  // server — and BEFORE caching, so a replay returns the alias too.
-  const clientBody = swap ? swapResponseModelJson(bodyText, swap) : bodyText;
-  // Persist 2xx replies for future lookups. Tag the MISS so the caller
-  // sees a consistent `x-llm-proxy-cache-status` contract whether the
-  // cache is enabled or off.
-  if (cacheKeyForWrite) {
-    void storeResponse({
-      cacheKey: cacheKeyForWrite,
-      ttlSeconds: cacheConfig.ttlSeconds,
-      status: upstream.status,
-      headers,
-      body: clientBody,
-    });
-    headers.set("x-llm-proxy-cache-status", "MISS");
-  }
-  return new Response(clientBody, { status: upstream.status, headers });
+  // Forward + meter, weaving in the alias-swap (every branch) and the
+  // response-cache write (non-streaming 2xx). Shared with the Claude Code
+  // subscription gateway, which forwards verbatim (no swap, no cache).
+  return forwardMeteredResponse(
+    upstream,
+    inputs.adapter,
+    { principal: inputs.principal, runId: inputs.runId, presetId, resolved, started },
+    {
+      swap,
+      cache: cacheKeyForWrite
+        ? { cacheKey: cacheKeyForWrite, ttlSeconds: cacheConfig.ttlSeconds }
+        : null,
+      logLabel: "llm-proxy",
+    },
+  );
 }
 
 async function resolvePresetForOrg(

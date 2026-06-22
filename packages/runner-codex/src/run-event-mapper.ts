@@ -29,7 +29,15 @@
  */
 
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import { truncateToolResult, type RunError, type TokenUsage } from "@appstrate/afps-runtime/runner";
+import {
+  truncateToolResult,
+  zeroTokenUsage,
+  type RunError,
+  type TokenUsage,
+} from "@appstrate/afps-runtime/runner";
+import type { CodexEvent, CodexUsage } from "@appstrate/core/codex-binary";
+
+export type { CodexEvent, CodexUsage };
 
 /** Per-token cost rates for the resolved model (USD per 1e6 tokens). */
 export interface CodexModelCost {
@@ -37,33 +45,6 @@ export interface CodexModelCost {
   output: number;
   cacheRead?: number;
   cacheWrite?: number;
-}
-
-/** Codex CLI usage counters (`turn.completed.usage`). */
-export interface CodexUsage {
-  input_tokens?: number;
-  cached_input_tokens?: number;
-  output_tokens?: number;
-  reasoning_output_tokens?: number;
-}
-
-/** A single `codex exec --json` NDJSON event (structural — only what we read). */
-export interface CodexEvent {
-  type: string;
-  thread_id?: string;
-  item?: { id?: string; type?: string; text?: string; command?: string; [k: string]: unknown };
-  usage?: CodexUsage;
-  error?: { message?: string } | string;
-  message?: string;
-}
-
-function zeroUsage(): TokenUsage {
-  return {
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_creation_input_tokens: 0,
-    cache_read_input_tokens: 0,
-  };
 }
 
 /** Compute equivalent cost (USD) from usage + the model's per-million rates. */
@@ -95,7 +76,7 @@ function errorText(ev: CodexEvent): string {
  * Codex NDJSON event in arrival order and returns the {@link RunEvent}s to emit.
  */
 export class CodexRunEventMapper {
-  private readonly liveUsage = zeroUsage();
+  private readonly liveUsage = zeroTokenUsage();
   private failureState: RunError | null = null;
 
   constructor(

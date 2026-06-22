@@ -29,21 +29,21 @@
  * event and surfaced in the finish chunk's metadata.
  */
 
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rm } from "node:fs/promises";
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from "ai";
 import {
-  buildCodexAuthJson,
   buildCodexEnv,
   makeCodexScopeResolver,
   readNdjsonLines,
   redactSecrets,
   resolveCodexBinary,
   safeParseJson,
+  writeCodexAuthHome,
+  type VendedCodexCredential,
 } from "@appstrate/core/codex-binary";
 import { CodexUiStreamMapper, type CodexEvent } from "./ui-stream-mapper.ts";
 import { acquireCodexSlot } from "./concurrency.ts";
+import { buildTranscriptPrompt } from "../transcript.ts";
 import { logger } from "../logger.ts";
 
 /**
@@ -105,28 +105,6 @@ function capacityResponse(): Response {
   );
 }
 
-/** Flatten the UI thread + system persona into a single prompt for `codex exec`. */
-export function buildCodexPrompt(messages: UIMessage[], system: string): string {
-  const textOf = (m: UIMessage): string =>
-    (m.parts ?? [])
-      .filter((p): p is { type: "text"; text: string } => p.type === "text")
-      .map((p) => p.text)
-      .join("")
-      .trim();
-
-  const turns = messages
-    .filter((m) => m.role === "user" || m.role === "assistant")
-    .map((m) => ({ role: m.role, text: textOf(m) }))
-    .filter((t) => t.text.length > 0);
-
-  const transcript =
-    turns.length === 1
-      ? turns[0]!.text
-      : turns.map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.text}`).join("\n\n");
-
-  return system ? `${system}\n\n---\n\n${transcript}` : transcript;
-}
-
 /**
  * Run one chat turn through the Codex CLI and return a UI-message-stream
  * Response (identical wire contract to the other engines).
@@ -173,20 +151,13 @@ export function runCodexAgentChat(input: CodexAgentChatInput): Response {
           writer.write(mapper.finishChunk());
           return;
         }
-        const cred = (await vend.json()) as { access_token: string; account_id?: string | null };
+        const cred = (await vend.json()) as VendedCodexCredential;
 
-        home = await mkdtemp(join(tmpdir(), "codex-chat-"));
-        await writeFile(
-          join(home, "auth.json"),
-          JSON.stringify(
-            buildCodexAuthJson({
-              accessToken: cred.access_token,
-              accountId: cred.account_id,
-              nowMs: Date.now(),
-            }),
-          ),
-          { mode: 0o600 },
-        );
+        home = await writeCodexAuthHome({
+          credential: cred,
+          nowMs: Date.now(),
+          prefix: "codex-chat-",
+        });
 
         child = Bun.spawn(
           [
@@ -198,7 +169,7 @@ export function runCodexAgentChat(input: CodexAgentChatInput): Response {
             "read-only",
             "-m",
             input.modelId,
-            buildCodexPrompt(input.messages, input.system),
+            buildTranscriptPrompt(input.messages, { system: input.system }),
           ],
           {
             cwd: home,

@@ -27,11 +27,9 @@
  */
 
 import type { Context } from "hono";
-import { loadModel, modelNeedsReconnection } from "../org-models.ts";
-import { resolveOAuthTokenForSidecar } from "../model-providers/token-resolver.ts";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
-import { logger } from "../../lib/logger.ts";
 import type { AppEnv } from "../../types/index.ts";
+import { resolveSubscriptionToken } from "./subscription-token.ts";
 
 /** Provider id of the Codex (ChatGPT Plus/Pro/Business) subscription credential. */
 export const CODEX_PROVIDER_ID = "codex";
@@ -66,34 +64,17 @@ export async function handleCodexSdkGateway(c: Context<AppEnv>): Promise<Respons
   const presetId = c.req.param("presetId");
   if (!presetId) throw invalidRequest("Missing model preset id in path");
 
-  const resolved = await loadModel(orgId, presetId);
-  if (!resolved) {
-    if (await modelNeedsReconnection(orgId, presetId)) {
-      logger.warn("codex vend: subscription needs reconnection (pre-flagged)", { presetId });
-      return codexAuthErrorResponse();
-    }
-    throw invalidRequest(`Model preset "${presetId}" is not enabled for this org`);
-  }
-  if (resolved.providerId !== CODEX_PROVIDER_ID) {
-    throw invalidRequest(
-      `Model preset "${presetId}" is not a Codex subscription model (provider: ${resolved.providerId})`,
-    );
-  }
-  if (!resolved.credentialId) {
-    throw invalidRequest(`Model preset "${presetId}" has no OAuth credential to resolve`);
-  }
-
-  let token: Awaited<ReturnType<typeof resolveOAuthTokenForSidecar>>;
-  try {
-    token = await resolveOAuthTokenForSidecar(resolved.credentialId, orgId);
-  } catch (err) {
-    const authError = codexSubscriptionAuthError(err);
-    if (authError) {
-      logger.warn("codex vend: subscription needs reconnection", { presetId });
-      return authError;
-    }
-    throw err;
-  }
+  const result = await resolveSubscriptionToken({
+    orgId,
+    presetId,
+    expectedProviderId: CODEX_PROVIDER_ID,
+    providerLabel: "Codex",
+    authErrorResponse: codexAuthErrorResponse,
+    translateAuthError: codexSubscriptionAuthError,
+    logLabel: "codex vend",
+  });
+  if (result instanceof Response) return result;
+  const { token } = result;
 
   // Vend to the in-process loopback caller only. `Cache-Control: no-store` keeps
   // it out of any intermediary cache; the body is never logged.

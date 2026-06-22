@@ -36,9 +36,7 @@
  * process exit code + any `turn.failed` recorded by the mapper.
  */
 
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rm } from "node:fs/promises";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   reduceEvents,
@@ -48,12 +46,14 @@ import {
 } from "@appstrate/afps-runtime/runner";
 import type { Runner, RunOptions } from "@appstrate/afps-runtime/runner";
 import {
-  buildCodexAuthJson,
   buildCodexEnv,
   readNdjsonLines,
   redactSecrets,
   safeParseJson,
+  writeCodexAuthHome,
+  type VendedCodexCredential,
 } from "@appstrate/core/codex-binary";
+import { getErrorMessage } from "@appstrate/core/errors";
 import {
   CodexRunEventMapper,
   computeCodexCost,
@@ -100,10 +100,6 @@ export interface CodexAgentRunnerOptions {
   fetchFn?: typeof fetch;
   /** Injectable clock. Defaults to `Date.now`. */
   now?: () => number;
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 /** Normalise the run input (`z.unknown()`) into prompt text. */
@@ -176,21 +172,10 @@ export class CodexAgentRunner implements Runner {
             : `Credential vend failed (${vend.status}).`,
         );
       }
-      const cred = (await vend.json()) as { access_token: string; account_id?: string | null };
+      const cred = (await vend.json()) as VendedCodexCredential;
 
       // 2. Write the ephemeral CODEX_HOME/auth.json (real token, 0600).
-      home = await mkdtemp(join(tmpdir(), "codex-run-"));
-      await writeFile(
-        join(home, "auth.json"),
-        JSON.stringify(
-          buildCodexAuthJson({
-            accessToken: cred.access_token,
-            accountId: cred.account_id,
-            nowMs: now(),
-          }),
-        ),
-        { mode: 0o600 },
-      );
+      home = await writeCodexAuthHome({ credential: cred, nowMs: now(), prefix: "codex-run-" });
 
       // 3. Spawn the official binary. No `chatgpt_base_url` (it talks to the
       //    upstream directly; egress is locked by the sidecar allowlist). The
@@ -263,7 +248,7 @@ export class CodexAgentRunner implements Runner {
         // block decides (mirrors the Claude/Pi runners).
         throw err;
       }
-      const message = errorMessage(err);
+      const message = getErrorMessage(err);
       await emit({ type: "appstrate.error", timestamp: now(), runId, message });
       const result = emptyRunResult();
       result.status = "failed";

@@ -29,6 +29,7 @@ import { resolveClaudeCodeBinary } from "./binary.ts";
 import { createLocalToolsServer, type LocalToolsContext } from "./local-tools.ts";
 import { SdkUiStreamMapper, type ClaudeSdkMessage } from "./ui-stream-mapper.ts";
 import { acquireClaudeSlot } from "./concurrency.ts";
+import { buildTranscriptPrompt } from "../transcript.ts";
 import { logger } from "../logger.ts";
 
 /** Upper bound on agent turns per chat message (mirrors the ai-sdk path's MAX_STEPS). */
@@ -95,27 +96,6 @@ export function buildSdkEnv(
   return buildClaudeSdkEnv({ baseUrl: gatewayBaseUrl, placeholderToken });
 }
 
-/** Flatten the UI thread into a transcript prompt (the SDK takes a prompt, not a UIMessage[]). */
-export function buildPromptFromMessages(messages: UIMessage[]): string {
-  const textOf = (m: UIMessage): string =>
-    (m.parts ?? [])
-      .filter((p): p is { type: "text"; text: string } => p.type === "text")
-      .map((p) => p.text)
-      .join("")
-      .trim();
-
-  const turns = messages
-    .filter((m) => m.role === "user" || m.role === "assistant")
-    .map((m) => ({ role: m.role, text: textOf(m) }))
-    .filter((t) => t.text.length > 0);
-
-  if (turns.length === 0) return "";
-  // Single user turn → send it directly. Otherwise a labelled transcript gives
-  // the (stateless, persistSession:false) SDK the full conversational context.
-  if (turns.length === 1) return turns[0]!.text;
-  return turns.map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.text}`).join("\n\n");
-}
-
 /**
  * Build the `mcpServers` config: always the in-process local tools, plus the
  * platform HTTP MCP when available. (Typed loosely — the SDK's McpServerConfig
@@ -164,7 +144,7 @@ export function runClaudeAgentChat(input: ClaudeAgentChatInput): Response {
         writer.write(mapper.startChunk(crypto.randomUUID()));
 
         const response = query({
-          prompt: buildPromptFromMessages(input.messages),
+          prompt: buildTranscriptPrompt(input.messages),
           options: {
             pathToClaudeCodeExecutable: binary,
             env: buildSdkEnv(input.gatewayBaseUrl, input.placeholderToken),

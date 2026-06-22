@@ -39,6 +39,7 @@ import {
   type RunResult,
 } from "@appstrate/afps-runtime/runner";
 import { buildClaudeSdkEnv } from "@appstrate/core/claude-binary";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { SdkRunEventMapper, type SdkRunMessage } from "./sdk-event-mapper.ts";
 import { buildRuntimeToolsMcpServer } from "./runtime-tools-mcp.ts";
 
@@ -99,10 +100,6 @@ function resolveStartMessage(context: ExecutionContext, explicit: string | undef
   return "Begin the task according to your instructions.";
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
 export class ClaudeAgentRunner implements Runner {
   readonly name = "claude-agent-runner";
 
@@ -123,7 +120,7 @@ export class ClaudeAgentRunner implements Runner {
       // failure here means the image was built wrong. Surface it explicitly
       // instead of leaking a raw module-not-found at first run().
       throw new Error(
-        `claude-agent-runner: @anthropic-ai/claude-agent-sdk is not available (${errorMessage(err)})`,
+        `claude-agent-runner: @anthropic-ai/claude-agent-sdk is not available (${getErrorMessage(err)})`,
       );
     }
     return (input) =>
@@ -217,7 +214,7 @@ export class ClaudeAgentRunner implements Runner {
         // block decides (mirrors PiRunner).
         throw err;
       }
-      const message = errorMessage(err);
+      const message = getErrorMessage(err);
       await emit({ type: "appstrate.error", timestamp: now(), runId, message });
       const result = reduceEvents(events, {
         error: { message, stack: err instanceof Error ? err.stack : undefined },

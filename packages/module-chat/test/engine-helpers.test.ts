@@ -2,7 +2,8 @@
 
 import { describe, expect, it, afterEach } from "bun:test";
 import type { UIMessage } from "ai";
-import { buildPromptFromMessages, buildSdkEnv } from "../src/claude-agent/engine.ts";
+import { buildSdkEnv } from "../src/claude-agent/engine.ts";
+import { buildTranscriptPrompt } from "../src/transcript.ts";
 
 const userMsg = (text: string): UIMessage => ({
   id: crypto.randomUUID(),
@@ -15,13 +16,13 @@ const assistantMsg = (text: string): UIMessage => ({
   parts: [{ type: "text", text }],
 });
 
-describe("buildPromptFromMessages", () => {
+describe("buildTranscriptPrompt", () => {
   it("a single user turn is sent verbatim (no transcript labels)", () => {
-    expect(buildPromptFromMessages([userMsg("salut")])).toBe("salut");
+    expect(buildTranscriptPrompt([userMsg("salut")])).toBe("salut");
   });
 
   it("multi-turn threads become a labelled transcript", () => {
-    const prompt = buildPromptFromMessages([
+    const prompt = buildTranscriptPrompt([
       userMsg("bonjour"),
       assistantMsg("salut, comment puis-je aider ?"),
       userMsg("liste mes agents"),
@@ -37,12 +38,12 @@ describe("buildPromptFromMessages", () => {
       role: "assistant",
       parts: [{ type: "step-start" } as never, { type: "text", text: "ok" }],
     };
-    expect(buildPromptFromMessages([userMsg("hi"), withTool])).toBe("User: hi\n\nAssistant: ok");
+    expect(buildTranscriptPrompt([userMsg("hi"), withTool])).toBe("User: hi\n\nAssistant: ok");
   });
 
   it("returns an empty string when there is no usable content", () => {
-    expect(buildPromptFromMessages([])).toBe("");
-    expect(buildPromptFromMessages([userMsg("   ")])).toBe("");
+    expect(buildTranscriptPrompt([])).toBe("");
+    expect(buildTranscriptPrompt([userMsg("   ")])).toBe("");
   });
 });
 

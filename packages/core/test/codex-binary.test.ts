@@ -2,6 +2,8 @@
 // Copyright 2026 Appstrate
 
 import { describe, expect, it } from "bun:test";
+import { readFile, stat, rm } from "node:fs/promises";
+import { join } from "node:path";
 import {
   buildCodexAuthJson,
   buildCodexEnv,
@@ -11,6 +13,7 @@ import {
   redactSecrets,
   resolveCodexBinary,
   safeParseJson,
+  writeCodexAuthHome,
 } from "../src/codex-binary.ts";
 
 describe("codexTargetTriple", () => {
@@ -76,6 +79,42 @@ describe("buildCodexAuthJson", () => {
     expect(parts).toHaveLength(3);
     const payload = JSON.parse(Buffer.from(parts[1]!, "base64url").toString());
     expect(payload.exp).toBeGreaterThan(Math.floor(now / 1000));
+  });
+});
+
+describe("writeCodexAuthHome", () => {
+  it("materialises auth.json (0600) holding buildCodexAuthJson output, and returns the home", async () => {
+    const now = 1_700_000_000_000;
+    const home = await writeCodexAuthHome({
+      credential: { access_token: "tok_real", account_id: "acct_123" },
+      nowMs: now,
+      prefix: "codex-test-",
+    });
+    try {
+      const path = join(home, "auth.json");
+      // Real token on disk → MUST be owner-only (0600).
+      const mode = (await stat(path)).mode & 0o777;
+      expect(mode).toBe(0o600);
+      const written = JSON.parse(await readFile(path, "utf8"));
+      expect(written).toEqual(
+        buildCodexAuthJson({ accessToken: "tok_real", accountId: "acct_123", nowMs: now }),
+      );
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("tolerates a credential with no account_id (falls back to the placeholder)", async () => {
+    const home = await writeCodexAuthHome({
+      credential: { access_token: "tok" },
+      nowMs: 1_700_000_000_000,
+    });
+    try {
+      const written = JSON.parse(await readFile(join(home, "auth.json"), "utf8"));
+      expect(written.tokens.account_id).toBe("00000000-0000-0000-0000-000000000000");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });
 

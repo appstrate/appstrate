@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { CodexUiStreamMapper } from "../src/codex-agent/ui-stream-mapper.ts";
-import { buildCodexPrompt } from "../src/codex-agent/engine.ts";
+import { buildTranscriptPrompt } from "../src/transcript.ts";
 import type { UIMessage } from "ai";
 
 describe("CodexUiStreamMapper", () => {
@@ -52,17 +52,19 @@ describe("CodexUiStreamMapper", () => {
   });
 });
 
-describe("buildCodexPrompt", () => {
+describe("buildTranscriptPrompt (codex system prefix)", () => {
   const mk = (role: "user" | "assistant", text: string): UIMessage =>
     ({ id: role, role, parts: [{ type: "text", text }] }) as UIMessage;
 
   it("a single user turn is sent verbatim under the system prefix", () => {
-    const out = buildCodexPrompt([mk("user", "salut")], "SYS");
+    const out = buildTranscriptPrompt([mk("user", "salut")], { system: "SYS" });
     expect(out).toBe("SYS\n\n---\n\nsalut");
   });
 
   it("multiple turns become a labelled transcript", () => {
-    const out = buildCodexPrompt([mk("user", "a"), mk("assistant", "b"), mk("user", "c")], "");
+    const out = buildTranscriptPrompt([mk("user", "a"), mk("assistant", "b"), mk("user", "c")], {
+      system: "",
+    });
     expect(out).toBe("User: a\n\nAssistant: b\n\nUser: c");
   });
 });

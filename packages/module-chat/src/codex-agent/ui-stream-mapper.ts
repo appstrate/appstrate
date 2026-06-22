@@ -28,22 +28,9 @@
  */
 
 import type { UIMessageChunk } from "ai";
+import type { CodexEvent, CodexUsage } from "@appstrate/core/codex-binary";
 
-export interface CodexUsage {
-  input_tokens?: number;
-  cached_input_tokens?: number;
-  output_tokens?: number;
-  reasoning_output_tokens?: number;
-}
-
-export interface CodexEvent {
-  type: string;
-  thread_id?: string;
-  item?: { id?: string; type?: string; text?: string };
-  usage?: CodexUsage;
-  error?: { message?: string } | string;
-  message?: string;
-}
+export type { CodexEvent, CodexUsage };
 
 export interface CodexResultMeta {
   isError: boolean;

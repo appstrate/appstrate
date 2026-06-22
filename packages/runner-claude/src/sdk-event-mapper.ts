@@ -33,6 +33,7 @@
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import {
   truncateToolResult,
+  zeroTokenUsage,
   type RunError,
   type RunResult,
   type TokenUsage,
@@ -119,15 +120,6 @@ function errorCodeForSubtype(subtype: string | undefined): string {
   }
 }
 
-function zeroUsage(): TokenUsage {
-  return {
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_creation_input_tokens: 0,
-    cache_read_input_tokens: 0,
-  };
-}
-
 function addUsage(into: TokenUsage, delta: SdkUsage | undefined): void {
   if (!delta) return;
   into.input_tokens = (into.input_tokens ?? 0) + (delta.input_tokens ?? 0);
@@ -155,7 +147,7 @@ function assistantErrorMessage(error: SdkAssistantMessage["error"]): string | un
  * verdict + counters for the run's {@link RunResult}.
  */
 export class SdkRunEventMapper {
-  private readonly liveUsage = zeroUsage();
+  private readonly liveUsage = zeroTokenUsage();
   private terminalState: SdkTerminal | null = null;
 
   constructor(
