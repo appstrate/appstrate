@@ -23,3 +23,12 @@ export const CHAT_USABLE_FAMILIES = new Set([
 
 /** apiShape of the codex (ChatGPT) subscription provider — routed to the codex CLI engine. */
 export const CODEX_API_SHAPE = "openai-codex-responses";
+
+/**
+ * Subscription `providerId`s that bypass the llm-proxy for their own ToS-clean
+ * engine. The proxy REFUSES these (no fingerprint forging), so ANY chat
+ * inference on them — including title generation — must route to the engine,
+ * never `streamText` against the proxy.
+ */
+export const CODEX_PROVIDER_ID = "codex";
+export const CLAUDE_CODE_PROVIDER_ID = "claude-code";

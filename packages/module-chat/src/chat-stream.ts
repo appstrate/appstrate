@@ -26,15 +26,10 @@ import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
 import { runClaudeAgentChat } from "./claude-agent/engine.ts";
 import { runCodexAgentChat } from "./codex-agent/engine.ts";
+import { CLAUDE_CODE_PROVIDER_ID, CODEX_PROVIDER_ID } from "./chat-families.ts";
 import { RENDER_HTML_DESCRIPTION, renderHtmlInputShape } from "./render-html-spec.ts";
 
 const MAX_STEPS = 16;
-
-/** Credential provider id of the Claude subscription — routed to the Agent SDK engine. */
-const CLAUDE_CODE_PROVIDER_ID = "claude-code";
-
-/** Credential provider id of the Codex (ChatGPT) subscription — routed to the codex CLI engine. */
-const CODEX_PROVIDER_ID = "codex";
 
 /**
  * TTL for the engine path's loopback bearer. The Agent SDK bakes it into the
