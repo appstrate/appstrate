@@ -31,9 +31,9 @@
 import type { Context } from "hono";
 import { anthropicMessagesAdapter } from "./anthropic.ts";
 import { forwardMeteredResponse } from "./metering.ts";
-import { resolveSubscriptionToken } from "./subscription-token.ts";
-import type { LlmProxyPrincipal } from "./types.ts";
-import { ApiError, invalidRequest } from "../../lib/errors.ts";
+import { make410AuthTranslator, resolveSubscriptionToken } from "./subscription-token.ts";
+import { buildLlmProxyPrincipal } from "./types.ts";
+import { invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
@@ -111,17 +111,12 @@ export function anthropicAuthErrorResponse(): Response {
 
 /**
  * Translate a token-resolution failure into {@link anthropicAuthErrorResponse}
- * when it is a `gone()` (HTTP 410) — i.e. a refresh-time revocation discovered
- * by `resolveOAuthTokenForSidecar` (the credential wasn't pre-flagged, the
- * refresh hit `invalid_grant`). Returns `null` for any other error so the
- * caller rethrows — unexpected failures must not masquerade as an auth problem.
- * Pure for unit testing. (The pre-flagged `needsReconnection` case is caught
- * earlier, at the `loadModel` layer, via `modelNeedsReconnection`.)
+ * when it is a `gone()` (HTTP 410) — a refresh-time revocation discovered by
+ * `resolveOAuthTokenForSidecar`. (The pre-flagged `needsReconnection` case is
+ * caught earlier, at `loadModel`, via `modelNeedsReconnection`.) See
+ * {@link make410AuthTranslator}.
  */
-export function subscriptionAuthErrorResponse(err: unknown): Response | null {
-  if (!(err instanceof ApiError) || err.status !== 410) return null;
-  return anthropicAuthErrorResponse();
-}
+export const subscriptionAuthErrorResponse = make410AuthTranslator(anthropicAuthErrorResponse);
 
 /**
  * Handle one upstream call from the Claude Agent SDK. The route layer has
@@ -181,9 +176,7 @@ export async function handleClaudeCodeSdkGateway(
   const upstreamUrl = `${resolved.baseUrl.replace(/\/+$/, "")}${subpath}${new URL(c.req.url).search}`;
   const upstreamHeaders = buildSubscriptionHeaders(c.req.raw.headers, token.accessToken);
 
-  const principal: LlmProxyPrincipal = apiKeyId
-    ? { kind: "api_key", apiKeyId, orgId, userId }
-    : { kind: "jwt_user", userId, orgId };
+  const principal = buildLlmProxyPrincipal({ apiKeyId, orgId, userId });
   const runId = c.req.header("X-Run-Id") || null;
   const started = Date.now();
 

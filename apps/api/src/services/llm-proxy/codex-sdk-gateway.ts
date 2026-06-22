@@ -27,9 +27,9 @@
  */
 
 import type { Context } from "hono";
-import { ApiError, invalidRequest } from "../../lib/errors.ts";
+import { invalidRequest } from "../../lib/errors.ts";
 import type { AppEnv } from "../../types/index.ts";
-import { resolveSubscriptionToken } from "./subscription-token.ts";
+import { make410AuthTranslator, resolveSubscriptionToken } from "./subscription-token.ts";
 
 /** Provider id of the Codex (ChatGPT Plus/Pro/Business) subscription credential. */
 export const CODEX_PROVIDER_ID = "codex";
@@ -47,12 +47,9 @@ export function codexAuthErrorResponse(): Response {
   );
 }
 
-/** Translate a 410 token-resolution failure into {@link codexAuthErrorResponse}.
- * Returns null for any other error so the caller rethrows. Pure for testing. */
-export function codexSubscriptionAuthError(err: unknown): Response | null {
-  if (!(err instanceof ApiError) || err.status !== 410) return null;
-  return codexAuthErrorResponse();
-}
+/** Translate a 410 token-resolution failure into {@link codexAuthErrorResponse}
+ * (null for any other error so the caller rethrows). See {@link make410AuthTranslator}. */
+export const codexSubscriptionAuthError = make410AuthTranslator(codexAuthErrorResponse);
 
 /**
  * Vend the resolved Codex subscription credential to the first-party loopback

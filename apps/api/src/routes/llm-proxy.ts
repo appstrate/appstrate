@@ -69,7 +69,8 @@ import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
 import { handleClaudeCodeSdkGateway } from "../services/llm-proxy/claude-code-sdk-gateway.ts";
 import { handleCodexSdkGateway } from "../services/llm-proxy/codex-sdk-gateway.ts";
-import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/types.ts";
+import type { LlmProxyAdapter } from "../services/llm-proxy/types.ts";
+import { buildLlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
 
@@ -171,9 +172,7 @@ async function handleProxy(
   const apiKeyId = c.get("apiKeyId");
   const orgId = c.get("orgId");
   const userId = c.get("user").id;
-  const principal: LlmProxyPrincipal = apiKeyId
-    ? { kind: "api_key", apiKeyId, orgId, userId }
-    : { kind: "jwt_user", userId, orgId };
+  const principal = buildLlmProxyPrincipal({ apiKeyId, orgId, userId });
 
   const runIdHeader = c.req.header("X-Run-Id");
   const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;

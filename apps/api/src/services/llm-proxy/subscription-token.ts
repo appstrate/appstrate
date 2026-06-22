@@ -25,8 +25,24 @@
 
 import { loadModel, modelNeedsReconnection, type ResolvedModel } from "../org-models.ts";
 import { resolveOAuthTokenForSidecar } from "../model-providers/token-resolver.ts";
-import { invalidRequest } from "../../lib/errors.ts";
+import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
+
+/**
+ * Build a `translateAuthError` for {@link resolveSubscriptionToken}: a
+ * token-refresh failure that surfaced as `gone()` (410 — the credential was
+ * revoked/expired upstream) becomes the provider-native auth-error `Response`
+ * the engine renders as "reconnect your subscription"; any other error returns
+ * `null` so the caller rethrows it unchanged (an unexpected failure must not
+ * masquerade as an auth problem). Both subscription surfaces share this 410→401
+ * logic; only the envelope shape (passed as `builder`) differs. Pure for tests.
+ */
+export function make410AuthTranslator(builder: () => Response): (err: unknown) => Response | null {
+  return (err: unknown): Response | null => {
+    if (!(err instanceof ApiError) || err.status !== 410) return null;
+    return builder();
+  };
+}
 
 export interface ResolvedSubscription {
   resolved: ResolvedModel;

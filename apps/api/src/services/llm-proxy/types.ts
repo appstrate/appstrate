@@ -14,6 +14,22 @@ export type LlmProxyPrincipal =
   | { kind: "api_key"; apiKeyId: string; orgId: string; userId: string }
   | { kind: "jwt_user"; userId: string; orgId: string };
 
+/**
+ * Build the {@link LlmProxyPrincipal} from the resolved auth identity: an API
+ * key (`apiKeyId` present) is an `"api_key"` principal, otherwise a cookie
+ * session is a `"jwt_user"`. Shared by every proxy surface (core route +
+ * subscription gateways) so the principal shape can't drift between them.
+ */
+export function buildLlmProxyPrincipal(args: {
+  apiKeyId: string | null | undefined;
+  orgId: string;
+  userId: string;
+}): LlmProxyPrincipal {
+  return args.apiKeyId
+    ? { kind: "api_key", apiKeyId: args.apiKeyId, orgId: args.orgId, userId: args.userId }
+    : { kind: "jwt_user", userId: args.userId, orgId: args.orgId };
+}
+
 /** Usage numbers parsed from the upstream response. */
 export interface UpstreamUsage {
   inputTokens: number;
