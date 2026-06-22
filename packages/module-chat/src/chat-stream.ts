@@ -206,9 +206,26 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   // Codex (ChatGPT) subscription → official `codex` CLI engine (clean/sanctioned),
   // pointed at the non-forging codex-sdk gateway. The CLI signs its own
   // fingerprint; the gateway swaps the placeholder bearer for the real token.
-  // Conversational MVP — no platform MCP tools wired yet (codex's own coding
-  // sandbox is read-only here), so close the probe client.
   if (chosen.providerId === CODEX_PROVIDER_ID) {
+    // Platform MCP for codex: the CLI can attach only a SINGLE bearer to an MCP
+    // server (no custom headers), so — unlike the Claude SDK — the caller's app
+    // context + permissions ride INSIDE the loopback token, mirroring exactly
+    // what the caller could do over REST (no amplification). The CLI connects
+    // to the HTTP MCP itself (we hand it the URL + bearer), so we still close
+    // our probe client (used only for reachability + the instructions in `system`).
+    const platformMcp = mcp
+      ? {
+          url: `${origin}/api/mcp/o/${encodeURIComponent(orgId)}`,
+          bearerToken: mintLoopbackToken(
+            { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
+            {
+              ttlMs: ENGINE_LOOPBACK_TTL_MS,
+              applicationId,
+              permissions: [...((c.get("permissions") as ReadonlySet<string> | undefined) ?? [])],
+            },
+          ),
+        }
+      : undefined;
     await mcp?.close();
     return runCodexAgentChat({
       messages,
@@ -219,6 +236,7 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
         { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
         { ttlMs: ENGINE_LOOPBACK_TTL_MS },
       ),
+      platformMcp,
       abortSignal: c.req.raw.signal,
       onError: clientErrorMessage,
     });

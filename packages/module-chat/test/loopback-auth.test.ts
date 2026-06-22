@@ -35,6 +35,17 @@ describe("mintLoopbackToken + chatLoopbackStrategy round-trip", () => {
       headers: authHeaders(mintLoopbackToken(claims)),
     } as never);
     expect(res!.permissions).toEqual(["llm-proxy:call", "models:read"]);
+    expect(res!.applicationId).toBeUndefined();
+  });
+
+  it("MCP path: carries the caller's app + permissions inside the token", async () => {
+    const token = mintLoopbackToken(claims, {
+      applicationId: "app_1",
+      permissions: ["mcp:read", "mcp:invoke", "agents:read", "runs:write"],
+    });
+    const res = await chatLoopbackStrategy.authenticate({ headers: authHeaders(token) } as never);
+    expect(res!.applicationId).toBe("app_1");
+    expect(res!.permissions).toEqual(["mcp:read", "mcp:invoke", "agents:read", "runs:write"]);
   });
 });
 

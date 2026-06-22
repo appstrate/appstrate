@@ -40,6 +40,24 @@ import { acquireCodexSlot } from "./concurrency.ts";
 import { logger } from "../logger.ts";
 
 /**
+ * Env var the codex `config.toml` reads the platform MCP bearer from. The CLI
+ * only accepts a bearer for an HTTP MCP server via an env var name
+ * (`bearer_token_env_var`), never an inline header — so we hand it this name
+ * and set the value in the curated subprocess env.
+ */
+const MCP_BEARER_ENV = "APPSTRATE_MCP_BEARER";
+
+/** `config.toml` body registering the platform HTTP MCP server (codex reads it from CODEX_HOME). */
+function codexConfigToml(mcpUrl: string): string {
+  return [
+    "[mcp_servers.platform]",
+    `url = ${JSON.stringify(mcpUrl)}`,
+    `bearer_token_env_var = ${JSON.stringify(MCP_BEARER_ENV)}`,
+    "",
+  ].join("\n");
+}
+
+/**
  * Resolve the `codex` binary. Order: explicit `CODEX_BINARY_PATH` override →
  * the bundled per-arch package in this module's install scope → bare `codex` on
  * `PATH` (dev with a global install; images that put it on PATH). The override
@@ -66,6 +84,13 @@ export interface CodexAgentChatInput {
   credentialUrl: string;
   /** Loopback bearer authorizing the vend GET (resolved to the caller's identity). */
   loopbackToken: string;
+  /**
+   * Platform MCP server (Streamable HTTP) the codex CLI connects to so the model
+   * can drive Appstrate (list/run agents, inspect runs, …). The CLI carries only
+   * a bearer to an MCP server — no custom headers — so the caller's app context +
+   * permissions are baked into `bearerToken`. Omitted when the mcp module is off.
+   */
+  platformMcp?: { url: string; bearerToken: string };
   /** Aborts the codex subprocess when the client disconnects. */
   abortSignal: AbortSignal;
   /** Maps a thrown error to a client-safe message. */
@@ -206,6 +231,14 @@ export function runCodexAgentChat(input: CodexAgentChatInput): Response {
           { mode: 0o600 },
         );
 
+        // Register the platform MCP server (if any) in CODEX_HOME/config.toml and
+        // hand the CLI the bearer via the env var its config points at.
+        const mcpEnv: Record<string, string> = {};
+        if (input.platformMcp) {
+          await writeFile(join(home, "config.toml"), codexConfigToml(input.platformMcp.url));
+          mcpEnv[MCP_BEARER_ENV] = input.platformMcp.bearerToken;
+        }
+
         child = Bun.spawn(
           [
             binary,
@@ -220,7 +253,7 @@ export function runCodexAgentChat(input: CodexAgentChatInput): Response {
           ],
           {
             cwd: home,
-            env: buildCodexEnv({ codexHome: home }),
+            env: buildCodexEnv({ codexHome: home, extra: mcpEnv }),
             stdin: "ignore",
             stdout: "pipe",
             stderr: "pipe",

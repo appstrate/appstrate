@@ -13,9 +13,16 @@
  *   - tokens expire after 60 seconds and carry exactly the caller's
  *     identity (already authenticated by the platform pipeline on the
  *     /api/chat request) — no privilege amplification;
- *   - the resolved permissions are the least required: `llm-proxy:call`
- *     + `models:read`. Nothing else on the platform accepts this token
- *     shape, and the strategy no-matches instantly on any other header.
+ *   - the resolved permissions default to the least required: `llm-proxy:call`
+ *     + `models:read`. The strategy no-matches instantly on any other header.
+ *
+ * The codex CLI engine reuses this token to reach the platform MCP server, but
+ * — unlike the SDKs — can attach only a SINGLE bearer to an MCP server (no
+ * custom headers). So that one path mints a token additionally carrying the
+ * caller's resolved `applicationId` + `permissions`, mirroring exactly what the
+ * caller could already do over REST (no amplification — the values come straight
+ * from the authenticated /api/chat request). Every other caller omits them and
+ * keeps the least-privilege default.
  *
  * Contributed through the standard `authStrategies()` module extension
  * point; `assertBearerOnly` accepts the strategy id alongside the OIDC
@@ -41,6 +48,18 @@ interface LoopbackClaims {
   orgId: string;
   orgRole: string;
   exp: number;
+  /**
+   * MCP engine path only (codex). The caller's resolved app context — codex
+   * can't send `x-application-id`, so the app rides in the token and the
+   * auth strategy pins it (app-context middleware reads it like an API key's).
+   */
+  applicationId?: string;
+  /**
+   * MCP engine path only (codex). The caller's full resolved permission set,
+   * so the single bearer carries RBAC fidelity for in-process MCP dispatch.
+   * Absent on the inference/SDK paths → least-privilege default applies.
+   */
+  permissions?: string[];
 }
 
 function sign(payload: string): string {
@@ -54,17 +73,22 @@ function sign(payload: string): string {
  * call. The Claude Agent SDK path can't — it bakes the bearer into the spawned
  * binary's env once at turn start (`ANTHROPIC_AUTH_TOKEN`), and the turn can
  * run for minutes (multi-step + a blocking `wait_for_run`). It passes a longer
- * `ttlMs` so the token outlives the whole turn. The token stays least-privilege
- * (`llm-proxy:call` + `models:read`), process-local, and only usable on the
- * 127.0.0.1 first-party gateway.
+ * `ttlMs` so the token outlives the whole turn. The token stays process-local
+ * and only usable on the 127.0.0.1 first-party gateway. By default it is
+ * least-privilege (`llm-proxy:call` + `models:read`); the codex MCP path passes
+ * `applicationId` + `permissions` to mirror the caller for in-process dispatch.
  */
 export function mintLoopbackToken(
-  claims: Omit<LoopbackClaims, "exp">,
-  opts?: { ttlMs?: number },
+  claims: Omit<LoopbackClaims, "exp" | "applicationId" | "permissions">,
+  opts?: { ttlMs?: number; applicationId?: string; permissions?: readonly string[] },
 ): string {
+  // `applicationId`/`permissions` are undefined on the inference/SDK paths;
+  // JSON.stringify drops them, so those tokens stay byte-identical to before.
   const payload = Buffer.from(
     JSON.stringify({
       ...claims,
+      applicationId: opts?.applicationId,
+      permissions: opts?.permissions ? [...opts.permissions] : undefined,
       exp: Date.now() + (opts?.ttlMs ?? TOKEN_TTL_MS),
     } satisfies LoopbackClaims),
   ).toString("base64url");
@@ -99,8 +123,11 @@ export const chatLoopbackStrategy: AuthStrategy = {
       orgId: claims.orgId,
       orgRole: claims.orgRole as AuthResolution["orgRole"],
       authMethod: CHAT_LOOPBACK_AUTH_METHOD,
-      // Least privilege: exactly what the inference loopback needs.
-      permissions: ["llm-proxy:call", "models:read"],
+      // Codex MCP path pins the caller's app so app-scoped dispatch resolves
+      // without an `x-application-id` header; undefined elsewhere (header-driven).
+      applicationId: claims.applicationId,
+      // Mirror the caller on the MCP path; else least privilege (inference).
+      permissions: claims.permissions ?? ["llm-proxy:call", "models:read"],
     };
   },
 };
