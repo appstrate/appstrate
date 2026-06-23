@@ -98,6 +98,8 @@ interface ScheduleFormProps {
   };
   /** Label of the schedule's current/default execution identity (#738). */
   defaultActorLabel?: string | null;
+  /** The schedule's current actor (edit mode) — used to detect a real change. */
+  currentActor?: ActorValue;
   inputSchema?: JSONSchemaObject;
   /** Agent's config schema — drives the override panel's config form. */
   configSchema?: JSONSchemaObject;
@@ -136,6 +138,7 @@ export function ScheduleForm({
   mode,
   defaultValues,
   defaultActorLabel,
+  currentActor,
   inputSchema,
   configSchema,
   persistedConfig,
@@ -213,13 +216,13 @@ export function ScheduleForm({
   // #738: execution identity. `undefined` = caller (create) / unchanged (edit).
   const [actor, setActor] = useState<ActorValue | undefined>(defaultValues?.actor);
 
-  // Changing the actor invalidates frozen connection picks (they belong to the
-  // previous identity), so drop them — otherwise the form would replay stale
-  // overrides under the new actor and defeat the backend reset (#738).
-  const handleActorChange = (next: ActorValue | undefined) => {
-    setActor(next);
-    setOverrides((prev) => ({ ...prev, connection_overrides: undefined }));
-  };
+  // True only when the selected actor differs from the schedule's current one.
+  // Exploring the picker (or re-selecting the same identity) is not a change, so
+  // it must not wipe the frozen connection picks.
+  const actorChanged =
+    !!actor &&
+    ((actor.user_id ?? null) !== (currentActor?.user_id ?? null) ||
+      (actor.end_user_id ?? null) !== (currentActor?.end_user_id ?? null));
 
   const {
     register,
@@ -279,9 +282,16 @@ export function ScheduleForm({
       input,
       ...(isEdit ? { enabled: data.enabled } : {}),
       ...overridePayload,
-      // Only send when a pick was made — keeps the caller default (create) and
-      // leaves the actor untouched (edit) otherwise.
-      ...(actor ? { actor } : {}),
+      // Create: send whatever actor was picked (omitted → backend defaults to
+      // the caller). Edit: send only on a real change, and then drop the seeded
+      // connection_overrides so they reset under the new identity.
+      ...(isEdit
+        ? actorChanged
+          ? { actor, connection_overrides: undefined }
+          : {}
+        : actor
+          ? { actor }
+          : {}),
     });
   });
 
@@ -405,11 +415,7 @@ export function ScheduleForm({
           )}
 
           {/* Execution identity (#738) */}
-          <ActorPicker
-            value={actor}
-            onChange={handleActorChange}
-            defaultLabel={defaultActorLabel}
-          />
+          <ActorPicker value={actor} onChange={setActor} defaultLabel={defaultActorLabel} />
 
           {/* Input fields (conditional) */}
           {hasInputSchema && (

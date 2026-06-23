@@ -59,6 +59,10 @@ export function ScheduleEditPage() {
           connection_overrides: schedule.connection_overrides ?? null,
         }}
         defaultActorLabel={schedule.actor_name}
+        currentActor={{
+          user_id: schedule.userId ?? undefined,
+          end_user_id: schedule.endUserId ?? undefined,
+        }}
         inputSchema={deps?.inputSchema}
         configSchema={deps?.configSchema}
         persistedConfig={deps?.persistedConfig ?? {}}

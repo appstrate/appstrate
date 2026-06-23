@@ -408,6 +408,45 @@ describe("Schedules API", () => {
       expect(res.status).toBe(400);
     });
 
+    it("rejects an empty actor object with 400", async () => {
+      const fid = agentId("actor-empty");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ cron_expression: "0 9 * * *", actor: {} }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("keeps connection_overrides when the actor is unchanged on update", async () => {
+      const fid = agentId("actor-same");
+      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        cronExpression: "0 * * * *",
+        connectionOverrides: { "@acme/slack": "conn_keep" },
+      });
+
+      const res = await app.request(`/api/schedules/${schedule.id}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        // Same actor as the existing one → not a change → overrides preserved.
+        body: JSON.stringify({ actor: { user_id: ctx.user.id } }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.userId).toBe(ctx.user.id);
+      expect(body.connection_overrides).toEqual({ "@acme/slack": "conn_keep" });
+    });
+
     it("rejects both user_id and end_user_id together", async () => {
       const fid = agentId("actor-both");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });

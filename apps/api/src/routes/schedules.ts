@@ -17,7 +17,7 @@ import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { ApiError, invalidRequest, notFound, parseBody, validationFailed } from "../lib/errors.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { getActor, type Actor } from "../lib/actor.ts";
+import { getActor, actorFromIds, type Actor } from "../lib/actor.ts";
 import { getAppScope, type AppScope } from "../lib/scope.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { getEndUser } from "../services/end-users.ts";
@@ -45,11 +45,11 @@ const dependencyOverridesSchema = z.record(z.string(), z.string());
 // can never be cleared (preserves #735: a schedule always has an identity).
 const actorSchema = z
   .object({
-    user_id: z.string().optional(),
-    end_user_id: z.string().optional(),
+    user_id: z.string().min(1).optional(),
+    end_user_id: z.string().min(1).optional(),
   })
-  .refine((a) => !(a.user_id && a.end_user_id), {
-    message: "user_id and end_user_id are mutually exclusive",
+  .refine((a) => (a.user_id ? 1 : 0) + (a.end_user_id ? 1 : 0) === 1, {
+    message: "provide exactly one of user_id or end_user_id",
   });
 
 /**
@@ -255,16 +255,20 @@ export function createSchedulesRouter() {
 
     // #738: re-point the actor when the caller selected one (validated against
     // this org/app scope). `undefined` leaves the existing actor untouched.
-    const actor =
-      data.actor && (data.actor.user_id || data.actor.end_user_id)
-        ? await resolveScheduleActor(scope, data.actor)
-        : undefined;
+    const actor = data.actor ? await resolveScheduleActor(scope, data.actor) : undefined;
 
-    // When the actor changes, frozen `connection_overrides` would reference the
-    // previous identity's connections. Reset them to null unless the same patch
-    // supplies fresh picks, forcing a re-pick under the new identity.
+    // Only a *real* identity change invalidates frozen connection picks. Picking
+    // the same actor (or omitting it) leaves overrides untouched.
+    const existingActor = actorFromIds(existing.userId, existing.endUserId);
+    const actorChanged =
+      !!actor &&
+      (!existingActor || actor.type !== existingActor.type || actor.id !== existingActor.id);
+
+    // On a real change, frozen `connection_overrides` reference the previous
+    // identity's connections — reset them unless this patch supplies fresh
+    // picks, forcing a re-pick under the new identity.
     const connectionOverrides =
-      actor && data.connection_overrides === undefined ? null : data.connection_overrides;
+      actorChanged && data.connection_overrides === undefined ? null : data.connection_overrides;
 
     // Translate snake_case wire fields to internal camelCase for the service.
     const schedule = await updateSchedule(scope, id, {
