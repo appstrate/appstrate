@@ -6,7 +6,7 @@
  * End-users belong to an application and represent external users of the platform.
  */
 
-import { eq, and, desc, lt, gt } from "drizzle-orm";
+import { eq, and, or, ilike, desc, lt, gt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { endUsers, applications, notifications } from "@appstrate/db/schema";
 import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
@@ -111,6 +111,7 @@ export async function listEndUsers(
   params: {
     externalId?: string;
     email?: string;
+    search?: string;
     limit?: number;
     startingAfter?: string;
     endingBefore?: string;
@@ -129,6 +130,17 @@ export async function listEndUsers(
   }
   if (params.email) {
     conditions.push(eq(endUsers.email, params.email));
+  }
+  if (params.search) {
+    // Case-insensitive substring match across the human-facing fields so a
+    // picker can find an end-user by name, email, or external id.
+    const pattern = `%${params.search}%`;
+    const term = or(
+      ilike(endUsers.name, pattern),
+      ilike(endUsers.email, pattern),
+      ilike(endUsers.externalId, pattern),
+    );
+    if (term) conditions.push(term);
   }
   if (params.startingAfter) {
     conditions.push(lt(endUsers.id, params.startingAfter));

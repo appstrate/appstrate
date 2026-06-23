@@ -165,10 +165,9 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   // Runs (read + cancel own)
   "runs:read",
   "runs:cancel",
-  // Schedules (read + write + delete own)
+  // Schedules (read only — creating/editing schedules, incl. choosing the
+  // execution identity, is an admin/owner operation; #738).
   "schedules:read",
-  "schedules:write",
-  "schedules:delete",
   // Persistence (read only — unified checkpoints + memories)
   "persistence:read",
   // Integrations (members can browse + self-connect their connections;

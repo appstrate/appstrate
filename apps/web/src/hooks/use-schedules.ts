@@ -104,6 +104,7 @@ export function useCreateSchedule(packageId: string) {
       proxy_id_override?: string | null;
       version_override?: string | null;
       connection_overrides?: Record<string, string> | null;
+      actor?: { user_id?: string; end_user_id?: string };
     }): Promise<ScheduleWireDto> => {
       const { scope, name } = splitPackageRef(packageId);
       const { data: created } = await client.POST("/api/agents/{scope}/{name}/schedules", {
@@ -136,6 +137,7 @@ export function useUpdateSchedule() {
       proxy_id_override?: string | null;
       version_override?: string | null;
       connection_overrides?: Record<string, string> | null;
+      actor?: { user_id?: string; end_user_id?: string };
     }): Promise<ScheduleWireDto> => {
       const { data: updated } = await client.PUT("/api/schedules/{id}", {
         params: { path: { id } },

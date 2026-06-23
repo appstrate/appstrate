@@ -13,7 +13,7 @@ import { ScheduleCard } from "../components/schedule-card";
 
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isMember } = usePermissions();
+  const { isAdmin } = usePermissions();
   const navigate = useNavigate();
   const { data: schedules, isLoading, error } = useAllSchedules();
   const { data: agents } = useAgents();
@@ -34,7 +34,7 @@ export function SchedulesListPage() {
           { label: t("schedules.title") },
         ]}
         actions={
-          isMember ? (
+          isAdmin ? (
             <Button onClick={() => navigate("/schedules/new")}>{t("schedules.create")}</Button>
           ) : undefined
         }
@@ -42,7 +42,7 @@ export function SchedulesListPage() {
 
       {!schedules || schedules.length === 0 ? (
         <EmptyState message={t("schedules.empty")} hint={t("schedules.emptyHint")} icon={Calendar}>
-          {isMember && (
+          {isAdmin && (
             <Button onClick={() => navigate("/schedules/new")}>{t("schedules.create")}</Button>
           )}
         </EmptyState>

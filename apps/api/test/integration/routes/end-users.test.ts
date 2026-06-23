@@ -101,6 +101,28 @@ describe("End-Users API", () => {
       expect(body.data).toBeArray();
       expect(body.data.length).toBeGreaterThanOrEqual(2);
     });
+
+    it("filters by substring search across name/email", async () => {
+      await app.request("/api/end-users", {
+        method: "POST",
+        headers: { ...apiKeyHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Zaphod Beeblebrox", email: "zaphod@example.com" }),
+      });
+      await app.request("/api/end-users", {
+        method: "POST",
+        headers: { ...apiKeyHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Arthur Dent", email: "arthur@example.com" }),
+      });
+
+      const res = await app.request("/api/end-users?search=zaph", {
+        headers: apiKeyHeaders(),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0].name).toBe("Zaphod Beeblebrox");
+    });
   });
 
   describe("GET /api/end-users/:id", () => {

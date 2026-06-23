@@ -137,6 +137,16 @@ export const schedulesPaths = {
                     'Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them.',
                   additionalProperties: { type: "string" },
                 },
+                actor: {
+                  type: "object",
+                  description:
+                    "Execution identity for runs this schedule fires (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to default to the calling identity. Requires `schedules:write`.",
+                  properties: {
+                    user_id: { type: "string" },
+                    end_user_id: { type: "string" },
+                  },
+                  oneOf: [{ required: ["user_id"] }, { required: ["end_user_id"] }],
+                },
               },
             },
           },
@@ -292,6 +302,16 @@ export const schedulesPaths = {
                   description:
                     'Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear.',
                   additionalProperties: { type: "string" },
+                },
+                actor: {
+                  type: "object",
+                  description:
+                    "Re-point the schedule's execution identity (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`.",
+                  properties: {
+                    user_id: { type: "string" },
+                    end_user_id: { type: "string" },
+                  },
+                  oneOf: [{ required: ["user_id"] }, { required: ["end_user_id"] }],
                 },
               },
             },

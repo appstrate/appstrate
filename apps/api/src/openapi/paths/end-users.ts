@@ -146,6 +146,12 @@ export const endUsersPaths = {
           description: "Filter by email address (exact match)",
         },
         {
+          name: "search",
+          in: "query",
+          schema: { type: "string" },
+          description: "Case-insensitive substring match across name, email, and external ID",
+        },
+        {
           name: "limit",
           in: "query",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },

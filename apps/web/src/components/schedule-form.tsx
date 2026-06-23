@@ -24,6 +24,7 @@ import { uploadClient } from "../api/uploads";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 import { AgentVersionField } from "./package-version-select";
+import { ActorSelect, type ActorValue } from "./actor-select";
 
 // Sentinel for the schedule's "inherit" version choice — no pin stored; the
 // agent's version resolution applies at fire time.
@@ -73,6 +74,11 @@ export interface ScheduleSaveData {
    * clears on edit.
    */
   connection_overrides?: Record<string, string> | null;
+  /**
+   * Schedule execution identity (#738). Omitted on create → server defaults to
+   * the caller. Omitted on edit → actor left unchanged (never cleared).
+   */
+  actor?: ActorValue;
 }
 
 interface ScheduleFormProps {
@@ -88,7 +94,10 @@ interface ScheduleFormProps {
     proxy_id_override?: string | null;
     version_override?: string | null;
     connection_overrides?: Record<string, string> | null;
+    actor?: ActorValue;
   };
+  /** The schedule's current actor (edit mode) — used to detect a real change. */
+  currentActor?: ActorValue;
   inputSchema?: JSONSchemaObject;
   /** Agent's config schema — drives the override panel's config form. */
   configSchema?: JSONSchemaObject;
@@ -126,6 +135,7 @@ interface FormFields {
 export function ScheduleForm({
   mode,
   defaultValues,
+  currentActor,
   inputSchema,
   configSchema,
   persistedConfig,
@@ -200,6 +210,17 @@ export function ScheduleForm({
     );
   const [overridesOpen, setOverridesOpen] = useState(initialOverridesNonEmpty);
 
+  // #738: execution identity. `undefined` = caller (create) / unchanged (edit).
+  const [actor, setActor] = useState<ActorValue | undefined>(defaultValues?.actor);
+
+  // True only when the selected actor differs from the schedule's current one.
+  // Exploring the picker (or re-selecting the same identity) is not a change, so
+  // it must not wipe the frozen connection picks.
+  const actorChanged =
+    !!actor &&
+    ((actor.user_id ?? null) !== (currentActor?.user_id ?? null) ||
+      (actor.end_user_id ?? null) !== (currentActor?.end_user_id ?? null));
+
   const {
     register,
     handleSubmit,
@@ -258,6 +279,16 @@ export function ScheduleForm({
       input,
       ...(isEdit ? { enabled: data.enabled } : {}),
       ...overridePayload,
+      // Create: send whatever actor was picked (omitted → backend defaults to
+      // the caller). Edit: send only on a real change, and then drop the seeded
+      // connection_overrides so they reset under the new identity.
+      ...(isEdit
+        ? actorChanged
+          ? { actor, connection_overrides: undefined }
+          : {}
+        : actor
+          ? { actor }
+          : {}),
     });
   });
 
@@ -379,6 +410,20 @@ export function ScheduleForm({
               </div>
             </div>
           )}
+
+          {/* Execution identity (#738) */}
+          <div className="space-y-2">
+            <Label>{t("schedule.actorTitle")}</Label>
+            {/* Edit seeds `actor` with the schedule's current identity, so the
+                placeholder only shows in create mode — where the default really
+                is the caller. */}
+            <ActorSelect
+              value={actor}
+              onChange={setActor}
+              placeholder={t("schedule.actorDefaultSelf")}
+            />
+            <p className="text-muted-foreground text-xs">{t("schedule.actorHint")}</p>
+          </div>
 
           {/* Input fields (conditional) */}
           {hasInputSchema && (
