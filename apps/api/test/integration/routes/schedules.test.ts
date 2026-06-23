@@ -3,8 +3,14 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedSchedule, seedRun } from "../../helpers/seed.ts";
+import {
+  createTestContext,
+  createTestUser,
+  addOrgMember,
+  authHeaders,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import { seedAgent, seedSchedule, seedRun, seedEndUser } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 
 const app = getTestApp();
@@ -297,6 +303,157 @@ describe("Schedules API", () => {
       // EnrichedSchedule — same serializer as GET /schedules/:id (#657).
       expect(body.actor_type).toBe("user");
       expect(body).toHaveProperty("actor_name");
+    });
+  });
+
+  describe("actor selection (#738)", () => {
+    it("creates a schedule pinned to another org member", async () => {
+      const fid = agentId("actor-member");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      const other = await createTestUser();
+      await addOrgMember(ctx.orgId, other.id, "member");
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * *",
+          actor: { user_id: other.id },
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.userId).toBe(other.id);
+      expect(body.endUserId).toBeNull();
+      expect(body.actor_type).toBe("user");
+    });
+
+    it("creates a schedule pinned to an end-user", async () => {
+      const fid = agentId("actor-eu");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        externalId: `ext-${Date.now()}`,
+        name: "End User",
+      });
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * *",
+          actor: { end_user_id: eu.id },
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.endUserId).toBe(eu.id);
+      expect(body.userId).toBeNull();
+      expect(body.actor_type).toBe("end_user");
+    });
+
+    it("defaults the actor to the caller when omitted", async () => {
+      const fid = agentId("actor-default");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ cron_expression: "0 9 * * *" }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.userId).toBe(ctx.user.id);
+    });
+
+    it("rejects a user_id that is not an org member", async () => {
+      const fid = agentId("actor-foreign");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      const stranger = await createTestUser();
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * *",
+          actor: { user_id: stranger.id },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects both user_id and end_user_id together", async () => {
+      const fid = agentId("actor-both");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * *",
+          actor: { user_id: ctx.user.id, end_user_id: "eu_x" },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("re-points the actor on update and resets connection_overrides", async () => {
+      const fid = agentId("actor-upd");
+      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      const other = await createTestUser();
+      await addOrgMember(ctx.orgId, other.id, "member");
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        cronExpression: "0 * * * *",
+        connectionOverrides: { "@acme/slack": "conn_old" },
+      });
+
+      const res = await app.request(`/api/schedules/${schedule.id}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ actor: { user_id: other.id } }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.userId).toBe(other.id);
+      expect(body.connection_overrides).toBeNull();
+    });
+
+    it("leaves the actor untouched when update omits it", async () => {
+      const fid = agentId("actor-keep");
+      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        cronExpression: "0 * * * *",
+      });
+
+      const res = await app.request(`/api/schedules/${schedule.id}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Renamed" }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.userId).toBe(ctx.user.id);
     });
   });
 

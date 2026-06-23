@@ -6594,6 +6594,11 @@ export interface operations {
                     dependency_overrides?: {
                         [key: string]: string;
                     };
+                    /** @description Execution identity for runs this schedule fires (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to default to the calling identity. Requires `schedules:write`. */
+                    actor?: {
+                        user_id?: string;
+                        end_user_id?: string;
+                    };
                 };
             };
         };
@@ -17533,6 +17538,11 @@ export interface operations {
                     dependency_overrides?: {
                         [key: string]: string;
                     } | null;
+                    /** @description Re-point the schedule's execution identity (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`. */
+                    actor?: {
+                        user_id?: string;
+                        end_user_id?: string;
+                    };
                 };
             };
         };

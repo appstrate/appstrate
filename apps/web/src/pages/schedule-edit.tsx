@@ -58,6 +58,7 @@ export function ScheduleEditPage() {
           version_override: schedule.version_override ?? null,
           connection_overrides: schedule.connection_overrides ?? null,
         }}
+        defaultActorLabel={schedule.actor_name}
         inputSchema={deps?.inputSchema}
         configSchema={deps?.configSchema}
         persistedConfig={deps?.persistedConfig ?? {}}

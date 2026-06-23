@@ -24,6 +24,7 @@ import { uploadClient } from "../api/uploads";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 import { AgentVersionField } from "./package-version-select";
+import { ActorPicker, type ActorValue } from "./actor-picker";
 
 // Sentinel for the schedule's "inherit" version choice — no pin stored; the
 // agent's version resolution applies at fire time.
@@ -73,6 +74,11 @@ export interface ScheduleSaveData {
    * clears on edit.
    */
   connection_overrides?: Record<string, string> | null;
+  /**
+   * Schedule execution identity (#738). Omitted on create → server defaults to
+   * the caller. Omitted on edit → actor left unchanged (never cleared).
+   */
+  actor?: ActorValue;
 }
 
 interface ScheduleFormProps {
@@ -88,7 +94,10 @@ interface ScheduleFormProps {
     proxy_id_override?: string | null;
     version_override?: string | null;
     connection_overrides?: Record<string, string> | null;
+    actor?: ActorValue;
   };
+  /** Label of the schedule's current/default execution identity (#738). */
+  defaultActorLabel?: string | null;
   inputSchema?: JSONSchemaObject;
   /** Agent's config schema — drives the override panel's config form. */
   configSchema?: JSONSchemaObject;
@@ -126,6 +135,7 @@ interface FormFields {
 export function ScheduleForm({
   mode,
   defaultValues,
+  defaultActorLabel,
   inputSchema,
   configSchema,
   persistedConfig,
@@ -200,6 +210,9 @@ export function ScheduleForm({
     );
   const [overridesOpen, setOverridesOpen] = useState(initialOverridesNonEmpty);
 
+  // #738: execution identity. `undefined` = caller (create) / unchanged (edit).
+  const [actor, setActor] = useState<ActorValue | undefined>(defaultValues?.actor);
+
   const {
     register,
     handleSubmit,
@@ -258,6 +271,9 @@ export function ScheduleForm({
       input,
       ...(isEdit ? { enabled: data.enabled } : {}),
       ...overridePayload,
+      // Only send when a pick was made — keeps the caller default (create) and
+      // leaves the actor untouched (edit) otherwise.
+      ...(actor ? { actor } : {}),
     });
   });
 
@@ -379,6 +395,9 @@ export function ScheduleForm({
               </div>
             </div>
           )}
+
+          {/* Execution identity (#738) */}
+          <ActorPicker value={actor} onChange={setActor} defaultLabel={defaultActorLabel} />
 
           {/* Input fields (conditional) */}
           {hasInputSchema && (

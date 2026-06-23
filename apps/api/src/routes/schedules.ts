@@ -17,8 +17,10 @@ import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest, notFound, parseBody, validationFailed } from "../lib/errors.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { getActor } from "../lib/actor.ts";
-import { getAppScope } from "../lib/scope.ts";
+import { getActor, type Actor } from "../lib/actor.ts";
+import { getAppScope, type AppScope } from "../lib/scope.ts";
+import { getOrgMember } from "../services/organizations.ts";
+import { getEndUser } from "../services/end-users.ts";
 import { assertExplicitModelExists } from "../services/org-models.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/runs.ts";
@@ -37,6 +39,49 @@ const connectionOverridesSchema = z.record(z.string(), z.string());
 // declared skill OR integration. Shape: { "@scope/dep": "draft" | "<spec>" }.
 const dependencyOverridesSchema = z.record(z.string(), z.string());
 
+// #738: schedule execution identity, chosen by an admin from the form.
+// XOR — exactly one of user_id / end_user_id. Omitted at create → defaults to
+// the caller (`getActor`). Omitted at update → actor left untouched. The actor
+// can never be cleared (preserves #735: a schedule always has an identity).
+const actorSchema = z
+  .object({
+    user_id: z.string().optional(),
+    end_user_id: z.string().optional(),
+  })
+  .refine((a) => !(a.user_id && a.end_user_id), {
+    message: "user_id and end_user_id are mutually exclusive",
+  });
+
+/**
+ * Resolves + validates a selected schedule actor against the org/app scope.
+ * Validates org membership (user) or app ownership (end-user) so a schedule
+ * can never be pinned to an identity outside the caller's tenant. Returns
+ * `fallback` when no actor was selected (the create-route default).
+ */
+async function resolveScheduleActor(
+  scope: AppScope,
+  selected: { user_id?: string; end_user_id?: string } | undefined,
+  fallback?: Actor,
+): Promise<Actor> {
+  if (!selected || (!selected.user_id && !selected.end_user_id)) {
+    if (fallback) return fallback;
+    throw invalidRequest("actor.user_id or actor.end_user_id is required", "actor");
+  }
+  if (selected.user_id && selected.end_user_id) {
+    throw invalidRequest("actor.user_id and actor.end_user_id are mutually exclusive", "actor");
+  }
+  if (selected.user_id) {
+    const member = await getOrgMember(scope.orgId, selected.user_id);
+    if (!member) {
+      throw invalidRequest("actor.user_id is not a member of this organization", "actor.user_id");
+    }
+    return { type: "user", id: selected.user_id };
+  }
+  // end_user_id present — getEndUser throws notFound when absent in this app/org.
+  await getEndUser(scope, selected.end_user_id!);
+  return { type: "end_user", id: selected.end_user_id! };
+}
+
 export const createScheduleSchema = z.object({
   name: z.string().optional(),
   cron_expression: z.string().min(1, "cron_expression is required"),
@@ -52,6 +97,7 @@ export const createScheduleSchema = z.object({
   version_override: z.string().optional(),
   connection_overrides: connectionOverridesSchema.optional(),
   dependency_overrides: dependencyOverridesSchema.optional(),
+  actor: actorSchema.optional(),
 });
 
 export const updateScheduleSchema = z.object({
@@ -67,6 +113,8 @@ export const updateScheduleSchema = z.object({
   version_override: z.string().nullable().optional(),
   connection_overrides: connectionOverridesSchema.nullable().optional(),
   dependency_overrides: dependencyOverridesSchema.nullable().optional(),
+  // No `.nullable()` — the actor can be re-pointed but never cleared (#735).
+  actor: actorSchema.optional(),
 });
 
 export function createSchedulesRouter() {
@@ -95,7 +143,6 @@ export function createSchedulesRouter() {
     requirePermission("schedules", "write"),
     async (c) => {
       const agent = c.get("package");
-      const actor = getActor(c);
 
       const body = await c.req.json();
       const data = parseBody(createScheduleSchema, body);
@@ -128,6 +175,10 @@ export function createSchedulesRouter() {
 
       const scope = getAppScope(c);
 
+      // #738: actor defaults to the caller; an admin may override it from the
+      // form (validated against this org/app scope).
+      const actor = await resolveScheduleActor(scope, data.actor, getActor(c));
+
       // Reject a `model_id_override` that references no real model up front, so
       // a bad id fails at schedule-create time instead of silently each tick.
       await assertExplicitModelExists(scope.orgId, data.model_id_override);
@@ -152,6 +203,8 @@ export function createSchedulesRouter() {
           packageId: agent.id,
           cronExpression: data.cron_expression,
           timezone: data.timezone,
+          actorType: actor.type,
+          actorId: actor.id,
         },
       });
       return c.json(schedule, 201);
@@ -189,6 +242,19 @@ export function createSchedulesRouter() {
     // the field isn't part of this patch).
     await assertExplicitModelExists(scope.orgId, data.model_id_override);
 
+    // #738: re-point the actor when the caller selected one (validated against
+    // this org/app scope). `undefined` leaves the existing actor untouched.
+    const actor =
+      data.actor && (data.actor.user_id || data.actor.end_user_id)
+        ? await resolveScheduleActor(scope, data.actor)
+        : undefined;
+
+    // When the actor changes, frozen `connection_overrides` would reference the
+    // previous identity's connections. Reset them to null unless the same patch
+    // supplies fresh picks, forcing a re-pick under the new identity.
+    const connectionOverrides =
+      actor && data.connection_overrides === undefined ? null : data.connection_overrides;
+
     // Translate snake_case wire fields to internal camelCase for the service.
     const schedule = await updateSchedule(scope, id, {
       name: data.name,
@@ -200,8 +266,9 @@ export function createSchedulesRouter() {
       modelIdOverride: data.model_id_override,
       proxyIdOverride: data.proxy_id_override,
       versionOverride: data.version_override,
-      connectionOverrides: data.connection_overrides,
+      connectionOverrides,
       dependencyOverrides: data.dependency_overrides,
+      actor,
     });
     // Mirror schedule.created: explicit camelCase keys (dominant audit
     // convention — see api-keys.ts, modules/webhooks/routes.ts). Only
@@ -221,6 +288,10 @@ export function createSchedulesRouter() {
       auditAfter.connectionOverrides = data.connection_overrides;
     if (data.dependency_overrides !== undefined)
       auditAfter.dependencyOverrides = data.dependency_overrides;
+    if (actor) {
+      auditAfter.actorType = actor.type;
+      auditAfter.actorId = actor.id;
+    }
     await recordAuditFromContext(c, {
       action: "schedule.updated",
       resourceType: "schedule",

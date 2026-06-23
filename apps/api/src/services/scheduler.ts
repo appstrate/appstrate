@@ -709,6 +709,11 @@ export async function updateSchedule(
     versionOverride?: string | null;
     connectionOverrides?: Record<string, string> | null;
     dependencyOverrides?: Record<string, string> | null;
+    // #738: re-point the schedule's execution identity. When set, overwrites
+    // both `userId` and `endUserId` (one non-null, mirroring create). Never
+    // clears the actor — the non-null type preserves #735's invariant that a
+    // schedule always has an execution identity.
+    actor?: Actor;
   },
 ): Promise<EnrichedSchedule | null> {
   const existing = await getSchedule(id, scope);
@@ -739,6 +744,10 @@ export async function updateSchedule(
     payload.connectionOverrides = data.connectionOverrides;
   if (data.dependencyOverrides !== undefined)
     payload.dependencyOverrides = data.dependencyOverrides;
+  if (data.actor) {
+    payload.userId = data.actor.type === "user" ? data.actor.id : null;
+    payload.endUserId = data.actor.type === "end_user" ? data.actor.id : null;
+  }
 
   const [row] = await db
     .update(schedules)
