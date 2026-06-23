@@ -22,11 +22,11 @@ describe("pathSerializer", () => {
 
   it("keeps the / separator literal in scoped package ids", () => {
     expect(
-      pathSerializer("/api/integrations/{packageId}/agent-resolution/{agentPackageId}", {
+      pathSerializer("/api/integrations/{packageId}/pins/{agentPackageId}", {
         packageId: "@official/gmail",
         agentPackageId: "@acme/my agent",
       }),
-    ).toBe("/api/integrations/@official/gmail/agent-resolution/@acme/my%20agent");
+    ).toBe("/api/integrations/@official/gmail/pins/@acme/my%20agent");
   });
 
   it("does not split / in values that are not scoped package ids", () => {
