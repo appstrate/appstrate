@@ -27,11 +27,10 @@ import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
 import { buildRuntimePiEnv } from "@appstrate/runner-pi";
 import {
-  selectRunEngine,
   assertRunnableOnEngine,
   assertSubscriptionEngineIsolation,
   buildOauthSidecarLlm,
-  subscriptionEngineDef,
+  resolveCredentialDelivery,
 } from "./engine-select.ts";
 import { getExecutionMode } from "../../infra/mode.ts";
 import { providerHasNativeOutput } from "@appstrate/core/subscription-engines";
@@ -52,7 +51,7 @@ import {
 } from "../../observability/index.ts";
 
 import { getEnv } from "@appstrate/env";
-import { isOAuthModelProvider, getModelProvider } from "../model-providers/registry.ts";
+import { getModelProvider } from "../model-providers/registry.ts";
 import type { LlmProxyConfig, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 
 /** Terminal state reported back to the caller once the container has exited. */
@@ -154,11 +153,19 @@ async function runPlatformContainerImpl(
 
     const llmApiKey = llmConfig.apiKey;
 
+    // Single source of truth for "what kind of credential is this and how is it
+    // delivered". Reads the provider→engine registry ONCE (plus the oauth-class
+    // flag for the engine-less refuse path); the delivery mode, the oauth-class
+    // boolean, the resolved engine, and the egress allowlist all flow from here,
+    // replacing the former parallel `isOAuthModelProvider` axis.
+    const delivery = resolveCredentialDelivery({
+      providerId: llmConfig.providerId,
+      hasCredentialId: !!llmConfig.credentialId,
+    });
     // OAuth credentials must take the sidecar's OAuth branch — the API-key
     // path can't refresh tokens or inject the provider's identity routing
     // headers at request time.
-    const isOauthCredential =
-      !!llmConfig.credentialId && isOAuthModelProvider(llmConfig.providerId);
+    const isOauthCredential = delivery.isOauthCredential;
 
     // The placeholder is what actually lands in MODEL_API_KEY inside the
     // agent container. Provider-specific shape (e.g. a structured JWT) is
@@ -194,9 +201,10 @@ async function runPlatformContainerImpl(
       ? { alias: llmConfig.aliasId, real: llmConfig.modelId }
       : undefined;
 
-    // Engine selection (Pi vs the official Claude Agent SDK). Computed once and
-    // reused for both the sidecar `/llm` mode and the container's RUN_ENGINE.
-    const engine = selectRunEngine(llmConfig);
+    // Engine selection (Pi vs the official Claude Agent SDK). Resolved from the
+    // same single source as the credential delivery, reused for both the sidecar
+    // `/llm` mode and the container's RUN_ENGINE.
+    const engine = delivery.engine;
     // No fingerprint-forging fallback: an OAuth subscription provider can only
     // run on an engine whose driver signs its own fingerprint (claude-code →
     // the Claude Agent SDK). Anything else (e.g. codex) is rejected here.
@@ -207,20 +215,19 @@ async function runPlatformContainerImpl(
     });
 
     let sidecarLlm: LlmProxyConfig | undefined;
-    // Credential delivery is driven by the provider→engine registry, not an
-    // engine literal: a `"vend"` subscription engine holds the real token
-    // in-container (the binary talks to the upstream directly; no reverse proxy
-    // is possible) and locks egress to the vendor's hosts; an `"oauth"` engine
-    // has its bearer swapped server-side by the gateway. Adding a new
-    // subscription engine is a registry entry, not a branch here.
-    const subDef = subscriptionEngineDef(llmConfig.providerId);
-    let egressAllowlist: readonly string[] | undefined;
-    if (subDef?.sidecarAuthMode === "vend") {
+    // Credential delivery is driven by the single `resolveCredentialDelivery`
+    // value (which reads the provider→engine registry), not an engine literal: a
+    // `"vend"` subscription engine holds the real token in-container (the binary
+    // talks to the upstream directly; no reverse proxy is possible) and locks
+    // egress to the vendor's hosts; an `"oauth"` engine has its bearer swapped
+    // server-side by the gateway. Adding a new subscription engine is a registry
+    // entry, not a branch here.
+    const egressAllowlist = delivery.egressAllowlist;
+    if (delivery.mode === "vend") {
       // Vend mode: the sidecar hands the resolved token to the in-container
       // runner via `/credential-vend` instead of swapping the bearer in flight.
       // No model alias (subscription models aren't aliased).
       sidecarLlm = { authMode: "vend", credentialId: llmConfig.credentialId! };
-      egressAllowlist = subDef.egressAllowlist;
     } else if (isOauthCredential) {
       // An `"oauth"` subscription engine (e.g. Claude Agent SDK). The official
       // binary signs its own fingerprint, so the sidecar just swaps the bearer

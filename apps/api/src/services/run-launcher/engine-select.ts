@@ -23,10 +23,91 @@ import {
   isSubscriptionEngine,
   subscriptionEngineDef,
   type RunEngine,
+  type SubscriptionEngineDef,
 } from "@appstrate/core/subscription-engines";
+import { isOAuthModelProvider } from "../model-providers/registry.ts";
 
 export { subscriptionEngineDef };
 export type { RunEngine };
+
+/**
+ * The sidecar credential-delivery mode for a resolved run, derived from a SINGLE
+ * source of truth.
+ *
+ * - `"oauth"` — the credential's bearer is swapped server-side by the sidecar
+ *   `/llm` gateway (the official binary points at the gateway). Either an
+ *   `"oauth"`-mode subscription engine (e.g. claude-code → Claude Agent SDK) OR
+ *   an oauth-class credential with no subscription engine (which {@link
+ *   assertRunnableOnEngine} then hard-refuses — there is no forging fallback).
+ * - `"vend"` — a `"vend"`-mode subscription engine (e.g. codex → Codex CLI): the
+ *   real token is vended into the container and egress is locked to the vendor's
+ *   hosts (the sole compensating control).
+ * - `"api_key"` — a static API-key provider (Pi engine).
+ */
+export type CredentialDeliveryMode = "oauth" | "vend" | "api_key";
+
+/**
+ * Single resolver for "what kind of credential is this and how is it delivered".
+ *
+ * Reads the provider→engine registry ONCE (plus the oauth-class flag for the
+ * no-subscription-engine refuse path) so the launcher no longer maintains a
+ * parallel `isOAuthModelProvider` axis alongside `subscriptionEngineDef`. The
+ * delivery mode, the oauth-class boolean, the resolved engine, and the egress
+ * allowlist all flow from this one value.
+ *
+ * Precedence: a subscription engine's own `sidecarAuthMode` wins (vend or
+ * oauth); otherwise an oauth-class credential (one whose provider declares
+ * `authMode: "oauth2"` but has NO subscription engine) is `"oauth"` — it will be
+ * hard-refused downstream by {@link assertRunnableOnEngine}; everything else is
+ * a static `"api_key"` provider.
+ */
+export function resolveCredentialDelivery(params: {
+  providerId: string;
+  /** Whether the resolved run actually carries a stored credential id. */
+  hasCredentialId: boolean;
+}): {
+  mode: CredentialDeliveryMode;
+  /** True for any oauth-class credential — subscription OR engine-less. */
+  isOauthCredential: boolean;
+  engine: RunEngine;
+  subscriptionEngine: SubscriptionEngineDef | undefined;
+  egressAllowlist: readonly string[] | undefined;
+} {
+  const { providerId, hasCredentialId } = params;
+  const subscriptionEngine = subscriptionEngineDef(providerId);
+  const engine = engineForProvider(providerId);
+
+  // A credential is oauth-class when it has a stored credential id AND its
+  // provider authenticates via OAuth — true both for a subscription engine and
+  // for an oauth provider with no official engine (the refuse path).
+  const isOauthCredential = hasCredentialId && isOAuthModelProvider(providerId);
+
+  if (subscriptionEngine?.sidecarAuthMode === "vend") {
+    return {
+      mode: "vend",
+      isOauthCredential,
+      engine,
+      subscriptionEngine,
+      egressAllowlist: subscriptionEngine.egressAllowlist,
+    };
+  }
+  if (isOauthCredential) {
+    return {
+      mode: "oauth",
+      isOauthCredential,
+      engine,
+      subscriptionEngine,
+      egressAllowlist: undefined,
+    };
+  }
+  return {
+    mode: "api_key",
+    isOauthCredential,
+    engine,
+    subscriptionEngine,
+    egressAllowlist: undefined,
+  };
+}
 
 /**
  * Pick the engine for a resolved model — delegates to the shared registry
@@ -45,10 +126,10 @@ export class UnrunnableOauthProviderError extends Error {
   constructor(public readonly providerId: string) {
     super(
       `Provider "${providerId}" uses an OAuth subscription credential but has no ` +
-        `official-binary execution engine. Subscription runs are supported for ` +
-        `"claude-code" (Claude Agent SDK) and "codex" (Codex CLI) — both drive the ` +
-        `vendor's official binary, which signs its own client fingerprint. Connect ` +
-        `an API-key model provider to run this agent.`,
+        `official-binary execution engine. Subscription runs are only supported for ` +
+        `providers whose engine drives the vendor's official binary (which signs ` +
+        `its own client fingerprint); this credential's subscription engine has no ` +
+        `such path. Connect an API-key model provider to run this agent.`,
     );
     this.name = "UnrunnableOauthProviderError";
   }

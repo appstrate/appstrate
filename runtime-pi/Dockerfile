@@ -133,6 +133,12 @@ LABEL org.opencontainers.image.title="Appstrate Pi" \
       org.opencontainers.image.revision="${BUILD_REVISION}" \
       org.opencontainers.image.created="${BUILD_CREATED}"
 
+# Pin the production environment. Beyond standard tooling hygiene, this is a
+# security backstop: entrypoint.ts refuses the codex binary-path override unless
+# NODE_ENV is explicitly "development"/"test", so a prod image (NODE_ENV=production)
+# can never honour an arbitrary CODEX_BINARY_PATH. A dev run must override this.
+ENV NODE_ENV=production
+
 # Runtime-only packages:
 #   - bash             Pi coding-agent's bash tool
 #   - git              `git init` on workspace cold start

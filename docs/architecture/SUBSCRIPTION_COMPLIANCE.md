@@ -84,12 +84,20 @@ the container's egress is **locked** to the provider's hosts:
   (`runtime-pi/sidecar/forward-proxy.ts`; the allowlist is contributed by the
   module — `packages/module-codex/src/index.ts` → `subscriptionEngine.egressAllowlist`
   — and applied by `apps/api/src/services/run-launcher/pi.ts`).
-- The vended access token is **non-renewable** (no refresh token is handed over)
-  and the container is ephemeral.
+- The vended access token is **non-renewable in-container**. The sidecar resolves
+  the access token **once** on the first `/credential-vend` call, **freezes** that
+  snapshot, and returns the identical frozen token on every subsequent call for the
+  run — it does **not** refresh the token after freezing, so the endpoint is not a
+  refresh oracle. No refresh token is ever handed to the container, so the runner
+  cannot mint a fresher token on its own either. Refresh capability stays
+  **platform-side only**; the in-container token simply expires with the (ephemeral)
+  run.
 
 This means: even though the real Codex token lives in-container (the CLI calls
 `chatgpt.com` directly and cannot be reverse-proxied), it cannot be exfiltrated to
-an attacker-controlled host, and it cannot be refreshed.
+an attacker-controlled host, and it cannot be renewed from inside the container —
+the frozen vend snapshot is the only token the agent ever sees, and it gets no
+fresher across the run.
 
 ### 1.5 Zero platform-side subscription API calls — offline validation only
 

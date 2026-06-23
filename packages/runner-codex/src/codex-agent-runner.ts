@@ -38,9 +38,16 @@
  * process exit code + any `turn.failed` recorded by the mapper.
  */
 
+// node:fs — Bun has no recursive directory removal (`Bun.file().delete()` is
+// single-file only); kept to tear down the ephemeral CODEX_HOME tree.
 import { rm } from "node:fs/promises";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
-import { reduceEvents, type RunError, type RunResult } from "@appstrate/afps-runtime/runner";
+import {
+  finalizeFailure,
+  reduceEvents,
+  type RunError,
+  type RunResult,
+} from "@appstrate/afps-runtime/runner";
 import type { Runner, RunOptions } from "@appstrate/afps-runtime/runner";
 import {
   buildCodexConfigToml,
@@ -272,6 +279,14 @@ export class CodexAgentRunner implements Runner {
       }
       const cred = (await vend.json()) as VendedCodexCredential;
 
+      // ORDERING INVARIANT (security-critical, H1): the redaction set MUST be
+      // armed HERE — synchronously, immediately after `vend.json()` and BEFORE
+      // the token is written to disk (step 2) or spawned/used (step 3). The
+      // `emit` closure scrubs by reading `knownSecrets` at emit time; if any
+      // token-bearing event or the terminal result could be produced before
+      // this push, it would leak the credential verbatim. Do NOT move this below
+      // writeCodexAuthHome/spawn. Guarded by the "scrub is armed before first
+      // use" test in test/scrub-armed-before-use.test.ts.
       // Arm the redaction set now that the real credential is in hand: the
       // access token always, plus the account id when it is a non-trivial value
       // (it rides outbound as the `chatgpt-account-id` header and could be
@@ -398,21 +413,25 @@ export class CodexAgentRunner implements Runner {
       // Best-effort final drain: a mid-run throw may leave journaled events the
       // agent produced before failing (memory.added / log.written / output).
       await drainAndEmit(true);
-      // reduceEvents (not emptyRunResult) so any partial canonical output the
-      // agent emitted before the throw — memory.added / output.emitted /
-      // log.written — survives into the failed result, matching the Pi + Claude
-      // runners and the in-try non-zero-exit branch above.
-      const reduced = reduceEvents(events, { error: { code: "adapter_error", message } });
-      reduced.status = "failed";
-      reduced.usage = mapper.usage();
-      reduced.cost = computeCodexCost(mapper.usage(), this.opts.modelCost);
-      reduced.durationMs = now() - startTime;
-      // A thrown error's text can carry the vended token verbatim. The emitted
-      // appstrate.error above is scrubbed by the emit() sink, but the terminal
-      // RunResult.error is the raw `message` — deep-scrub the whole result by
-      // VALUE (knownSecrets is armed after vend; empty if the throw predates it).
-      const result = redactSecretsDeep(reduced, knownSecrets);
-      await eventSink.finalize(result);
+      // Shared failure epilogue (reduceEvents — NOT emptyRunResult — so any
+      // partial canonical output the agent emitted before the throw
+      // [memory.added / output.emitted / log.written] survives into the failed
+      // result; then status="failed" → stamp usage/cost/duration → finalize).
+      // See `@appstrate/afps-runtime/runner` `finalizeFailure`, shared with the
+      // Claude runner so the tail can't drift. The injected `redact` deep-scrubs
+      // the WHOLE result by VALUE: a thrown error's text can carry the vended
+      // token verbatim, and the terminal RunResult.error is the raw `message`
+      // (the emitted appstrate.error above is already scrubbed by the emit()
+      // sink). `knownSecrets` is armed after vend; empty if the throw predates it.
+      await finalizeFailure({
+        events,
+        error: { code: "adapter_error", message },
+        usage: mapper.usage(),
+        cost: computeCodexCost(mapper.usage(), this.opts.modelCost),
+        durationMs: now() - startTime,
+        redact: (result) => redactSecretsDeep(result, knownSecrets),
+        finalize: (result) => eventSink.finalize(result),
+      });
     } finally {
       if (signal) signal.removeEventListener("abort", onAbort);
       // Let the stderr drain settle so its reader unwinds (no dangling lock /

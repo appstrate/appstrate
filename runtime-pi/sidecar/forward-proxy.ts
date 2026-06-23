@@ -165,6 +165,28 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     return true;
   }
 
+  // Vend-egress port pin. A vend run holds the REAL subscription token
+  // in-container, so its DIRECT egress must be locked tight: the host-only
+  // allowlist (`isAllowedHost`) would still let the agent CONNECT to
+  // `chatgpt.com:<any-port>` and tunnel arbitrary protocols out. When an
+  // allowlist is present (the vend-run signal — `authMode === "vend"` iff
+  // `egressAllowlist` is set, per SidecarConfig), refuse any non-443 port on
+  // allowlisted hosts. The platform host is exempt — it is internal HMAC-scoped
+  // traffic on its own port, governed by `isPlatformHost`, not the allowlist.
+  const vendEgressActive = egressAllowlist.length > 0;
+
+  function isAllowedPort(hostname: string, port: number): boolean {
+    if (!vendEgressActive) return true;
+    if (isPlatformHost(hostname)) return true;
+    // Loopback is a dev/test-only target (local echo servers on ephemeral
+    // ports); a real vend-egress provider host is never loopback. Exempting it
+    // keeps the port pin from breaking local fixtures while still locking every
+    // real allowlisted host to :443.
+    const h = hostname.toLowerCase();
+    if (h === "127.0.0.1" || h === "::1" || h === "localhost") return true;
+    return port === 443;
+  }
+
   /**
    * DNS-rebind guard for the DIRECT egress paths (resolve-and-pin): a DNS
    * name whose A/AAAA record points inside (10.x, 169.254.169.254, …) passes
@@ -210,6 +232,15 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     if (!isAllowedHost(parsed.hostname)) {
       res.writeHead(403);
       res.end("Blocked: internal network");
+      return;
+    }
+
+    // Vend-egress port pin (see isAllowedPort) — a vend run may only egress to
+    // :443 on allowlisted hosts, so an in-container token can't be tunnelled
+    // out over an arbitrary port.
+    if (!isAllowedPort(parsed.hostname, parseInt(parsed.port) || 80)) {
+      res.writeHead(403);
+      res.end("Blocked: port not allowed for this run");
       return;
     }
 
@@ -298,6 +329,15 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     // SSRF protection — block CONNECT tunnels to internal/private networks,
     // except the trusted platform API (handles local-dev host.docker.internal).
     if (!isAllowedHost(host)) {
+      clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      clientSocket.destroy();
+      return;
+    }
+
+    // Vend-egress port pin (see isAllowedPort) — refuse a CONNECT tunnel to any
+    // non-443 port on an allowlisted host so the in-container token cannot be
+    // exfiltrated over an arbitrary tunnelled port.
+    if (!isAllowedPort(host, port)) {
       clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       clientSocket.destroy();
       return;

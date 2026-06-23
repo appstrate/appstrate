@@ -299,6 +299,11 @@ export const chatPaths = {
                     },
                   },
                 },
+                modelId: {
+                  type: "string",
+                  description:
+                    "Optional. Title with the SAME model the turn used; falls back to the org default when omitted.",
+                },
               },
             },
           },
@@ -313,7 +318,14 @@ export const chatPaths = {
               schema: {
                 type: "object",
                 required: ["title"],
-                properties: { title: { type: "string" } },
+                properties: {
+                  title: { type: "string" },
+                  reason: {
+                    type: "string",
+                    description:
+                      "Optional. Present when the title is empty and LLM generation was skipped (e.g. `subscription-engine`, `unsupported-family`).",
+                  },
+                },
               },
             },
           },

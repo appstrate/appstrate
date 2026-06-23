@@ -847,9 +847,26 @@ async function buildCodexAgentRunner(): Promise<CodexAgentRunner> {
   // PATH). An explicit, non-default operator opt-in (`CODEX_ALLOW_BINARY_OVERRIDE
   // = "1"`) is required to honour `CODEX_BINARY_PATH` for local dev/test — a real
   // production vend run never silently trusts an arbitrary path.
+  //
+  // PRODUCTION HARDENING: the override is additionally gated on an explicit
+  // dev/test signal that FAILS CLOSED when absent. `runOrigin` (platform vs
+  // remote) is NOT in the agent container's env contract here (it lives on the
+  // platform run record, never forwarded to runtime-pi), so we cannot key off
+  // it directly. Instead we require `NODE_ENV` to be explicitly "development"
+  // or "test": the runtime-pi prod image pins `NODE_ENV=production` (Dockerfile
+  // `runtime` stage) AND an UNSET `NODE_ENV` ALSO fails closed — so a
+  // production container refuses the override even if both
+  // `CODEX_ALLOW_BINARY_OVERRIDE` and `CODEX_BINARY_PATH` were somehow injected.
+  // Honouring an arbitrary path is a deliberate triple opt-in only a local
+  // dev/test run can make; otherwise the pinned official resolver wins.
+  const isDevOrTestEnv = process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
+  const binaryOverrideAllowed =
+    isDevOrTestEnv &&
+    process.env.CODEX_ALLOW_BINARY_OVERRIDE === "1" &&
+    !!process.env.CODEX_BINARY_PATH;
   let codexBinary: string;
-  if (process.env.CODEX_ALLOW_BINARY_OVERRIDE === "1" && process.env.CODEX_BINARY_PATH) {
-    codexBinary = process.env.CODEX_BINARY_PATH;
+  if (binaryOverrideAllowed) {
+    codexBinary = process.env.CODEX_BINARY_PATH!;
   } else {
     // Throws a descriptive error when the pinned package is not installed —
     // intentionally fatal: launching a vend run on an unverifiable binary is a
