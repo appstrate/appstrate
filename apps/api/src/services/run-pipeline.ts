@@ -345,6 +345,9 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // needs structured feedback, not a silent fallback. The cascade reads the
   // pinned manifests seeded by Step 2a (auth keys / scopes match the spawn).
   let resolvedConnections: ResolvedConnectionMap | null = null;
+  // An actor-less run leaves the connection snapshot null (nothing to pin).
+  // Scheduled actor-less runs that declare integrations never reach here —
+  // the scheduler fail-fasts first (#735); other run paths always have an actor.
   if (actor) {
     const outcome = await resolveRunConnectionsOrError({
       agentManifest: agent.manifest as Record<string, unknown>,

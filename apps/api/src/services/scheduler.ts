@@ -27,6 +27,7 @@ import { mergeAndValidateConfigOverride } from "./agent-readiness.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
+import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import type { AppScope } from "../lib/scope.ts";
 import { setQueueDepthProvider } from "../observability/index.ts";
 
@@ -259,6 +260,28 @@ export async function shutdownScheduleWorker(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
+ * #735: a scheduled run with no actor cannot execute an agent that declares
+ * integrations. The actor is the run's execution identity across the whole
+ * credential plane — three runtime sites short-circuit on a null actor
+ * (`resolveIntegrationSpawns` returns `[]`, the run-pipeline connection
+ * snapshot stays null, and the live credentials resolver throws). The agent
+ * would therefore boot with only built-in tools, silently drop every declared
+ * integration, and still finish `success`. The schema permits an actor-less
+ * schedule (a legacy state from before the actor column was wired) but no
+ * org-level/system principal was ever implemented, so the only safe outcome is
+ * to fail fast. New schedules always carry an actor (`getActor` is non-null),
+ * so this only guards legacy rows and is otherwise dead-but-defensive.
+ *
+ * Exported as a pure predicate so it can be unit-tested without the DB.
+ */
+export function scheduleCannotResolveIntegrations(
+  actor: Actor | null,
+  manifest: Record<string, unknown>,
+): boolean {
+  return !actor && parseManifestIntegrations(manifest).length > 0;
+}
+
+/**
  * Fire one scheduled run. Loads the agent, resolves the version selector
  * (`versionOverride` | inherit → `published`, #636), runs the readiness +
  * preflight gates, then executes. Any `ApiError` along the way is converted
@@ -356,6 +379,22 @@ export async function triggerScheduledRun(
         return;
       }
       throw err;
+    }
+
+    // #735: fail fast on an actor-less schedule whose agent declares
+    // integrations. Without an execution identity the spawn resolver yields no
+    // integration tools, yet the run would otherwise finish `success` — a
+    // silent, invisible degradation. Record a visible failed run instead.
+    if (scheduleCannotResolveIntegrations(actor, agent.manifest as Record<string, unknown>)) {
+      logger.warn("Schedule has no actor but agent declares integrations, failing run", {
+        scheduleId,
+        packageId,
+      });
+      await failSchedule(
+        "Schedule has no execution identity (actor) but the agent declares integrations. " +
+          "Recreate the schedule so it runs as a specific user or end-user.",
+      );
+      return;
     }
 
     // Shared preflight: resolve config, validate readiness

@@ -560,7 +560,11 @@ export const schedules = pgTable(
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
     // Actor the scheduled run executes as. Exactly one of userId / endUserId
-    // is set (or both null for an org-level / system-owned schedule).
+    // is set. Both-null is a LEGACY state only (rows created before the actor
+    // column was wired) — there is no shipped org-level/system principal, and
+    // the runtime fails such a run fast when the agent declares integrations
+    // (#735, `scheduleCannotResolveIntegrations`). New schedules always carry
+    // an actor (`getActor` is non-null at the create route).
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     endUserId: text("end_user_id").references(() => endUsers.id, {
       onDelete: "cascade",

@@ -29,6 +29,7 @@ import {
   updateSchedule,
   deleteSchedule,
   triggerScheduledRun,
+  scheduleCannotResolveIntegrations,
 } from "../../../src/services/scheduler.ts";
 
 // Real BullMQ repeatable-job semantics — skipped in tier0 (in-memory queue).
@@ -604,6 +605,113 @@ describeRequiresRedis("scheduler service", () => {
       expect(failed).toHaveLength(1);
       expect(failed[0]!.status).toBe("failed");
       expect((failed[0]!.error ?? "").toLowerCase()).toContain("no published version");
+    });
+  });
+
+  // ── triggerScheduledRun — actor-less schedule with integrations (#735) ──
+  //
+  // A schedule whose actor is null (a legacy row created before the actor
+  // column was wired) cannot resolve any user-scoped integration connection:
+  // the spawn resolver returns no tools, yet the run would otherwise finish
+  // `success` — an invisible degradation. The fire path must instead record a
+  // VISIBLE failed run and never execute. The schedule references the WORKING
+  // copy (`versionOverride: "draft"`) so the guard — which sits just after
+  // version resolution — is reached without publishing.
+
+  describe("triggerScheduledRun actor enforcement (#735)", () => {
+    it("fails fast with a visible failed run when an actor-less schedule's agent declares integrations", async () => {
+      const agent = await seedPackage({
+        orgId,
+        id: `@${orgSlug}/integration-agent`,
+        draftManifest: {
+          name: `@${orgSlug}/integration-agent`,
+          version: "0.1.0",
+          type: "agent",
+          description: "Agent declaring an integration",
+          dependencies: { integrations: { "@vendor/some-integration": "1.0.0" } },
+        },
+      });
+
+      // Schedule row created with a real actor (the create path requires one),
+      // but the fire is invoked with a NULL actor to reproduce the legacy
+      // BullMQ path where `actorFromIds(null, null)` yields no actor.
+      const schedule = await createSchedule(
+        { orgId, applicationId: defaultAppId },
+        agent.id,
+        actor,
+        { cronExpression: "0 * * * *", versionOverride: "draft" },
+      );
+
+      await triggerScheduledRun(
+        schedule.id,
+        agent.id,
+        null, // actor-less fire (legacy row)
+        orgId,
+        defaultAppId,
+        undefined,
+        { versionOverride: "draft" },
+      );
+
+      const failed = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+      expect(failed).toHaveLength(1);
+      expect(failed[0]!.status).toBe("failed");
+      expect((failed[0]!.error ?? "").toLowerCase()).toContain("execution identity");
+    });
+
+    it("does not apply the actor guard when the agent declares no integrations", async () => {
+      // Same actor-less fire, but the agent has no integrations. The #735 guard
+      // must NOT trigger; the run instead fails downstream for a DIFFERENT
+      // reason (never-published agent → `no_published_version`), proving the
+      // guard is specific to integration-declaring agents.
+      const schedule = await createSchedule(
+        { orgId, applicationId: defaultAppId },
+        packageId, // seeded agent, no integrations, never published
+        actor,
+        { cronExpression: "0 * * * *" }, // inherit → resolves to `published`
+      );
+
+      await triggerScheduledRun(
+        schedule.id,
+        packageId,
+        null, // actor-less fire
+        orgId,
+        defaultAppId,
+        undefined,
+        {},
+      );
+
+      const failed = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+      expect(failed).toHaveLength(1);
+      expect(failed[0]!.status).toBe("failed");
+      const err = (failed[0]!.error ?? "").toLowerCase();
+      expect(err).not.toContain("execution identity");
+      expect(err).toContain("no published version");
+    });
+  });
+
+  // Pure-predicate unit coverage — no DB, no fire path.
+  describe("scheduleCannotResolveIntegrations (#735)", () => {
+    const withIntegrations = {
+      dependencies: { integrations: { "@vendor/x": "1.0.0" } },
+    } as Record<string, unknown>;
+    const withoutIntegrations = { dependencies: { skills: { "@vendor/s": "1.0.0" } } } as Record<
+      string,
+      unknown
+    >;
+
+    it("is true for a null actor when the manifest declares integrations", () => {
+      expect(scheduleCannotResolveIntegrations(null, withIntegrations)).toBe(true);
+    });
+
+    it("is false for a null actor when the manifest declares no integrations", () => {
+      expect(scheduleCannotResolveIntegrations(null, withoutIntegrations)).toBe(false);
+      expect(scheduleCannotResolveIntegrations(null, {})).toBe(false);
+    });
+
+    it("is false when an actor is present, regardless of integrations", () => {
+      const present: Actor = { type: "user", id: "u_1" };
+      expect(scheduleCannotResolveIntegrations(present, withIntegrations)).toBe(false);
+      expect(scheduleCannotResolveIntegrations(present, withoutIntegrations)).toBe(false);
     });
   });
 });

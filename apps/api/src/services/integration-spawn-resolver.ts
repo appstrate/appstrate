@@ -108,6 +108,11 @@ export async function resolveIntegrationSpawns(
   input: ResolveIntegrationsInput,
 ): Promise<IntegrationSpawnSpec[]> {
   const { applicationId, actor, agentManifest, resolvedConnections } = input;
+  // No actor → no actor-scoped connections to resolve. Scheduled runs are
+  // fail-fasted upstream when actor-less + integrations are declared (#735,
+  // scheduler.ts `scheduleCannotResolveIntegrations`); request-triggered runs
+  // always carry an actor (`getActor` is non-null), so this stays an empty
+  // return rather than a throw.
   if (!actor) return [];
 
   const entries = parseManifestIntegrations(agentManifest);
