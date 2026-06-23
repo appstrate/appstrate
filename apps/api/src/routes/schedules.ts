@@ -15,7 +15,7 @@ import { isValidCron } from "../lib/cron.ts";
 import { validateInput } from "../services/schema.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { invalidRequest, notFound, parseBody, validationFailed } from "../lib/errors.ts";
+import { ApiError, invalidRequest, notFound, parseBody, validationFailed } from "../lib/errors.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getActor, type Actor } from "../lib/actor.ts";
 import { getAppScope, type AppScope } from "../lib/scope.ts";
@@ -77,8 +77,19 @@ async function resolveScheduleActor(
     }
     return { type: "user", id: selected.user_id };
   }
-  // end_user_id present — getEndUser throws notFound when absent in this app/org.
-  await getEndUser(scope, selected.end_user_id!);
+  // end_user_id present. Translate getEndUser's 404 into a 400 so both actor
+  // branches report an invalid selection consistently as a bad request.
+  try {
+    await getEndUser(scope, selected.end_user_id!);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      throw invalidRequest(
+        "actor.end_user_id is not an end-user of this application",
+        "actor.end_user_id",
+      );
+    }
+    throw err;
+  }
   return { type: "end_user", id: selected.end_user_id! };
 }
 

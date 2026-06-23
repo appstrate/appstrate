@@ -391,6 +391,23 @@ describe("Schedules API", () => {
       expect(res.status).toBe(400);
     });
 
+    it("rejects an unknown end_user_id with 400 (not 404)", async () => {
+      const fid = agentId("actor-bad-eu");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * *",
+          actor: { end_user_id: "eu_does_not_exist" },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
     it("rejects both user_id and end_user_id together", async () => {
       const fid = agentId("actor-both");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });

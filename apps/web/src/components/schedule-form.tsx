@@ -213,6 +213,14 @@ export function ScheduleForm({
   // #738: execution identity. `undefined` = caller (create) / unchanged (edit).
   const [actor, setActor] = useState<ActorValue | undefined>(defaultValues?.actor);
 
+  // Changing the actor invalidates frozen connection picks (they belong to the
+  // previous identity), so drop them — otherwise the form would replay stale
+  // overrides under the new actor and defeat the backend reset (#738).
+  const handleActorChange = (next: ActorValue | undefined) => {
+    setActor(next);
+    setOverrides((prev) => ({ ...prev, connection_overrides: undefined }));
+  };
+
   const {
     register,
     handleSubmit,
@@ -397,7 +405,11 @@ export function ScheduleForm({
           )}
 
           {/* Execution identity (#738) */}
-          <ActorPicker value={actor} onChange={setActor} defaultLabel={defaultActorLabel} />
+          <ActorPicker
+            value={actor}
+            onChange={handleActorChange}
+            defaultLabel={defaultActorLabel}
+          />
 
           {/* Input fields (conditional) */}
           {hasInputSchema && (
