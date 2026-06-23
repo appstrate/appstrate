@@ -403,6 +403,7 @@
   "schedule.actorKindEndUser": "End-user",
   "schedule.actorSelectMember": "Choose a member",
   "schedule.actorSelectEndUser": "Choose an end-user",
+  "schedule.actorSearchEndUser": "Search by name, email or external ID",
   "schedule.connectionOverrides.label": "Integration connections",
   "schedule.connectionOverrides.hint": "Force a specific connection per integration the agent depends on. Leave on \"Inherit\" to use the default resolution (admin pin → user fallback) at each fire time.",
   "detail.configSectionProxy": "Proxy",

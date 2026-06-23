@@ -89,6 +89,7 @@ export function createEndUsersRouter() {
     const endingBefore = c.req.query("endingBefore");
     const externalId = c.req.query("externalId");
     const email = c.req.query("email");
+    const search = c.req.query("search");
 
     if (startingAfter && endingBefore) {
       throw invalidRequest("startingAfter and endingBefore are mutually exclusive");
@@ -97,6 +98,7 @@ export function createEndUsersRouter() {
     const result = await listEndUsers(scope, {
       externalId: externalId ?? undefined,
       email: email ?? undefined,
+      search: search ?? undefined,
       limit,
       startingAfter: startingAfter ?? undefined,
       endingBefore: endingBefore ?? undefined,

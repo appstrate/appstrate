@@ -6598,7 +6598,7 @@ export interface operations {
                     actor?: {
                         user_id?: string;
                         end_user_id?: string;
-                    };
+                    } & (unknown | unknown);
                 };
             };
         };
@@ -8810,6 +8810,8 @@ export interface operations {
                 externalId?: string;
                 /** @description Filter by email address (exact match) */
                 email?: string;
+                /** @description Case-insensitive substring match across name, email, and external ID */
+                search?: string;
                 /** @description Maximum number of end-users to return */
                 limit?: number;
                 /** @description Cursor for forward pagination (end-user ID to start after) */
@@ -17542,7 +17544,7 @@ export interface operations {
                     actor?: {
                         user_id?: string;
                         end_user_id?: string;
-                    };
+                    } & (unknown | unknown);
                 };
             };
         };

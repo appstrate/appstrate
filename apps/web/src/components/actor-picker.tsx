@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -43,7 +44,19 @@ export function ActorPicker({ value, onChange, defaultLabel }: ActorPickerProps)
   );
   const members = orgData?.members ?? [];
 
-  const { data: endUserPage } = useEndUsers({ limit: 100 });
+  // Debounced server-side search so the end-user list isn't capped at the
+  // first N rows on large tenants (#738). Mirrors useOpenRouterSearch.
+  const [euSearch, setEuSearch] = useState("");
+  const [euSearchDebounced, setEuSearchDebounced] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setEuSearchDebounced(euSearch), 300);
+    return () => clearTimeout(timer);
+  }, [euSearch]);
+
+  const { data: endUserPage } = useEndUsers({
+    limit: 50,
+    search: euSearchDebounced || undefined,
+  });
   const endUsers = endUserPage?.data ?? [];
 
   // Kind lives in local state — deriving it from `value` alone would make the
@@ -96,21 +109,28 @@ export function ActorPicker({ value, onChange, defaultLabel }: ActorPickerProps)
             </SelectContent>
           </Select>
         ) : (
-          <Select
-            value={value?.end_user_id ?? ""}
-            onValueChange={(endUserId) => onChange({ end_user_id: endUserId })}
-          >
-            <SelectTrigger className="flex-1">
-              <SelectValue placeholder={t("schedule.actorSelectEndUser")} />
-            </SelectTrigger>
-            <SelectContent>
-              {endUsers.map((eu) => (
-                <SelectItem key={eu.id} value={eu.id}>
-                  {eu.name || eu.email || eu.externalId || eu.id}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex-1 space-y-2">
+            <Input
+              value={euSearch}
+              onChange={(e) => setEuSearch(e.target.value)}
+              placeholder={t("schedule.actorSearchEndUser")}
+            />
+            <Select
+              value={value?.end_user_id ?? ""}
+              onValueChange={(endUserId) => onChange({ end_user_id: endUserId })}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder={t("schedule.actorSelectEndUser")} />
+              </SelectTrigger>
+              <SelectContent>
+                {endUsers.map((eu) => (
+                  <SelectItem key={eu.id} value={eu.id}>
+                    {eu.name || eu.email || eu.externalId || eu.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         )}
       </div>
     </div>

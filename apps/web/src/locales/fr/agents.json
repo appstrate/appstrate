@@ -403,6 +403,7 @@
   "schedule.actorKindEndUser": "Utilisateur final",
   "schedule.actorSelectMember": "Choisir un membre",
   "schedule.actorSelectEndUser": "Choisir un utilisateur final",
+  "schedule.actorSearchEndUser": "Rechercher par nom, email ou ID externe",
   "schedule.connectionOverrides.label": "Connexions d'intégration",
   "schedule.connectionOverrides.hint": "Forcez une connexion spécifique pour chaque intégration dont dépend l'agent. Laisser sur « Hériter » pour utiliser la résolution par défaut (épingle admin → fallback utilisateur) au moment de chaque déclenchement.",
   "detail.configSectionProxy": "Proxy",
