@@ -30,6 +30,11 @@ export function applySpecToSidecarEnv(
   if (spec.modelMaxTokens != null) {
     target.MODEL_MAX_TOKENS = String(spec.modelMaxTokens);
   }
+  if (spec.anonymize) {
+    // PII anonymization on for this run — the sidecar masks LLM traffic through
+    // the platform's /internal/anonymize endpoint (palier b2).
+    target.ANONYMIZE = "1";
+  }
   if (spec.llm) {
     if (spec.llm.authMode === "oauth") {
       // OAuth wire format: ship the LlmProxyOauthConfig as JSON so

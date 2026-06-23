@@ -37,6 +37,7 @@ import {
   adaptHeaderForRetry,
   TransformBodyTooLargeError,
 } from "./oauth-identity.ts";
+import type { RunAnonymizer } from "./anonymizer.ts";
 import { logger } from "./logger.ts";
 import { filterSensitiveHeaders } from "./redact.ts";
 
@@ -59,6 +60,14 @@ export interface AppDeps {
   refreshCredentials?: NonNullable<ApiCallDeps["refreshCredentials"]>;
   cookieJar: Map<string, string[]>;
   fetchFn?: typeof fetch; // default: global fetch — injectable for tests
+  /**
+   * Per-run PII anonymizer (palier b2). Present iff anonymization is enabled
+   * for this run — then the `/llm/*` reverse proxy masks the outbound request
+   * body through it and restores the response. Absent (the default) → bytes
+   * pass through untouched (zero footprint). The mask table lives in this
+   * object, for the lifetime of the run (Option S).
+   */
+  anonymizer?: RunAnonymizer;
   isReady?: () => boolean; // default: () => true — controls /health
   /**
    * OAuth token cache. Required when the sidecar serves OAuth-mode LLM
@@ -170,6 +179,7 @@ async function passUpstream(
   upstream: Response,
   observe?: LlmStreamObservation,
   swap?: ModelSwap,
+  anonymizer?: RunAnonymizer,
 ): Promise<Response> {
   const responseHeaders: Record<string, string> = {};
   for (const name of PASSTHROUGH_RESPONSE_HEADERS) {
@@ -198,9 +208,10 @@ async function passUpstream(
   // blind substring replace is safe here (it isn't for 2xx). Applies to ANY
   // content type on a non-2xx, mirroring the platform gateway (`llm-proxy/
   // core.ts`); errors are tiny, so buffering them costs nothing.
-  if (swap && !upstream.ok) {
+  if ((swap || anonymizer) && !upstream.ok) {
     const text = await upstream.text();
-    return new Response(scrubModelText(text, swap), {
+    const scrubbed = swap ? scrubModelText(text, swap) : text;
+    return new Response(anonymizer ? anonymizer.restore(scrubbed) : scrubbed, {
       status: upstream.status,
       headers: responseHeaders,
     });
@@ -210,12 +221,18 @@ async function passUpstream(
   // rewritten chunk-by-chunk — buffer the whole thing, swap, re-serialize. SSE
   // is rewritten in-stream below (frame-buffered). Other content types and the
   // no-swap path keep the zero-copy telemetry passthrough.
-  if (swap && contentType.includes("application/json") && !contentType.includes("event-stream")) {
+  if (
+    (swap || anonymizer) &&
+    contentType.includes("application/json") &&
+    !contentType.includes("event-stream")
+  ) {
     const text = await upstream.text();
-    const rewritten = swapResponseModelJson(text, swap);
+    const rewritten = swap ? swapResponseModelJson(text, swap) : text;
+    // Restore PII tokens the model echoed back (buffered → no token-split issue).
+    const restored = anonymizer ? anonymizer.restore(rewritten) : rewritten;
     // Length changed by the rewrite — let Response recompute Content-Length
     // rather than forward a now-wrong upstream value.
-    return new Response(rewritten, { status: upstream.status, headers: responseHeaders });
+    return new Response(restored, { status: upstream.status, headers: responseHeaders });
   }
 
   const reader = upstream.body.getReader();
@@ -279,10 +296,13 @@ async function passUpstream(
   // each frame as it flows. Frame-buffered, so a chunk boundary mid-frame is
   // handled. The telemetry passthrough (`observed`) stays in front so stream
   // metrics still reflect the upstream timing.
-  const body =
+  const swapped =
     swap && contentType.includes("event-stream")
       ? observed.pipeThrough(createSseModelSwapStream(swap))
       : observed;
+  // Restore PII tokens in-stream (per chunk, best-effort across chunk
+  // boundaries). Covers SSE and any other streamed content type.
+  const body = anonymizer ? swapped.pipeThrough(anonymizer.restoreStream()) : swapped;
 
   return new Response(body, { status: upstream.status, headers: responseHeaders });
 }
@@ -440,6 +460,10 @@ export function createApp(deps: AppDeps): Hono {
   const { config } = deps;
   const fetchFn = deps.fetchFn ?? fetch;
   const isReady = deps.isReady ?? (() => true);
+  // Per-run PII anonymizer (palier b2). Present iff anonymization is on for this
+  // run; the `/llm/*` reverse proxy masks the request through it and restores
+  // the response. Absent → no-op (bytes untouched).
+  const anonymizer = deps.anonymizer;
 
   const app = new Hono();
 
@@ -526,11 +550,15 @@ export function createApp(deps: AppDeps): Hono {
     // a zero-copy ReadableStream; for an alias we must buffer it to rewrite the
     // `model` field. Only aliases pay that cost — every other model stays
     // zero-copy.
+    // Buffer the body when we must transform it (model-alias swap and/or PII
+    // masking); otherwise keep the zero-copy stream passthrough.
     let body: string | ReadableStream<Uint8Array> | undefined;
     if (method !== "GET" && method !== "HEAD") {
-      if (apiKeyConfig.modelSwap) {
-        const text = await c.req.raw.text();
-        body = text ? swapRequestModel(text, apiKeyConfig.modelSwap) : undefined;
+      if (apiKeyConfig.modelSwap || anonymizer) {
+        let text = await c.req.raw.text();
+        if (text && apiKeyConfig.modelSwap) text = swapRequestModel(text, apiKeyConfig.modelSwap);
+        if (text && anonymizer) text = await anonymizer.maskBody(text);
+        body = text || undefined;
       } else {
         body = c.req.raw.body ?? undefined;
       }
@@ -560,7 +588,12 @@ export function createApp(deps: AppDeps): Hono {
       return llmFetchErrorResponse(c, targetUrl, err);
     }
 
-    return passUpstream(upstream, { targetUrl, authMode: "api_key" }, apiKeyConfig.modelSwap);
+    return passUpstream(
+      upstream,
+      { targetUrl, authMode: "api_key" },
+      apiKeyConfig.modelSwap,
+      anonymizer,
+    );
   });
 
   async function handleOauthLlmRequest(
@@ -643,6 +676,10 @@ export function createApp(deps: AppDeps): Hono {
         if (llmConfig.modelSwap) {
           bodyText = swapRequestModel(bodyText, llmConfig.modelSwap);
         }
+        // PII anonymization (palier b2.2c): mask the OAuth (claude-code) request
+        // body too, so subscription agent runs mask like api_key/Mistral runs.
+        // After the swap, before content-length — masking changes the length.
+        if (anonymizer) bodyText = await anonymizer.maskBody(bodyText);
         // Refresh content-length to match the transformed body so the
         // upstream doesn't read a stale value forwarded from the agent.
         forwardedHeaders["content-length"] = String(new TextEncoder().encode(bodyText).byteLength);
@@ -697,6 +734,7 @@ export function createApp(deps: AppDeps): Hono {
             authMode: "oauth",
           },
           llmConfig.modelSwap,
+          anonymizer,
         );
       }
       forwardedHeaders = {
@@ -738,6 +776,7 @@ export function createApp(deps: AppDeps): Hono {
         authMode: "oauth",
       },
       llmConfig.modelSwap,
+      anonymizer,
     );
   }
 

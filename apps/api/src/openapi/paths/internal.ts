@@ -347,4 +347,62 @@ export const internalPaths = {
       },
     },
   },
+  "/internal/anonymize": {
+    post: {
+      operationId: "anonymizeForRun",
+      tags: ["Internal"],
+      summary: "Mask PII in an LLM request body (or arbitrary value) for a run",
+      description:
+        "Sidecar-only (palier b2). Auth via Bearer run token. Masks PII for the run's outbound LLM traffic — the platform lends its shared detector while the sidecar holds the run's token↔value mapping (Option S). Provide exactly one of `body` (base64-encoded LLM request body, field-targeted masking) or `value` (arbitrary JSON, deep masking for the tool path), plus the run's current `mapping`. Returns the masked payload + the updated mapping. Restore is NOT here — it needs no detection and the sidecar does it locally.",
+      security: [{ bearerExecToken: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                body: {
+                  type: "string",
+                  description: "Base64-encoded LLM request body (field-targeted masking).",
+                },
+                value: { description: "Arbitrary JSON value (deep masking, tool path)." },
+                mapping: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                  description:
+                    "The run's current token→value table (empty on the run's first call).",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Masked payload + updated mapping.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["mapping"],
+                properties: {
+                  body: {
+                    type: "string",
+                    description: "Masked body (base64), when `body` was sent.",
+                  },
+                  value: { description: "Masked value, when `value` was sent." },
+                  mapping: { type: "object", additionalProperties: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
 } as const;

@@ -22,6 +22,7 @@
     "@appstrate/emails": "workspace:*",
     "@appstrate/env": "workspace:*",
     "@appstrate/mcp-transport": "workspace:*",
+    "@appstrate/module-anonymizer": "workspace:*",
     "@appstrate/module-claude-code": "workspace:*",
     "@appstrate/module-codex": "workspace:*",
     "@appstrate/runner-pi": "workspace:*",
