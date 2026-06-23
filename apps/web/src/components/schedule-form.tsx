@@ -261,22 +261,10 @@ export function ScheduleForm({
     });
   });
 
-  if (blockedMessage) {
-    return (
-      <div className="space-y-6">
-        <p className="text-muted-foreground text-sm">{blockedMessage}</p>
-        <div className="border-border flex justify-end gap-2 border-t pt-4">
-          <Button variant="outline" onClick={onCancel}>
-            {t("btn.cancel")}
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <form onSubmit={onFormSubmit} className="space-y-6">
-      {/* Agent selector (create mode only) */}
+      {/* Agent selector (create mode only) — kept visible even when blocked so
+          the user can pick a compatible agent instead of hitting a dead end. */}
       {mode === "create" && agents && onAgentChange && (
         <div className="space-y-3">
           <Label htmlFor="sched-agent">{t("schedule.agent")}</Label>
@@ -295,159 +283,167 @@ export function ScheduleForm({
         </div>
       )}
 
-      {/* Name */}
-      <div className="space-y-3">
-        <Label htmlFor="sched-name">{t("schedule.name")}</Label>
-        <Input
-          id="sched-name"
-          type="text"
-          {...register("name")}
-          placeholder={t("schedule.namePlaceholder")}
-        />
-      </div>
-
-      {/* Frequency (presets + cron input) */}
-      <div className="space-y-3">
-        <Label>{t("schedule.frequency")}</Label>
-        <div className="flex flex-wrap gap-1">
-          {cronPresets.map((p) => (
-            <Button
-              key={p.cron}
-              type="button"
-              variant="outline"
-              size="sm"
-              className={cn(
-                "text-xs",
-                cronExpression === p.cron
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : "text-muted-foreground",
-              )}
-              onClick={() => {
-                setValue("cron_expression", p.cron);
-                clearErrors("cron_expression");
-              }}
-            >
-              {p.label}
-            </Button>
-          ))}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="sched-cron">{t("schedule.cronLabel")}</Label>
-          <Input
-            id="sched-cron"
-            type="text"
-            {...register("cron_expression", {
-              validate: (v) => {
-                if (!v.trim()) return t("validation.required", { ns: "common" });
-                return undefined;
-              },
-            })}
-            placeholder="*/30 * * * *"
-            aria-invalid={showError("cron_expression") ? true : undefined}
-            className={cn(showError("cron_expression") && "border-destructive")}
-          />
-          <p className="text-muted-foreground text-sm">{t("schedule.cronHint")}</p>
-          {showError("cron_expression") && errors.cron_expression?.message && (
-            <p className="text-destructive text-sm">{errors.cron_expression.message}</p>
-          )}
-        </div>
-      </div>
-
-      {/* Timezone */}
-      <div className="space-y-3">
-        <Label htmlFor="sched-tz">{t("schedule.timezone")}</Label>
-        <Select value={timezone} onValueChange={(v) => setValue("timezone", v)}>
-          <SelectTrigger id="sched-tz">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {TIMEZONES.map((tz) => (
-              <SelectItem key={tz} value={tz}>
-                {tz}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Enabled toggle (edit mode only) */}
-      {isEdit && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="schedule-enabled"
-              checked={enabled}
-              onCheckedChange={(checked) => setValue("enabled", Boolean(checked))}
+      {/* When the selected agent is incompatible, show the block message in
+          place of the rest of the form — but leave the selector usable above. */}
+      {blockedMessage ? (
+        <p className="text-muted-foreground text-sm">{blockedMessage}</p>
+      ) : (
+        <>
+          {/* Name */}
+          <div className="space-y-3">
+            <Label htmlFor="sched-name">{t("schedule.name")}</Label>
+            <Input
+              id="sched-name"
+              type="text"
+              {...register("name")}
+              placeholder={t("schedule.namePlaceholder")}
             />
-            <Label htmlFor="schedule-enabled" className="cursor-pointer font-normal">
-              {t("schedule.enabled")}
-            </Label>
           </div>
-        </div>
-      )}
 
-      {/* Input fields (conditional) */}
-      {hasInputSchema && (
-        <div className="space-y-3">
-          <Label>{t("schedule.inputTitle")}</Label>
-          <SchemaForm
-            wrapper={wrapper}
-            formData={inputValues}
-            upload={uploadClient}
-            labels={labels}
-            onChange={(e) => setInputValues(e.formData as Record<string, unknown>)}
-          />
-        </div>
-      )}
+          {/* Frequency (presets + cron input) */}
+          <div className="space-y-3">
+            <Label>{t("schedule.frequency")}</Label>
+            <div className="flex flex-wrap gap-1">
+              {cronPresets.map((p) => (
+                <Button
+                  key={p.cron}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    "text-xs",
+                    cronExpression === p.cron
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "text-muted-foreground",
+                  )}
+                  onClick={() => {
+                    setValue("cron_expression", p.cron);
+                    clearErrors("cron_expression");
+                  }}
+                >
+                  {p.label}
+                </Button>
+              ))}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sched-cron">{t("schedule.cronLabel")}</Label>
+              <Input
+                id="sched-cron"
+                type="text"
+                {...register("cron_expression", {
+                  validate: (v) => {
+                    if (!v.trim()) return t("validation.required", { ns: "common" });
+                    return undefined;
+                  },
+                })}
+                placeholder="*/30 * * * *"
+                aria-invalid={showError("cron_expression") ? true : undefined}
+                className={cn(showError("cron_expression") && "border-destructive")}
+              />
+              <p className="text-muted-foreground text-sm">{t("schedule.cronHint")}</p>
+              {showError("cron_expression") && errors.cron_expression?.message && (
+                <p className="text-destructive text-sm">{errors.cron_expression.message}</p>
+              )}
+            </div>
+          </div>
 
-      {/* Overrides accordion — surfaces per-schedule overrides for config,
+          {/* Timezone */}
+          <div className="space-y-3">
+            <Label htmlFor="sched-tz">{t("schedule.timezone")}</Label>
+            <Select value={timezone} onValueChange={(v) => setValue("timezone", v)}>
+              <SelectTrigger id="sched-tz">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TIMEZONES.map((tz) => (
+                  <SelectItem key={tz} value={tz}>
+                    {tz}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Enabled toggle (edit mode only) */}
+          {isEdit && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="schedule-enabled"
+                  checked={enabled}
+                  onCheckedChange={(checked) => setValue("enabled", Boolean(checked))}
+                />
+                <Label htmlFor="schedule-enabled" className="cursor-pointer font-normal">
+                  {t("schedule.enabled")}
+                </Label>
+              </div>
+            </div>
+          )}
+
+          {/* Input fields (conditional) */}
+          {hasInputSchema && (
+            <div className="space-y-3">
+              <Label>{t("schedule.inputTitle")}</Label>
+              <SchemaForm
+                wrapper={wrapper}
+                formData={inputValues}
+                upload={uploadClient}
+                labels={labels}
+                onChange={(e) => setInputValues(e.formData as Record<string, unknown>)}
+              />
+            </div>
+          )}
+
+          {/* Overrides accordion — surfaces per-schedule overrides for config,
           model, proxy, and version. Same UX vocabulary as the Run modal so
           users learn the override layer once. */}
-      {packageId && (
-        <Collapsible open={overridesOpen} onOpenChange={setOverridesOpen}>
-          <CollapsibleTrigger asChild>
-            <button
-              type="button"
-              className="text-foreground hover:bg-muted/50 border-border flex w-full items-center justify-between rounded-md border border-dashed px-3 py-2 text-sm font-medium transition-colors"
-            >
-              <span>{t("schedule.overridesTitle")}</span>
-              <ChevronDown
-                className={cn(
-                  "text-muted-foreground size-4 transition-transform",
-                  overridesOpen && "rotate-180",
-                )}
-              />
-            </button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-4 pt-3">
-            <p className="text-muted-foreground text-xs">{t("schedule.overridesHint")}</p>
-            <AgentVersionField
-              packageId={packageId}
-              label={t("run.overrides.versionLabel")}
-              value={versionSelectValue}
-              onChange={setVersion}
-              leadingOptions={[
-                {
-                  value: VERSION_INHERIT,
-                  label: persistedVersion
-                    ? t("run.overrides.versionInheritPinned", { version: persistedVersion })
-                    : t("run.overrides.versionInheritLatest"),
-                },
-                { value: "draft", label: t("run.overrides.versionDraft") },
-              ]}
-            />
-            <RunOverridesPanel
-              packageId={packageId}
-              configSchema={configSchema}
-              persistedConfig={persistedConfig ?? {}}
-              persistedModelId={persistedModelId ?? null}
-              persistedProxyId={persistedProxyId ?? null}
-              {...(agentIntegrations ? { agentIntegrations } : {})}
-              value={overrides}
-              onChange={setOverrides}
-            />
-          </CollapsibleContent>
-        </Collapsible>
+          {packageId && (
+            <Collapsible open={overridesOpen} onOpenChange={setOverridesOpen}>
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="text-foreground hover:bg-muted/50 border-border flex w-full items-center justify-between rounded-md border border-dashed px-3 py-2 text-sm font-medium transition-colors"
+                >
+                  <span>{t("schedule.overridesTitle")}</span>
+                  <ChevronDown
+                    className={cn(
+                      "text-muted-foreground size-4 transition-transform",
+                      overridesOpen && "rotate-180",
+                    )}
+                  />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-4 pt-3">
+                <p className="text-muted-foreground text-xs">{t("schedule.overridesHint")}</p>
+                <AgentVersionField
+                  packageId={packageId}
+                  label={t("run.overrides.versionLabel")}
+                  value={versionSelectValue}
+                  onChange={setVersion}
+                  leadingOptions={[
+                    {
+                      value: VERSION_INHERIT,
+                      label: persistedVersion
+                        ? t("run.overrides.versionInheritPinned", { version: persistedVersion })
+                        : t("run.overrides.versionInheritLatest"),
+                    },
+                    { value: "draft", label: t("run.overrides.versionDraft") },
+                  ]}
+                />
+                <RunOverridesPanel
+                  packageId={packageId}
+                  configSchema={configSchema}
+                  persistedConfig={persistedConfig ?? {}}
+                  persistedModelId={persistedModelId ?? null}
+                  persistedProxyId={persistedProxyId ?? null}
+                  {...(agentIntegrations ? { agentIntegrations } : {})}
+                  value={overrides}
+                  onChange={setOverrides}
+                />
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+        </>
       )}
 
       {/* Footer */}
@@ -484,7 +480,7 @@ export function ScheduleForm({
         <Button type="button" variant="outline" onClick={onCancel}>
           {t("btn.cancel")}
         </Button>
-        <Button type="submit" disabled={isPending}>
+        <Button type="submit" disabled={isPending || Boolean(blockedMessage)}>
           {isEdit ? t("btn.save") : t("btn.create")}
         </Button>
       </div>
