@@ -32,32 +32,27 @@ import type { RunEvent } from "@appstrate/afps-runtime/types";
 import {
   truncateToolResult,
   zeroTokenUsage,
+  computeTokenCost,
   type RunError,
   type TokenUsage,
+  type TokenCost,
 } from "@appstrate/afps-runtime/runner";
 import type { CodexEvent, CodexUsage } from "./codex-binary.ts";
 
 /** Per-token cost rates for the resolved model (USD per 1e6 tokens). */
-export interface CodexModelCost {
-  input: number;
-  output: number;
-  cacheRead?: number;
-  cacheWrite?: number;
-}
+export type CodexModelCost = TokenCost;
 
-/** Compute equivalent cost (USD) from usage + the model's per-million rates. */
+/**
+ * Compute equivalent cost (USD) from usage + the model's per-million rates.
+ * Thin wrapper over the shared {@link computeTokenCost} (`@appstrate/afps-
+ * runtime/runner`) so the per-token formula has ONE definition shared with the
+ * LLM-proxy meter — see D1.
+ */
 export function computeCodexCost(
   usage: TokenUsage,
   cost: CodexModelCost | null | undefined,
 ): number {
-  if (!cost) return 0;
-  const perMillion = 1_000_000;
-  const inputCost = ((usage.input_tokens ?? 0) * cost.input) / perMillion;
-  const outputCost = ((usage.output_tokens ?? 0) * cost.output) / perMillion;
-  const cacheReadCost = ((usage.cache_read_input_tokens ?? 0) * (cost.cacheRead ?? 0)) / perMillion;
-  const cacheWriteCost =
-    ((usage.cache_creation_input_tokens ?? 0) * (cost.cacheWrite ?? 0)) / perMillion;
-  return inputCost + outputCost + cacheReadCost + cacheWriteCost;
+  return computeTokenCost(usage, cost);
 }
 
 function errorText(ev: CodexEvent): string {

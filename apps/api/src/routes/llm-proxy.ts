@@ -66,8 +66,12 @@ import {
 import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
-import { handleClaudeCodeSdkGateway } from "../services/llm-proxy/claude-code-sdk-gateway.ts";
-import { listSubscriptionEngines, type RunEngine } from "@appstrate/core/subscription-engines";
+// Side-effect import: loading the gateway module runs its
+// `registerSubscriptionGateway(...)` so the handler is in the provider-id-keyed
+// registry the loop below reads. The router references no vendor handler directly.
+import "../services/llm-proxy/claude-code-sdk-gateway.ts";
+import { subscriptionGatewayFor } from "../services/llm-proxy/subscription-gateways.ts";
+import { listSubscriptionEngines } from "@appstrate/core/subscription-engines";
 import type { LlmProxyAdapter } from "../services/llm-proxy/types.ts";
 import { buildLlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
@@ -126,24 +130,29 @@ export function createLlmProxyRouter() {
   // own client identity; we only swap the placeholder bearer for the real
   // subscription token, server-side.
   //
-  // Mounted DATA-DRIVEN from the contributed subscription-engine registry: with
-  // no subscription module loaded the registry is empty and NO gateway route
-  // exists. The route PATH derives from the provider id, so apps/api hardcodes no
-  // vendor slug. Only `oauth`-delivery engines get a chat gateway (`vend` engines
-  // — codex — are agent-only, no chat surface). The handler stays platform
-  // llm-proxy infra (peer of the protocol adapters); this map binds an engine to
-  // its handler, the one unavoidable vendor reference (the handler is our code).
-  // LOOPBACK ONLY — driven only by the chat loopback bearer (not API keys /
-  // dashboard tokens), so a subscription can't be spent as a bare proxy.
-  const subscriptionGateways: Partial<
-    Record<RunEngine, (c: Context<AppEnv>, maxBytes: number) => Promise<Response>>
-  > = {
-    claude: handleClaudeCodeSdkGateway,
-  };
+  // Mounted FULLY DATA-DRIVEN: with no subscription module loaded the registry is
+  // empty and NO gateway route exists. For each engine binding that declares
+  // `chatGateway` (an `oauth`-delivery provider with a chat surface — `vend`
+  // engines like codex are agent-only), the handler is looked up by PROVIDER ID
+  // in the apps/api gateway registry (the gateway module self-registers it). The
+  // route PATH also derives from the provider id, so this router has NO vendor
+  // literal — adding a chat-capable engine is a registry entry + a self-
+  // registering handler, never an edit here. LOOPBACK ONLY — driven only by the
+  // chat loopback bearer (not API keys / dashboard tokens), so a subscription
+  // can't be spent as a bare proxy.
   for (const def of listSubscriptionEngines()) {
-    if (def.sidecarAuthMode !== "oauth") continue;
-    const handler = subscriptionGateways[def.engine];
-    if (!handler) continue;
+    if (!def.chatGateway) continue;
+    const handler = subscriptionGatewayFor(def.providerId);
+    if (!handler) {
+      // The engine advertises a chat gateway but no handler self-registered
+      // (decoupled boot paths — engine binding vs gateway module). The chat
+      // surface for this provider would 404 silently; surface the
+      // misconfiguration at boot instead of dead-ending quietly.
+      logger.warn("chatGateway engine has no registered handler — chat surface unavailable", {
+        providerId: def.providerId,
+      });
+      continue;
+    }
     const gateway = async (c: Context<AppEnv>): Promise<Response> => {
       assertLoopbackOnly(c.get("authMethod"), `${def.label} SDK gateway`);
       return handler(c, limits.max_request_bytes);

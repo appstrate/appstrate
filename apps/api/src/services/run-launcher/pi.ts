@@ -34,7 +34,7 @@ import {
   subscriptionEngineDef,
 } from "./engine-select.ts";
 import { getExecutionMode } from "../../infra/mode.ts";
-import { engineHasNativeOutput } from "@appstrate/core/subscription-engines";
+import { providerHasNativeOutput } from "@appstrate/core/subscription-engines";
 import {
   getOrchestrator,
   type ContainerOrchestrator,
@@ -257,11 +257,12 @@ async function runPlatformContainerImpl(
       );
     }
 
-    // Native-output engines (e.g. claude) materialise `output` themselves →
-    // strip it from the tools the sidecar serves so the model sees a single
-    // output path. Driven by the engine's declared capability, NOT a hardcoded
-    // engine id, so a future native-output provider needs no launcher edit.
-    const sidecarRuntimeTools = engineHasNativeOutput(engine)
+    // Native-output providers (e.g. claude-code) materialise `output` themselves
+    // → strip it from the tools the sidecar serves so the model sees a single
+    // output path. Driven by the PROVIDER's declared capability (not the engine),
+    // so a second provider on the same engine that lacks native output keeps its
+    // MCP `output` path, and a future native-output provider needs no launcher edit.
+    const sidecarRuntimeTools = providerHasNativeOutput(llmConfig.providerId)
       ? plan.runtimeTools?.filter((t) => t !== "output")
       : plan.runtimeTools;
 

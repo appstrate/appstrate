@@ -3,7 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import {
   engineForProvider,
-  engineHasNativeOutput,
+  providerHasNativeOutput,
   isSubscriptionEngine,
   registerSubscriptionEngine,
   resetSubscriptionEnginesForTesting,
@@ -104,12 +104,15 @@ describe("isSubscriptionEngine", () => {
   });
 });
 
-describe("engineHasNativeOutput", () => {
-  it("is true only for engines that materialise output natively (claude)", () => {
-    expect(engineHasNativeOutput("claude")).toBe(true);
+describe("providerHasNativeOutput", () => {
+  it("is true only for a provider that materialises output natively (claude-code)", () => {
+    expect(providerHasNativeOutput("claude-code")).toBe(true);
   });
-  it("is false for engines that take output through the MCP tool (codex, pi)", () => {
-    expect(engineHasNativeOutput("codex")).toBe(false);
-    expect(engineHasNativeOutput("pi")).toBe(false);
+  it("is false for a provider that takes output through the MCP tool (codex)", () => {
+    expect(providerHasNativeOutput("codex")).toBe(false);
+  });
+  it("is false for an unregistered / API-key provider", () => {
+    expect(providerHasNativeOutput("openai")).toBe(false);
+    expect(providerHasNativeOutput("")).toBe(false);
   });
 });

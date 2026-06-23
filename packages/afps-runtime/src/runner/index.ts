@@ -10,6 +10,7 @@ export {
   type ReduceOptions,
 } from "./reducer.ts";
 export { truncateToolResult, toolResultByteLimit } from "./tool-result.ts";
+export { computeTokenCost, type TokenCost } from "./token-cost.ts";
 export {
   runContainerLifecycle,
   RunTimeoutError,

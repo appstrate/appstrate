@@ -6,13 +6,19 @@
  * A model provider runs on one of three engines: the generic `pi` loop (every
  * API-key provider, and the default for anything unregistered), or a
  * subscription engine that drives a vendor's OFFICIAL binary so it signs its
- * own client fingerprint (no forging). Core ships ZERO subscription bindings:
+ * own client fingerprint (no forging). What core owns here is the engine
+ * REGISTRY CONTRACT — the `"claude"|"codex"` engine vocabulary, the binding
+ * shape (credential-delivery mode, egress allowlist, native-output capability,
+ * chat handler), and the read/write accessors. It ships ZERO bindings populated:
  * the `claude` (Claude Agent SDK) and `codex` (Codex CLI) bindings are
  * contributed at boot by their opt-in provider modules (`@appstrate/module-
  * claude-code`, `@appstrate/module-codex`) via the `subscriptionEngine` field
  * on their {@link ModelProviderDefinition}. With those modules absent (the OSS
- * default), this registry stays empty and every provider resolves to `"pi"` —
- * core carries no subscription-engine machinery.
+ * default), the registry stays empty and every provider resolves to `"pi"`, so
+ * core carries no vendor binding — only the routing contract that lets the run,
+ * chat, and llm-proxy surfaces agree on which engine a provider runs on. (This
+ * is engine-routing vocabulary, NOT billing vocabulary — no billing concept
+ * lives here.)
  *
  * Both axes — agent **runs** (run-launcher) and **chat** (module-chat) — and the
  * llm-proxy subscription gateways read this one registry by provider id, so the
@@ -109,6 +115,18 @@ export interface SubscriptionEngineBinding {
    * everything unregistered.
    */
   chatHandler?: (input: ChatEngineInput) => Response;
+  /**
+   * True iff this provider's chat surface is driven through an `/api/llm-proxy/
+   * <providerId>-sdk/:presetId/*` credential-injection gateway (the official
+   * vendor binary points its base URL there; the gateway swaps the placeholder
+   * bearer for the real token without forging). The gateway HANDLER itself stays
+   * in the platform (apps/api), keyed by provider id — but this flag lets the
+   * platform mount the gateway route DATA-DRIVEN from the registry instead of a
+   * hardcoded engine→handler map, so adding a chat-capable engine is a registry
+   * entry, not an llm-proxy edit. Only `"oauth"`-delivery engines set it (`vend`
+   * engines — codex — are agent-only, no chat surface).
+   */
+  chatGateway?: boolean;
 }
 
 /** A registered binding plus the identity (provider id + label) it was registered under. */
@@ -174,17 +192,15 @@ export function isSubscriptionEngine(engine: RunEngine): engine is SubscriptionR
 }
 
 /**
- * True iff `engine` materialises the structured deliverable natively (see
+ * True iff PROVIDER materialises the structured deliverable natively (see
  * {@link SubscriptionEngineBinding.nativeOutput}). The launcher uses this to
- * decide whether to serve the MCP `output` runtime tool to a run — native-output
- * engines must not be offered it. `"pi"` is always false. Reads the contributed
- * registry: an engine counts as native-output iff at least one registered
- * provider on that engine declared it.
+ * decide whether to serve the MCP `output` runtime tool to a run — a
+ * native-output provider must not be offered it. Provider-specific, NOT
+ * engine-wide: a second provider on the same engine that does NOT emit output
+ * natively must not inherit the capability (it would lose its MCP `output`
+ * path). An unregistered / API-key provider (resolves to `"pi"`) is always
+ * false.
  */
-export function engineHasNativeOutput(engine: RunEngine): boolean {
-  if (engine === "pi") return false;
-  for (const def of BY_PROVIDER.values()) {
-    if (def.engine === engine && def.nativeOutput) return true;
-  }
-  return false;
+export function providerHasNativeOutput(providerId: string): boolean {
+  return BY_PROVIDER.get(providerId)?.nativeOutput === true;
 }

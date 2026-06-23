@@ -37,6 +37,7 @@ import { forwardMeteredResponse } from "./metering.ts";
 import { make410AuthTranslator, resolveSubscriptionToken } from "./subscription-token.ts";
 import { markCredentialNeedsReconnection } from "../model-providers/credentials.ts";
 import { buildLlmProxyPrincipal } from "./types.ts";
+import { registerSubscriptionGateway } from "./subscription-gateways.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -232,3 +233,10 @@ export async function handleClaudeCodeSdkGateway(
     },
   );
 }
+
+// Self-register this handler in the provider-id-keyed gateway registry, so the
+// llm-proxy router mounts the route data-driven from the subscription-engine
+// registry (engine binding flagged `chatGateway`) with no vendor literal in the
+// router. Co-located with the handler so a new gateway provider's wiring lives
+// next to its implementation.
+registerSubscriptionGateway(CLAUDE_CODE_PROVIDER_ID, handleClaudeCodeSdkGateway);

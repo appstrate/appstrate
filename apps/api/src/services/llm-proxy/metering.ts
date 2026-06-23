@@ -24,6 +24,7 @@ import { db } from "@appstrate/db/client";
 import { llmUsage } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { computeTokenCost } from "@appstrate/afps-runtime/runner";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
 import {
@@ -172,13 +173,18 @@ export async function recordProxyUsage(inputs: RecordUsageInputs): Promise<void>
 }
 
 export function computeCostUsd(usage: UpstreamUsage, cost: ModelCost | null): number {
-  if (!cost) return 0;
-  const perMillion = 1_000_000;
-  const inputCost = (usage.inputTokens * cost.input) / perMillion;
-  const outputCost = (usage.outputTokens * cost.output) / perMillion;
-  const cacheReadCost = ((usage.cacheReadTokens ?? 0) * (cost.cacheRead ?? 0)) / perMillion;
-  const cacheWriteCost = ((usage.cacheWriteTokens ?? 0) * (cost.cacheWrite ?? 0)) / perMillion;
-  return inputCost + outputCost + cacheReadCost + cacheWriteCost;
+  // Delegate to the shared per-token formula (`@appstrate/afps-runtime/runner`)
+  // so the proxy meter and the codex runner can't drift (D1). `UpstreamUsage`
+  // is camelCase; map it onto the snake_case `TokenUsage` the helper consumes.
+  return computeTokenCost(
+    {
+      input_tokens: usage.inputTokens,
+      output_tokens: usage.outputTokens,
+      cache_read_input_tokens: usage.cacheReadTokens ?? 0,
+      cache_creation_input_tokens: usage.cacheWriteTokens ?? 0,
+    },
+    cost,
+  );
 }
 
 /** Per-call metering context for {@link forwardMeteredResponse}. */
