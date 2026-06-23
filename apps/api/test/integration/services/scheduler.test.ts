@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 process.on("unhandledRejection", () => {});
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs } from "@appstrate/db/schema";
+import { runs, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
@@ -658,6 +658,64 @@ describeRequiresRedis("scheduler service", () => {
       expect((failed[0]!.error ?? "").toLowerCase()).toContain("execution identity");
     });
 
+    it("fails fast on the published path (inherit → published) when the agent declares integrations", async () => {
+      // Reproduces the production case (@saneki/orgabusiness-export-compta@2.1.0):
+      // the schedule inherits (no versionOverride → resolves to `published`) and
+      // the PUBLISHED manifest declares integrations. Proves the guard inspects
+      // the resolved published manifest, not only the working copy.
+      const pubAgent = await seedPackage({
+        orgId,
+        id: `@${orgSlug}/published-integration-agent`,
+        draftManifest: {
+          name: `@${orgSlug}/published-integration-agent`,
+          version: "1.0.0",
+          type: "agent",
+          description: "Published agent declaring an integration",
+        },
+      });
+      const publishedManifest = {
+        name: pubAgent.id,
+        version: "1.0.0",
+        type: "agent",
+        dependencies: { integrations: { "@vendor/some-integration": "1.0.0" } },
+      };
+      const [ver] = await db
+        .insert(packageVersions)
+        .values({
+          packageId: pubAgent.id,
+          version: "1.0.0",
+          integrity: "sha256-test",
+          artifactSize: 1024,
+          manifest: publishedManifest,
+        })
+        .returning();
+      await db
+        .insert(packageDistTags)
+        .values({ packageId: pubAgent.id, tag: "latest", versionId: ver!.id });
+
+      const schedule = await createSchedule(
+        { orgId, applicationId: defaultAppId },
+        pubAgent.id,
+        actor,
+        { cronExpression: "0 * * * *" }, // inherit → published
+      );
+
+      await triggerScheduledRun(
+        schedule.id,
+        pubAgent.id,
+        null, // actor-less fire
+        orgId,
+        defaultAppId,
+        undefined,
+        {}, // inherit → published
+      );
+
+      const failed = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+      expect(failed).toHaveLength(1);
+      expect(failed[0]!.status).toBe("failed");
+      expect((failed[0]!.error ?? "").toLowerCase()).toContain("execution identity");
+    });
+
     it("does not apply the actor guard when the agent declares no integrations", async () => {
       // Same actor-less fire, but the agent has no integrations. The #735 guard
       // must NOT trigger; the run instead fails downstream for a DIFFERENT
@@ -712,6 +770,29 @@ describeRequiresRedis("scheduler service", () => {
       const present: Actor = { type: "user", id: "u_1" };
       expect(scheduleCannotResolveIntegrations(present, withIntegrations)).toBe(false);
       expect(scheduleCannotResolveIntegrations(present, withoutIntegrations)).toBe(false);
+    });
+
+    it("is fail-safe (blocks) for a null actor with a malformed manifest", () => {
+      // Must never throw out of the guard — the outer fire-path catch only logs,
+      // so a throw would re-introduce a silent skip. Malformed + no actor blocks.
+      for (const bad of [
+        { dependencies: "nope" },
+        { dependencies: { integrations: "bogus" } },
+        { dependencies: { integrations: 42 } },
+        { dependencies: null },
+        null as unknown as Record<string, unknown>,
+      ]) {
+        expect(() =>
+          scheduleCannotResolveIntegrations(null, bad as Record<string, unknown>),
+        ).not.toThrow();
+      }
+      // A present actor short-circuits before any parsing — never blocks.
+      expect(
+        scheduleCannotResolveIntegrations(
+          { type: "user", id: "u_1" },
+          null as unknown as Record<string, unknown>,
+        ),
+      ).toBe(false);
     });
   });
 });

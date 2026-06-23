@@ -278,7 +278,16 @@ export function scheduleCannotResolveIntegrations(
   actor: Actor | null,
   manifest: Record<string, unknown>,
 ): boolean {
-  return !actor && parseManifestIntegrations(manifest).length > 0;
+  if (actor) return false;
+  // Fail-safe: a malformed manifest must not throw out of the guard. The outer
+  // `triggerScheduledRun` catch only logs (no failed-run record), so an
+  // exception here would re-introduce the silent skip this guard exists to
+  // prevent. On a parse failure with no actor, block the run.
+  try {
+    return parseManifestIntegrations(manifest).length > 0;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -623,7 +632,12 @@ async function enrichSchedules(
 export async function createSchedule(
   scope: AppScope,
   packageId: string,
-  actor: Actor | null,
+  // #735: a schedule MUST have an execution identity. Enforced at the service
+  // (non-null type) so every creation path — not just the authenticated route
+  // where `getActor` is non-null — is structurally prevented from minting a new
+  // actor-less row. Actor-less rows only exist as legacy data; the fire path
+  // fails them fast (`scheduleCannotResolveIntegrations`).
+  actor: Actor,
   data: {
     name?: string;
     cronExpression: string;
@@ -648,8 +662,8 @@ export async function createSchedule(
     .values({
       id,
       packageId,
-      userId: actor?.type === "user" ? actor.id : null,
-      endUserId: actor?.type === "end_user" ? actor.id : null,
+      userId: actor.type === "user" ? actor.id : null,
+      endUserId: actor.type === "end_user" ? actor.id : null,
       orgId: scope.orgId,
       applicationId: scope.applicationId,
       name: data.name ?? null,
