@@ -554,11 +554,11 @@ export interface LlmProxyApiKeyConfig {
  * OAuth mode — the no-forging path for an agent driver that signs its OWN
  * provider fingerprint (the official Claude Agent SDK binary).
  *
- * The sidecar forges nothing: no identity headers, no `system`-prepend /
- * `forceStream` body transform. It only resolves a fresh access token from the
+ * The sidecar forges nothing. It only resolves a fresh access token from the
  * platform, swaps the request bearer for it, and ensures the OAuth beta flag
  * ({@link oauthBeta}) is present — leaving the driver's own user-agent / `x-app`
- * / `anthropic-beta` fingerprint untouched. This is the runner-side counterpart
+ * / `anthropic-beta` fingerprint, request headers, and body untouched. This is
+ * the runner-side counterpart
  * of the chat's `claude-code-sdk-gateway`. There is no forging fallback: a
  * subscription provider whose driver can't sign its own fingerprint has no
  * execution path.

@@ -76,6 +76,49 @@ describe("GET /credential-vend", () => {
     expect(body).toEqual({ access_token: "oat-fresh-token", account_id: "acct-123" });
   });
 
+  it("FREEZE-ON-FIRST: two GETs return the same token, getToken invoked once", async () => {
+    // Counting fake that returns a DIFFERENT token on every call AND has no
+    // internal TTL cache — so if the handler resolved twice, the second GET
+    // would observe a fresh value. This isolates the endpoint-level freeze
+    // from the OAuthTokenCache's own 30s TTL (which could otherwise mask a
+    // regression).
+    let getTokenCalls = 0;
+    const countingCache = {
+      getToken: async () => {
+        getTokenCalls += 1;
+        return {
+          accessToken: `oat-token-${getTokenCalls}`,
+          accountId: "acct-123",
+          expiresAt: Date.now() + 60 * 60_000,
+          fetchedAt: Date.now(),
+        };
+      },
+      forceRefresh: async () => {
+        throw new Error("forceRefresh must not be called by vend");
+      },
+      invalidate: () => {},
+    };
+    const deps = makeDeps(() => tokenResponse());
+    deps.oauthTokenCache = countingCache as unknown as OAuthTokenCache;
+    deps.config.llm = { authMode: "vend", credentialId: "conn-codex" };
+    const app = createApp(deps);
+
+    const res1 = await app.request("/credential-vend");
+    expect(res1.status).toBe(200);
+    const body1 = (await res1.json()) as { access_token: string; account_id: string | null };
+
+    const res2 = await app.request("/credential-vend");
+    expect(res2.status).toBe(200);
+    expect(res2.headers.get("cache-control")).toBe("no-store");
+    const body2 = (await res2.json()) as { access_token: string; account_id: string | null };
+
+    // Identical frozen snapshot returned both times — no post-freeze refresh.
+    expect(body2).toEqual(body1);
+    expect(body1.access_token).toBe("oat-token-1");
+    // getToken hit EXACTLY once across both GETs (the freeze short-circuits #2).
+    expect(getTokenCalls).toBe(1);
+  });
+
   it("returns account_id null when the credential has none", async () => {
     const deps = makeDeps(() => tokenResponse({ accountId: undefined }));
     deps.config.llm = { authMode: "vend", credentialId: "conn-codex" };

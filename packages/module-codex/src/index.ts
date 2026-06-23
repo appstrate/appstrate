@@ -37,7 +37,8 @@ import type {
   ModelProviderHooks,
   ModelProviderIdentity,
 } from "@appstrate/core/module";
-import { base64UrlEncode, decodeJwtPayload } from "@appstrate/core/jwt";
+import { decodeJwtPayload } from "@appstrate/core/jwt";
+import { buildCodexAuthJson } from "@appstrate/runner-codex/binary";
 
 // ---------------------------------------------------------------------------
 // Codex JWT decoder
@@ -105,24 +106,26 @@ const codexHooks: ModelProviderHooks = {
    * Build the `MODEL_API_KEY` placeholder the agent container sees. pi-ai's
    * `openai-codex-responses` provider decodes the apiKey as a JWT to read
    * `https://api.openai.com/auth.chatgpt_account_id`, so the placeholder
-   * must be a parseable JWT carrying only that claim — anything else
-   * either fails to parse or leaks signature material into the container.
+   * must be a parseable JWT carrying that claim — anything else either fails
+   * to parse or leaks signature material into the container.
    *
-   * Returns `null` when the access token has no decodable account id so
-   * the platform falls back to its generic dash-stripped placeholder.
+   * The synthetic `alg:none` JWT is built by the CANONICAL Codex auth builder
+   * (`buildCodexAuthJson` in `@appstrate/runner-codex/binary`) — the same one
+   * the runner writes into `auth.json` — so the placeholder shape can never
+   * drift from what the official binary boots against. We surface only its
+   * `tokens.id_token` (the local-only unsigned JWT carrying `chatgpt_account_id`,
+   * `exp`, and a placeholder `email`); the real `access_token` is never spent
+   * here. `accessToken` is unused by the builder — the account id is the sole
+   * routing claim — so we pass an empty token.
+   *
+   * Returns `null` when the access token has no decodable account id so the
+   * platform falls back to its generic dash-stripped placeholder.
    */
   buildApiKeyPlaceholder(accessToken: string): string | null {
     const claims = decodeCodexJwtPayload(accessToken);
     const accountId = claims?.chatgpt_account_id;
     if (!accountId) return null;
-    const headerB64 = base64UrlEncode(JSON.stringify({ alg: "none", typ: "JWT" }));
-    const payloadB64 = base64UrlEncode(
-      JSON.stringify({
-        "https://api.openai.com/auth": { chatgpt_account_id: accountId },
-      }),
-    );
-    // Fixed, recognisable fake signature — never derived from the real one.
-    return `${headerB64}.${payloadB64}.placeholder`;
+    return buildCodexAuthJson({ accessToken: "", accountId, nowMs: Date.now() }).tokens.id_token;
   },
 
   /**

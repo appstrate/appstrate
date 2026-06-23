@@ -4706,7 +4706,7 @@ export interface components {
             updatedAt: string | null;
             clientSecret: string;
         };
-        /** @description Resolved access token returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Carries only the fields that change per refresh — provider invariants (baseUrl, wireFormat, …) live in the sidecar's boot-time `LlmProxyOauthConfig`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`. */
+        /** @description Resolved access token returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Carries only the fields that change per refresh — provider invariants (baseUrl, …) live in the sidecar's boot-time `LlmProxyOauthConfig`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`. */
         OAuthTokenResponse: {
             accessToken: string;
             /** @description Epoch milliseconds. null when expiry is unknown. */
@@ -8757,6 +8757,8 @@ export interface operations {
                         role: string;
                         text: string;
                     }[];
+                    /** @description Optional. Title with the SAME model the turn used; falls back to the org default when omitted. */
+                    modelId?: string;
                 };
             };
         };
@@ -8771,6 +8773,8 @@ export interface operations {
                 content: {
                     "application/json": {
                         title: string;
+                        /** @description Optional. Present when the title is empty and LLM generation was skipped (e.g. `subscription-engine`, `unsupported-family`). */
+                        reason?: string;
                     };
                 };
             };

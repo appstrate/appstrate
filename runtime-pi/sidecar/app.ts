@@ -462,6 +462,18 @@ export function createApp(deps: AppDeps): Hono {
   const fetchFn = deps.fetchFn ?? fetch;
   const isReady = deps.isReady ?? (() => true);
 
+  // FREEZE-ON-FIRST snapshot for the vend endpoint. A sidecar serves EXACTLY
+  // one run, and `createApp` runs once per sidecar (once per test), so a
+  // closure-scoped variable is per-sidecar state. The vended subscription
+  // token is resolved from the platform ONCE on the first successful
+  // `/credential-vend` call, frozen here, and every subsequent GET returns
+  // this same snapshot WITHOUT re-resolving — so the in-container token is
+  // genuinely non-renewable (the platform's proactive near-expiry refresh can
+  // never be triggered from inside the container after the freeze). Freezing
+  // (rather than 410-ing on a second call) keeps the GET idempotent, so a
+  // runner retry of the handover is safe — it gets the identical token.
+  let frozenVendToken: { accessToken: string; accountId: string | null } | null = null;
+
   const app = new Hono();
 
   // Health check for startup readiness (includes forward proxy readiness)
@@ -510,9 +522,25 @@ export function createApp(deps: AppDeps): Hono {
   // the per-run internal Docker network is the boundary. Only a `vend`-mode run
   // answers; `oauth` (Claude) and `api_key` runs 403, so their
   // no-real-token-in-container invariant is preserved.
+  //
+  // FREEZE-ON-FIRST: the token is resolved from the platform exactly once (on
+  // the first successful call) and frozen in `frozenVendToken`. Every later
+  // GET returns the frozen snapshot without re-resolving — never triggering the
+  // platform's near-expiry refresh — so the handed-over token is non-renewable
+  // in-container. A 410 (NeedsReconnection) can therefore only occur on the
+  // FIRST resolve, before the freeze; after the freeze there is no refresh.
   app.get("/credential-vend", async (c) => {
     if (config.llm?.authMode !== "vend") {
       return c.json({ error: "credential vend not enabled for this run" }, 403);
+    }
+    // Already frozen: return the snapshot verbatim — no resolver call, no
+    // refresh. Idempotent under a runner retry of the handover.
+    if (frozenVendToken) {
+      c.header("cache-control", "no-store");
+      return c.json({
+        access_token: frozenVendToken.accessToken,
+        account_id: frozenVendToken.accountId,
+      });
     }
     const tokenCache = deps.oauthTokenCache;
     if (!tokenCache) {
@@ -520,8 +548,14 @@ export function createApp(deps: AppDeps): Hono {
     }
     try {
       const token = await tokenCache.getToken(config.llm.credentialId);
+      // Freeze the first successful resolve. Subsequent calls short-circuit
+      // above and never reach the resolver again.
+      frozenVendToken = { accessToken: token.accessToken, accountId: token.accountId ?? null };
       c.header("cache-control", "no-store");
-      return c.json({ access_token: token.accessToken, account_id: token.accountId ?? null });
+      return c.json({
+        access_token: frozenVendToken.accessToken,
+        account_id: frozenVendToken.accountId,
+      });
     } catch (err) {
       if (err instanceof NeedsReconnectionError) {
         return c.json({ error: "subscription credential needs reconnection" }, 410);

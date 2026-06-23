@@ -16,6 +16,10 @@
  * `@appstrate/core` gains no dependency on the vendor packages.
  */
 
+// node:module — `createRequire` is the only way to anchor `require.resolve` at a
+// given module scope (hopping through the vendor package to reach its per-arch
+// optional-dep binary). Bun exposes no equivalent scope-anchored resolver, so
+// this Node import is required.
 import { createRequire } from "node:module";
 
 /**

@@ -34,8 +34,15 @@
  * resolver, so `@appstrate/core` gains no dependency on the Codex CLI.
  */
 
+// node:fs — kept for needs with no Bun equivalent: `mkdtemp` (atomic unique temp
+// dir), `readdir`/`stat`/`rm` (directory listing + recursive removal), and
+// crucially `writeFile({ mode: 0o600 })` — `Bun.write` cannot set file
+// permissions, and the auth.json/config.toml hold the REAL subscription token,
+// so the 0600 owner-only mode is security-critical and must stay node:fs.
 import { mkdtemp, writeFile, readdir, stat, rm } from "node:fs/promises";
+// node:os — Bun has no `tmpdir()` equivalent for the default ephemeral-home base.
 import { tmpdir } from "node:os";
+// node:path — Bun exposes no path-join primitive; kept for portable path joins.
 import { join } from "node:path";
 import {
   buildIsolatedSubprocessEnv,

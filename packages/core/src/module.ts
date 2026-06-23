@@ -486,9 +486,9 @@ export interface ModelProviderProxyPatch {
  * internal claim vocabulary.
  *
  * `accountId` is the stable account/tenant identifier the provider uses
- * for routing (echoed back to the upstream via the configured
- * `accountIdHeader`). `email` is the user identity associated with the
- * credential.
+ * for routing (echoed back to the upstream by the sidecar's identity
+ * layer, which decides the routing header from the boot config). `email`
+ * is the user identity associated with the credential.
  */
 export interface ModelProviderIdentity {
   accountId?: string;

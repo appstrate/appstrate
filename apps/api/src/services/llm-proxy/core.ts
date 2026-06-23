@@ -72,18 +72,19 @@ export class LlmProxyModelApiMismatchError extends Error {
 /**
  * Thrown when an OAuth-subscription model is requested through this generic
  * gateway. The gateway forges nothing — a raw bearer alone won't satisfy a
- * subscription upstream — so subscription providers have no path here. The only
- * supported subscription is `claude-code`, served by its own dedicated SDK
- * gateway (`claude-code-sdk-gateway.ts`), where the official Claude Agent SDK
- * signs its own client fingerprint. Any other subscription has no
- * official-binary chat path (so no path here — this gateway never forges).
+ * subscription upstream — so subscription providers have no path here. A
+ * subscription is only serviceable through its OWN dedicated official-binary SDK
+ * gateway (where the vendor's binary signs its own client fingerprint); a
+ * subscription engine with no such gateway has no chat path at all (so no path
+ * here — this gateway never forges).
  */
 export class LlmProxyUnsupportedSubscriptionError extends Error {
   constructor(public readonly providerId: string) {
     super(
       `Provider "${providerId}" is an OAuth subscription and cannot be served through ` +
-        `this gateway (no fingerprint forging). Only "claude-code" supports subscription ` +
-        `chat, via its dedicated SDK gateway. Use an API-key model instead.`,
+        `this gateway (no fingerprint forging). Subscription chat is only available when ` +
+        `the provider's subscription engine has a dedicated official-binary SDK gateway; ` +
+        `this credential's engine has none. Use an API-key model instead.`,
     );
     this.name = "LlmProxyUnsupportedSubscriptionError";
   }

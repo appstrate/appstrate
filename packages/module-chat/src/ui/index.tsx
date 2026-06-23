@@ -29,8 +29,10 @@ import { PanelLeftIcon, PanelRightIcon, InfoIcon } from "lucide-react";
 import { Thread } from "./thread.tsx";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { makeThreadListAdapter } from "./thread-list-adapter.tsx";
-import { ModelSelect, fetchModels, type OrgModelOption } from "./model-select.tsx";
-import { AgentRunPanel, useThreadRuns } from "./agent-run-panel.tsx";
+import { ModelSelect } from "./model-select.tsx";
+import { fetchModels, type OrgModelOption } from "./models-data.ts";
+import { AgentRunPanel } from "./agent-run-panel.tsx";
+import { useThreadRuns } from "./use-thread-runs.ts";
 
 export interface ChatContext {
   /** What the conversation is anchored to (e.g. "document", "run"). */
@@ -221,7 +223,11 @@ export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
           ...getHeaders?.(),
           ...(selectedModelRef.current ? { "X-Model-Id": selectedModelRef.current } : {}),
         }),
-        [getHeaders],
+        // `getHeaders` is captured from the enclosing `ChatPage` closure — it is
+        // not a reactive value of this nested runtime hook, and `selectedModelRef`
+        // is a ref (exempt). Both are read via `?.()`/`.current` at request time,
+        // so a stable empty-dep callback is correct (no stale closure).
+        [],
       );
       const transport = useMemo(
         () =>

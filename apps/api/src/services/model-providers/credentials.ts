@@ -72,7 +72,7 @@ export interface DecryptedModelProviderCredentials {
   baseUrl: string;
   /** Either the API key OR the current OAuth access token. */
   apiKey: string;
-  /** OAuth only — abstract account/tenant identifier (echoed by the sidecar as `wireFormat.accountIdHeader`). */
+  /** OAuth only — abstract account/tenant identifier (used at connect time for required-claim validation; not forwarded to the upstream provider). */
   accountId?: string;
   /** OAuth only — if true, the connection is dead and apiKey may be stale. */
   needsReconnection?: boolean;
@@ -631,8 +631,8 @@ export async function getOrgModelProviderCredential(
  * DB-stored credentials (api-key or OAuth, decrypted on demand) — and
  * gates dead OAuth rows (`needsReconnection`).
  *
- * The returned shape carries the registry overlay (apiShape, baseUrl,
- * wireFormat) inline so downstream consumers (pi.ts, llm-proxy) don't
+ * The returned shape carries the registry overlay (apiShape, baseUrl)
+ * inline so downstream consumers (pi.ts, llm-proxy) don't
  * have to re-look-up `getModelProvider(providerId)`.
  *
  * Returns `null` when the id is unknown to either source, or when the
