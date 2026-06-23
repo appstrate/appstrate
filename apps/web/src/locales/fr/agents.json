@@ -397,7 +397,6 @@
   "schedule.overridesHint": "Ces paramètres s'appliquent à chaque exécution de cette planification. Laisser sur \"Hériter\" pour utiliser les paramètres par défaut de l'agent.",
   "schedule.actorTitle": "Identité d'exécution",
   "schedule.actorHint": "Les exécutions de cette planification utiliseront les connexions et l'état de cette identité.",
-  "schedule.actorDefaultShort": "Par défaut : {{actor}}",
   "schedule.actorDefaultSelf": "Par défaut : vous",
   "actorSelect.placeholder": "Sélectionner une identité",
   "actorSelect.search": "Rechercher par nom ou email",

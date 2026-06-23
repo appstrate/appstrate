@@ -57,8 +57,14 @@ export function ScheduleEditPage() {
           proxy_id_override: schedule.proxy_id_override ?? null,
           version_override: schedule.version_override ?? null,
           connection_overrides: schedule.connection_overrides ?? null,
+          // Seed the actor with the schedule's current identity so the select
+          // shows the real value (not a "default" placeholder). Submit still
+          // only sends it when it differs from currentActor.
+          actor: {
+            user_id: schedule.userId ?? undefined,
+            end_user_id: schedule.endUserId ?? undefined,
+          },
         }}
-        defaultActorLabel={schedule.actor_name}
         currentActor={{
           user_id: schedule.userId ?? undefined,
           end_user_id: schedule.endUserId ?? undefined,

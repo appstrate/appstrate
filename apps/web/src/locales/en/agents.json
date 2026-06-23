@@ -397,7 +397,6 @@
   "schedule.overridesHint": "These overrides apply on every execution of this schedule. Leave on \"Inherit\" to use the agent's default settings.",
   "schedule.actorTitle": "Execution identity",
   "schedule.actorHint": "Runs from this schedule will use this identity's connections and state.",
-  "schedule.actorDefaultShort": "Default: {{actor}}",
   "schedule.actorDefaultSelf": "Default: you",
   "actorSelect.placeholder": "Select an identity",
   "actorSelect.search": "Search by name or email",

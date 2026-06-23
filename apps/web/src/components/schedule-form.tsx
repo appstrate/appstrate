@@ -96,8 +96,6 @@ interface ScheduleFormProps {
     connection_overrides?: Record<string, string> | null;
     actor?: ActorValue;
   };
-  /** Label of the schedule's current/default execution identity (#738). */
-  defaultActorLabel?: string | null;
   /** The schedule's current actor (edit mode) — used to detect a real change. */
   currentActor?: ActorValue;
   inputSchema?: JSONSchemaObject;
@@ -137,7 +135,6 @@ interface FormFields {
 export function ScheduleForm({
   mode,
   defaultValues,
-  defaultActorLabel,
   currentActor,
   inputSchema,
   configSchema,
@@ -417,14 +414,13 @@ export function ScheduleForm({
           {/* Execution identity (#738) */}
           <div className="space-y-2">
             <Label>{t("schedule.actorTitle")}</Label>
+            {/* Edit seeds `actor` with the schedule's current identity, so the
+                placeholder only shows in create mode — where the default really
+                is the caller. */}
             <ActorSelect
               value={actor}
               onChange={setActor}
-              placeholder={
-                defaultActorLabel
-                  ? t("schedule.actorDefaultShort", { actor: defaultActorLabel })
-                  : t("schedule.actorDefaultSelf")
-              }
+              placeholder={t("schedule.actorDefaultSelf")}
             />
             <p className="text-muted-foreground text-xs">{t("schedule.actorHint")}</p>
           </div>
