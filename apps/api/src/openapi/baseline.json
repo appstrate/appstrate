@@ -3959,6 +3959,26 @@
                     "additionalProperties": {
                       "type": "string"
                     }
+                  },
+                  "actor": {
+                    "type": "object",
+                    "description": "Execution identity for runs this schedule fires (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to default to the calling identity. Requires `schedules:write`.",
+                    "properties": {
+                      "user_id": {
+                        "type": "string"
+                      },
+                      "end_user_id": {
+                        "type": "string"
+                      }
+                    },
+                    "oneOf": [
+                      {
+                        "required": ["user_id"]
+                      },
+                      {
+                        "required": ["end_user_id"]
+                      }
+                    ]
                   }
                 }
               }
@@ -4181,6 +4201,26 @@
                     "additionalProperties": {
                       "type": "string"
                     }
+                  },
+                  "actor": {
+                    "type": "object",
+                    "description": "Re-point the schedule's execution identity (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`.",
+                    "properties": {
+                      "user_id": {
+                        "type": "string"
+                      },
+                      "end_user_id": {
+                        "type": "string"
+                      }
+                    },
+                    "oneOf": [
+                      {
+                        "required": ["user_id"]
+                      },
+                      {
+                        "required": ["end_user_id"]
+                      }
+                    ]
                   }
                 }
               }
@@ -7184,6 +7224,7 @@
                       "source": "built-in",
                       "enabled": true,
                       "is_default": false,
+                      "aliased": false,
                       "credentialId": "pk_abc123",
                       "contextWindow": 128000,
                       "maxTokens": 16384,
@@ -7274,6 +7315,10 @@
                         "type": "number"
                       }
                     }
+                  },
+                  "aliased": {
+                    "type": "boolean",
+                    "description": "Model-alias flag. When true, this model's `id` becomes a public alias and its real binding (modelId, provider, baseUrl, capabilities/cost) is hidden from user-facing surfaces; the sidecar rewrites the `model` field on every inference call."
                   }
                 }
               }
@@ -7790,6 +7835,10 @@
                         "type": "number"
                       }
                     }
+                  },
+                  "aliased": {
+                    "type": "boolean",
+                    "description": "Model-alias flag. When true, this model's `id` becomes a public alias and its real binding is hidden from user-facing surfaces."
                   }
                 }
               }
@@ -11062,6 +11111,122 @@
                       "type": "boolean"
                     }
                   }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/me/context": {
+      "get": {
+        "operationId": "getMyContext",
+        "tags": ["Profile"],
+        "summary": "The caller's working context for an AI agent",
+        "description": "Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current application (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). App context resolves from `X-Application-Id`, the API key's application, or the org default.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Caller context",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["user", "org", "connections"],
+                  "properties": {
+                    "user": {
+                      "type": "object",
+                      "required": ["id", "name", "email"],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": ["string", "null"]
+                        },
+                        "email": {
+                          "type": ["string", "null"]
+                        }
+                      }
+                    },
+                    "org": {
+                      "type": "object",
+                      "required": ["id", "role"],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string",
+                          "enum": ["owner", "admin", "member", "viewer", "end_user"]
+                        }
+                      }
+                    },
+                    "connections": {
+                      "type": "array",
+                      "description": "Integrations the caller could attach to an agent.",
+                      "items": {
+                        "type": "object",
+                        "required": ["integration_id", "name", "source"],
+                        "properties": {
+                          "integration_id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": ["own", "shared", "both"]
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "user": {
+                    "id": "user_abc",
+                    "name": "Ada Lovelace",
+                    "email": "ada@acme.com"
+                  },
+                  "org": {
+                    "id": "org_abc123",
+                    "role": "member"
+                  },
+                  "connections": [
+                    {
+                      "integration_id": "@appstrate/gmail",
+                      "name": "Gmail",
+                      "source": "own"
+                    },
+                    {
+                      "integration_id": "@appstrate/clickup",
+                      "name": "ClickUp",
+                      "source": "shared"
+                    }
+                  ]
                 }
               }
             }
@@ -17184,6 +17349,14 @@
             "description": "Filter by email address (exact match)"
           },
           {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Case-insensitive substring match across name, email, and external ID"
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {
@@ -19730,6 +19903,13 @@
                 }
               }
             }
+          },
+          "runtime_tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Built-in runtime tools the agent opted into via `manifest.runtime_tools` (output/log/note/pin/report)."
           }
         }
       },
@@ -20751,10 +20931,12 @@
             "type": "string"
           },
           "apiShape": {
-            "type": "string"
+            "type": ["string", "null"],
+            "description": "Protocol family. `null` for a built-in credential whose every backing model is an alias (#727) — binding hidden so the endpoint doesn't reveal the provider."
           },
           "baseUrl": {
-            "type": "string"
+            "type": ["string", "null"],
+            "description": "Endpoint base URL. `null` for an alias-only built-in credential (see apiShape)."
           },
           "source": {
             "type": "string",
@@ -20800,10 +20982,12 @@
           "id",
           "label",
           "apiShape",
+          "providerId",
           "baseUrl",
           "modelId",
           "enabled",
           "is_default",
+          "aliased",
           "source",
           "credentialId",
           "created_by",
@@ -20818,13 +21002,20 @@
             "type": "string"
           },
           "apiShape": {
-            "type": "string"
+            "type": ["string", "null"],
+            "description": "Protocol family. `null` for model aliases (`aliased: true`) — binding hidden."
+          },
+          "providerId": {
+            "type": ["string", "null"],
+            "description": "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for model aliases — binding hidden."
           },
           "baseUrl": {
-            "type": "string"
+            "type": ["string", "null"],
+            "description": "Provider endpoint. `null` for model aliases — binding hidden."
           },
           "modelId": {
-            "type": "string"
+            "type": ["string", "null"],
+            "description": "Upstream model id. `null` for model aliases — the real backing is hidden."
           },
           "input": {
             "type": ["array", "null"],
@@ -20847,13 +21038,17 @@
           "is_default": {
             "type": "boolean"
           },
+          "aliased": {
+            "type": "boolean",
+            "description": "Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a public alias and the real binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is stripped from this projection — render an alias badge; the backing model is hidden."
+          },
           "source": {
             "type": "string",
             "enum": ["built-in", "custom"]
           },
           "credentialId": {
-            "type": "string",
-            "description": "ID of the backing `model_provider_credentials` row."
+            "type": ["string", "null"],
+            "description": "ID of the backing `model_provider_credentials` row. `null` for model aliases — binding hidden."
           },
           "cost": {
             "type": ["object", "null"],

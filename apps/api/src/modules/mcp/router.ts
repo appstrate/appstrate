@@ -121,8 +121,8 @@ const MCP_RATE_LIMIT_PER_MIN = 120;
  * surface grows without editing this text. describe_operation (or
  * search_operations' best_match) remains the source of truth for input schemas.
  */
-function buildServerInstructions(): string {
-  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you discover and call any operation of the Appstrate REST API — their own descriptions tell you how. The operation index at the end of these instructions lists EVERY operation by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, then call describe_operation for its input schema and invoke_operation to run it. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema.
+function buildServerInstructions(permissions?: ReadonlySet<string>): string {
+  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you discover and call any operation of the Appstrate REST API — their own descriptions tell you how. Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when building or configuring an agent). The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, then call describe_operation for its input schema and invoke_operation to run it. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema.
 
 ## Core model
 Organization → Applications (id \`app_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe_operation shows which; always keep the \`@\`, and the \`/\` when it's a single param.
@@ -136,7 +136,7 @@ This MCP server is scoped to ONE organization — the one this endpoint serves �
 - Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.
 
 ${OPERATION_INDEX_HEADING}
-${buildOperationIndex()}`;
+${buildOperationIndex(permissions)}`;
 }
 
 // The index is the LAST section of the instructions, fenced by this exact
@@ -315,15 +315,17 @@ export function createMcpRouter(): Hono<AppEnv> {
       }
     };
 
-    // The three disclosure tools are tenant-agnostic — the caller's org is
-    // fixed by the endpoint + token audience and pinned by the org-context
-    // middleware, and every in-process dispatch re-derives it the same way, so
-    // the tools need no actor context.
+    // The disclosure tools are tenant-agnostic — the caller's org is fixed by
+    // the endpoint + token audience and pinned by the org-context middleware,
+    // and every in-process dispatch re-derives it the same way, so the tools
+    // need no actor context. get_me likewise carries no actor context: it
+    // dispatches in-process to /api/me/context, which resolves the caller from
+    // the forwarded auth headers. The index is scoped to the caller's role.
     const tools = buildMcpTools({ origin, permissions, authHeaders, dispatch, observe });
     const server = createMcpServer(
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
-      { instructions: buildServerInstructions() },
+      { instructions: buildServerInstructions(permissions) },
     );
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

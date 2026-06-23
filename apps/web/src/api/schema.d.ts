@@ -1764,6 +1764,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's working context for an AI agent
+         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current application (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). App context resolves from `X-Application-Id`, the API key's application, or the org default.
+         */
+        get: operations["getMyContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/integration-pins": {
         parameters: {
             query?: never;
@@ -11260,6 +11280,78 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    getMyContext: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Caller context */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "user": {
+                     *         "id": "user_abc",
+                     *         "name": "Ada Lovelace",
+                     *         "email": "ada@acme.com"
+                     *       },
+                     *       "org": {
+                     *         "id": "org_abc123",
+                     *         "role": "member"
+                     *       },
+                     *       "connections": [
+                     *         {
+                     *           "integration_id": "@appstrate/gmail",
+                     *           "name": "Gmail",
+                     *           "source": "own"
+                     *         },
+                     *         {
+                     *           "integration_id": "@appstrate/clickup",
+                     *           "name": "ClickUp",
+                     *           "source": "shared"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/json": {
+                        user: {
+                            id: string;
+                            name: string | null;
+                            email: string | null;
+                        };
+                        org: {
+                            id: string;
+                            /** @enum {string} */
+                            role: "owner" | "admin" | "member" | "viewer" | "end_user";
+                        };
+                        /** @description Integrations the caller could attach to an agent. */
+                        connections: {
+                            integration_id: string;
+                            name: string;
+                            /** @enum {string} */
+                            source: "own" | "shared" | "both";
+                        }[];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listMyIntegrationPins: {

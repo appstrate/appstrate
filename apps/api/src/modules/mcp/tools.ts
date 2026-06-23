@@ -37,7 +37,11 @@ import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 export type Dispatch = (req: Request) => Promise<Response>;
 
 /** The tools, named for telemetry/audit. */
-export type McpToolName = "search_operations" | "describe_operation" | "invoke_operation";
+export type McpToolName =
+  | "search_operations"
+  | "describe_operation"
+  | "invoke_operation"
+  | "get_me";
 
 /** Outcome of an `invoke_operation` call, for audit + telemetry. */
 export type McpInvokeOutcome =
@@ -625,7 +629,51 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
+function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
+  const descriptor: Tool = {
+    name: "get_me",
+    description:
+      "Return the caller's working context: identity (name, email), role in this organization, " +
+      "and the integrations the caller already has connected and could attach to an agent " +
+      "(their own or org-shared). Call this first to ground who you are acting for, what the " +
+      "caller's role allows (operations beyond it fail at invoke time), and which integrations " +
+      "to prefer when building or configuring an agent.",
+    annotations: {
+      title: "Get caller context",
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: { type: "object", properties: {} },
+  };
+
+  const handler = async (): Promise<CallToolResult> => {
+    const start = performance.now();
+    const headers = new Headers(ctx.authHeaders);
+    // Trusted in-process re-entry — same rationale as invoke_operation: lets the
+    // org-pinned MCP token reach an app-scoped route, and lets requireAppContext
+    // fall back to the org default application when no X-Application-Id is forwarded.
+    headers.set(...internalDispatchHeader());
+    const request = new Request(new URL("/api/me/context", ctx.origin).toString(), {
+      method: "GET",
+      headers,
+    });
+    const response = await ctx.dispatch(request);
+    emit(ctx, {
+      tool: "get_me",
+      durationMs: performance.now() - start,
+      method: "GET",
+      path: "/api/me/context",
+      status: response.status,
+      outcome: "invoked",
+    });
+    return readResponse(response);
+  };
+
+  return { descriptor, handler };
+}
+
 /** Build the per-request tool set. Handlers close over the caller's auth context. */
 export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
-  return [buildSearchTool(ctx), buildDescribeTool(ctx), buildInvokeTool(ctx)];
+  return [buildSearchTool(ctx), buildDescribeTool(ctx), buildInvokeTool(ctx), buildGetMeTool(ctx)];
 }

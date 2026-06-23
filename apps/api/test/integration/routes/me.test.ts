@@ -21,7 +21,7 @@ import {
   orgOnlyHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage, seedApplication } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -34,6 +34,7 @@ async function seedConnectionFor(opts: {
   integrationId: string;
   userId: string;
   label?: string;
+  sharedWithOrg?: boolean;
 }): Promise<string> {
   await seedPackage({
     id: opts.integrationId,
@@ -52,6 +53,7 @@ async function seedConnectionFor(opts: {
       credentialsEncrypted: "x",
       scopesGranted: ["openid", "email"],
       label: opts.label ?? null,
+      sharedWithOrg: opts.sharedWithOrg ?? false,
     })
     .returning({ id: integrationConnections.id });
   return row!.id;
@@ -137,6 +139,64 @@ describe("Me API (/api/me)", () => {
 
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/me/orgs");
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe("GET /api/me/context", () => {
+    let ctx: TestContext;
+    beforeEach(async () => {
+      ctx = await createTestContext();
+    });
+
+    it("returns identity, org role, and usable integrations (own + org-shared), app-scoped", async () => {
+      // Own connection in the current app → source "own".
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        integrationId: "@ctx/gmail",
+        userId: ctx.user.id,
+      });
+
+      // Connection owned by ANOTHER user but shared with the org, same app → "shared".
+      const other = await createTestUser();
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        integrationId: "@ctx/clickup",
+        userId: other.id,
+        sharedWithOrg: true,
+      });
+
+      // Connection in a DIFFERENT app of the same org → must NOT appear.
+      const otherApp = await seedApplication({ orgId: ctx.orgId });
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        applicationId: otherApp.id,
+        integrationId: "@ctx/other-app",
+        userId: ctx.user.id,
+      });
+
+      const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        user: { id: string; name: string | null; email: string | null };
+        org: { id: string; role: string };
+        connections: { integration_id: string; name: string; source: string }[];
+      };
+
+      expect(body.user.id).toBe(ctx.user.id);
+      expect(body.org.id).toBe(ctx.orgId);
+      expect(body.org.role).toBe("owner");
+
+      const byId = new Map(body.connections.map((c) => [c.integration_id, c]));
+      expect(byId.get("@ctx/gmail")?.source).toBe("own");
+      expect(byId.get("@ctx/clickup")?.source).toBe("shared");
+      expect(byId.has("@ctx/other-app")).toBe(false);
+    });
+
+    it("returns 401 without authentication", async () => {
+      const res = await app.request("/api/me/context");
       expect(res.status).toBe(401);
     });
   });

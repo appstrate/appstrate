@@ -42,7 +42,11 @@ import {
   deleteMemberPin,
   listMemberPinsForAgent,
 } from "../services/integration-pins-service.ts";
-import { deleteIntegrationConnection } from "../services/integration-connections.ts";
+import {
+  deleteIntegrationConnection,
+  listUsableIntegrationsForActor,
+} from "../services/integration-connections.ts";
+import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { parseBody, unauthorized, invalidRequest } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
@@ -292,6 +296,44 @@ router.delete("/connections/:connectionId", async (c) => {
     resourceId: connectionId,
   });
   return c.body(null, 204);
+});
+
+/**
+ * GET /api/me/context — the caller's working context for an AI agent.
+ *
+ * One payload, three consumers: the chat module injects it into the system
+ * prompt, the platform MCP server exposes it as the `get_me` tool, and
+ * external REST/MCP clients call it directly. Returns the caller's identity,
+ * their role in the pinned org, and the integrations they could attach when
+ * building an agent in the current application (own or org-shared) — so the
+ * agent can prefer already-connected integrations and respect the caller's
+ * role (operations beyond it will 403 at invoke time).
+ *
+ * App context resolves from `X-Application-Id`, the API key's application, or
+ * (for the in-process MCP sub-dispatch) the org's default application.
+ */
+router.get("/context", requireAppContext(), async (c) => {
+  const actor = getActor(c);
+  const scope = getAppScope(c);
+
+  let identity: { id: string; name: string | null; email: string | null };
+  if (actor.type === "end_user") {
+    const eu = await getEndUser(scope, actor.id);
+    identity = { id: eu.id, name: eu.name ?? null, email: eu.email ?? null };
+  } else {
+    const user = c.get("user");
+    if (!user) throw unauthorized("Authentication required");
+    identity = { id: user.id, name: user.name ?? null, email: user.email ?? null };
+  }
+
+  const role = (c.get("orgRole") as string | undefined) ?? "end_user";
+  const connections = await listUsableIntegrationsForActor(scope, actor);
+
+  return c.json({
+    user: identity,
+    org: { id: scope.orgId, role },
+    connections,
+  });
 });
 
 export default router;

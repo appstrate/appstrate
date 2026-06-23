@@ -261,6 +261,7 @@ const expectedEndpoints = [
   "PATCH /api/profile",
   "POST /api/profiles/batch",
   "GET /api/me/orgs",
+  "GET /api/me/context",
   "GET /api/me/models",
   "GET /api/me/connections",
   "DELETE /api/me/connections/{connectionId}",

@@ -168,8 +168,42 @@ export function resetCatalog(): void {
  * fully derived from the live catalog and memoized, so it grows with the API
  * surface without any hand maintenance.
  */
-export function buildOperationIndex(): string {
-  if (cachedIndex !== null) return cachedIndex;
+/**
+ * OpenAPI tag → RBAC resource, for permission-scoped index filtering. Coarse
+ * by design: the index is grouped by tag, and there is no per-operation
+ * permission metadata, so we drop a whole tag section when the caller's role
+ * has no permission on the mapped resource. Tags with no clear single resource
+ * (auth, health, profile, uploads, library, packages, proxies-as-call, …) are
+ * intentionally absent and always shown — this is a context-reduction heuristic,
+ * NOT a security boundary (invoke_operation re-enforces RBAC per call).
+ */
+const TAG_TO_RESOURCE: Record<string, string> = {
+  Agents: "agents",
+  Runs: "runs",
+  Schedules: "schedules",
+  Integrations: "integrations",
+  Applications: "applications",
+  "Application Packages": "applications",
+  "End Users": "end-users",
+  "API Keys": "api-keys",
+  Models: "models",
+  "Model Provider Credentials": "model-provider-credentials",
+  Organizations: "org",
+};
+
+/** Whether a tag's section is shown to a caller holding `permissions`. */
+function tagVisible(tag: string, permissions: ReadonlySet<string>): boolean {
+  const resource = TAG_TO_RESOURCE[tag];
+  if (!resource) return true; // unmapped tag → always shown (conservative)
+  const prefix = `${resource}:`;
+  for (const p of permissions) if (p.startsWith(prefix)) return true;
+  return false;
+}
+
+export function buildOperationIndex(permissions?: ReadonlySet<string>): string {
+  // The unfiltered index is memoized; a permission-scoped index is built fresh
+  // (it varies per caller role and is cheap relative to a full request).
+  if (!permissions && cachedIndex !== null) return cachedIndex;
 
   const { operations } = getCatalog();
   const byTag = new Map<string, string[]>();
@@ -179,13 +213,17 @@ export function buildOperationIndex(): string {
     (byTag.get(tag) ?? byTag.set(tag, []).get(tag)!).push(line);
   }
 
-  const sections = [...byTag.keys()].sort().map((tag) => {
-    const lines = byTag.get(tag)!.sort();
-    return `## ${tag}\n${lines.join("\n")}`;
-  });
+  const sections = [...byTag.keys()]
+    .sort()
+    .filter((tag) => !permissions || tagVisible(tag, permissions))
+    .map((tag) => {
+      const lines = byTag.get(tag)!.sort();
+      return `## ${tag}\n${lines.join("\n")}`;
+    });
 
-  cachedIndex = sections.join("\n\n");
-  return cachedIndex;
+  const result = sections.join("\n\n");
+  if (!permissions) cachedIndex = result;
+  return result;
 }
 
 const SCHEMA_REF_PREFIX = "#/components/schemas/";

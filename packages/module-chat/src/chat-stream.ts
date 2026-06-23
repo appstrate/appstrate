@@ -63,13 +63,49 @@ const SYSTEM_PROMPT = `You are Appstrate's assistant. You help the user operate 
 
 Use the tools to ground every action: search for the right operation, read its schema, then invoke it. Never invent an operationId or argument shape. Runs are asynchronous — after triggering one, call the run-get operation with \`query: { wait: true }\` to long-poll the platform until the run is terminal (it returns after ~55s; if still running, call it again); never busy-poll in a tight loop yourself. Cite what the tools return; do not fabricate results.
 
-When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.`;
+When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.
+
+Respect the user's role: actions beyond it will be refused by the platform — don't attempt them. When building or configuring an agent, prefer integrations the user already has connected (listed in their context below) over asking them to connect new ones.`;
 
 // Fallback when the platform MCP module isn't reachable (e.g. `mcp` absent
 // from MODULES). The chat keeps working for plain conversation — it just has
 // no instance tools — so the prompt drops the tool-grounding instructions and
 // tells the model to be upfront about the limitation.
 const NO_TOOLS_SYSTEM_PROMPT = `You are Appstrate's assistant. Right now your instance tools are unavailable because the platform MCP module is not active, so you cannot search operations, run agents, inspect runs, or schedule. Answer the user's questions directly and conversationally. If the user asks for an action that needs those tools, say plainly that tools are disabled until the \`mcp\` module is enabled, rather than pretending to act.`;
+
+/** Shape of GET /api/me/context (the `get_me` payload). Validated loosely. */
+interface CallerContext {
+  user?: { name?: string | null; email?: string | null } | null;
+  org?: { role?: string | null } | null;
+  connections?: { integration_id: string; name: string; source: string }[] | null;
+}
+
+/**
+ * Render the caller context into a system-prompt block. Returns "" when the
+ * payload is unusable so the caller can skip injection.
+ */
+export function formatCallerContext(raw: unknown): string {
+  const ctx = (raw ?? {}) as CallerContext;
+  const name = ctx.user?.name?.trim();
+  const email = ctx.user?.email?.trim();
+  const role = ctx.org?.role?.trim();
+  if (!name && !email && !role && !ctx.connections?.length) return "";
+
+  const who = name && email ? `${name} (${email})` : (name ?? email ?? "the user");
+  const lines = [
+    "## Your context",
+    `You are assisting ${who}${role ? `, whose role in this organization is "${role}"` : ""}.`,
+  ];
+  if (ctx.connections?.length) {
+    const list = ctx.connections.map((c) => `${c.name} (${c.source})`).join(", ");
+    lines.push(
+      `Integrations the user has connected and could attach to an agent: ${list}. Prefer these when building or configuring an agent.`,
+    );
+  } else {
+    lines.push("The user has no connected integrations yet.");
+  }
+  return lines.join("\n");
+}
 
 // The client (assistant-ui / useChat) posts the full thread plus optional
 // session/model/context extras. `messages` are UIMessages; we keep validation
@@ -172,6 +208,23 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
       : SYSTEM_PROMPT;
   if (body.context) {
     system += `\n\nThe user is currently looking at: ${body.context.type} "${body.context.label ?? body.context.id}" (id: ${body.context.id}). Prefer this context when the question is ambiguous.`;
+  }
+
+  // Caller context (identity, role, connected integrations) — one source of
+  // truth shared with the MCP `get_me` tool: GET /api/me/context. Best-effort,
+  // a failure degrades to no context block rather than breaking the turn.
+  try {
+    const ctxHeaders: Record<string, string> = { ...headers };
+    if (applicationId) ctxHeaders["x-application-id"] = applicationId;
+    const res = await fetch(new URL("/api/me/context", origin), { headers: ctxHeaders });
+    if (res.ok) {
+      const block = formatCallerContext(await res.json());
+      if (block) system += `\n\n${block}`;
+    }
+  } catch (err) {
+    logger.warn("me/context unavailable — chat degrades without caller context", {
+      err: String(err),
+    });
   }
 
   // Platform MCP wiring shared by both engines: the meta-tools live at

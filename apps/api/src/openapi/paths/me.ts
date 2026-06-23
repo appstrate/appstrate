@@ -387,4 +387,84 @@ export const mePaths = {
       },
     },
   },
+  "/api/me/context": {
+    get: {
+      operationId: "getMyContext",
+      tags: ["Profile"],
+      summary: "The caller's working context for an AI agent",
+      description:
+        "Returns the caller's identity, their role in the pinned org, and the integrations " +
+        "they could attach when building an agent in the current application (their own or " +
+        "org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and " +
+        "direct API/MCP callers — so an agent can prefer already-connected integrations and " +
+        "respect the caller's role (operations beyond it 403 at invoke time). App context " +
+        "resolves from `X-Application-Id`, the API key's application, or the org default.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
+      responses: {
+        "200": {
+          description: "Caller context",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["user", "org", "connections"],
+                properties: {
+                  user: {
+                    type: "object",
+                    required: ["id", "name", "email"],
+                    properties: {
+                      id: { type: "string" },
+                      name: { type: ["string", "null"] },
+                      email: { type: ["string", "null"] },
+                    },
+                  },
+                  org: {
+                    type: "object",
+                    required: ["id", "role"],
+                    properties: {
+                      id: { type: "string" },
+                      role: {
+                        type: "string",
+                        enum: ["owner", "admin", "member", "viewer", "end_user"],
+                      },
+                    },
+                  },
+                  connections: {
+                    type: "array",
+                    description: "Integrations the caller could attach to an agent.",
+                    items: {
+                      type: "object",
+                      required: ["integration_id", "name", "source"],
+                      properties: {
+                        integration_id: { type: "string" },
+                        name: { type: "string" },
+                        source: { type: "string", enum: ["own", "shared", "both"] },
+                      },
+                    },
+                  },
+                },
+              },
+              example: {
+                user: { id: "user_abc", name: "Ada Lovelace", email: "ada@acme.com" },
+                org: { id: "org_abc123", role: "member" },
+                connections: [
+                  { integration_id: "@appstrate/gmail", name: "Gmail", source: "own" },
+                  { integration_id: "@appstrate/clickup", name: "ClickUp", source: "shared" },
+                ],
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
 } as const;

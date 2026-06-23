@@ -53,6 +53,7 @@ import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { actorInsert, actorFilter } from "../lib/actor.ts";
+import { getPackageDisplayName } from "../lib/package-helpers.ts";
 import type { Actor } from "@appstrate/connect";
 import {
   resolveIntegrationToolCatalog,
@@ -1905,6 +1906,75 @@ export async function listIntegrationConnections(
       ),
     );
   return rows.map(serializeIntegrationConnection);
+}
+
+/** One integration the actor could attach to an agent (own and/or org-shared). */
+export interface UsableIntegration {
+  integration_id: string;
+  name: string;
+  source: "own" | "shared" | "both";
+}
+
+/**
+ * Integrations the actor could use when building an agent manually in the
+ * current application: any integration for which a connection exists that is
+ * either the actor's own (`actorFilter`) OR opted into org-wide sharing
+ * (`sharedWithOrg`). Mirrors the resolver predicate in `loadActorConnection`.
+ *
+ * Deduped to the integration level (the agent picks an integration; the
+ * connection itself is resolved at run time by `resolveAgentIntegrationPick`).
+ * `source` reflects whether the actor owns a connection, only inherits a
+ * shared one, or both.
+ */
+export async function listUsableIntegrationsForActor(
+  scope: AppScope,
+  actor: Actor,
+): Promise<UsableIntegration[]> {
+  await assertAppBelongsToOrg(scope);
+  const ownerPredicate = actorFilter(actor, integrationConnections);
+  const rows = await db
+    .select({
+      integrationId: integrationConnections.integrationId,
+      userId: integrationConnections.userId,
+      endUserId: integrationConnections.endUserId,
+      sharedWithOrg: integrationConnections.sharedWithOrg,
+    })
+    .from(integrationConnections)
+    .where(
+      and(
+        eq(integrationConnections.applicationId, scope.applicationId),
+        or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
+      ),
+    );
+  if (rows.length === 0) return [];
+
+  // own = row owned by this actor; shared = row opted into org-wide sharing.
+  // A single integration can have both kinds across multiple connection rows.
+  const acc = new Map<string, { own: boolean; shared: boolean }>();
+  for (const row of rows) {
+    const own = actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
+    const entry = acc.get(row.integrationId) ?? { own: false, shared: false };
+    entry.own ||= own;
+    entry.shared ||= row.sharedWithOrg;
+    acc.set(row.integrationId, entry);
+  }
+
+  const ids = [...acc.keys()];
+  const pkgRows = await db
+    .select({ id: packages.id, draftManifest: packages.draftManifest })
+    .from(packages)
+    .where(inArray(packages.id, ids));
+  const nameMap = new Map(pkgRows.map((p) => [p.id, getPackageDisplayName(p)]));
+
+  return ids.map((integrationId) => {
+    const { own, shared } = acc.get(integrationId)!;
+    const source: UsableIntegration["source"] = own && shared ? "both" : own ? "own" : "shared";
+    return {
+      integration_id: integrationId,
+      name: nameMap.get(integrationId) ?? integrationId,
+      source,
+    };
+  });
 }
 
 /**
