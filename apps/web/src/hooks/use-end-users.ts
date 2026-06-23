@@ -10,6 +10,7 @@ export type EndUserInfo = components["schemas"]["EndUserObject"];
 export interface EndUserListParams {
   limit?: number;
   startingAfter?: string;
+  search?: string;
 }
 
 export function useEndUsers(params?: EndUserListParams) {
@@ -19,7 +20,11 @@ export function useEndUsers(params?: EndUserListParams) {
     "/api/end-users",
     {
       params: {
-        query: { limit: params?.limit, startingAfter: params?.startingAfter },
+        query: {
+          limit: params?.limit,
+          startingAfter: params?.startingAfter,
+          search: params?.search,
+        },
         header: scope.header,
       },
     },

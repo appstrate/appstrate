@@ -155,8 +155,8 @@ describe("RBAC — Permission enforcement", () => {
 
   // ─── Member-accessible routes ──────────────────────────────
 
-  describe("schedules:write (member-accessible)", () => {
-    it("member can access schedule creation endpoint", async () => {
+  describe("schedules:write (admin-only — #738)", () => {
+    it("member gets 403 on schedule creation", async () => {
       await seedPackage({
         id: `@rbac-test/test-agent`,
         orgId: owner.orgId,
@@ -172,12 +172,10 @@ describe("RBAC — Permission enforcement", () => {
           cronExpression: "0 9 * * 1",
         }),
       });
-      // Should not be a PERMISSION 403 — may fail for other reasons (invalid profile → 403 "forbidden")
-      if (res.status === 403) {
-        const body = (await res.json()) as Record<string, unknown>;
-        // If 403, it should NOT be a permission error — just ownership
-        expect(body.detail as string).not.toContain("schedules:write");
-      }
+      // Members are read-only on schedules now — must be a permission 403.
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.detail as string).toContain("schedules:write");
     });
 
     it("viewer gets 403 on schedule creation", async () => {

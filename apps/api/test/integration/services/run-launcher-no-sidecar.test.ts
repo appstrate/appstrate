@@ -158,13 +158,15 @@ describe("run-launcher — sidecar skip decision", () => {
     expect(counts.createWorkloadCalls).toBe(1);
 
     // The agent env must not advertise a sidecar URL nor a forward proxy
-    // — both would point at a non-existent service. MODEL_BASE_URL should
-    // also be absent (Pi SDK falls back to the API's native default).
+    // — both would point at a non-existent service. MODEL_BASE_URL, however,
+    // MUST carry the model's own baseUrl on the no-sidecar path so the Pi
+    // SDK talks to the correct upstream instead of falling back to the
+    // api-shape's native default (api.openai.com). See #741.
     const env = counts.capturedAgentEnv ?? {};
     expect(env.SIDECAR_URL).toBeUndefined();
     expect(env.HTTP_PROXY).toBeUndefined();
     expect(env.HTTPS_PROXY).toBeUndefined();
-    expect(env.MODEL_BASE_URL).toBeUndefined();
+    expect(env.MODEL_BASE_URL).toBe("https://api.anthropic.com");
     // The real API key must reach the container — there's no sidecar to
     // substitute the placeholder back to the real value.
     expect(env.MODEL_API_KEY).toBe("sk-test-secret");

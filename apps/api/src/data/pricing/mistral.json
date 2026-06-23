@@ -423,6 +423,19 @@
       "output": 2
     }
   },
+  "mistral-medium-3-5": {
+    "label": "Mistral Medium 3 5",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 1.5,
+      "output": 7.5
+    }
+  },
   "mistral-medium-latest": {
     "label": "Mistral Medium Latest",
     "contextWindow": 131072,

@@ -15,7 +15,7 @@ import { LoadingState, ErrorState } from "../components/page-states";
 
 export function ScheduleEditPage() {
   const { t } = useTranslation(["agents", "common"]);
-  const { isMember } = usePermissions();
+  const { isAdmin } = usePermissions();
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
 
@@ -24,7 +24,7 @@ export function ScheduleEditPage() {
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
-  if (!isMember) return null;
+  if (!isAdmin) return null;
   if (isLoading) return <LoadingState />;
   if (error || !schedule) return <ErrorState message={error?.message} />;
 
@@ -57,6 +57,17 @@ export function ScheduleEditPage() {
           proxy_id_override: schedule.proxy_id_override ?? null,
           version_override: schedule.version_override ?? null,
           connection_overrides: schedule.connection_overrides ?? null,
+          // Seed the actor with the schedule's current identity so the select
+          // shows the real value (not a "default" placeholder). Submit still
+          // only sends it when it differs from currentActor.
+          actor: {
+            user_id: schedule.userId ?? undefined,
+            end_user_id: schedule.endUserId ?? undefined,
+          },
+        }}
+        currentActor={{
+          user_id: schedule.userId ?? undefined,
+          end_user_id: schedule.endUserId ?? undefined,
         }}
         inputSchema={deps?.inputSchema}
         configSchema={deps?.configSchema}

@@ -43,8 +43,11 @@ describe("resolvePermissions", () => {
     // Can run completions through the LLM proxy (powers a member-facing chat —
     // intentionally granted to members, not just admins)
     expect(perms.has("llm-proxy:call")).toBe(true);
-    // Module-owned permissions still part of the core taxonomy
-    expect(perms.has("schedules:write")).toBe(true);
+    // Can read schedules but not create/edit/delete them (#738 — scheduling,
+    // incl. choosing the execution identity, is an admin/owner operation)
+    expect(perms.has("schedules:read")).toBe(true);
+    expect(perms.has("schedules:write")).toBe(false);
+    expect(perms.has("schedules:delete")).toBe(false);
     expect(perms.has("models:read")).toBe(true);
     // Cannot write agents
     expect(perms.has("agents:write")).toBe(false);
