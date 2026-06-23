@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Label } from "@/components/ui/label";
 import {
@@ -45,8 +46,16 @@ export function ActorPicker({ value, onChange, defaultLabel }: ActorPickerProps)
   const { data: endUserPage } = useEndUsers({ limit: 100 });
   const endUsers = endUserPage?.data ?? [];
 
-  const kind = value?.end_user_id ? KIND_END_USER : KIND_MEMBER;
+  // Kind lives in local state — deriving it from `value` alone would make the
+  // end-user option unreachable, since switching kind clears `value` (which
+  // would immediately snap the toggle back to "member").
+  const [kind, setKind] = useState(value?.end_user_id ? KIND_END_USER : KIND_MEMBER);
   const hasSelection = !!(value?.user_id || value?.end_user_id);
+
+  const handleKindChange = (next: string) => {
+    setKind(next);
+    onChange(undefined);
+  };
 
   return (
     <div className="space-y-3">
@@ -60,7 +69,7 @@ export function ActorPicker({ value, onChange, defaultLabel }: ActorPickerProps)
       <div className="flex gap-2">
         {/* Identity kind: org member vs. end-user. Switching clears the
             current pick so the two id fields never coexist. */}
-        <Select value={kind} onValueChange={() => onChange(undefined)}>
+        <Select value={kind} onValueChange={handleKindChange}>
           <SelectTrigger className="w-40">
             <SelectValue />
           </SelectTrigger>
