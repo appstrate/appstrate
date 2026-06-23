@@ -24,7 +24,7 @@ import { uploadClient } from "../api/uploads";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 import { AgentVersionField } from "./package-version-select";
-import { ActorPicker, type ActorValue } from "./actor-picker";
+import { ActorSelect, type ActorValue } from "./actor-select";
 
 // Sentinel for the schedule's "inherit" version choice — no pin stored; the
 // agent's version resolution applies at fire time.
@@ -415,7 +415,19 @@ export function ScheduleForm({
           )}
 
           {/* Execution identity (#738) */}
-          <ActorPicker value={actor} onChange={setActor} defaultLabel={defaultActorLabel} />
+          <div className="space-y-2">
+            <Label>{t("schedule.actorTitle")}</Label>
+            <ActorSelect
+              value={actor}
+              onChange={setActor}
+              placeholder={
+                defaultActorLabel
+                  ? t("schedule.actorDefaultShort", { actor: defaultActorLabel })
+                  : t("schedule.actorDefaultSelf")
+              }
+            />
+            <p className="text-muted-foreground text-xs">{t("schedule.actorHint")}</p>
+          </div>
 
           {/* Input fields (conditional) */}
           {hasInputSchema && (
