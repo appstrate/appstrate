@@ -207,7 +207,7 @@ export function PackageActionsDropdown({
           {isAgent && (
             <>
               <DropdownMenuSeparator />
-              {isMember && !hasFileInput && onAddSchedule && (
+              {isAdmin && !hasFileInput && onAddSchedule && (
                 <DropdownMenuItem onSelect={onAddSchedule}>
                   <CalendarPlus size={14} />
                   {t("schedule.titleNew")}

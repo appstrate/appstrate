@@ -12,7 +12,7 @@ import { LoadingState } from "../components/page-states";
 
 export function ScheduleCreatePage() {
   const { t } = useTranslation(["agents", "common"]);
-  const { isMember } = usePermissions();
+  const { isAdmin } = usePermissions();
   const navigate = useNavigate();
 
   const { data: agents, isLoading: agentsLoading } = useAgents();
@@ -22,7 +22,7 @@ export function ScheduleCreatePage() {
   const deps = useScheduleFormDeps(effectiveAgentId || undefined);
   const createSchedule = useCreateSchedule(effectiveAgentId);
 
-  if (!isMember) return null;
+  if (!isAdmin) return null;
   if (agentsLoading) return <LoadingState />;
 
   return (
