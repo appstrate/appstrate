@@ -46,7 +46,7 @@ function ToolLine({
   trailing?: string;
 }) {
   return (
-    <div className="bg-card text-card-foreground mb-3 flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+    <div className="bg-card text-card-foreground my-3 flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm">
       <Icon className={`size-4 shrink-0 ${iconClass}`} />
       <span className={`flex-1 truncate ${muted ? "text-muted-foreground" : ""}`}>{label}</span>
       {trailing ? <code className="text-muted-foreground shrink-0 text-xs">{trailing}</code> : null}
