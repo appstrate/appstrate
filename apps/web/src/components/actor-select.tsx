@@ -82,7 +82,10 @@ export function ActorSelect({
     limit: 50,
     search: debouncedQuery || undefined,
   });
-  const endUsers = includeEndUsers ? (endUserPage?.data ?? []) : [];
+  const endUsers = useMemo(
+    () => (includeEndUsers ? (endUserPage?.data ?? []) : []),
+    [includeEndUsers, endUserPage],
+  );
 
   const memberOptions = useMemo<Option[]>(() => {
     const q = debouncedQuery.toLowerCase();

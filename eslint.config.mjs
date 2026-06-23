@@ -220,7 +220,18 @@ export default tseslint.config(
       // and fragile components — a static cleanliness/robustness gate that
       // runs in `bun run check` (local + CI), no runtime harness needed.
       ...reactHooks.configs["recommended-latest"].rules,
-      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      "react-refresh/only-export-components": [
+        "warn",
+        {
+          allowConstantExport: true,
+          // `makeAssistantToolUI(...)` is assistant-ui's documented HOC factory
+          // for registering a tool's render UI (chat module, tool-uis.tsx). Its
+          // result is a component wrapped by an HOC, not a plain value — declare
+          // the factory so Fast Refresh treats those exports as components, the
+          // sanctioned mechanism the rule offers for HOC factories.
+          extraHOCs: ["makeAssistantToolUI"],
+        },
+      ],
       // Re-render robustness: the React Compiler rules above check Rules-of-React
       // correctness but NOT re-render efficiency. These three catch the structural
       // causes of avoidable re-renders / remounts that a runtime tool (react-scan)
