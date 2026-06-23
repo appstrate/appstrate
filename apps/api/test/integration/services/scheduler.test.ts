@@ -794,5 +794,13 @@ describeRequiresRedis("scheduler service", () => {
         ),
       ).toBe(false);
     });
+
+    it("blocks (returns true) when parsing throws on a null actor", () => {
+      // A null manifest makes the parse throw; the catch must fail safe by
+      // BLOCKING (true) so the run surfaces as a failed run, not a silent skip.
+      expect(
+        scheduleCannotResolveIntegrations(null, null as unknown as Record<string, unknown>),
+      ).toBe(true);
+    });
   });
 });
