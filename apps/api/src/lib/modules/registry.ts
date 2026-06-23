@@ -40,10 +40,10 @@ import { listLlmUsageForRun } from "../../services/state/runs.ts";
  * mutate `process.env.MODULES` must call `_resetCacheForTesting()` from
  * `@appstrate/env` to flush the cached snapshot.
  *
- * Defaults to the built-in OSS modules plus the two reference
- * OAuth-provider modules (`@appstrate/module-codex`,
- * `@appstrate/module-claude-code`) when the env var is unset. External
- * deployments extend the list by appending npm package specifiers, e.g.:
+ * Defaults to the built-in OSS modules ONLY
+ * (`oidc,webhooks,mcp,core-providers`) — the authoritative default lives
+ * in the `@appstrate/env` Zod schema (`packages/env/src/index.ts`).
+ * External deployments extend the list by appending specifiers, e.g.:
  *   MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-codex,@appstrate/module-claude-code,@scope/module
  *
  * `core-providers` ships the API-key model providers (openai, anthropic,
@@ -51,13 +51,12 @@ import { listLlmUsageForRun } from "../../services/state/runs.ts";
  * deployments that BYO their own provider catalog can opt out cleanly.
  *
  * `@appstrate/module-codex` (ChatGPT/Codex OAuth) and
- * `@appstrate/module-claude-code` (Claude Pro/Max/Team OAuth) ship as
- * the two reference external-provider modules. They are enabled by
- * default; operators who do not want to expose ChatGPT- or
- * Claude-subscription billing must remove them from `MODULES`
- * explicitly (cf. upstream ToS posture for each — OpenAI Consumer ToU
- * grey zone, Anthropic Consumer ToS forbids third-party use of OAuth
- * subscription tokens).
+ * `@appstrate/module-claude-code` (Claude Pro/Max/Team OAuth) are the two
+ * reference subscription-provider modules. They are OPT-IN — NOT in the
+ * default set — because each sits in a vendor-ToS grey zone (OpenAI
+ * Consumer ToU grey zone; Anthropic Consumer ToS forbids third-party use
+ * of OAuth subscription tokens). An operator enables them deliberately by
+ * appending them to `MODULES` (cf. `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`).
  *
  * All declared modules are required — if a module is in the list, it must
  * load and init successfully or the platform crashes.

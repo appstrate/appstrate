@@ -15,16 +15,24 @@
  *   - `extractTokenIdentity` decodes the RS256 access JWT to surface
  *     `chatgpt_account_id` (required as `chatgpt-account-id` header by
  *     the chatgpt.com Codex backend) and `email`.
+ *   - `validateCredential` decodes the same JWT OFFLINE (no network) to
+ *     confirm the token is unexpired and carries `chatgpt_account_id`.
  *   - `beforeLlmProxyRequest` is not currently needed — the sidecar
  *     reads the persisted `accountId` from the credential row before
  *     each request.
+ *
+ * The platform issues ZERO Codex API calls to validate a credential or
+ * discover models: validation is the local JWT decode below, and model
+ * discovery persists the static `modelDiscoveryCandidates` (declared via
+ * `credentialValidation: "offline"`). The user's subscription token is
+ * only ever spent through the official Codex CLI at run time. See
+ * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`.
  */
 
 import type {
   AppstrateModule,
-  InferenceProbeBuildError,
-  InferenceProbeContext,
-  InferenceProbeRequest,
+  CredentialValidationContext,
+  CredentialValidationResult,
   ModelProviderDefinition,
   ModelProviderHooks,
   ModelProviderIdentity,
@@ -54,6 +62,8 @@ import { base64UrlEncode, decodeJwtPayload } from "@appstrate/core/jwt";
 function decodeCodexJwtPayload(accessToken: string): {
   chatgpt_account_id?: string;
   email?: string;
+  /** Standard `exp` claim — seconds since epoch, when present. */
+  exp?: number;
 } | null {
   const claims = decodeJwtPayload(accessToken);
   if (!claims) return null;
@@ -63,50 +73,13 @@ function decodeCodexJwtPayload(accessToken: string): {
       ? (auth["chatgpt_account_id"] as string)
       : undefined;
   const email = typeof claims["email"] === "string" ? (claims["email"] as string) : undefined;
-  return { chatgpt_account_id: accountId, email };
+  const exp = typeof claims["exp"] === "number" ? (claims["exp"] as number) : undefined;
+  return { chatgpt_account_id: accountId, email, exp };
 }
 
 // ---------------------------------------------------------------------------
 // Provider hooks
 // ---------------------------------------------------------------------------
-
-/**
- * Build the Codex inference probe request. Mirrors pi-ai's openai-codex-
- * responses provider exactly (cf. node_modules/@mariozechner/pi-ai/dist/
- * providers/openai-codex-responses.js). The wire format is the
- * regression-prone part — Codex rejects requests that drop any of the
- * load-bearing headers (`chatgpt-account-id`, `originator`, `OpenAI-Beta`).
- *
- * Module-private — the wire shape is pinned via `buildInferenceProbe`
- * on the provider's `hooks`.
- */
-function buildCodexInferenceRequest(config: {
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-  accountId: string;
-}): InferenceProbeRequest {
-  return {
-    url: `${config.baseUrl.replace(/\/+$/, "")}/codex/responses`,
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "chatgpt-account-id": config.accountId,
-      originator: "pi",
-      "OpenAI-Beta": "responses=experimental",
-      accept: "text/event-stream",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: config.modelId,
-      store: false,
-      stream: true,
-      instructions: "ping",
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "ping" }] }],
-      include: [],
-    }),
-  };
-}
 
 const codexHooks: ModelProviderHooks = {
   /**
@@ -153,31 +126,51 @@ const codexHooks: ModelProviderHooks = {
   },
 
   /**
-   * Build the inference probe sent by the platform's connection test.
-   * Codex's chatgpt.com backend exposes no `/models` endpoint, so the
-   * generic discovery probe is useless — we issue a real single-token
-   * `${baseUrl}/codex/responses` request instead. On 200 the connection
-   * works end-to-end (oauth + chatgpt backend + subscription + model).
-   *
-   * Returns a structured error when the `accountId` slot is missing so
-   * the platform fails the test loudly instead of sending a request the
-   * backend will 401.
+   * Validate a Codex credential OFFLINE — NO request to chatgpt.com. The
+   * platform never spends a subscription request to test a token: we
+   * decode the access JWT locally and confirm it (a) is a well-formed
+   * Codex JWT carrying `chatgpt_account_id` (required as the
+   * `chatgpt-account-id` routing header at run time) and (b) has a
+   * verifiable, unexpired expiry (the row's `expiresAt` or the token's
+   * `exp` claim). When NO expiry source is present, expiry is
+   * unverifiable offline and the credential is rejected — a dead token
+   * with no expiry metadata must not pass. This is a STRUCTURAL/offline
+   * check only (decode + required claims + expiry), NOT a signature
+   * verification or a live backend call. Real per-model availability —
+   * and true credential liveness — is established at first
+   * official-binary run.
    */
-  buildInferenceProbe(
-    ctx: InferenceProbeContext,
-  ): InferenceProbeRequest | InferenceProbeBuildError | null {
-    if (!ctx.accountId) {
+  validateCredential(ctx: CredentialValidationContext): CredentialValidationResult {
+    const claims = decodeCodexJwtPayload(ctx.apiKey);
+    if (!claims?.chatgpt_account_id) {
       return {
+        ok: false,
         error: "AUTH_FAILED",
         message: "Missing chatgpt-account-id (token may not be a valid Codex JWT)",
       };
     }
-    return buildCodexInferenceRequest({
-      baseUrl: ctx.baseUrl,
-      modelId: ctx.modelId,
-      apiKey: ctx.apiKey,
-      accountId: ctx.accountId,
-    });
+    // Prefer the credential row's `expiresAt` (the platform's source of
+    // truth, kept fresh by the refresh worker); fall back to the token's
+    // own `exp` claim (seconds → ms) when the row carries none.
+    const expiresAtMs = ctx.expiresAt ?? (claims.exp !== undefined ? claims.exp * 1000 : undefined);
+    // No expiry source at all (neither the row's `expiresAt` nor the token's
+    // `exp` claim) → expiry is unverifiable offline. A dead token with no
+    // expiry metadata would otherwise pass; treat absence as NOT verifiable.
+    if (expiresAtMs === undefined || expiresAtMs === null) {
+      return {
+        ok: false,
+        error: "AUTH_FAILED",
+        message: "credential expiry could not be verified",
+      };
+    }
+    if (expiresAtMs <= Date.now()) {
+      return {
+        ok: false,
+        error: "AUTH_FAILED",
+        message: "Codex access token has expired — reconnect the subscription",
+      };
+    }
+    return { ok: true };
   },
 };
 
@@ -246,6 +239,12 @@ const codexProvider: ModelProviderDefinition = {
     "gpt-5.1-codex-max",
     "gpt-5.1-codex-mini",
   ],
+  // OFFLINE validation: the platform issues ZERO Codex API calls to test
+  // a credential or discover models. The connection test runs
+  // `validateCredential` (local JWT decode); discovery persists the
+  // candidates above (∩ catalog) without per-model probing. Real
+  // availability is checked at first official-binary run.
+  credentialValidation: "offline",
   hooks: codexHooks,
   // The chatgpt.com Codex backend rejects requests without a
   // `chatgpt-account-id` header. The platform refuses to persist a

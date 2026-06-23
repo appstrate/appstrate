@@ -1,20 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Empirical model discovery — probe which models a credential ACTUALLY
- * serves, instead of trusting a static list.
+ * Model discovery — determine which models a credential serves and persist
+ * them on the credential row (`available_model_ids`).
  *
- * Why probing: for subscription-backed OAuth providers (codex,
- * claude-code) the served model set depends on the *account's plan*
- * (ChatGPT Plus vs Pro, Claude Pro vs Max) and moves over time, with no
- * `/models` discovery endpoint (codex) and no machine-readable source.
- * A 1-token inference request per candidate is the only ground truth.
+ * Two strategies, chosen by the provider definition's
+ * `credentialValidation` flag:
  *
- * Candidates come from the provider definition's
- * `modelDiscoveryCandidates` (falling back to `featuredModels`) —
- * modules own their candidate sets; the platform stays
- * provider-agnostic and just sends whatever `testModelConfig` builds
- * (module `buildInferenceProbe` hook or generic wire format).
+ *   - `"offline"` (subscription providers: codex, claude-code) — the
+ *     platform issues ZERO API calls. It persists the provider's static
+ *     `modelDiscoveryCandidates` (∩ catalog) directly. Spending a user's
+ *     subscription quota to enumerate models would contradict the
+ *     compliance posture (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`):
+ *     all subscription inference runs through the official binary, never a
+ *     platform-side request. Real per-model availability is validated at
+ *     first run.
+ *
+ *   - `"probe"` (default, API-key providers) — empirical: a 1-token
+ *     inference request per candidate, persisting the ids that answered
+ *     2xx. Candidates come from `modelDiscoveryCandidates` (falling back to
+ *     `featuredModels`); the platform stays provider-agnostic and just
+ *     sends whatever `testModelConfig` builds (generic `/models` wire
+ *     format).
+ *
+ * The classification below applies only to the `"probe"` path:
  *
  * Classification per probe:
  *   - 2xx                → served, goes into `availableModelIds`
@@ -39,6 +48,7 @@ import type { TestResult } from "@appstrate/shared-types";
 import { loadInferenceCredentials } from "./credentials.ts";
 import { getModelProvider } from "./registry.ts";
 import { testModelConfig } from "../org-models.ts";
+import { listCatalogModels } from "../pricing-catalog.ts";
 import { logger } from "../../lib/logger.ts";
 
 /** Pause before the single 429 retry. */
@@ -83,12 +93,69 @@ const defaultDeps: ModelDiscoveryDeps = {
 };
 
 /**
+ * Persist the static `modelDiscoveryCandidates` (∩ resolved catalog) for an
+ * `"offline"` provider, with NO network call. Used for subscription
+ * providers whose tokens must never be spent on a platform-side probe. The
+ * catalog intersection mirrors the `/seed` route's gate (catalog membership),
+ * so the persisted list is exactly the set a user can actually seed. An empty
+ * candidate list is a no-op that leaves any previous list untouched.
+ */
+async function persistStaticCandidates(
+  orgId: string,
+  credentialId: string,
+  providerId: string,
+  def: NonNullable<ReturnType<typeof getModelProvider>>,
+): Promise<ModelDiscoveryResult> {
+  const catalogKey = def.catalogProviderId ?? providerId;
+  const catalogIds = new Set(listCatalogModels(catalogKey).map((m) => m.id));
+  const candidates = [...new Set(def.modelDiscoveryCandidates ?? def.featuredModels ?? [])];
+  const verified = candidates.filter((id) => catalogIds.has(id));
+
+  if (verified.length === 0) {
+    logger.warn("offline model discovery resolved no catalog-backed candidates — keeping list", {
+      credentialId,
+      providerId,
+      candidateCount: candidates.length,
+    });
+    return {
+      outcome: "nothing_verified",
+      verifiedModelIds: [],
+      probedCount: candidates.length,
+      persisted: false,
+    };
+  }
+
+  await db
+    .update(modelProviderCredentials)
+    .set({ availableModelIds: verified, updatedAt: new Date() })
+    .where(
+      and(eq(modelProviderCredentials.id, credentialId), eq(modelProviderCredentials.orgId, orgId)),
+    );
+
+  logger.info("offline model discovery persisted static candidates", {
+    credentialId,
+    providerId,
+    verifiedCount: verified.length,
+    candidateCount: candidates.length,
+  });
+  return {
+    outcome: "ok",
+    verifiedModelIds: verified,
+    probedCount: candidates.length,
+    persisted: true,
+  };
+}
+
+/**
  * Probe every discovery candidate of `credentialId` and persist the ids
  * that answered. The first candidate runs alone as an auth gate (a dead
  * credential aborts after one probe); the rest fan out at
  * {@link PROBE_CONCURRENCY}. Bounded concurrency — not an unlimited
  * burst — keeps it polite to the subscription backend's rate limits
  * while cutting wall-clock from O(n) sequential round-trips to ~O(n/4).
+ *
+ * `"offline"` providers skip probing entirely — see
+ * {@link persistStaticCandidates}.
  */
 export async function discoverAvailableModels(
   orgId: string,
@@ -105,6 +172,19 @@ export async function discoverAvailableModels(
     };
   }
   const def = getModelProvider(creds.providerId);
+
+  // Offline providers (subscription: codex, claude-code) — persist the
+  // static candidate list (∩ catalog) WITHOUT any network probe. The
+  // platform never spends a subscription request to enumerate models; real
+  // per-model availability is validated at first official-binary run. The
+  // catalog intersection keeps `available_model_ids` aligned with what the
+  // `/seed` route can actually accept (it gates seeding on catalog
+  // membership), so a candidate absent from the catalog isn't persisted as
+  // "available" only to be rejected at seed time.
+  if (def?.credentialValidation === "offline") {
+    return persistStaticCandidates(orgId, credentialId, creds.providerId, def);
+  }
+
   const candidates = [...new Set(def?.modelDiscoveryCandidates ?? def?.featuredModels ?? [])].slice(
     0,
     MAX_CANDIDATES,

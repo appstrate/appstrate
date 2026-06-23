@@ -23,7 +23,10 @@ not policy opinions.
 
 A subscription credential is **only ever** driven through the vendor's own
 official binary, which signs its own client fingerprint. There is no
-reimplementation of either vendor's wire protocol for subscription auth.
+reimplementation of either vendor's wire protocol for subscription auth — and
+the platform issues **zero** subscription API calls of its own (see §1.5). Every
+request a subscription token authenticates is made by the official binary at run
+time; the platform never sends one to test a credential or to enumerate models.
 
 | Provider      | Chat                                                    | Agents (sandboxed run)                               |
 | ------------- | ------------------------------------------------------- | ---------------------------------------------------- |
@@ -87,6 +90,55 @@ the container's egress is **locked** to the provider's hosts:
 This means: even though the real Codex token lives in-container (the CLI calls
 `chatgpt.com` directly and cannot be reverse-proxied), it cannot be exfiltrated to
 an attacker-controlled host, and it cannot be refreshed.
+
+### 1.5 Zero platform-side subscription API calls — offline validation only
+
+The platform never sends a request that a subscription token authenticates.
+Two paths that historically would have (connection test + per-model discovery)
+are now **offline**:
+
+- **Connection test** (`POST /api/models/test`, `/api/models/:id/test`): for a
+  provider that declares `credentialValidation: "offline"` the platform runs the
+  module's `validateCredential` hook — a **structural, offline** check (decode +
+  required claims + expiry), no network. Codex decodes the access JWT and
+  confirms it carries `chatgpt_account_id` and has a verifiable, unexpired expiry
+  (the row's `expiresAt` or the token's `exp` claim); Claude (whose OAuth tokens
+  are not JWTs) confirms the bearer is well-formed and the credential row carries
+  an unexpired `expiresAt`. When **no** expiry source is present the credential
+  is rejected — a dead token with no expiry metadata must not pass. `{ ok: true }`
+  ⇒ structurally well-formed with a verifiable, unexpired expiry; otherwise
+  `AUTH_FAILED`. No request is sent to `chatgpt.com` or `api.anthropic.com`
+  (`apps/api/src/services/org-models.ts` → `testModelConfig`).
+
+  **What this check does NOT prove.** It is **not** a cryptographic signature
+  verification (the JWT signature is never checked — the platform cannot, offline,
+  hold the vendor's signing key) and **not** a live backend call. A structurally
+  valid, unexpired token can still be revoked, throttled, or otherwise dead
+  upstream. Real end-to-end credential validity — that the token is live and
+  authentic — is established only at the **first run through the official vendor
+  binary** (Codex CLI / Claude Agent SDK), which presents the credential to the
+  real backend. The offline check is a cheap, no-spend structural gate that
+  catches malformed and expired credentials early; it is not proof of liveness.
+
+- **Model discovery** (`POST /api/model-provider-credentials/:id/refresh-models`):
+  for offline providers the platform persists the provider's static
+  `modelDiscoveryCandidates` (∩ catalog) as `available_model_ids` **without
+  probing** any candidate. Real per-model availability surfaces at first
+  official-binary run, not via a platform-side request
+  (`apps/api/src/services/model-providers/model-discovery.ts` →
+  `persistStaticCandidates`).
+
+The `validateCredential` hook + `credentialValidation` flag are provider-agnostic
+core contracts (`packages/core/src/module.ts`): the platform asks "does this
+provider validate offline?" by data, never by hardcoding `codex` / `claude-code`.
+API-key providers leave the flag unset and keep the empirical `/models` probe.
+
+This is what makes §1.1's "official binary only" claim literally true for the
+test/discovery paths, not just the run path. The earlier hand-built
+`${baseUrl}/codex/responses` / `/v1/messages` probe requests (which forged an
+`originator: "pi"` client id and sent the subscription bearer directly from the
+platform process) have been **deleted**, along with the now-unused
+`buildInferenceProbe` / `InferenceProbeRequest` / `runInferenceProbe` machinery.
 
 ---
 

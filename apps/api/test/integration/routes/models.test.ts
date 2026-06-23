@@ -3,7 +3,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  createTestUser,
+  addOrgMember,
+  authHeaders,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import {
   seedOrgModelProviderKey,
   seedOrgModel,
@@ -691,6 +697,73 @@ describe("Models API", () => {
       const body = (await res.json()) as { created: number; promotedDefault: boolean };
       expect(body.created).toBe(1);
       expect(body.promotedDefault).toBe(false);
+    });
+  });
+
+  // FINDING B2: the connection-test routes load a credential and can spend a
+  // subscription credential, so they must require `models:write` like their
+  // siblings — not just be rate-limited. The `member` role has `models:read`
+  // but NOT `models:write`, so it is the right negative case.
+  describe("connection-test routes require models:write", () => {
+    /** Member-role headers in the owner's org (member lacks models:write). */
+    async function memberHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
+      const member = await createTestUser({});
+      await addOrgMember(ctx.orgId, member.id, "member");
+      return {
+        Cookie: member.cookie,
+        "X-Org-Id": ctx.orgId,
+        "X-Application-Id": ctx.defaultAppId,
+        ...extra,
+      };
+    }
+
+    it("POST /api/models/test → 403 for a member (no models:write)", async () => {
+      const key = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiShape: "openai",
+        baseUrl: "https://api.openai.com",
+      });
+      const res = await app.request("/api/models/test", {
+        method: "POST",
+        headers: await memberHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId: key.id, modelId: "gpt-4o", apiKey: "sk-test" }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("POST /api/models/:id/test → 403 for a member (no models:write)", async () => {
+      const key = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiShape: "openai",
+        baseUrl: "https://api.openai.com",
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: key.id,
+        modelId: "gpt-4o",
+        label: "Member test model",
+      });
+      const res = await app.request(`/api/models/${model.id}/test`, {
+        method: "POST",
+        headers: await memberHeaders(),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("POST /api/models/test → not 403 for an owner (has models:write)", async () => {
+      const key = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiShape: "openai",
+        baseUrl: "https://api.openai.com",
+      });
+      const res = await app.request("/api/models/test", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId: key.id, modelId: "gpt-4o", apiKey: "sk-test" }),
+      });
+      // The owner passes the permission guard; the body may then succeed or
+      // surface a provider error, but it is never an authorization failure.
+      expect(res.status).not.toBe(403);
     });
   });
 });

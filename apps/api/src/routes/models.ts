@@ -456,7 +456,7 @@ export function createModelsRouter() {
 
   // POST /api/models/test — test model config inline (before saving)
   // MUST be registered before /:id/test
-  router.post("/test", rateLimit(5), async (c) => {
+  router.post("/test", rateLimit(5), requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
     const data = parseBody(testInlineSchema, body);
@@ -489,6 +489,7 @@ export function createModelsRouter() {
         apiKey,
         providerId: creds.providerId,
         accountId: creds.accountId,
+        expiresAt: creds.expiresAt,
       });
       return c.json(result);
     } catch (err) {
@@ -500,7 +501,7 @@ export function createModelsRouter() {
   });
 
   // POST /api/models/:id/test — test model connection
-  router.post("/:id/test", rateLimit(5), async (c) => {
+  router.post("/:id/test", rateLimit(5), requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const modelId = c.req.param("id")!;
     try {

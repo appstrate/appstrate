@@ -496,41 +496,31 @@ export interface ModelProviderIdentity {
 }
 
 /**
- * Pure-data inference probe request — used by the platform's connection
- * test to verify that a stored credential can actually serve traffic
- * against the provider's backend. Factored out so the wire format can be
- * unit-tested without standing up an HTTP listener.
+ * Context passed to {@link ModelProviderHooks.validateCredential}. The
+ * platform supplies the decrypted credential material it already holds —
+ * the module validates it OFFLINE (no network), so the platform never
+ * issues a subscription API call to test a token.
  */
-export interface InferenceProbeRequest {
-  url: string;
-  method: "POST";
-  headers: Record<string, string>;
-  body: string;
-}
-
-/**
- * Input passed to {@link ModelProviderHooks.buildInferenceProbe}. The
- * platform supplies the resolved model + credential material; the module
- * builds the wire-shape its backend will actually accept.
- */
-export interface InferenceProbeContext {
-  baseUrl: string;
-  modelId: string;
+export interface CredentialValidationContext {
+  /** OAuth access token or API key the credential carries. */
   apiKey: string;
-  /** Populated from the credential row's identity slots when present. */
+  /** Abstract account/tenant id surfaced by `extractTokenIdentity`, when present. */
   accountId?: string;
+  /** Token expiry in epoch ms, when known (`null`/unset = unknown). */
+  expiresAt?: number | null;
 }
 
 /**
- * Pure-data error result a module may return from
- * {@link ModelProviderHooks.buildInferenceProbe} when it knows the probe
- * cannot succeed (e.g. a required identity slot is missing). The platform
- * surfaces it as a `TestResult` without ever sending the request.
+ * Pure-data result of an OFFLINE credential validation. Returned by
+ * {@link ModelProviderHooks.validateCredential}. `ok: true` means the
+ * credential is structurally valid and unexpired; `ok: false` carries a
+ * stable error code + message the platform surfaces as a `TestResult`
+ * (latency 0 — no request was made). Defined in core (not shared-types)
+ * to keep the module contract dependency-free.
  */
-export interface InferenceProbeBuildError {
-  error: string;
-  message: string;
-}
+export type CredentialValidationResult =
+  | { ok: true }
+  | { ok: false; error: string; message: string };
 
 /**
  * Provider-scoped hooks. All hooks are optional. The platform dispatches
@@ -580,23 +570,18 @@ export interface ModelProviderHooks {
   buildApiKeyPlaceholder?: (accessToken: string) => string | null;
 
   /**
-   * Build the inference probe the platform sends to verify the credential
-   * can serve traffic. Modules whose backend doesn't accept the generic
-   * `GET ${baseUrl}/models` discovery probe implement this hook to
-   * provide the real wire format.
+   * Validate a credential OFFLINE — with NO network call. Subscription
+   * providers (`claude-code`, `codex`) implement this so the platform can
+   * confirm a token is structurally valid and unexpired by decoding it
+   * locally, instead of spending a subscription request against the
+   * vendor's backend. Real per-model availability is validated at first
+   * official-binary run.
    *
-   * Returns:
-   *  - {@link InferenceProbeRequest} → the platform sends it and reports
-   *    the result.
-   *  - {@link InferenceProbeBuildError} → the platform surfaces it as a
-   *    failed `TestResult` without ever sending the request (e.g. when a
-   *    required identity slot is missing).
-   *  - `null` → fall back to the platform's generic `/models` discovery
-   *    probe.
+   * When present, the platform's connection test calls this hook and
+   * NEVER issues a subscription API request. API-key providers omit it
+   * and fall back to the generic `GET ${baseUrl}/models` discovery probe.
    */
-  buildInferenceProbe?: (
-    ctx: InferenceProbeContext,
-  ) => InferenceProbeRequest | InferenceProbeBuildError | null;
+  validateCredential?: (ctx: CredentialValidationContext) => CredentialValidationResult;
 }
 
 /**
@@ -682,6 +667,22 @@ export interface ModelProviderDefinition {
    * providers whose full catalog is exposed.
    */
   modelDiscoveryCandidates?: readonly string[];
+
+  /**
+   * Credential-validation strategy. Defaults to `"probe"` — the platform
+   * verifies a credential by hitting the provider's backend (generic
+   * `/models` discovery probe, or a provider-specific request).
+   *
+   * `"offline"` declares that the platform must issue ZERO API calls to
+   * validate or discover models for this provider: the connection test
+   * runs the module's {@link ModelProviderHooks.validateCredential} hook
+   * (local token decode) and model discovery persists the static
+   * {@link modelDiscoveryCandidates} (∩ catalog) WITHOUT per-model live
+   * probing. Set by subscription providers (`claude-code`, `codex`) so a
+   * user's subscription token is never spent on a platform-side test —
+   * real per-model availability is validated at first official-binary run.
+   */
+  credentialValidation?: "probe" | "offline";
 
   // — Behavior —
   /** Provider-scoped hooks (header injection, identity extraction). */

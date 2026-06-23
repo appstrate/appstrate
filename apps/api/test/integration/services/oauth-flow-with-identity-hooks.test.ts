@@ -159,10 +159,10 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
     // OAuth rows must not return null on read (regression).
     expect(creds!.apiKey).toBe(accessToken);
     // Identity slots populated by the hook must flow through the read path
-    // so downstream hooks (`buildInferenceProbe`, …) see them.
+    // so downstream consumers (sidecar routing headers, …) see them.
     expect(creds!.accountId).toBe("acc-load-123");
     // providerId is what the platform looks up in the registry to find
-    // the module's hooks (`buildInferenceProbe`, `buildApiKeyPlaceholder`,
+    // the module's hooks (`validateCredential`, `buildApiKeyPlaceholder`,
     // `extractTokenIdentity`).
     expect(creds!.providerId).toBe(TEST_OAUTH_HOOKS_PROVIDER_ID);
     // apiShape + baseUrl are sidecar resolution inputs — they must

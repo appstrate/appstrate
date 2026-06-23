@@ -20,67 +20,71 @@
  * is fully impossible end-to-end. Operators who want plain API-key
  * Anthropic stay on the `anthropic` provider in `core-providers`.
  *
- * No fingerprint forging anywhere. A `claude-code` run executes on the official
- * Claude Agent SDK (the `claude` runner engine) and the chat on the same SDK —
- * the official `claude` binary signs its own client fingerprint, and the sidecar
- * / chat gateways only swap the bearer + ensure the `oauth-2025-04-20` beta. The
- * provider therefore declares no `oauthWireFormat`; the module's only `hooks`
- * entry is a minimal credential-validation / model-discovery probe that sends
- * just the bearer + version + oauth beta (no `x-app`, no `system` prelude).
+ * No fingerprint forging anywhere — and the platform issues ZERO Anthropic API
+ * calls to validate a credential or discover models. A `claude-code` run
+ * executes on the official Claude Agent SDK (the `claude` runner engine) and the
+ * chat on the same SDK — the official `claude` binary signs its own client
+ * fingerprint, and the sidecar / chat gateways only swap the bearer + ensure the
+ * `oauth-2025-04-20` beta. The provider declares no `oauthWireFormat`; the
+ * module's only `hooks` entry is `validateCredential`, an OFFLINE check (no
+ * network) that confirms the bearer is well-formed and unexpired. Model
+ * discovery persists the static `modelDiscoveryCandidates` (declared via
+ * `credentialValidation: "offline"`) without probing — real per-model
+ * availability is validated at first official-binary run. See
+ * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`.
  */
 
 import type {
   AppstrateModule,
-  InferenceProbeRequest,
+  CredentialValidationContext,
+  CredentialValidationResult,
   ModelProviderDefinition,
   ModelProviderHooks,
 } from "@appstrate/core/module";
 import { runClaudeAgentChat } from "./claude-agent/engine.ts";
 
-/**
- * 1-token `/v1/messages` probe to validate a subscription credential and
- * discover which models the plan serves (`available_model_ids`). Sends ONLY the
- * OAuth bearer (NOT `x-api-key` — the generic anthropic-messages test would send
- * the wrong header for a subscription token), the `anthropic-version`, and the
- * `oauth-2025-04-20` beta the OAuth token requires.
- *
- * It does NOT forge the Claude Code client fingerprint — no `x-app: cli`, no
- * `anthropic-dangerous-direct-browser-access`, no third-party-tier `system`
- * prelude. Forging is removed platform-wide: real inference runs on the official
- * Claude Agent SDK binary (which signs its own fingerprint), and this probe is
- * a plain authenticated request. A model the probe can't reach is simply dropped
- * from `available_model_ids`.
- */
-function buildClaudeCodeInferenceRequest(config: {
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-}): InferenceProbeRequest {
-  return {
-    url: `${config.baseUrl.replace(/\/+$/, "")}/v1/messages`,
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "anthropic-version": "2023-06-01",
-      "anthropic-beta": "oauth-2025-04-20",
-      accept: "application/json",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: config.modelId,
-      max_tokens: 1,
-      messages: [{ role: "user", content: "ping" }],
-    }),
-  };
-}
-
 const claudeCodeHooks: ModelProviderHooks = {
-  buildInferenceProbe(ctx) {
-    return buildClaudeCodeInferenceRequest({
-      baseUrl: ctx.baseUrl,
-      modelId: ctx.modelId,
-      apiKey: ctx.apiKey,
-    });
+  /**
+   * Validate a Claude subscription credential OFFLINE — NO request to
+   * api.anthropic.com. Anthropic OAuth tokens are NOT JWTs (no decodable
+   * identity/expiry claims), so the only expiry source is the credential
+   * row's `expiresAt`. Structural validation is: the bearer is a
+   * non-empty string AND the row carries an unexpired `expiresAt`. When
+   * `expiresAt` is absent, expiry is unverifiable offline and the
+   * credential is rejected — a dead token with no expiry metadata must
+   * not pass. This is a STRUCTURAL/offline check only, NOT a signature
+   * verification or a live backend call. The platform never spends a
+   * subscription request to test a token — real per-model availability
+   * and true credential liveness are established at first
+   * official-binary run.
+   */
+  validateCredential(ctx: CredentialValidationContext): CredentialValidationResult {
+    if (typeof ctx.apiKey !== "string" || ctx.apiKey.trim().length === 0) {
+      return {
+        ok: false,
+        error: "AUTH_FAILED",
+        message: "Missing or malformed Claude subscription bearer token",
+      };
+    }
+    // Anthropic OAuth tokens are opaque (not JWTs), so the credential row's
+    // `expiresAt` is the ONLY expiry source. When it's absent, expiry is
+    // unverifiable offline — a dead token with no expiry metadata would
+    // otherwise pass, so reject rather than silently accept.
+    if (ctx.expiresAt === undefined || ctx.expiresAt === null) {
+      return {
+        ok: false,
+        error: "AUTH_FAILED",
+        message: "credential expiry could not be verified",
+      };
+    }
+    if (ctx.expiresAt <= Date.now()) {
+      return {
+        ok: false,
+        error: "AUTH_FAILED",
+        message: "Claude subscription token has expired — reconnect the subscription",
+      };
+    }
+    return { ok: true };
   },
 };
 
@@ -127,6 +131,12 @@ const claudeCodeProvider: ModelProviderDefinition = {
     "claude-sonnet-4-5",
     "claude-haiku-4-5",
   ],
+  // OFFLINE validation: the platform issues ZERO Anthropic API calls to test a
+  // credential or discover models. The connection test runs `validateCredential`
+  // (a non-empty/unexpired bearer check); discovery persists the candidates above
+  // (∩ catalog) without per-model probing. Real availability is checked at first
+  // official-binary run.
+  credentialValidation: "offline",
   // Anthropic OAuth tokens are not JWTs — no JWT identity decoding. There is no
   // sidecar fingerprint forging: a `claude-code` run executes on the official
   // Claude Agent SDK (the `claude` runner engine), whose binary signs its own
@@ -148,6 +158,12 @@ const claudeCodeProvider: ModelProviderDefinition = {
     sidecarAuthMode: "oauth",
     nativeOutput: true,
     chatHandler: runClaudeAgentChat,
+    // The chat surface is driven through the `/api/llm-proxy/claude-code-sdk/…`
+    // credential-injection gateway (the official Claude Agent SDK points its
+    // ANTHROPIC_BASE_URL there). This flag lets the platform mount that gateway
+    // route data-driven from the registry — the handler stays in apps/api,
+    // keyed by provider id — instead of a hardcoded engine→handler map.
+    chatGateway: true,
   },
   hooks: claudeCodeHooks,
 };

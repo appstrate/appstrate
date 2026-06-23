@@ -2,8 +2,17 @@
 
 import { describe, it, expect } from "bun:test";
 import claudeCodeModule from "../../src/index.ts";
+import type { CredentialValidationResult } from "@appstrate/core/module";
 
 const def = (claudeCodeModule.modelProviders?.() ?? [])[0]!;
+
+function validate(args: {
+  apiKey: string;
+  accountId?: string;
+  expiresAt?: number | null;
+}): CredentialValidationResult | undefined {
+  return def.hooks?.validateCredential?.(args);
+}
 
 describe("claude-code discovery candidates", () => {
   it("declares modelDiscoveryCandidates ⊇ featuredModels", () => {
@@ -14,45 +23,48 @@ describe("claude-code discovery candidates", () => {
   });
 });
 
-describe("claude-code buildInferenceProbe", () => {
-  it("sends bearer + version + oauth beta only — no x-api-key, no forged fingerprint", () => {
-    const probe = def.hooks?.buildInferenceProbe?.({
-      baseUrl: "https://api.anthropic.com",
-      modelId: "claude-sonnet-4-6",
-      apiKey: "sk-ant-oat-test",
-    });
-    expect(probe).toBeDefined();
-    if (!probe || "error" in probe) throw new Error("expected a request, got an error result");
-    expect(probe.url).toBe("https://api.anthropic.com/v1/messages");
-    expect(probe.method).toBe("POST");
-    // Subscription token rides the bearer header (NOT x-api-key).
-    expect(probe.headers["Authorization"]).toBe("Bearer sk-ant-oat-test");
-    expect(probe.headers["anthropic-beta"]).toContain("oauth");
-    expect(probe.headers["anthropic-version"]).toBe("2023-06-01");
-    expect(probe.headers["x-api-key"]).toBeUndefined();
-    // No Claude Code client-fingerprint forging.
-    expect(probe.headers["x-app"]).toBeUndefined();
-    expect(probe.headers["anthropic-dangerous-direct-browser-access"]).toBeUndefined();
+describe("claude-code offline credential validation", () => {
+  it("declares credentialValidation: 'offline' and NO buildInferenceProbe (forging removed)", () => {
+    // Real inference runs on the official Claude Agent SDK (which signs its own
+    // fingerprint); the platform issues ZERO Anthropic API calls to test a
+    // credential. There is no wire-format probe to declare.
+    expect(def.credentialValidation).toBe("offline");
+    expect(def.hooks?.validateCredential).toBeFunction();
+    expect((def.hooks as Record<string, unknown>).buildInferenceProbe).toBeUndefined();
+    expect((def as Record<string, unknown>).oauthWireFormat).toBeUndefined();
   });
 
-  it("builds a 1-token request with NO third-party-tier system prelude", () => {
-    const probe = def.hooks!.buildInferenceProbe!({
-      baseUrl: "https://api.anthropic.com/",
-      modelId: "claude-opus-4-8",
-      apiKey: "tok",
+  it("rejects a well-formed bearer with NO expiry metadata (expiry unverifiable offline)", () => {
+    // Anthropic OAuth tokens are not JWTs, so the row's `expiresAt` is the only
+    // expiry source. Absent it, a dead token would otherwise pass — reject.
+    const out = validate({ apiKey: "sk-ant-oat-test" });
+    expect(out?.ok).toBe(false);
+    if (out?.ok === false) {
+      expect(out.error).toBe("AUTH_FAILED");
+      expect(out.message).toMatch(/expiry could not be verified/i);
+    }
+  });
+
+  it("accepts a well-formed bearer with a future expiresAt", () => {
+    expect(validate({ apiKey: "sk-ant-oat-test", expiresAt: Date.now() + 60_000 })).toEqual({
+      ok: true,
     });
-    if (!probe || "error" in probe) throw new Error("expected a request");
-    // Trailing slash on baseUrl must not produce a double slash.
-    expect(probe.url).toBe("https://api.anthropic.com/v1/messages");
-    const body = JSON.parse(probe.body) as {
-      model: string;
-      max_tokens: number;
-      system?: unknown;
-      messages: unknown[];
-    };
-    expect(body.model).toBe("claude-opus-4-8");
-    expect(body.max_tokens).toBe(1);
-    expect(body.system).toBeUndefined();
-    expect(body.messages).toEqual([{ role: "user", content: "ping" }]);
+  });
+
+  it("rejects an empty / whitespace bearer (AUTH_FAILED)", () => {
+    for (const bad of ["", "   "]) {
+      const out = validate({ apiKey: bad });
+      expect(out?.ok).toBe(false);
+      if (out?.ok === false) expect(out.error).toBe("AUTH_FAILED");
+    }
+  });
+
+  it("rejects a bearer whose credential row carries a past expiresAt", () => {
+    const out = validate({ apiKey: "sk-ant-oat-test", expiresAt: Date.now() - 1 });
+    expect(out?.ok).toBe(false);
+    if (out?.ok === false) {
+      expect(out.error).toBe("AUTH_FAILED");
+      expect(out.message).toContain("expired");
+    }
   });
 });

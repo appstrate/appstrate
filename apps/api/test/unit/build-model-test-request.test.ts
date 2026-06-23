@@ -139,7 +139,7 @@ describe("buildModelTestRequest", () => {
   });
 });
 
-// Provider-specific `buildInferenceProbe` hook behavior (e.g. fail-fast on
-// missing identity claims) is covered in each module's own unit suite
-// under `packages/module-*/test/`. This file owns only the request-shape
-// branches of `buildModelTestRequest` above.
+// Provider-specific offline `validateCredential` hook behavior (e.g.
+// fail-fast on missing identity claims / expired tokens) is covered in each
+// module's own unit suite under `packages/module-*/test/`. This file owns
+// only the request-shape branches of `buildModelTestRequest` above.

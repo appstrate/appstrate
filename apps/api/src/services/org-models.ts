@@ -27,7 +27,6 @@ import {
 } from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
-import type { InferenceProbeRequest } from "@appstrate/core/module";
 
 // --- Metadata projection ---
 
@@ -471,8 +470,8 @@ export interface ResolvedModel extends Pick<
   aliasId: string;
   /**
    * Abstract account/tenant identifier surfaced by the credential's
-   * `extractTokenIdentity` hook — passed to the provider's
-   * `buildInferenceProbe` hook so it can be echoed as a routing header.
+   * `extractTokenIdentity` hook — echoed by the sidecar as a routing
+   * header at request time (e.g. `chatgpt-account-id` for Codex).
    */
   accountId?: string;
   /** `model_provider_credentials` row id — passed to the sidecar so it can pull fresh OAuth tokens at request time. Unset for system (env-driven) keys. */
@@ -777,7 +776,27 @@ export async function testModelConfig(config: {
   apiKey: string;
   providerId?: string;
   accountId?: string;
+  /** OAuth only — token expiry (epoch ms). Used by the offline credential check. */
+  expiresAt?: number | null;
 }): Promise<TestResult> {
+  // Provider-agnostic OFFLINE credential validation — subscription
+  // providers (codex, claude-code) declare `credentialValidation:
+  // "offline"` and implement `validateCredential`, so the platform NEVER
+  // issues an API call to test their tokens. The module decodes the token
+  // locally; we map its pure-data result to a TestResult (latency 0 — no
+  // request was made). Returns BEFORE the SSRF/network branch.
+  const provider = config.providerId ? getModelProvider(config.providerId) : null;
+  if (provider?.credentialValidation === "offline" && provider.hooks?.validateCredential) {
+    const result = provider.hooks.validateCredential({
+      apiKey: config.apiKey,
+      accountId: config.accountId,
+      expiresAt: config.expiresAt,
+    });
+    return result.ok
+      ? { ok: true, latency: 0 }
+      : { ok: false, latency: 0, error: result.error, message: result.message };
+  }
+
   if (isBlockedUrl(config.baseUrl)) {
     return {
       ok: false,
@@ -785,24 +804,6 @@ export async function testModelConfig(config: {
       error: "BLOCKED_URL",
       message: "URL targets a blocked network",
     };
-  }
-
-  // Provider-agnostic inference-probe override — modules whose backend
-  // doesn't accept the generic `/models` discovery probe implement
-  // `buildInferenceProbe` to provide the real wire format. The platform
-  // sends whatever the module builds without inspecting the contents.
-  const provider = config.providerId ? getModelProvider(config.providerId) : null;
-  const probe = provider?.hooks?.buildInferenceProbe?.({
-    baseUrl: config.baseUrl,
-    modelId: config.modelId,
-    apiKey: config.apiKey,
-    accountId: config.accountId,
-  });
-  if (probe) {
-    if ("error" in probe) {
-      return { ok: false, latency: 0, error: probe.error, message: probe.message };
-    }
-    return runInferenceProbe(probe);
   }
 
   const { url, headers } = buildModelTestRequest(config);
@@ -844,52 +845,6 @@ export async function testModelConnection(orgId: string, modelDbId: string): Pro
     return { ok: false, latency: 0, error: "MODEL_NOT_FOUND", message: "Model not found" };
 
   return testModelConfig(model);
-}
-
-// --- OAuth inference probes ---
-
-const PROBE_TIMEOUT_MS = 15_000;
-
-/**
- * Send a module-supplied {@link InferenceProbeRequest} and map the response
- * to a {@link TestResult}. The platform is provider-agnostic here — the
- * module's `buildInferenceProbe` hook owns the wire format; this helper
- * only knows how to send it and classify the outcome.
- *
- * Streaming bodies are aborted immediately — we only care about the
- * response status.
- */
-async function runInferenceProbe(req: InferenceProbeRequest): Promise<TestResult> {
-  const start = performance.now();
-  try {
-    const res = await fetch(req.url, {
-      method: req.method,
-      headers: req.headers,
-      body: req.body,
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    });
-    const latency = Math.round(performance.now() - start);
-    void res.body?.cancel().catch(() => {});
-    if (res.ok) return { ok: true, latency, status: res.status };
-    if (res.status === 401 || res.status === 403) {
-      return {
-        ok: false,
-        latency,
-        error: "AUTH_FAILED",
-        message: "Provider rejected the token (auth failed or subscription inactive)",
-        status: res.status,
-      };
-    }
-    return {
-      ok: false,
-      latency,
-      error: "PROVIDER_ERROR",
-      message: `Provider returned ${res.status}`,
-      status: res.status,
-    };
-  } catch (err) {
-    return mapFetchErrorToTestResult(err, Math.round(performance.now() - start));
-  }
 }
 
 // OSS supports only the API-key flow for Anthropic, via the `anthropic`

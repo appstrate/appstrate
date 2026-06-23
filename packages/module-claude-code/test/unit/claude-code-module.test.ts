@@ -47,11 +47,12 @@ describe("claude-code module", () => {
   it("declares no identity hook — Anthropic OAuth tokens are not JWTs", () => {
     // Identity comes from the token endpoint response body (the CLI
     // surfaces `email` / `subscriptionType`), not from a self-describing
-    // access token. The only hook is `buildInferenceProbe` (credential
-    // validation + model discovery) — its non-forging shape is covered by
+    // access token. The only hook is `validateCredential` (OFFLINE
+    // credential validation — no network) — covered by
     // `inference-probe.test.ts`.
     const cc = claudeCodeModule.modelProviders?.()[0];
     expect(cc?.hooks?.extractTokenIdentity).toBeUndefined();
-    expect(cc?.hooks?.buildInferenceProbe).toBeFunction();
+    expect(cc?.hooks?.validateCredential).toBeFunction();
+    expect((cc?.hooks as Record<string, unknown>).buildInferenceProbe).toBeUndefined();
   });
 });

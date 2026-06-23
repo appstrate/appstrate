@@ -104,3 +104,70 @@ describe("extractTokenIdentity hook", () => {
     expect(codex?.hooks?.buildApiKeyPlaceholder?.(encodeJwt({}))).toBeNull();
   });
 });
+
+describe("validateCredential hook", () => {
+  function encodeJwt(payload: Record<string, unknown>): string {
+    const b64 = (s: string) =>
+      Buffer.from(s, "utf-8")
+        .toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+    return [
+      b64(JSON.stringify({ alg: "RS256" })),
+      b64(JSON.stringify(payload)),
+      "fake-signature",
+    ].join(".");
+  }
+
+  const codex = () => codexModule.modelProviders?.()[0];
+  const ACCOUNT = "acct-uuid";
+  const withAccount = (extra: Record<string, unknown> = {}) =>
+    encodeJwt({ "https://api.openai.com/auth": { chatgpt_account_id: ACCOUNT }, ...extra });
+
+  it("rejects a token missing chatgpt_account_id", () => {
+    const out = codex()?.hooks?.validateCredential?.({ apiKey: encodeJwt({ exp: 9_999_999_999 }) });
+    expect(out?.ok).toBe(false);
+    expect(out?.error).toBe("AUTH_FAILED");
+  });
+
+  it("rejects a token with NO expiry source (no row expiresAt, no exp claim)", () => {
+    // Has the required account id but neither an `exp` claim nor a row expiresAt:
+    // expiry is unverifiable offline → must be rejected, not accepted.
+    const out = codex()?.hooks?.validateCredential?.({ apiKey: withAccount() });
+    expect(out?.ok).toBe(false);
+    expect(out?.error).toBe("AUTH_FAILED");
+    expect(out?.message).toMatch(/expiry could not be verified/i);
+  });
+
+  it("rejects an expired token (via exp claim)", () => {
+    const out = codex()?.hooks?.validateCredential?.({ apiKey: withAccount({ exp: 1 }) });
+    expect(out?.ok).toBe(false);
+    expect(out?.error).toBe("AUTH_FAILED");
+    expect(out?.message).toMatch(/expired/i);
+  });
+
+  it("accepts a token with an unexpired exp claim", () => {
+    const out = codex()?.hooks?.validateCredential?.({
+      apiKey: withAccount({ exp: 9_999_999_999 }),
+    });
+    expect(out?.ok).toBe(true);
+  });
+
+  it("accepts a token with an unexpired row expiresAt (exp claim absent)", () => {
+    const out = codex()?.hooks?.validateCredential?.({
+      apiKey: withAccount(),
+      expiresAt: Date.now() + 60_000,
+    });
+    expect(out?.ok).toBe(true);
+  });
+
+  it("rejects when the row expiresAt has passed (exp claim absent)", () => {
+    const out = codex()?.hooks?.validateCredential?.({
+      apiKey: withAccount(),
+      expiresAt: Date.now() - 60_000,
+    });
+    expect(out?.ok).toBe(false);
+    expect(out?.message).toMatch(/expired/i);
+  });
+});
