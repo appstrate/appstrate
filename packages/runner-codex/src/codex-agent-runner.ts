@@ -47,6 +47,7 @@ import {
   buildCodexEnv,
   readNdjsonLines,
   redactSecrets,
+  redactSecretsDeep,
   safeParseJson,
   writeCodexAuthHome,
   writeCodexConfig,
@@ -205,10 +206,20 @@ export class CodexAgentRunner implements Runner {
     const spawn = this.opts.spawn ?? defaultSpawn;
     const startTime = now();
 
+    // Secret values to scrub from EVERY emitted string. Empty until the token is
+    // vended below; mutated in place so the `emit` closure picks it up. The codex
+    // CLI runs with native tools holding the REAL subscription token at rest in
+    // auth.json, so assistant text / tool output / logs / errors could echo it —
+    // not just the subprocess stderr (which `redactSecrets` already covers). We
+    // scrub by VALUE here (the caller already has the token) on the run's single
+    // sink, so the credential cannot leak on any channel (H1).
+    const knownSecrets: string[] = [];
+
     const events: RunEvent[] = [];
     const emit = async (event: RunEvent): Promise<void> => {
-      events.push(event);
-      await eventSink.handle(event);
+      const scrubbed = redactSecretsDeep(event, knownSecrets);
+      events.push(scrubbed);
+      await eventSink.handle(scrubbed);
     };
 
     const mapper = new CodexRunEventMapper(runId, now);
@@ -260,6 +271,14 @@ export class CodexAgentRunner implements Runner {
         );
       }
       const cred = (await vend.json()) as VendedCodexCredential;
+
+      // Arm the redaction set now that the real credential is in hand: the
+      // access token always, plus the account id when it is a non-trivial value
+      // (it rides outbound as the `chatgpt-account-id` header and could be
+      // sensitive). The `>= 8` length guard inside the scrubber drops the
+      // placeholder/short ids. From here on every emitted string is scrubbed.
+      knownSecrets.push(cred.access_token);
+      if (typeof cred.account_id === "string") knownSecrets.push(cred.account_id);
 
       // 2. Write the ephemeral CODEX_HOME/auth.json (real token, 0600).
       home = await writeCodexAuthHome({ credential: cred, nowMs: now(), prefix: "codex-run-" });
@@ -335,7 +354,11 @@ export class CodexAgentRunner implements Runner {
       let error: RunError | undefined;
       if (failure) {
         status = "failed";
-        error = failure;
+        // A turn.failed message can echo the vended token/account id verbatim.
+        // The event stream is scrubbed by the emit() sink, but the terminal
+        // RunResult.error is NOT — scrub it by VALUE (same knownSecrets set
+        // armed after vend) before it folds into reduceEvents / the result.
+        error = redactSecretsDeep(failure, knownSecrets);
       } else if (exitCode === 0) {
         status = "success";
       } else {
@@ -353,12 +376,16 @@ export class CodexAgentRunner implements Runner {
 
       const usage = mapper.usage();
       const cost = computeCodexCost(usage, this.opts.modelCost);
-      const result = reduceEvents(events, error ? { error } : {});
-      result.status = status;
-      result.usage = usage;
-      result.cost = cost;
-      result.durationMs = now() - startTime;
+      const reduced = reduceEvents(events, error ? { error } : {});
+      reduced.status = status;
+      reduced.usage = usage;
+      reduced.cost = cost;
+      reduced.durationMs = now() - startTime;
 
+      // Defense-in-depth: deep-scrub the whole RunResult (error/usage/any string
+      // field reduceEvents may have folded in) before it leaves the runner, so a
+      // secret can't ride the terminal result even though every event was scrubbed.
+      const result = redactSecretsDeep(reduced, knownSecrets);
       await eventSink.finalize(result);
     } catch (err) {
       if (signal?.aborted) {
@@ -375,11 +402,16 @@ export class CodexAgentRunner implements Runner {
       // agent emitted before the throw — memory.added / output.emitted /
       // log.written — survives into the failed result, matching the Pi + Claude
       // runners and the in-try non-zero-exit branch above.
-      const result = reduceEvents(events, { error: { code: "adapter_error", message } });
-      result.status = "failed";
-      result.usage = mapper.usage();
-      result.cost = computeCodexCost(mapper.usage(), this.opts.modelCost);
-      result.durationMs = now() - startTime;
+      const reduced = reduceEvents(events, { error: { code: "adapter_error", message } });
+      reduced.status = "failed";
+      reduced.usage = mapper.usage();
+      reduced.cost = computeCodexCost(mapper.usage(), this.opts.modelCost);
+      reduced.durationMs = now() - startTime;
+      // A thrown error's text can carry the vended token verbatim. The emitted
+      // appstrate.error above is scrubbed by the emit() sink, but the terminal
+      // RunResult.error is the raw `message` — deep-scrub the whole result by
+      // VALUE (knownSecrets is armed after vend; empty if the throw predates it).
+      const result = redactSecretsDeep(reduced, knownSecrets);
       await eventSink.finalize(result);
     } finally {
       if (signal) signal.removeEventListener("abort", onAbort);

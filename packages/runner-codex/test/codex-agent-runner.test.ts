@@ -305,6 +305,135 @@ describe("CodexAgentRunner.run", () => {
     expect(finalDrained).toBe(true);
   });
 
+  it("redacts the vended access token from every emitted channel (H1)", async () => {
+    const TOKEN = "tok-real-SECRET-abcdef1234567890";
+    const ACCOUNT = "acct-SECRET-0987654321";
+    // The agent echoes the real token in its assistant text AND a shell command,
+    // and a turn.failed names it in the error — all of which leave the runner via
+    // the event sink. None must carry the token verbatim.
+    const child: CodexChild = {
+      stdout: ndjsonStream([
+        JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: `here is my token: ${TOKEN} and ${ACCOUNT}` },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: { type: "command_execution", command: `curl -H "auth: ${TOKEN}" host` },
+        }),
+        JSON.stringify({ type: "turn.failed", error: { message: `boom with ${TOKEN}` } }),
+        JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }),
+      ]),
+      stderr: emptyStream(),
+      exited: Promise.resolve(0),
+      kill() {},
+    };
+    const h = makeSink();
+    const runner = new CodexAgentRunner({
+      binaryPath: "/fake/codex",
+      modelId: "gpt-5.5",
+      systemPrompt: "",
+      credentialUrl: "http://sidecar:8080/credential-vend",
+      cwd: "/workspace",
+      fetchFn: vendFetch({ access_token: TOKEN, account_id: ACCOUNT }),
+      spawn: () => child,
+      now: () => 1_700_000_000_000,
+    });
+    await runner.run({ bundle, context: ctx, eventSink: h.sink });
+
+    // No emitted event — on ANY channel — may carry the token or account id.
+    const serialized = JSON.stringify(h.events);
+    expect(serialized).not.toContain(TOKEN);
+    expect(serialized).not.toContain(ACCOUNT);
+
+    // The assistant message still surfaced, with the secret swapped for the marker.
+    const progress = h.events.find(
+      (e) =>
+        e.type === "appstrate.progress" &&
+        typeof (e as RunEvent & { message?: string }).message === "string" &&
+        (e as RunEvent & { message: string }).message.startsWith("here is my token"),
+    ) as (RunEvent & { message: string }) | undefined;
+    expect(progress).toBeDefined();
+    expect(progress?.message).toContain("[REDACTED]");
+
+    // The error message reached the sink redacted too.
+    const errored = h.events.find((e) => e.type === "appstrate.error") as
+      | (RunEvent & { message?: string })
+      | undefined;
+    expect(errored?.message).toContain("[REDACTED]");
+    expect(errored?.message).not.toContain(TOKEN);
+  });
+
+  it("scrubs the vended token from the terminal RunResult error (F1), not just events", async () => {
+    const TOKEN = "tok-real-SECRET-abcdef1234567890";
+    const ACCOUNT = "acct-SECRET-0987654321";
+    // A turn.failed whose message names the vended token/account id. The event
+    // stream is scrubbed by emit(); this asserts the FINAL RESULT is too.
+    const child: CodexChild = {
+      stdout: ndjsonStream([
+        JSON.stringify({
+          type: "turn.failed",
+          error: { message: `auth blew up with token ${TOKEN} for ${ACCOUNT}` },
+        }),
+      ]),
+      stderr: emptyStream(),
+      exited: Promise.resolve(0),
+      kill() {},
+    };
+    const h = makeSink();
+    const runner = new CodexAgentRunner({
+      binaryPath: "/fake/codex",
+      modelId: "gpt-5.5",
+      systemPrompt: "",
+      credentialUrl: "http://sidecar:8080/credential-vend",
+      cwd: "/workspace",
+      fetchFn: vendFetch({ access_token: TOKEN, account_id: ACCOUNT }),
+      spawn: () => child,
+      now: () => 1_700_000_000_000,
+    });
+    await runner.run({ bundle, context: ctx, eventSink: h.sink });
+
+    expect(h.result?.status).toBe("failed");
+    // Assert on the RESULT object — the whole thing, not just the events.
+    const serializedResult = JSON.stringify(h.result);
+    expect(serializedResult).not.toContain(TOKEN);
+    expect(serializedResult).not.toContain(ACCOUNT);
+    // The error message still surfaced, with the secret swapped for the marker.
+    expect(h.result?.error?.message).toContain("[REDACTED]");
+  });
+
+  it("scrubs the vended token from the RunResult error on the catch path (F1)", async () => {
+    const TOKEN = "tok-throw-SECRET-abcdef1234567890";
+    // The NDJSON stream throws mid-read with a message embedding the token.
+    const throwingStream = new ReadableStream<Uint8Array>({
+      pull() {
+        throw new Error(`stream blew up exposing ${TOKEN}`);
+      },
+    });
+    const child: CodexChild = {
+      stdout: throwingStream,
+      stderr: emptyStream(),
+      exited: Promise.resolve(0),
+      kill() {},
+    };
+    const h = makeSink();
+    const runner = new CodexAgentRunner({
+      binaryPath: "/fake/codex",
+      modelId: "gpt-5.5",
+      systemPrompt: "",
+      credentialUrl: "http://sidecar:8080/credential-vend",
+      cwd: "/workspace",
+      fetchFn: vendFetch({ access_token: TOKEN }),
+      spawn: () => child,
+      now: () => 1_700_000_000_000,
+    });
+    await runner.run({ bundle, context: ctx, eventSink: h.sink });
+
+    expect(h.result?.status).toBe("failed");
+    expect(JSON.stringify(h.result)).not.toContain(TOKEN);
+    expect(h.result?.error?.message).toContain("[REDACTED]");
+  });
+
   it("runs without a drainer (no runtime tools) and never reads result _meta", async () => {
     const child: CodexChild = {
       stdout: ndjsonStream([

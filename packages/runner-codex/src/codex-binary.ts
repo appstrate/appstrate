@@ -69,19 +69,55 @@ function b64url(value: object): string {
  * caught — pass the vended `access_token`).
  */
 export function redactSecrets(text: string, knownSecrets: readonly string[] = []): string {
-  let out = text;
-  // Value-based redaction first: exact known secrets, longest-first so a token
-  // that contains a shorter one is fully masked. Guard against short/empty
-  // values that would over-redact innocuous substrings.
-  for (const secret of [...knownSecrets]
-    .filter((s) => s && s.length >= 8)
-    .sort((a, b) => b.length - a.length)) {
-    out = out.split(secret).join("[REDACTED]");
-  }
-  return out
+  return redactSecretValues(text, knownSecrets)
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
     .replace(/eyJ[A-Za-z0-9._-]{10,}/g, "[REDACTED_JWT]")
     .replace(/\bsk-[A-Za-z0-9-]{16,}/g, "[REDACTED_KEY]");
+}
+
+/** Marker substituted for a redacted secret value. */
+const REDACTION_MARKER = "[REDACTED]";
+
+/**
+ * Replace each known secret VALUE in `text` with {@link REDACTION_MARKER}.
+ * Longest-first so a token that contains a shorter secret is fully masked; the
+ * `length >= 8` guard avoids over-redacting innocuous short substrings. This is
+ * the precise, value-based core shared by {@link redactSecrets} (which adds
+ * shape-based heuristics for a subprocess's stderr) and {@link redactEventStrings}
+ * (which must NOT apply shape heuristics — they could corrupt legitimate agent
+ * output — only mask the exact vended credential).
+ */
+export function redactSecretValues(text: string, knownSecrets: readonly string[]): string {
+  let out = text;
+  for (const secret of [...knownSecrets]
+    .filter((s) => s && s.length >= 8)
+    .sort((a, b) => b.length - a.length)) {
+    out = out.split(secret).join(REDACTION_MARKER);
+  }
+  return out;
+}
+
+/**
+ * Deep-scrub every string in an arbitrary JSON-ish value, masking known secret
+ * VALUES (value-based only — no shape heuristics, so legitimate content is never
+ * mangled). Returns a structurally-equal copy with strings scrubbed; non-string
+ * leaves are returned as-is. A no-op (returns the input) when there are no
+ * secrets ≥ 8 chars to scrub.
+ */
+export function redactSecretsDeep<T>(value: T, knownSecrets: readonly string[]): T {
+  const secrets = knownSecrets.filter((s) => s && s.length >= 8);
+  if (secrets.length === 0) return value;
+  const scrub = (v: unknown): unknown => {
+    if (typeof v === "string") return redactSecretValues(v, secrets);
+    if (Array.isArray(v)) return v.map(scrub);
+    if (v && typeof v === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = scrub(val);
+      return out;
+    }
+    return v;
+  };
+  return scrub(value) as T;
 }
 
 /**

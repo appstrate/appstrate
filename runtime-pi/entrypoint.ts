@@ -34,6 +34,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { tmpdir } from "node:os";
 import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
 import {
   PiRunner,
@@ -816,21 +817,44 @@ async function buildCodexAgentRunner(): Promise<CodexAgentRunner> {
   // Dynamic import: loaded ONLY for a codex run, so a pi/claude run (or a slim
   // image without @appstrate/runner-codex) never resolves the Codex package.
   const { CodexAgentRunner } = await import("@appstrate/runner-codex");
-  const { resolveCodexBinary, makeCodexScopeResolver } =
+  const { resolveCodexBinary, makeCodexScopeResolver, sweepStaleCodexHomes } =
     await import("@appstrate/runner-codex/binary");
   const base = sidecarUrl.replace(/\/$/, "");
-  // Resolve order: explicit CODEX_BINARY_PATH → the bundled per-arch package →
-  // bare `codex` on PATH (the image also symlinks the binary onto PATH as a
-  // belt-and-suspenders). Mirrors the chat engine's fallback chain.
+
+  // Real-token-at-rest hygiene (Q1, backs H1): reap any orphaned `codex-run-*`
+  // CODEX_HOME dirs a prior ungraceful kill (SIGKILL/OOM between writing
+  // auth.json and the runner's `finally` cleanup) left behind — each still holds
+  // a real subscription token on disk. Done at codex runner init, before this
+  // run writes its own home. Best-effort and never throws (a missing dir is a
+  // no-op); 1 h staleness threshold so an in-flight sibling run is never touched.
+  const sweptHomes = await sweepStaleCodexHomes({
+    baseDir: tmpdir(),
+    prefix: "codex-run-",
+    maxAgeMs: 60 * 60 * 1000,
+    nowMs: Date.now(),
+  });
+  if (sweptHomes > 0) {
+    await progress(`Reaped ${sweptHomes} stale codex credential home(s)`, {
+      sweptCodexHomes: sweptHomes,
+    });
+  }
+  // OFFICIAL-BINARY-ONLY for a subscription (vend) run. The vend run holds the
+  // REAL ChatGPT subscription token in-container, so the binary it drives MUST
+  // be the pinned, official `@openai/codex` vendor binary — a substituted binary
+  // could exfiltrate the token or forge a different client identity. So we
+  // resolve ONLY through the per-arch package resolver and FAIL CLOSED if it is
+  // absent: NO bare-`codex`-on-PATH fallback (anyone could drop a `codex` onto
+  // PATH). An explicit, non-default operator opt-in (`CODEX_ALLOW_BINARY_OVERRIDE
+  // = "1"`) is required to honour `CODEX_BINARY_PATH` for local dev/test — a real
+  // production vend run never silently trusts an arbitrary path.
   let codexBinary: string;
-  if (process.env.CODEX_BINARY_PATH) {
+  if (process.env.CODEX_ALLOW_BINARY_OVERRIDE === "1" && process.env.CODEX_BINARY_PATH) {
     codexBinary = process.env.CODEX_BINARY_PATH;
   } else {
-    try {
-      codexBinary = resolveCodexBinary({ resolve: makeCodexScopeResolver(import.meta.url) });
-    } catch {
-      codexBinary = "codex";
-    }
+    // Throws a descriptive error when the pinned package is not installed —
+    // intentionally fatal: launching a vend run on an unverifiable binary is a
+    // worse outcome than failing the run.
+    codexBinary = resolveCodexBinary({ resolve: makeCodexScopeResolver(import.meta.url) });
   }
   return new CodexAgentRunner({
     binaryPath: codexBinary,
