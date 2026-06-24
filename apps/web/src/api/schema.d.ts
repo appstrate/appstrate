@@ -12162,7 +12162,10 @@ export interface operations {
     };
     listModels: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description When true, resolve each model's protocol family and base URL from the provider registry WITHOUT decrypting its credential. Faster for callers that only need to pick a model (e.g. the chat model picker); a model whose secret is unusable is not filtered and surfaces an error only at inference time. */
+                metadata_only?: boolean;
+            };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];

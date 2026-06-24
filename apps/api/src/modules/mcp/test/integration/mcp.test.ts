@@ -383,8 +383,16 @@ describe("mcp tool round-trip", () => {
     // chat splits on the same literal to strip it for uncached/no-tool
     // providers (see applyOperationIndexPolicy in module-chat). Keep in sync.
     expect(instructions).toContain("## Operation index");
-    // ...and the index actually lists operations under it.
-    expect(instructions!.split("## Operation index")[1]).toContain("- listAgents");
+    // ...and the index actually lists operations under it (compact form:
+    // comma-separated operationIds per tag, no per-op summary).
+    const indexSection = instructions!.split("## Operation index")[1]!;
+    expect(indexSection).toContain("listAgents");
+    // Regression guard for the compact index (TTFT): operationIds only, never the
+    // old `- operationId — summary` form. The bullet+em-dash would re-bloat the
+    // index (~3.4k tokens) that every uncached turn re-sends. If summaries return,
+    // this fails — re-evaluate the token cost first.
+    expect(indexSection).not.toContain(" — ");
+    expect(indexSection).not.toMatch(/^- \w/m);
   });
 });
 

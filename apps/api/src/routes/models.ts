@@ -130,7 +130,13 @@ export function createModelsRouter() {
   // GET /api/models — list all models (system + DB)
   router.get("/", requirePermission("models", "read"), async (c) => {
     const orgId = c.get("orgId");
-    const models = await listOrgModels(orgId);
+    // `metadata_only`: resolve protocol family/baseUrl from the registry without
+    // decrypting each model's credential. For callers that only need to pick a
+    // model row (e.g. the chat picker), not to call inference. Rows with a gone
+    // credential/provider are still dropped, but a model whose secret is unusable
+    // (dead OAuth) is NOT filtered here — it surfaces and errors at inference.
+    const metadataOnly = c.req.query("metadata_only") === "true";
+    const models = await listOrgModels(orgId, { metadataOnly });
     // Strip the backing of any model alias before it reaches the dashboard user
     // (Threat A) — see projectAliasedModel. Non-aliased models pass through.
     //

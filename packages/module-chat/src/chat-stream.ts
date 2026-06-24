@@ -25,6 +25,7 @@ import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
 import { subscriptionEngineDef } from "@appstrate/core/subscription-engines";
 import { buildTranscriptPrompt } from "./transcript.ts";
+import { getIntegrationsService } from "./platform-services.ts";
 
 const MAX_STEPS = 16;
 
@@ -72,6 +73,14 @@ Respect the user's role: actions beyond it will be refused by the platform — d
 // no instance tools — so the prompt drops the tool-grounding instructions and
 // tells the model to be upfront about the limitation.
 const NO_TOOLS_SYSTEM_PROMPT = `You are Appstrate's assistant. Right now your instance tools are unavailable because the platform MCP module is not active, so you cannot search operations, run agents, inspect runs, or schedule. Answer the user's questions directly and conversationally. If the user asks for an action that needs those tools, say plainly that tools are disabled until the \`mcp\` module is enabled, rather than pretending to act.`;
+
+// The subscription (claude-code) path doesn't probe the platform MCP for
+// reachability (the SDK opens its own connection) — so unlike the ai-sdk path it
+// can't pre-select NO_TOOLS_SYSTEM_PROMPT when the `mcp` module is absent. This
+// note makes the tool-grounding prompt degrade gracefully in that rare config
+// (claude-code enabled, mcp disabled): the model reports tools are off instead
+// of looping on failing tool calls. Harmless when tools ARE present.
+const SUBSCRIPTION_TOOLS_NOTE = `If your tool calls fail because the platform tools are unavailable (the \`mcp\` module is disabled on this instance), do not retry — tell the user plainly that instance tools are off and answer conversationally instead.`;
 
 /** Shape of GET /api/me/context (the `get_me` payload). Validated loosely. */
 interface CallerContext {
@@ -138,6 +147,62 @@ function clientErrorMessage(error: unknown): string {
   return `Le modèle a échoué : ${trimmed.length > 400 ? `${trimmed.slice(0, 400)}…` : trimmed}`;
 }
 
+/**
+ * Build the caller-context system-prompt block WITHOUT a loopback HTTP hop when
+ * possible. Identity (name/email) and role come straight off the request
+ * context (already authenticated by the platform pipeline); only the connected
+ * integrations need a read, served in-process via the injected platform
+ * service. Falls back to the `GET /api/me/context` loopback when the service
+ * isn't wired (OSS/tests). Best-effort: any failure degrades to no block ("").
+ */
+async function buildCallerContextBlock(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  c: Context<any>,
+  args: {
+    origin: string;
+    headers: Record<string, string>;
+    orgId: string;
+    applicationId?: string;
+    user: { id: string; name?: string | null; email?: string | null };
+  },
+): Promise<string> {
+  const { origin, headers, orgId, applicationId, user } = args;
+  const role = (c.get("orgRole") as string | undefined) ?? undefined;
+  try {
+    const svc = getIntegrationsService();
+    if (svc) {
+      // In-process: identity/role come from the request context. The connection
+      // list is app-scoped — fetch it only when an application id is known;
+      // without one we still emit the identity/role block (empty connections)
+      // rather than fall back to a loopback that would itself 400 without app
+      // context.
+      const connections = applicationId
+        ? await svc.listUsableForActor({
+            orgId,
+            applicationId,
+            actor: { type: "user", id: user.id },
+          })
+        : [];
+      return formatCallerContext({
+        user: { name: user.name ?? null, email: user.email ?? null },
+        org: { role: role ?? null },
+        connections,
+      });
+    }
+    // Fallback: the original loopback hop (kept for OSS/test wiring).
+    const ctxHeaders: Record<string, string> = { ...headers };
+    if (applicationId) ctxHeaders["x-application-id"] = applicationId;
+    const res = await fetch(new URL("/api/me/context", origin), { headers: ctxHeaders });
+    if (res.ok) return formatCallerContext(await res.json());
+    return "";
+  } catch (err) {
+    logger.warn("me/context unavailable — chat degrades without caller context", {
+      err: String(err),
+    });
+    return "";
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function handleChatStream(c: Context<any>): Promise<Response> {
   const orgId = c.get("orgId") as string;
@@ -149,6 +214,14 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
 
   const origin = selfOrigin();
   const headers = forwardedHeaders(c);
+
+  // Per-turn observability: structured per-step logs to stdout. Full payloads
+  // only under CHAT_DEBUG — they may carry PII/customer content.
+  const debug = Boolean(process.env.CHAT_DEBUG);
+  const turnStart = Date.now();
+  let step = 0;
+  let stepStart = turnStart;
+  let firstChunkAt = 0;
 
   // The proxy surfaces are bearer-only (cookies refused — CSRF model):
   // inference loopback calls carry a short-lived token only this process
@@ -167,82 +240,32 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
     "X-Org-Id": orgId,
   };
 
-  // Model chosen in the picker (X-Model-Id), else the request body, else the
-  // org default. We pick the org model row first (so we can read its
-  // providerId) and only then decide the engine — `claude-code` (Claude
-  // subscription) goes through the Agent SDK; everything else through ai-sdk.
+  // ── Preamble phase A (parallel) ──────────────────────────────────────────
+  // The model list and the default application id are independent reads, so
+  // fire them together rather than back-to-back. `listModels` decides the
+  // engine (we read the chosen row's providerId); the app id scopes the MCP
+  // + integration reads that follow. Pin from the header when the caller
+  // already supplied one (no lookup needed).
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
-  const models = await listModels(origin, inferenceHeaders);
+  const pinnedAppId = c.req.header("x-application-id");
+  const phaseAStart = Date.now();
+  const [models, applicationId] = await Promise.all([
+    // metadata_only (skip credential decrypt) is safe only when an explicit
+    // model is pinned — that id came from the filtered picker, so it's reachable.
+    // Without a pin we resolve the org default from the full filtered list, so a
+    // dead-credential default is dropped rather than picked → inference error.
+    listModels(origin, inferenceHeaders, { metadataOnly: Boolean(modelId) }),
+    pinnedAppId
+      ? Promise.resolve(pinnedAppId)
+      : resolveDefaultApplicationId(origin, headers, orgId),
+  ]);
   const chosen = pickModel(models, modelId);
+  const phaseAMs = Date.now() - phaseAStart;
   logger.info("model resolved", {
     model: chosen.id,
     modelId: chosen.modelId,
     providerId: chosen.providerId,
   });
-  // App-scoped ops (agents, runs) need an application context; resolve the
-  // org's default app unless the caller already pinned one.
-  const applicationId =
-    c.req.header("x-application-id") ?? (await resolveDefaultApplicationId(origin, headers, orgId));
-  // Graceful degradation: the chat's tools come from the platform MCP module
-  // (`/api/mcp/o/:org`). If it's unreachable (e.g. `mcp` not in MODULES), keep
-  // the turn usable for plain conversation instead of 500-ing. The UI surfaces
-  // a "no tools" banner via the `mcp` app-config feature flag.
-  let mcp: Awaited<ReturnType<typeof openPlatformMcp>> | null = null;
-  // Single MCP-teardown path. The session must be closed on EVERY exit (the
-  // claude engine's early return, the ai-sdk stream's `onError` AND `onFinish`,
-  // and a mid-stream client disconnect) or it leaks per turn — close failures are
-  // swallowed (warn only) so they never mask the turn result. `await` it on the
-  // synchronous paths, `void` it inside the stream callbacks.
-  const closeMcp = async (): Promise<void> => {
-    try {
-      await mcp?.close();
-    } catch (err) {
-      logger.warn("mcp close failed", { err: String(err) });
-    }
-  };
-  try {
-    mcp = await openPlatformMcp({ origin, headers, orgId, applicationId });
-  } catch (err) {
-    logger.warn("platform MCP unavailable — chat degrades to no-tools", { err: String(err) });
-  }
-
-  // Per-turn observability: structured per-step logs to stdout. Full payloads
-  // only under CHAT_DEBUG — they may carry PII/customer content.
-  const debug = Boolean(process.env.CHAT_DEBUG);
-  const turnStart = Date.now();
-  let step = 0;
-  let stepStart = turnStart;
-
-  let system = !mcp
-    ? NO_TOOLS_SYSTEM_PROMPT
-    : mcp.instructions
-      ? `${SYSTEM_PROMPT}\n\n${mcp.instructions}`
-      : SYSTEM_PROMPT;
-  if (body.context) {
-    system += `\n\nThe user is currently looking at: ${body.context.type} "${body.context.label ?? body.context.id}" (id: ${body.context.id}). Prefer this context when the question is ambiguous.`;
-  }
-
-  // Caller context (identity, role, connected integrations) — one source of
-  // truth shared with the MCP `get_me` tool: GET /api/me/context. Best-effort,
-  // a failure degrades to no context block rather than breaking the turn.
-  try {
-    const ctxHeaders: Record<string, string> = { ...headers };
-    if (applicationId) ctxHeaders["x-application-id"] = applicationId;
-    const res = await fetch(new URL("/api/me/context", origin), { headers: ctxHeaders });
-    if (res.ok) {
-      const block = formatCallerContext(await res.json());
-      if (block) system += `\n\n${block}`;
-    }
-  } catch (err) {
-    logger.warn("me/context unavailable — chat degrades without caller context", {
-      err: String(err),
-    });
-  }
-
-  // Platform MCP wiring shared by both engines: the meta-tools live at
-  // /api/mcp/o/:org and run with the caller's own credentials (RBAC fidelity).
-  const mcpHeaders: Record<string, string> = { ...headers };
-  if (applicationId) mcpHeaders["x-application-id"] = applicationId;
 
   // Subscription engine with a chat surface — the binding AND its chat driver
   // are contributed by the provider module via the shared core registry (the
@@ -253,20 +276,96 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   // (filtered from the chat model list by CHAT_USABLE_FAMILIES) and contributes
   // no chatHandler — so today only the Claude Agent SDK reaches this branch.
   const subscriptionEngine = subscriptionEngineDef(chosen.providerId ?? "");
+  const isSubscription = Boolean(subscriptionEngine?.chatHandler);
 
+  // Platform MCP wiring shared by both engines: the meta-tools live at
+  // /api/mcp/o/:org and run with the caller's own credentials (RBAC fidelity).
+  const mcpHeaders: Record<string, string> = { ...headers };
+  if (applicationId) mcpHeaders["x-application-id"] = applicationId;
+
+  // ── Preamble phase B (parallel) ──────────────────────────────────────────
+  // The caller-context block (both paths) and the platform MCP probe (ai-sdk
+  // path only) are independent — run them together.
+  //
+  // The subscription (claude-code) path SKIPS the probe entirely: the official
+  // binary opens its OWN MCP connection from `platformMcp.url`, and the MCP
+  // server's instructions reach the model through that handshake. A probe here
+  // would be a second handshake we'd immediately close (2 round-trips wasted on
+  // the TTFT path). We pass `platformMcp` optimistically; if the `mcp` module is
+  // absent the SDK just gets no tools.
+  let mcp: Awaited<ReturnType<typeof openPlatformMcp>> | null = null;
+  // Single MCP-teardown path. The session must be closed on EVERY ai-sdk exit
+  // (stream `onError` AND `onFinish`, and a mid-stream client disconnect) or it
+  // leaks per turn — close failures are swallowed (warn only) so they never mask
+  // the turn result. `await` it on the synchronous paths, `void` in callbacks.
+  const closeMcp = async (): Promise<void> => {
+    try {
+      await mcp?.close();
+    } catch (err) {
+      logger.warn("mcp close failed", { err: String(err) });
+    }
+  };
+
+  const phaseBStart = Date.now();
+  const contextPromise = buildCallerContextBlock(c, {
+    origin,
+    headers,
+    orgId,
+    applicationId,
+    user,
+  });
+  let contextBlock: string;
+  if (isSubscription) {
+    contextBlock = await contextPromise;
+  } else {
+    // Graceful degradation: the chat's tools come from the platform MCP module
+    // (`/api/mcp/o/:org`). If it's unreachable (e.g. `mcp` not in MODULES), keep
+    // the turn usable for plain conversation instead of 500-ing. The UI surfaces
+    // a "no tools" banner via the `mcp` app-config feature flag.
+    const [openedMcp, block] = await Promise.all([
+      openPlatformMcp({ origin, headers, orgId, applicationId }).catch((err) => {
+        logger.warn("platform MCP unavailable — chat degrades to no-tools", {
+          err: String(err),
+        });
+        return null;
+      }),
+      contextPromise,
+    ]);
+    mcp = openedMcp;
+    contextBlock = block;
+  }
+  const phaseBMs = Date.now() - phaseBStart;
+
+  // Assemble the system prompt. Subscription path: tool-grounding prompt, no
+  // inline instructions (the SDK's own MCP handshake delivers them). ai-sdk
+  // path: prompt + probe instructions, or the no-tools prompt when MCP is down.
+  let system = isSubscription
+    ? `${SYSTEM_PROMPT}\n\n${SUBSCRIPTION_TOOLS_NOTE}`
+    : !mcp
+      ? NO_TOOLS_SYSTEM_PROMPT
+      : mcp.instructions
+        ? `${SYSTEM_PROMPT}\n\n${mcp.instructions}`
+        : SYSTEM_PROMPT;
+  if (body.context) {
+    system += `\n\nThe user is currently looking at: ${body.context.type} "${body.context.label ?? body.context.id}" (id: ${body.context.id}). Prefer this context when the question is ambiguous.`;
+  }
+  if (contextBlock) system += `\n\n${contextBlock}`;
   system = applyOperationIndexPolicy(system, chosen.apiShape);
 
-  // The official binary opens its OWN MCP connection — so close the probe client
-  // (used only for reachability + instructions), point the engine at the
-  // platform MCP endpoint + forwarded headers, and mint one turn-scoped loopback
-  // bearer for the credential-injection gateway (which swaps it server-side; the
-  // real subscription token never enters this process or the spawned binary's
-  // env). The gateway slug derives from the provider id — no vendor literal.
+  logger.info("chat preamble", {
+    engine: isSubscription ? "subscription" : "ai-sdk",
+    providerId: chosen.providerId,
+    phaseAMs,
+    phaseBMs,
+    preambleMs: Date.now() - turnStart,
+    hasTools: isSubscription || Boolean(mcp),
+  });
+
+  // The credential-injection gateway swaps the placeholder bearer server-side;
+  // the real subscription token never enters this process or the spawned
+  // binary's env. The gateway slug derives from the provider id — no vendor
+  // literal. `platformMcp` is passed unconditionally (see phase B note).
   if (subscriptionEngine?.chatHandler) {
-    const platformMcp = mcp
-      ? { url: `${origin}/api/mcp/o/${encodeURIComponent(orgId)}`, headers: mcpHeaders }
-      : undefined;
-    await closeMcp();
     const loopbackToken = mintLoopbackToken(
       { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
       { ttlMs: ENGINE_LOOPBACK_TTL_MS },
@@ -277,7 +376,7 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
       modelId: chosen.modelId,
       gatewayBaseUrl: `${origin}/api/llm-proxy/${subscriptionEngine.providerId}-sdk/${encodeURIComponent(chosen.id)}`,
       placeholderToken: loopbackToken,
-      platformMcp,
+      platformMcp: { url: `${origin}/api/mcp/o/${encodeURIComponent(orgId)}`, headers: mcpHeaders },
       abortSignal: c.req.raw.signal,
       onError: clientErrorMessage,
     });
@@ -311,6 +410,14 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
       tools: mcp ? mcp.tools : undefined,
       stopWhen: stepCountIs(MAX_STEPS),
       abortSignal: c.req.raw.signal,
+      onChunk: ({ chunk }) => {
+        // TTFT marker: log once on the first model output (text or tool call),
+        // measured from turn start. The dominant lever this work optimizes.
+        if (firstChunkAt === 0 && (chunk.type === "text-delta" || chunk.type === "tool-call")) {
+          firstChunkAt = Date.now();
+          logger.info("chat first token", { firstTokenMs: firstChunkAt - turnStart });
+        }
+      },
       onStepFinish: ({ toolCalls, toolResults, finishReason, usage }) => {
         const now = Date.now();
         logger.info("chat step", {

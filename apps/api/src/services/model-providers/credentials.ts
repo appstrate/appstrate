@@ -31,6 +31,7 @@ import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { getSystemModelProviderCredentials, getSystemModels } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
+import { clearResolvedModelCache } from "../resolved-model-cache.ts";
 
 // ─── Blob shapes (encrypted at rest) ───────────────────────────────────────
 
@@ -184,6 +185,40 @@ export async function loadCredentialRow(
   };
 }
 
+/**
+ * Registry-derived credential metadata WITHOUT decrypting the secret blob.
+ * `providerId` is a plaintext column; `apiShape`/`baseUrl` come from the
+ * provider registry. Used by metadata-only listings (e.g. the chat model
+ * picker) that need to resolve the protocol family + base URL but never the
+ * key itself — the real secret is decrypted later, at inference time.
+ */
+export interface CredentialMetadata {
+  providerId: string;
+  apiShape: ModelApiShape;
+  baseUrl: string;
+}
+
+export async function loadCredentialMetadata(
+  id: string,
+  orgId: string,
+): Promise<CredentialMetadata | null> {
+  const [row] = await db
+    .select({
+      orgId: modelProviderCredentials.orgId,
+      providerId: modelProviderCredentials.providerId,
+      baseUrlOverride: modelProviderCredentials.baseUrlOverride,
+    })
+    .from(modelProviderCredentials)
+    .where(eq(modelProviderCredentials.id, id))
+    .limit(1);
+  if (!row || row.orgId !== orgId) return null;
+  const cfg = getModelProvider(row.providerId);
+  if (!cfg) return null;
+  const baseUrl =
+    row.baseUrlOverride && cfg.baseUrlOverridable ? row.baseUrlOverride : cfg.defaultBaseUrl;
+  return { providerId: row.providerId, apiShape: cfg.apiShape, baseUrl };
+}
+
 // ─── Create ────────────────────────────────────────────────────────────────
 
 export interface CreateApiKeyCredentialInput {
@@ -327,6 +362,9 @@ export async function updateModelProviderCredential(
         extra: [eq(modelProviderCredentials.id, id)],
       }),
     );
+  // Models backed by this credential may have a cached resolution carrying the
+  // old key/baseUrl — drop it so the rotation takes effect immediately.
+  clearResolvedModelCache();
 }
 
 // ─── Label derivation ──────────────────────────────────────────────────────
@@ -415,6 +453,10 @@ async function updateOAuthBlob(
         extra: [eq(modelProviderCredentials.id, id)],
       }),
     );
+  // Chokepoint for every OAuth blob write (token refresh + needsReconnection):
+  // bust the resolved-model cache so a rotated token or a freshly-dead credential
+  // stops being served immediately, not after the TTL.
+  clearResolvedModelCache();
 }
 
 export async function updateOAuthCredentialTokens(
@@ -518,6 +560,9 @@ export async function deleteModelProviderCredential(orgId: string, id: string): 
       extra: [eq(modelProviderCredentials.id, id)],
     }),
   );
+  // Any model backed by the deleted credential is now unresolvable — drop cached
+  // resolutions so they don't serve a stale (now-deleted) secret.
+  clearResolvedModelCache();
 }
 
 // ─── Aggregated UI surface (system env-driven + DB) ────────────────────────

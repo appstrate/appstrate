@@ -31,4 +31,12 @@ describe("ModuleInitContext.services — platform service wiring", () => {
   it("wires the run-ledger read (runs.listLlmUsage — sole cross-tenant consumer: cloud)", () => {
     expect(typeof services.runs.listLlmUsage).toBe("function");
   });
+
+  it("wires the integration read (integrations.listUsableForActor — chat caller context)", () => {
+    expect(typeof services.integrations.listUsableForActor).toBe("function");
+  });
+
+  it("wires in-process dispatch (inProcess.dispatch — chat loopback-free reads)", () => {
+    expect(typeof services.inProcess.dispatch).toBe("function");
+  });
 });

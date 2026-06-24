@@ -17,8 +17,20 @@ import type { LanguageModel } from "ai";
 import { badGateway, invalidRequest } from "@appstrate/core/api-errors";
 import { CHAT_USABLE_FAMILIES } from "./chat-families.ts";
 import { logger } from "./logger.ts";
+import { getInProcessService } from "./platform-services.ts";
 
 const LLM_PROXY_PATH = "/api/llm-proxy";
+
+/**
+ * Reach the platform IN-PROCESS when the host wired `inProcess.dispatch`
+ * (re-enters the Hono app, no socket hop), else the loopback `fetch` the chat
+ * has always used. The auth pipeline runs either way — same headers, same RBAC.
+ */
+function platformFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  const svc = getInProcessService();
+  if (svc) return svc.dispatch(new Request(input, init));
+  return fetch(input, init);
+}
 
 export interface OrgModel {
   id: string;
@@ -50,8 +62,19 @@ interface ResolveArgs {
 export async function listModels(
   origin: string,
   headers: Record<string, string>,
+  opts?: { metadataOnly?: boolean },
 ): Promise<OrgModel[]> {
-  const res = await fetch(`${origin}/api/models`, { headers });
+  // `metadata_only` skips the per-model credential decrypt + reachability filter
+  // — faster, but it also stops dropping models whose credential is dead
+  // (needs-reconnection). Safe ONLY when the caller will match an explicit,
+  // user-picked id (that id came from the browser's filtered picker, so it is
+  // already reachable). For DEFAULT resolution (no explicit id) we must use the
+  // full filtered list, or a dead org-default would be picked and fail at
+  // inference. The caller passes `metadataOnly` accordingly.
+  const url = opts?.metadataOnly
+    ? `${origin}/api/models?metadata_only=true`
+    : `${origin}/api/models`;
+  const res = await platformFetch(url, { headers });
   if (!res.ok) throw badGateway(`/api/models returned ${res.status}`);
   const body = (await res.json()) as { models?: OrgModel[]; data?: OrgModel[] };
   const models = body.models ?? body.data;
@@ -130,7 +153,7 @@ export function modelFromFamily(
   const fetchImpl = (async (input, init) => {
     const h = new Headers(init?.headers);
     h.set("authorization", `Bearer ${mintAuth()}`);
-    return fetch(input, { ...init, headers: h });
+    return platformFetch(input, { ...init, headers: h });
   }) as typeof fetch;
 
   // The proxy resolves `body.model` as the Appstrate **preset id** (the org
@@ -196,7 +219,7 @@ export async function resolveDefaultApplicationId(
   origin: string,
   headers: Record<string, string>,
   orgId: string,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = platformFetch as typeof fetch,
 ): Promise<string | undefined> {
   const cached = appCache.get(orgId);
   if (cached !== undefined) return cached;
