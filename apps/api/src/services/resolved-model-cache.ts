@@ -14,9 +14,13 @@
  * at runtime, so it introduces no runtime dependency edge.
  *
  * Security: the cached value carries the decrypted credential, so a disable /
- * rotation / reconnection-flag change MUST invalidate it immediately (not wait
- * out the TTL). Every credential mutator calls `clearResolvedModelCache()`; the
- * TTL is only a backstop for anything not explicitly wired.
+ * rotation / reconnection-flag change MUST invalidate it. Every credential
+ * mutator calls `clearResolvedModelCache()`, which is immediate WITHIN a
+ * process. This Map is process-local — there is no cross-instance pub/sub
+ * invalidation, so on a multi-instance deployment another instance's cached
+ * copy stays live until its own entry expires; cross-instance staleness is
+ * therefore bounded by the 30 s TTL backstop. The TTL is also the backstop for
+ * anything not explicitly wired to an invalidation call.
  */
 
 import type { ResolvedModel } from "./org-models.ts";

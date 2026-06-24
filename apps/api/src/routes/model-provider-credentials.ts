@@ -300,13 +300,18 @@ export function createModelProviderCredentialsRouter() {
     },
   );
 
-  // POST /api/model-provider-credentials/:id/refresh-models — empirical
-  // model discovery. Probes every discovery candidate against the live
-  // credential (1-token requests) and persists the ids that answered as
-  // `available_model_ids`. Synchronous — the caller gets the verified
-  // list back. Rate-limited (each call burns a handful of requests on the
-  // user's own quota), but loose enough for the model form to revalidate
-  // on every open while configuring several models in a row.
+  // POST /api/model-provider-credentials/:id/refresh-models — model
+  // discovery. For `"probe"` (API-key) providers this is empirical: probes
+  // every discovery candidate against the live credential (1-token requests)
+  // and persists the ids that answered as `available_model_ids`. For
+  // `"offline"`-validation providers (subscription: codex, claude-code) it
+  // issues ZERO upstream calls — it persists the provider's static candidate
+  // set (∩ catalog) instead. Synchronous — the caller gets the resulting
+  // list back. `probed_count` means candidates considered (not necessarily
+  // models live-probed: offline providers consider candidates without any
+  // upstream request). Rate-limited (a probe call burns a handful of requests
+  // on the user's own quota), but loose enough for the model form to
+  // revalidate on every open while configuring several models in a row.
   router.post(
     "/:id/refresh-models",
     rateLimit(6),

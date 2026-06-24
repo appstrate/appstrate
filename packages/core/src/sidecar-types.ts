@@ -611,7 +611,10 @@ export interface OAuthTokenResponse {
   /**
    * Abstract account/tenant identifier surfaced by the integration's
    * `extractTokenIdentity` hook (used at connect time for required-claim
-   * validation; not forwarded to the upstream provider).
+   * validation). This generic OAuth `accountId` metadata is NOT forwarded as an
+   * upstream header by the platform. (Distinct, provider-specific mechanism: the
+   * codex vend path writes the real `chatgpt_account_id` into the CLI's local
+   * auth state, consumed by the official binary — not this field.)
    */
   accountId?: string;
 }

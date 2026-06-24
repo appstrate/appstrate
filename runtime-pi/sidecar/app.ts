@@ -11,6 +11,7 @@ import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import {
   DEFAULT_API_CALL_CONCURRENCY,
   LLM_PROXY_TIMEOUT_MS,
+  MAX_REQUEST_BODY_SIZE,
   filterHeaders,
   isBlockedUrl,
   readPositiveIntEnv,
@@ -365,6 +366,92 @@ function stringifyError(err: unknown): string {
 }
 
 /**
+ * The `/llm` 413 envelope. Mirrors the mcp.ts oversize-error shape so a
+ * caller sees a consistent `PAYLOAD_TOO_LARGE` discriminator on both the
+ * MCP envelope cap and this request-body cap.
+ */
+function llmBodyOversizeError(actual: number | null) {
+  return {
+    error:
+      actual !== null
+        ? `Request body exceeds ${MAX_REQUEST_BODY_SIZE} bytes (declared ${actual}).`
+        : `Request body exceeds ${MAX_REQUEST_BODY_SIZE} bytes.`,
+    reason: "PAYLOAD_TOO_LARGE" as const,
+    limit: MAX_REQUEST_BODY_SIZE,
+    ...(actual !== null ? { actual } : {}),
+    envVar: "SIDECAR_MAX_REQUEST_BODY_BYTES",
+  };
+}
+
+/**
+ * Stream-read a Request body into bytes, refusing the read the moment the
+ * cumulative size crosses `maxBytes`. Returns `"exceeded"` if the cap was
+ * hit (the read is cancelled — an over-budget body is never materialised),
+ * the bytes otherwise. Mirrors mcp.ts's `readRequestBodyBounded`; kept
+ * local because that one is module-private to mcp.ts.
+ */
+async function readBodyBounded(req: Request, maxBytes: number): Promise<Uint8Array | "exceeded"> {
+  if (!req.body) return new Uint8Array(0);
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      if (total + value.byteLength > maxBytes) {
+        await reader.cancel();
+        return "exceeded";
+      }
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged;
+}
+
+/**
+ * Buffer an inbound `/llm` request body as text under a hard byte cap.
+ * Enforces a `Content-Length` precheck when declared AND the actual
+ * buffered byte length (a missing/spoofed Content-Length is still
+ * bounded by the streaming read). Returns the decoded text, or a 413
+ * `Response` the caller returns verbatim.
+ *
+ * Replaces a bare `await c.req.raw.text()` — that path was uncapped after
+ * `oauth-identity.ts` (which carried the `MAX_REQUEST_BODY_SIZE` →
+ * `TransformBodyTooLargeError` → 413 guard) was deleted.
+ */
+async function bufferLlmBodyBounded(
+  c: {
+    req: { raw: Request; header: (name: string) => string | undefined };
+    json: (body: unknown, status: number) => Response;
+  },
+  maxBytes: number,
+): Promise<string | Response> {
+  const declared = c.req.header("content-length");
+  if (declared !== undefined) {
+    const declaredLength = Number(declared);
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      return c.json(llmBodyOversizeError(declaredLength), 413);
+    }
+  }
+  const bytes = await readBodyBounded(c.req.raw, maxBytes);
+  if (bytes === "exceeded") {
+    return c.json(llmBodyOversizeError(null), 413);
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+/**
  * Build the sidecar's HTTP surface.
  *
  *   - `GET  /health`     — readiness probe.
@@ -530,6 +617,12 @@ export function createApp(deps: AppDeps): Hono {
   // in-container. A 410 (NeedsReconnection) can therefore only occur on the
   // FIRST resolve, before the freeze; after the freeze there is no refresh.
   app.get("/credential-vend", async (c) => {
+    // Host-header validation (DNS-rebinding defence) — this endpoint vends
+    // the REAL subscription token, so it must enforce the same Host guard as
+    // its same-commit siblings (`/mcp`, `/runtime-events`). Inbound auth is
+    // the per-run Docker network; the Host guard rejects rebind attempts.
+    const hostError = validateMcpHostHeader(c.req.raw);
+    if (hostError) return hostError;
     if (config.llm?.authMode !== "vend") {
       return c.json({ error: "credential vend not enabled for this run" }, 403);
     }
@@ -558,7 +651,13 @@ export function createApp(deps: AppDeps): Hono {
       });
     } catch (err) {
       if (err instanceof NeedsReconnectionError) {
-        return c.json({ error: "subscription credential needs reconnection" }, 410);
+        // Status stays 410 (distinct from the oauth path's 401 by design), but
+        // share the `needsReconnection: true` discriminator so both modes carry
+        // one machine-readable flag the runner can branch on.
+        return c.json(
+          { error: "subscription credential needs reconnection", needsReconnection: true },
+          410,
+        );
       }
       logger.error("credential vend: token resolution failed", {
         credentialId: config.llm.credentialId,
@@ -627,7 +726,12 @@ export function createApp(deps: AppDeps): Hono {
     let body: string | ReadableStream<Uint8Array> | undefined;
     if (method !== "GET" && method !== "HEAD") {
       if (apiKeyConfig.modelSwap) {
-        const text = await c.req.raw.text();
+        // Buffer under a hard byte cap (Content-Length precheck + bounded
+        // streaming read → 413) before the model-alias rewrite. A bare
+        // `.text()` here would buffer an unbounded body into memory.
+        const buffered = await bufferLlmBodyBounded(c, MAX_REQUEST_BODY_SIZE);
+        if (buffered instanceof Response) return buffered;
+        const text = buffered;
         body = text ? swapRequestModel(text, apiKeyConfig.modelSwap) : undefined;
       } else {
         body = c.req.raw.body ?? undefined;
@@ -728,12 +832,15 @@ export function createApp(deps: AppDeps): Hono {
     };
 
     // Buffer the request body (inference JSON, bounded by
-    // SIDECAR_MAX_REQUEST_BODY_BYTES) so a 401 can be replayed after a token
+    // SIDECAR_MAX_REQUEST_BODY_BYTES via the Content-Length precheck +
+    // bounded streaming read → 413) so a 401 can be replayed after a token
     // refresh — a consumed stream can't be. Apply the model-alias swap here
     // when configured; otherwise forward the body verbatim.
     let body: string | undefined;
     if (method !== "GET" && method !== "HEAD") {
-      const text = await c.req.raw.text();
+      const buffered = await bufferLlmBodyBounded(c, MAX_REQUEST_BODY_SIZE);
+      if (buffered instanceof Response) return buffered;
+      const text = buffered;
       body =
         text && llmConfig.modelSwap
           ? swapRequestModel(text, llmConfig.modelSwap)

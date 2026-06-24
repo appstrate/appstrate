@@ -198,6 +198,7 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   UIHintsMap: "AFPS schema-wrapper sub-schema (structural map)",
   // Error + auth/credential wire with no SPA shared-type consumer.
   ProblemDetail: "RFC 9457 error envelope; never read through a shared-type",
+  ResolutionFieldError: "ProblemDetail.errors[] item; never read through a shared-type",
   OAuthClientObject: "OIDC oauth-admin wire; no shared-type (SPA uses the generated spec type)",
   OAuthClientWithSecret: "OIDC client-create wire; no shared-type",
   OAuthTokenResponse: "internal credential-proxy wire; mirrors @appstrate/core/sidecar-types",

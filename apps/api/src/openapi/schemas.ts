@@ -8,6 +8,62 @@ const ORG_ROLES = [...orgRoleEnum.enumValues];
  * All OpenAPI schema definitions (components/schemas).
  */
 export const schemas = {
+  // Shared field-error item carrying the connection-resolution "smuggle"
+  // fields surfaced by services/integration-connection-resolver.ts:
+  // translateResolutionError (mirrors the `ResolutionFieldError` TS type in
+  // @appstrate/core/api-errors). Extracted into one component so every
+  // consumer (ProblemDetail.errors, and any future readiness DTO) shares one
+  // shape and can't drift. The base four (`field`/`code`/`message`/`title`)
+  // come from ValidationFieldError; the six snake_case extras are each
+  // populated only for the matching resolution `code` and so are all optional.
+  ResolutionFieldError: {
+    type: "object",
+    required: ["field", "code", "message"],
+    properties: {
+      field: { type: "string" },
+      code: { type: "string" },
+      message: { type: "string" },
+      title: {
+        type: "string",
+        description: "Human-readable title; preserved from the underlying error factory.",
+      },
+      // Channel-specific smuggles surfaced by services/integration-connection-resolver.ts:translateResolutionError.
+      // Documented here so SDK consumers can rely on them without reading the resolver source.
+      candidate_connection_ids: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run.",
+      },
+      connection_id: {
+        type: "string",
+        description:
+          "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`).",
+      },
+      missing_scopes: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt.",
+      },
+      owned_by_actor: {
+        type: "boolean",
+        description:
+          "Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error).",
+      },
+      required_auth_key: {
+        type: "string",
+        description:
+          "Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1.",
+      },
+      available_auth_keys: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method.",
+      },
+    },
+  },
   ProblemDetail: {
     type: "object",
     description: "RFC 9457 Problem Details for HTTP APIs",
@@ -28,53 +84,7 @@ export const schemas = {
       errors: {
         type: "array",
         description: "Field-level validation errors",
-        items: {
-          type: "object",
-          properties: {
-            field: { type: "string" },
-            code: { type: "string" },
-            title: {
-              type: "string",
-              description: "Human-readable title; preserved from the underlying error factory.",
-            },
-            message: { type: "string" },
-            // Channel-specific smuggles surfaced by services/integration-connection-resolver.ts:translateResolutionError.
-            // Documented here so SDK consumers can rely on them without reading the resolver source.
-            candidate_connection_ids: {
-              type: "array",
-              items: { type: "string" },
-              description:
-                "Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run.",
-            },
-            connection_id: {
-              type: "string",
-              description:
-                "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`).",
-            },
-            missing_scopes: {
-              type: "array",
-              items: { type: "string" },
-              description:
-                "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt.",
-            },
-            owned_by_actor: {
-              type: "boolean",
-              description:
-                "Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error).",
-            },
-            required_auth_key: {
-              type: "string",
-              description:
-                "Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1.",
-            },
-            available_auth_keys: {
-              type: "array",
-              items: { type: "string" },
-              description:
-                "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method.",
-            },
-          },
-        },
+        items: { $ref: "#/components/schemas/ResolutionFieldError" },
       },
     },
   },
@@ -277,12 +287,6 @@ export const schemas = {
           mcp_servers: { type: "object", additionalProperties: { type: "string" } },
           integrations: { type: "object", additionalProperties: { type: "string" } },
         },
-      },
-      runtime_tools: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          "Built-in runtime tools the agent opted into via `manifest.runtime_tools` (output/log/note/pin/report).",
       },
     },
   },
@@ -1040,7 +1044,7 @@ export const schemas = {
         type: ["array", "null"],
         items: { type: "string" },
         description:
-          "Model ids empirically verified against this credential by the discovery probe (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. Null = never probed. Per-credential because availability depends on the account's plan.",
+          "Model ids this credential is authorized to seed, persisted by model discovery (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential; for `offline`-validation providers (subscription: codex, claude-code) these are the provider's static candidate set (∩ catalog), persisted with zero upstream calls. Null = discovery never ran. Per-credential because availability depends on the account's plan.",
       },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },

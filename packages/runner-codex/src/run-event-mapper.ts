@@ -4,13 +4,12 @@
 /**
  * Translate the Codex CLI's `--json` event stream into the canonical AFPS
  * {@link RunEvent} stream the platform already consumes from the Pi and Claude
- * runners — the runner-side counterpart of the chat's codex `ui-stream-mapper.ts`.
+ * runners.
  *
  * Like the Claude `SdkRunEventMapper`, this is message-grained, not
  * token-grained: each `item.completed` already carries the whole text, so we
- * emit one `appstrate.progress` per item rather than streaming deltas. The chat
- * mapper targets the AI-SDK UI message stream (a live transcript); a *run* is
- * autonomous and fire-and-forget, so this emits `appstrate.progress` /
+ * emit one `appstrate.progress` per item rather than streaming deltas. A *run*
+ * is autonomous and fire-and-forget, so this emits `appstrate.progress` /
  * `appstrate.metric` / `appstrate.error` only.
  *
  * The terminal verdict is NOT decided here. Codex `exec` ends a turn with

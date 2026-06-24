@@ -29,8 +29,11 @@ jobs:
       - name: Refresh catalog (apply)
         run: bun scripts/refresh-pricing-catalog.ts --apply
 
+      # Plain `bun install` (NOT `--frozen-lockfile`): the comparator has a bug
+      # with @openai/codex's same-name aliased platform binaries and false-reports
+      # "lockfile had changes" on a byte-stable lockfile (rationale in check.yml).
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: Format generated files
         # The generator writes JSON that does not match Prettier style;

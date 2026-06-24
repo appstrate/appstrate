@@ -21,6 +21,10 @@ import type { CredentialsResponse } from "../helpers.ts";
 
 const PLATFORM_API = "http://platform-mock:3000";
 const RUN_TOKEN = "run-tok";
+// The in-container caller (Codex runner) always reaches the sidecar via an
+// allowlisted host; `/credential-vend` enforces the same Host-header
+// DNS-rebind guard as `/mcp` and `/runtime-events`.
+const SIDECAR_HOST = { Host: "sidecar" };
 
 function makeDeps(handler: (url: string) => Response): AppDeps {
   const fetchFn = mock(async (url: unknown) => {
@@ -69,11 +73,20 @@ describe("GET /credential-vend", () => {
     deps.config.llm = { authMode: "vend", credentialId: "conn-codex" };
     const app = createApp(deps);
 
-    const res = await app.request("/credential-vend");
+    const res = await app.request("/credential-vend", { headers: SIDECAR_HOST });
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
     const body = (await res.json()) as { access_token: string; account_id: string | null };
     expect(body).toEqual({ access_token: "oat-fresh-token", account_id: "acct-123" });
+  });
+
+  it("403s a request whose Host header is not allowlisted (DNS-rebind guard)", async () => {
+    const deps = makeDeps(() => tokenResponse());
+    deps.config.llm = { authMode: "vend", credentialId: "conn-codex" };
+    const app = createApp(deps);
+
+    const res = await app.request("/credential-vend", { headers: { Host: "evil.example.com" } });
+    expect(res.status).toBe(403);
   });
 
   it("FREEZE-ON-FIRST: two GETs return the same token, getToken invoked once", async () => {
@@ -103,11 +116,11 @@ describe("GET /credential-vend", () => {
     deps.config.llm = { authMode: "vend", credentialId: "conn-codex" };
     const app = createApp(deps);
 
-    const res1 = await app.request("/credential-vend");
+    const res1 = await app.request("/credential-vend", { headers: SIDECAR_HOST });
     expect(res1.status).toBe(200);
     const body1 = (await res1.json()) as { access_token: string; account_id: string | null };
 
-    const res2 = await app.request("/credential-vend");
+    const res2 = await app.request("/credential-vend", { headers: SIDECAR_HOST });
     expect(res2.status).toBe(200);
     expect(res2.headers.get("cache-control")).toBe("no-store");
     const body2 = (await res2.json()) as { access_token: string; account_id: string | null };
@@ -124,7 +137,7 @@ describe("GET /credential-vend", () => {
     deps.config.llm = { authMode: "vend", credentialId: "conn-codex" };
     const app = createApp(deps);
 
-    const res = await app.request("/credential-vend");
+    const res = await app.request("/credential-vend", { headers: SIDECAR_HOST });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { account_id: string | null };
     expect(body.account_id).toBeNull();
@@ -139,7 +152,7 @@ describe("GET /credential-vend", () => {
     };
     const app = createApp(deps);
 
-    const res = await app.request("/credential-vend");
+    const res = await app.request("/credential-vend", { headers: SIDECAR_HOST });
     expect(res.status).toBe(403);
   });
 
@@ -147,7 +160,7 @@ describe("GET /credential-vend", () => {
     const deps = makeDeps(() => tokenResponse());
     const app = createApp(deps);
 
-    const res = await app.request("/credential-vend");
+    const res = await app.request("/credential-vend", { headers: SIDECAR_HOST });
     expect(res.status).toBe(403);
   });
 
@@ -160,7 +173,7 @@ describe("GET /credential-vend", () => {
     deps.config.llm = { authMode: "vend", credentialId: "conn-codex" };
     const app = createApp(deps);
 
-    const res = await app.request("/credential-vend");
+    const res = await app.request("/credential-vend", { headers: SIDECAR_HOST });
     expect(res.status).toBe(410);
   });
 });

@@ -156,11 +156,12 @@ export function resetCatalog(): void {
 }
 
 /**
- * A compact, generated index of every operation, grouped by tag:
+ * A compact, generated index of every operation, grouped by tag — one
+ * comma-separated line of operationIds per tag (the per-op summary is dropped
+ * to keep the index small, see below):
  *
  *   ## Agents
- *   - listAgents — List agents in the organization
- *   - runAgent — Trigger an agent run
+ *   listAgents, runAgent
  *
  * Method/path are deliberately omitted (they come from describe_operation or
  * search_operations' best_match); this is a discovery aid that lets a client

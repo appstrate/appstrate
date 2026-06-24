@@ -162,6 +162,20 @@ if (config.llm?.authMode === "vend" && (config.egressAllowlist?.length ?? 0) ===
   );
 }
 
+// M1 (reverse) — fail closed: the forward proxy infers the vend egress-lock
+// (deny-by-default + `:443` port-pin) purely from `egressAllowlist.length > 0`,
+// independent of `authMode`. If an allowlist is set for a NON-vend run the
+// proxy would silently apply that vend-only lock to an `oauth`/`api_key` run —
+// an unintended egress restriction that the operator never asked for, and the
+// inverse of M1's exfil window. The documented `vend ⟺ allowlist` invariant is
+// an iff: enforce both directions so an allowlist can ONLY accompany a vend run.
+if ((config.egressAllowlist?.length ?? 0) > 0 && config.llm?.authMode !== "vend") {
+  throw new Error(
+    "Sidecar refusing to boot: a non-empty EGRESS_ALLOWLIST_JSON requires a vend-mode run " +
+      "(the egress lock is a vend-only invariant and must never gate an oauth/api_key run).",
+  );
+}
+
 // ─── P4 — connect mode (`runAt: "link"` ephemeral connect-run) ───
 // When `CONNECT_LOGIN_JSON` is present the sidecar is NOT serving an agent
 // run: it runs the single integration's `login` tool exactly once via

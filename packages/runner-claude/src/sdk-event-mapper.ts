@@ -291,17 +291,36 @@ export class SdkRunEventMapper {
           }),
     };
 
-    // Final authoritative metric. The runner also stamps usage+cost onto the
-    // RunResult at finalize, so this event is purely the live-UI signal.
-    return [
-      {
-        type: "appstrate.metric",
+    const events: RunEvent[] = [];
+
+    // Terminal-failure breadcrumb. A FAILED result (error_max_turns /
+    // error_max_budget_usd / output-schema unsatisfied / generic) records the
+    // failure into terminalState above but, without this, would emit NO
+    // `appstrate.error` RunEvent — leaving the event stream / run_logs silent on
+    // why the run failed. The Codex sibling emits one on its turn.failed / non-
+    // zero-exit branches, and the Claude per-turn assistant-error path emits one
+    // too; mirror that shape here so the breadcrumb is consistent across runners.
+    // This does NOT change the terminal status (decided above) — it only adds the
+    // missing error event.
+    if (!isSuccess) {
+      events.push({
+        type: "appstrate.error",
         timestamp: this.now(),
         runId: this.runId,
-        usage: { ...usage },
-        cost,
-      },
-    ];
+        message: terminalErrorMessage(msg),
+      });
+    }
+
+    // Final authoritative metric. The runner also stamps usage+cost onto the
+    // RunResult at finalize, so this event is purely the live-UI signal.
+    events.push({
+      type: "appstrate.metric",
+      timestamp: this.now(),
+      runId: this.runId,
+      usage: { ...usage },
+      cost,
+    });
+    return events;
   }
 }
 

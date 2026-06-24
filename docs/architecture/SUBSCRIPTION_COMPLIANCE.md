@@ -38,7 +38,7 @@ host-side (the CLI talks to chatgpt.com directly, so the chat host would hold th
 real token), so it runs only as a docker-isolated agent. The Claude subscription
 is chat-usable because its gateway swaps the bearer server-side.
 
-Anchors: `packages/module-chat/src/claude-agent/engine.ts`,
+Anchors: `packages/module-claude-code/src/claude-agent/engine.ts`,
 `packages/runner-claude/`, `packages/runner-codex/`, `runtime-pi/entrypoint.ts`
 (`buildClaudeAgentRunner` / `buildCodexAgentRunner`).
 

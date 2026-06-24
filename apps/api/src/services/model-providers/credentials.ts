@@ -73,7 +73,14 @@ export interface DecryptedModelProviderCredentials {
   baseUrl: string;
   /** Either the API key OR the current OAuth access token. */
   apiKey: string;
-  /** OAuth only — abstract account/tenant identifier (used at connect time for required-claim validation; not forwarded to the upstream provider). */
+  /**
+   * OAuth only — abstract account/tenant identifier (used at connect time for
+   * required-claim validation). The platform does NOT forward this generic
+   * `accountId` as an upstream request header. (The codex vend path is a
+   * distinct, provider-specific mechanism: sidecar-side it writes the real
+   * `chatgpt_account_id` into the CLI's local auth state, used by the official
+   * binary — not an HTTP header set by the platform.)
+   */
   accountId?: string;
   /** OAuth only — if true, the connection is dead and apiKey may be stale. */
   needsReconnection?: boolean;

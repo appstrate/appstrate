@@ -88,6 +88,8 @@ export interface SubscriptionEngineBinding {
    *   control.
    *
    * Invariant: `sidecarAuthMode === "vend"` iff {@link egressAllowlist} is set.
+   * This invariant is enforced downstream at launch/boot — by the run launcher
+   * (`pi.ts`) and the sidecar (`server.ts`) — not by this registry.
    */
   sidecarAuthMode: "oauth" | "vend";
   /**
@@ -128,11 +130,16 @@ export interface SubscriptionEngineDef extends SubscriptionEngineBinding {
 const BY_PROVIDER = new Map<string, SubscriptionEngineDef>();
 
 /**
- * Contribute a subscription-engine binding for a provider. Idempotent for an
- * identical re-registration (same engine) so boot can run more than once in a
- * single process; throws on a CONFLICTING re-registration (same provider id,
- * different engine) — that would mean two modules disagree on a provider's
- * engine, exactly the drift this single registry exists to prevent.
+ * Contribute a subscription-engine binding for a provider. The registry guards
+ * against a CONFLICTING-engine re-registration (same provider id, different
+ * engine) — that would mean two modules disagree on a provider's engine, exactly
+ * the drift this single registry exists to prevent. A same-engine re-register is
+ * allowed (so boot can run more than once in a single process); note it
+ * overwrites the prior binding rather than asserting field-by-field equality.
+ *
+ * The registry does NOT enforce the `vend ⟺ egressAllowlist` invariant — that is
+ * enforced downstream at launch/boot by the run launcher (`pi.ts`) and the
+ * sidecar (`server.ts`).
  */
 export function registerSubscriptionEngine(def: SubscriptionEngineDef): void {
   const existing = BY_PROVIDER.get(def.providerId);

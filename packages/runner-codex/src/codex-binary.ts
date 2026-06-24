@@ -186,10 +186,10 @@ export function buildCodexAuthJson(opts: {
 
 /**
  * The credential vended to a first-party caller before driving the `codex`
- * binary — the shape the chat codex-vend endpoint and the runner's
- * `/credential-vend` both return (snake_case wire). `access_token` is the REAL
- * subscription token; `account_id` is the credential's `chatgpt_account_id`
- * when present. Shared so the on-disk-credential contract has one definition.
+ * binary — the shape the runner's `/credential-vend` returns (snake_case wire).
+ * `access_token` is the REAL subscription token; `account_id` is the
+ * credential's `chatgpt_account_id` when present. Shared so the
+ * on-disk-credential contract has one definition.
  */
 export interface VendedCodexCredential {
   access_token: string;
@@ -199,22 +199,21 @@ export interface VendedCodexCredential {
 /**
  * Materialise an ephemeral `CODEX_HOME` holding the subscription `auth.json`
  * the spawned `codex` binary reads. The thin IO wrapper around
- * {@link buildCodexAuthJson}, shared by the chat engine and the AFPS runner so
- * the security-sensitive on-disk-credential lifecycle (real token, mode 0600)
+ * {@link buildCodexAuthJson}, used by the AFPS runner so the
+ * security-sensitive on-disk-credential lifecycle (real token, mode 0600)
  * has ONE audited implementation. The caller owns teardown — `rm(home, …)` in
  * its own `finally` — since only the caller knows the subprocess lifetime.
  *
- * `baseDir` defaults to the OS temp dir; the host-resident chat path passes a
- * RAM-backed dir (e.g. `/dev/shm`) so the real token is never written to a
- * physical disk at rest. (The containerised runner keeps the default — its temp
- * dir is wiped with the ephemeral container.)
+ * `baseDir` defaults to the OS temp dir. The containerised runner keeps the
+ * default — its temp dir is wiped with the ephemeral container, and the
+ * auth.json is written with mode 0600 (owner-only).
  *
  * @returns the absolute path of the created `CODEX_HOME` directory.
  */
 export async function writeCodexAuthHome(opts: {
   credential: VendedCodexCredential;
   nowMs: number;
-  /** mkdtemp prefix, e.g. `"codex-chat-"` / `"codex-run-"` (for debuggability). */
+  /** mkdtemp prefix, e.g. `"codex-run-"` (for debuggability). */
   prefix?: string;
   /** Parent dir for the ephemeral home. Defaults to {@link tmpdir}. */
   baseDir?: string;
@@ -475,8 +474,8 @@ export function resolveCodexBinary(opts: {
 /**
  * Split a byte stream into newline-delimited, trimmed, non-empty strings
  * (UTF-8), flushing any unterminated tail. Used to read the `codex exec --json`
- * NDJSON event stream off the subprocess stdout — shared by the chat engine
- * (`module-chat`) and the AFPS runner (`runner-codex`).
+ * NDJSON event stream off the subprocess stdout — used by the AFPS runner
+ * (`runner-codex`).
  */
 export async function* readNdjsonLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const decoder = new TextDecoder();
@@ -496,8 +495,8 @@ export async function* readNdjsonLines(stream: ReadableStream<Uint8Array>): Asyn
 
 /**
  * Codex CLI usage counters (`turn.completed.usage`, codex-cli 0.141). Shared
- * by both codex event mappers (chat UI-stream + AFPS runner) so the CLI wire
- * contract has one definition.
+ * by the codex AFPS run event mapper so the CLI wire contract has one
+ * definition.
  */
 export interface CodexUsage {
   input_tokens?: number;
@@ -508,8 +507,8 @@ export interface CodexUsage {
 
 /**
  * A single `codex exec --json` NDJSON event (structural — only the fields the
- * mappers read). A superset of both mappers' needs: `item.command` + the index
- * signature are used by the runner mapper, the chat mapper reads a subset.
+ * run event mapper reads): `item.command` + the index signature are used by the
+ * runner mapper.
  */
 export interface CodexEvent {
   type: string;

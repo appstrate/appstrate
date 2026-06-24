@@ -52,8 +52,12 @@ export interface LlmProxyAdapter {
   /**
    * Build the upstream request headers (auth + protocol-specific).
    * `accountId` is the credential's abstract identity slot (set for OAuth
-   * credentials whose provider surfaced one) — subscription adapters echo
-   * it as their routing header (e.g. codex `chatgpt-account-id`).
+   * credentials whose provider surfaced one). The platform does NOT forward
+   * this generic `accountId` as an upstream header — adapters here receive it
+   * but none turn it into a routing header. (The codex vend path is a distinct,
+   * provider-specific mechanism: sidecar-side it writes the real
+   * `chatgpt_account_id` into the CLI's local auth state, used by the official
+   * binary — not an HTTP header set by this gateway.)
    */
   buildUpstreamHeaders(
     incoming: Headers,

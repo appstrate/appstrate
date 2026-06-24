@@ -39,6 +39,29 @@ export interface ValidationFieldError {
   title?: string;
 }
 
+/**
+ * A `ValidationFieldError` carrying the connection-resolution "smuggle" fields
+ * surfaced by the integration connection resolver
+ * (`translateResolutionError`). These snake_case extras let the dashboard's
+ * MissingConnections UI act on a 412 / readiness error without parsing the
+ * `detail` string. Each field is populated only for the matching resolution
+ * `code`; all are optional.
+ */
+export interface ResolutionFieldError extends ValidationFieldError {
+  /** `must_choose_connection` — connection ids the caller may pick from. */
+  candidate_connection_ids?: string[];
+  /** `needs_reconnection` / `insufficient_scopes` — the existing connection's id to UPDATE in place. */
+  connection_id?: string;
+  /** `insufficient_scopes` — OAuth scopes the selected tools require that the connection lacks. */
+  missing_scopes?: string[];
+  /** `insufficient_scopes` — true when the under-scoped connection belongs to the calling actor. */
+  owned_by_actor?: boolean;
+  /** `auth_key_mismatch` — the agent dep's pinned `auth_key` (AFPS §4.1). */
+  required_auth_key?: string;
+  /** `auth_key_mismatch` — auth keys the actor's existing connections use. */
+  available_auth_keys?: string[];
+}
+
 // ---------------------------------------------------------------------------
 // Base error class
 // ---------------------------------------------------------------------------

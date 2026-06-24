@@ -1930,8 +1930,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Empirically discover the models this credential serves
-         * @description Probes every discovery-candidate model against the live credential (1-token inference requests on the account's own quota) and persists the ids that answered as `available_model_ids`. Designed for subscription-backed OAuth providers (codex, claude-code) whose served model set depends on the account's plan and has no discovery endpoint. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.
+         * Discover the models this credential serves
+         * @description Discovers the models a credential serves and persists them as `available_model_ids`. For `probe`-validation (API-key) providers this is empirical: each discovery candidate is probed against the live credential (1-token inference requests on the account's own quota) and the ids that answered are persisted. For `offline`-validation providers (subscription: codex, claude-code) NO upstream call is made — the provider's static candidate set (intersected with the catalog) is persisted instead; real per-model availability is validated at first run by the official binary. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.
          */
         post: operations["refreshModelProviderCredentialModels"];
         delete?: never;
@@ -4416,8 +4416,6 @@ export interface components {
                     [key: string]: string;
                 };
             };
-            /** @description Built-in runtime tools the agent opted into via `manifest.runtime_tools` (output/log/note/pin/report). */
-            runtime_tools?: string[];
         };
         /** @description AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema. Most extension fields use the x- prefix per AFPS §10, with the exception of the Appstrate-specific top-level `runtime_tools` field documented below. */
         AgentManifest: components["schemas"]["agent.schema"] & {
@@ -4639,7 +4637,7 @@ export interface components {
             providerId?: string | null;
             oauth_email?: string | null;
             needs_reconnection?: boolean;
-            /** @description Model ids empirically verified against this credential by the discovery probe (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. Null = never probed. Per-credential because availability depends on the account's plan. */
+            /** @description Model ids this credential is authorized to seed, persisted by model discovery (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential; for `offline`-validation providers (subscription: codex, claude-code) these are the provider's static candidate set (∩ catalog), persisted with zero upstream calls. Null = discovery never ran. Per-credential because availability depends on the account's plan. */
             available_model_ids?: string[] | null;
             created_by: string | null;
             /** Format: date-time */
@@ -4899,29 +4897,30 @@ export interface components {
             /** @description Seconds before retry (on 429) */
             retryAfter?: number;
             /** @description Field-level validation errors */
-            errors?: {
-                field?: string;
-                code?: string;
-                /** @description Human-readable title; preserved from the underlying error factory. */
-                title?: string;
-                message?: string;
-                /** @description Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run. */
-                candidate_connection_ids?: string[];
-                /** @description Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). */
-                connection_id?: string;
-                /** @description Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt. */
-                missing_scopes?: string[];
-                /** @description Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error). */
-                owned_by_actor?: boolean;
-                /** @description Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1. */
-                required_auth_key?: string;
-                /** @description Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method. */
-                available_auth_keys?: string[];
-            }[];
+            errors?: components["schemas"]["ResolutionFieldError"][];
         };
         ProfileBatchItem: {
             id: string;
             displayName?: string | null;
+        };
+        ResolutionFieldError: {
+            field: string;
+            code: string;
+            message: string;
+            /** @description Human-readable title; preserved from the underlying error factory. */
+            title?: string;
+            /** @description Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run. */
+            candidate_connection_ids?: string[];
+            /** @description Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). */
+            connection_id?: string;
+            /** @description Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt. */
+            missing_scopes?: string[];
+            /** @description Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error). */
+            owned_by_actor?: boolean;
+            /** @description Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1. */
+            required_auth_key?: string;
+            /** @description Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method. */
+            available_auth_keys?: string[];
         };
         Run: {
             id: string;
@@ -11835,6 +11834,7 @@ export interface operations {
                          * @enum {string}
                          */
                         outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates";
+                        /** @description Number of candidates considered, not necessarily models live-probed. For `offline`-validation providers (codex, claude-code) candidates are considered with zero upstream calls. */
                         probed_count: number;
                         available_model_ids: string[] | null;
                     };

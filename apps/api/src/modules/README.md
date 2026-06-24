@@ -8,7 +8,7 @@ At boot, `apps/api/src/lib/modules/module-loader.ts` scans this directory and re
 
 Only modules listed in the `MODULES` environment variable are actually initialized. Everything else is inert: no tables, no routes, no workers, no hook handlers.
 
-The default value is `oidc,webhooks` — these are built-in OSS modules that ship with the platform and are loaded out of the box. Override `MODULES` to extend (by appending external npm specifiers) or to remove a built-in.
+The default value is `oidc,webhooks,mcp,core-providers` — these are built-in OSS modules that ship with the platform and are loaded out of the box. Override `MODULES` to extend (by appending external npm specifiers) or to remove a built-in.
 
 ## Directory layout
 

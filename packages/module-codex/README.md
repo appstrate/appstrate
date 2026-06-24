@@ -13,7 +13,7 @@ The platform core has zero knowledge of Codex — provider id, OAuth client, wir
 Append the specifier to your `MODULES` env var:
 
 ```
-MODULES=oidc,webhooks,core-providers,@appstrate/module-codex
+MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-codex
 ```
 
 The platform resolves it via dynamic import — workspace resolution finds it locally during development; in production it must be installed (it ships as a workspace package and is bundled by the build).
@@ -37,4 +37,4 @@ This module is a canonical example. Copy the shape: declare a `ModelProviderDefi
 
 > **Execution status.** Codex **agent runs are executable**. The provider contributes a `subscriptionEngine` binding (`engine: "codex"`), so a run dispatches to the real `CodexAgentRunner`, which drives the **official Codex CLI** (`codex exec --json`) — the binary signs its OWN client fingerprint (`originator: codex_exec`) and sends its own `chatgpt-account-id`; we forge nothing. Because the CLI ignores any base-URL override and talks to `chatgpt.com` directly, the sidecar can't reverse-proxy it: the real subscription token is **vended** into the container (`sidecarAuthMode: "vend"`) and the compensating control is a per-run **egress lock** to OpenAI's hosts (`chatgpt.com` + `openai.com`, suffix-matched) so the token can't be exfiltrated. This is opt-in (append `@appstrate/module-codex` to `MODULES`) and sits in a ToS grey zone — see [`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`](../../docs/architecture/SUBSCRIPTION_COMPLIANCE.md).
 >
-> **Chat:** Codex is **agent-only — no chat surface.** It is excluded from the chat model list (`CHAT_USABLE_FAMILIES`) and contributes no `chatHandler`, so it never appears in the conversational assistant; only `claude-code` reaches the chat engine. (Title generation likewise hard-skips subscription engines rather than misrouting them through the generic llm-proxy.)
+> **Chat:** Codex is **agent-only — no chat surface.** It is excluded from the chat model list (`CHAT_USABLE_FAMILIES`) and contributes no `chatHandler`, so it never appears in the conversational assistant; only `claude-code` among subscription engines reaches the chat engine (api-key families also reach chat). (Titles are derived locally from the first user message — no model call for any engine.)

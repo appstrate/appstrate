@@ -208,7 +208,9 @@ async function runPlatformContainerImpl(
     const engine = delivery.engine;
     // No fingerprint-forging fallback: an OAuth subscription provider can only
     // run on an engine whose driver signs its own fingerprint (claude-code →
-    // the Claude Agent SDK). Anything else (e.g. codex) is rejected here.
+    // the Claude Agent SDK). A provider with no official engine (e.g. a future
+    // oauth provider with no official engine) is rejected here. (codex DOES have
+    // an engine — it resolves to engine "codex" / mode "vend" and is accepted.)
     assertRunnableOnEngine({
       engine,
       providerId: llmConfig.providerId,

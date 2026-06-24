@@ -9,26 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`@appstrate/core/claude-binary`** — shared Claude Agent SDK runtime helpers
-  used by every host that drives `@anthropic-ai/claude-agent-sdk` under Bun (the
-  chat engine + the agent runner). Exports `resolveClaudeCodeBinary`,
-  `makeSdkScopeResolver`, `candidateBinaryPackages`, `binaryFileName` (resolve
-  the prebuilt per-arch `claude` binary via `pathToClaudeCodeExecutable`), and
-  `buildClaudeSdkEnv` (curated, no-secret-leak subprocess env). Imports nothing
-  from the SDK — only resolves package-specifier strings — so core gains no
-  Agent SDK dependency.
+- **`@appstrate/core/subscription-engines`** — the provider→execution-engine
+  binding registry contract: the `"claude"|"codex"` engine vocabulary, the
+  binding shape (credential-delivery mode, egress allowlist, native-output
+  capability, chat handler), and the read/write accessors. Ships zero bindings —
+  the `claude` / `codex` bindings are contributed at boot by their opt-in
+  provider modules.
+- **`@appstrate/core/subprocess-env`** — `buildIsolatedSubprocessEnv()`, a
+  curated, no-secret-leak environment for spawned subprocesses.
+- **`@appstrate/core/runtime-event-drain`** — runtime-tool event drain helpers
+  that relay sidecar runtime-tool events into the run-event pipeline.
 - **`@appstrate/core/sidecar-types`** — `LlmProxyOauthConfig`
   (`authMode: "oauth"`) is now the single, **non-forging** OAuth `/llm` mode: the
   sidecar swaps the bearer + ensures the OAuth beta only, leaving the driver's own
   fingerprint untouched (the official Claude Agent SDK binary signs its own). The
-  `LlmProxyConfig` union is `LlmProxyApiKeyConfig | LlmProxyOauthConfig`.
+  `LlmProxyConfig` union is `LlmProxyApiKeyConfig | LlmProxyOauthConfig | LlmProxyVendConfig`.
 
 ### Removed — OAuth subscription fingerprint forging (BREAKING)
 
-- **`@appstrate/core/oauth-wire-format` subpath deleted** (`buildIdentityHeaders`,
-  `applyOAuthBodyTransform`) — all fingerprint forging is removed platform-wide. A
-  subscription provider whose driver cannot sign its own client fingerprint has no
-  execution path; it is refused, never forged.
 - **`OAuthWireFormat` interface + `OAuthAdaptiveRetryPolicy` removed** from
   `@appstrate/core/sidecar-types`, and **`ModelProviderDefinition.oauthWireFormat`
   removed** from `@appstrate/core/module`. Provider modules no longer declare

@@ -337,6 +337,12 @@ export class CodexAgentRunner implements Runner {
       // 3. Spawn the official binary. No `chatgpt_base_url` (it talks to the
       //    upstream directly; egress is locked by the sidecar allowlist). The
       //    container is the sandbox, so Codex's own sandbox is bypassed.
+      //
+      //    No per-run turn cap is passed (unlike the Claude runner's
+      //    `maxTurns: 100`): the `codex exec` CLI exposes no clean per-run
+      //    turn-limit flag, so per-run bounding is delegated to the container
+      //    timeout / abort (SIGTERM→SIGKILL via `armAbort`). The omission is
+      //    deliberate, not an oversight.
       child = spawn(
         [
           this.opts.binaryPath,
