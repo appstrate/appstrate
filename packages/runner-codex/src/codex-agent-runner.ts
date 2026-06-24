@@ -43,10 +43,11 @@
 import { rm } from "node:fs/promises";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
-  finalizeFailure,
+  computeTokenCost,
   reduceEvents,
   type RunError,
   type RunResult,
+  type TokenCost,
 } from "@appstrate/afps-runtime/runner";
 import type { Runner, RunOptions } from "@appstrate/afps-runtime/runner";
 import {
@@ -64,7 +65,7 @@ import {
 } from "./codex-binary.ts";
 import { drainAndEmitInto, type RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { CodexRunEventMapper, computeCodexCost, type CodexModelCost } from "./run-event-mapper.ts";
+import { CodexRunEventMapper } from "./run-event-mapper.ts";
 
 /** Subprocess handle shape (Bun.spawn) — the minimum the runner drives. */
 export interface CodexChild {
@@ -118,7 +119,7 @@ export interface CodexAgentRunnerOptions {
    */
   drainer?: RuntimeEventDrainer;
   /** Per-million-token cost rates for equivalent-cost reporting; cost is 0 when absent. */
-  modelCost?: CodexModelCost | null;
+  modelCost?: TokenCost | null;
   /** Extra curated env merged into the spawned binary's environment. */
   env?: Record<string, string>;
   /** Injectable spawner. Defaults to the real `Bun.spawn`. */
@@ -412,7 +413,7 @@ export class CodexAgentRunner implements Runner {
       }
 
       const usage = mapper.usage();
-      const cost = computeCodexCost(usage, this.opts.modelCost);
+      const cost = computeTokenCost(usage, this.opts.modelCost);
       const reduced = reduceEvents(events, error ? { error } : {});
       reduced.status = status;
       reduced.usage = usage;
@@ -435,25 +436,22 @@ export class CodexAgentRunner implements Runner {
       // Best-effort final drain: a mid-run throw may leave journaled events the
       // agent produced before failing (memory.added / log.written / output).
       await drainAndEmit(true);
-      // Shared failure epilogue (reduceEvents — NOT emptyRunResult — so any
-      // partial canonical output the agent emitted before the throw
-      // [memory.added / output.emitted / log.written] survives into the failed
-      // result; then status="failed" → stamp usage/cost/duration → finalize).
-      // See `@appstrate/afps-runtime/runner` `finalizeFailure`, shared with the
-      // Claude runner so the tail can't drift. The injected `redact` deep-scrubs
-      // the WHOLE result by VALUE: a thrown error's text can carry the vended
-      // token verbatim, and the terminal RunResult.error is the raw `message`
-      // (the emitted appstrate.error above is already scrubbed by the emit()
-      // sink). `knownSecrets` is armed after vend; empty if the throw predates it.
-      await finalizeFailure({
-        events,
-        error: { code: "adapter_error", message },
-        usage: mapper.usage(),
-        cost: computeCodexCost(mapper.usage(), this.opts.modelCost),
-        durationMs: now() - startTime,
-        redact: (result) => redactSecretsDeep(result, knownSecrets),
-        finalize: (result) => eventSink.finalize(result),
-      });
+      // Failure epilogue (reduceEvents — NOT emptyRunResult — so any partial
+      // canonical output the agent emitted before the throw [memory.added /
+      // output.emitted / log.written] survives into the failed result; then
+      // status="failed" → stamp usage/cost/duration → deep-scrub → finalize).
+      // The final `redactSecretsDeep` scrubs the WHOLE result by VALUE: a thrown
+      // error's text can carry the vended token verbatim, and the terminal
+      // RunResult.error is the raw `message` (the emitted appstrate.error above
+      // is already scrubbed by the emit() sink). `knownSecrets` is armed after
+      // vend; empty if the throw predates it.
+      const usage = mapper.usage();
+      const failed = reduceEvents(events, { error: { code: "adapter_error", message } });
+      failed.status = "failed";
+      failed.usage = usage;
+      failed.cost = computeTokenCost(usage, this.opts.modelCost);
+      failed.durationMs = now() - startTime;
+      await eventSink.finalize(redactSecretsDeep(failed, knownSecrets));
     } finally {
       if (signal) signal.removeEventListener("abort", onAbort);
       // Let the stderr drain settle so its reader unwinds (no dangling lock /

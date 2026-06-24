@@ -2,7 +2,8 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
-import { CodexRunEventMapper, computeCodexCost } from "../src/run-event-mapper.ts";
+import { computeTokenCost } from "@appstrate/afps-runtime/runner";
+import { CodexRunEventMapper } from "../src/run-event-mapper.ts";
 
 const FIXED = 1_700_000_000_000;
 const now = () => FIXED;
@@ -112,10 +113,13 @@ describe("CodexRunEventMapper.map", () => {
   });
 });
 
-describe("computeCodexCost", () => {
+// Codex cost reporting uses the shared computeTokenCost directly (the
+// pass-through CodexModelCost/computeCodexCost wrappers were removed). These
+// two assertions pin the formula as used by the codex runner.
+describe("codex cost (computeTokenCost)", () => {
   it("is zero when no cost rates are supplied", () => {
     expect(
-      computeCodexCost(
+      computeTokenCost(
         {
           input_tokens: 1000,
           output_tokens: 1000,
@@ -134,7 +138,7 @@ describe("computeCodexCost", () => {
       cache_read_input_tokens: 500_000,
       cache_creation_input_tokens: 0,
     };
-    const cost = computeCodexCost(usage, { input: 1, output: 2, cacheRead: 0.5 });
+    const cost = computeTokenCost(usage, { input: 1, output: 2, cacheRead: 0.5 });
     // 1*1 + 2*2 + 0.5*0.5 = 1 + 4 + 0.25
     expect(cost).toBeCloseTo(5.25, 6);
   });

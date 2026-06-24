@@ -17,5 +17,5 @@ export {
   type CodexChild,
   type CodexSpawnFn,
 } from "./codex-agent-runner.ts";
-export { CodexRunEventMapper, computeCodexCost, type CodexModelCost } from "./run-event-mapper.ts";
+export { CodexRunEventMapper } from "./run-event-mapper.ts";
 export type { CodexEvent, CodexUsage } from "./codex-binary.ts";
