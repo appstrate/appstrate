@@ -222,7 +222,7 @@ describe("HTTP forwarding", () => {
         platformApiUrl: "http://mock:3000",
         runToken: "tok",
         proxyUrl: "",
-        egressAllowlist: ["127.0.0.1"],
+        llm: { authMode: "vend", credentialId: "cred_test", egressAllowlist: ["127.0.0.1"] },
       },
     });
     await proxy.ready;
@@ -238,7 +238,7 @@ describe("HTTP forwarding", () => {
         platformApiUrl: "http://mock:3000",
         runToken: "tok",
         proxyUrl: "",
-        egressAllowlist: ["chatgpt.com"],
+        llm: { authMode: "vend", credentialId: "cred_test", egressAllowlist: ["chatgpt.com"] },
       },
     });
     await proxy.ready;
@@ -259,7 +259,7 @@ describe("HTTP forwarding", () => {
         platformApiUrl: "http://mock:3000",
         runToken: "tok",
         proxyUrl: "",
-        egressAllowlist: ["chatgpt.com"],
+        llm: { authMode: "vend", credentialId: "cred_test", egressAllowlist: ["chatgpt.com"] },
       },
     });
     await proxy.ready;
@@ -470,7 +470,7 @@ describe("DNS rebind guard", () => {
         platformApiUrl: "http://mock:3000",
         runToken: "tok",
         proxyUrl: "",
-        egressAllowlist: ["chatgpt.com"],
+        llm: { authMode: "vend", credentialId: "cred_test", egressAllowlist: ["chatgpt.com"] },
       },
       resolveHostFn: async () => ["127.0.0.1"],
     });

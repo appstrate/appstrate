@@ -139,11 +139,13 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     return platformHost !== null && hostname.toLowerCase() === platformHost;
   }
 
-  // Per-run egress allowlist (vend-mode runs, e.g. the Codex CLI). When set,
+  // Per-run egress allowlist (vend-mode runs, e.g. the Codex CLI). The allowlist
+  // lives ON the vend LLM config — it exists if and only if this is a vend run —
+  // so the vend-egress lock and its host list derive from one source. When set,
   // outbound traffic is locked to these hosts only — the real upstream token
   // lives in-container, so a wide-open egress would let it be exfiltrated.
   // Normalised once; a target matches by exact name or parent-domain suffix.
-  const egressAllowlist = (config.egressAllowlist ?? [])
+  const egressAllowlist = (config.llm?.authMode === "vend" ? config.llm.egressAllowlist : [])
     .map((h) => h.toLowerCase())
     .filter(Boolean);
 
@@ -169,8 +171,8 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   // in-container, so its DIRECT egress must be locked tight: the host-only
   // allowlist (`isAllowedHost`) would still let the agent CONNECT to
   // `chatgpt.com:<any-port>` and tunnel arbitrary protocols out. When an
-  // allowlist is present (the vend-run signal — `authMode === "vend"` iff
-  // `egressAllowlist` is set, per SidecarConfig), refuse any non-443 port on
+  // allowlist is present (the vend-run signal — the allowlist lives on the vend
+  // config, so a non-empty list iff `authMode === "vend"`), refuse any non-443 port on
   // allowlisted hosts. The platform host is exempt — it is internal HMAC-scoped
   // traffic on its own port, governed by `isPlatformHost`, not the allowlist.
   const vendEgressActive = egressAllowlist.length > 0;

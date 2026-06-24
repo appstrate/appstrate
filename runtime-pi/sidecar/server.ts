@@ -71,6 +71,24 @@ function assertLlmProxyConfig(value: unknown): LlmProxyConfig {
       break;
     case "vend":
       need("credentialId");
+      // Fail closed at the cause: a vend run hands the REAL subscription token
+      // into the container and relies on the per-run egress allowlist to keep it
+      // from being exfiltrated. The allowlist lives ON the vend config (not a
+      // sibling env var), so the `vend ⟺ egress-lock` invariant is structural —
+      // assert it here so a vend payload without a non-empty allowlist fails at
+      // boot rather than silently leaving the forward proxy SSRF-block-only while
+      // still vending the live token.
+      if (
+        !Array.isArray(c.egressAllowlist) ||
+        c.egressAllowlist.length === 0 ||
+        !c.egressAllowlist.every((h) => typeof h === "string" && h.length > 0)
+      ) {
+        throw new Error(
+          'PI_LLM_OAUTH_CONFIG_JSON: vend config requires a non-empty "egressAllowlist" ' +
+            "string array (the real subscription token must never be served without the " +
+            "egress lock active).",
+        );
+      }
       break;
     default:
       throw new Error(`PI_LLM_OAUTH_CONFIG_JSON: unknown authMode "${String(c.authMode)}"`);
@@ -103,23 +121,6 @@ function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
   return undefined;
 }
 
-/** Parse the per-run egress allowlist forwarded via `EGRESS_ALLOWLIST_JSON`. */
-function readEgressAllowlistFromEnv(): string[] | undefined {
-  const raw = process.env.EGRESS_ALLOWLIST_JSON;
-  if (!raw) return undefined;
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      const hosts = parsed.filter((h): h is string => typeof h === "string" && h.length > 0);
-      return hosts.length > 0 ? hosts : undefined;
-    }
-  } catch {
-    // Launcher bug — surface via the warn below rather than crashing the sidecar.
-    logger.warn("Sidecar env: ignoring invalid EGRESS_ALLOWLIST_JSON", { raw });
-  }
-  return undefined;
-}
-
 function readPositiveIntFromEnv(name: string): number | undefined {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return undefined;
@@ -144,37 +145,14 @@ const config = {
   llm: readLlmConfigFromEnv(),
   modelContextWindow: readPositiveIntFromEnv("MODEL_CONTEXT_WINDOW"),
   modelMaxTokens: readPositiveIntFromEnv("MODEL_MAX_TOKENS"),
-  egressAllowlist: readEgressAllowlistFromEnv(),
 };
 
-// M1 — fail closed: a `vend`-mode run hands the REAL subscription token into the
-// container and relies on the per-run egress allowlist to keep that token from
-// being exfiltrated to an attacker host. `readEgressAllowlistFromEnv` fails OPEN
-// (returns `undefined`) on a missing/malformed `EGRESS_ALLOWLIST_JSON`, which
-// would leave the forward proxy in SSRF-block-only mode while still vending the
-// live token — a token-exfil window. The launcher always pairs the two env vars,
-// but the sidecar must not trust that: refuse to boot a vend run without a
-// non-empty allowlist rather than silently degrade.
-if (config.llm?.authMode === "vend" && (config.egressAllowlist?.length ?? 0) === 0) {
-  throw new Error(
-    "Sidecar refusing to boot: vend-mode run requires a non-empty EGRESS_ALLOWLIST_JSON " +
-      "(the real subscription token must never be served without the egress lock active).",
-  );
-}
-
-// M1 (reverse) — fail closed: the forward proxy infers the vend egress-lock
-// (deny-by-default + `:443` port-pin) purely from `egressAllowlist.length > 0`,
-// independent of `authMode`. If an allowlist is set for a NON-vend run the
-// proxy would silently apply that vend-only lock to an `oauth`/`api_key` run —
-// an unintended egress restriction that the operator never asked for, and the
-// inverse of M1's exfil window. The documented `vend ⟺ allowlist` invariant is
-// an iff: enforce both directions so an allowlist can ONLY accompany a vend run.
-if ((config.egressAllowlist?.length ?? 0) > 0 && config.llm?.authMode !== "vend") {
-  throw new Error(
-    "Sidecar refusing to boot: a non-empty EGRESS_ALLOWLIST_JSON requires a vend-mode run " +
-      "(the egress lock is a vend-only invariant and must never gate an oauth/api_key run).",
-  );
-}
+// The `vend ⟺ egress-lock` invariant is now STRUCTURAL: the allowlist lives on
+// the vend config (parsed + asserted non-empty in `assertLlmProxyConfig`), and
+// the forward proxy derives the lock solely from `config.llm.authMode === "vend"`.
+// A vend run therefore cannot boot without its lock, and no non-vend run can
+// carry one — so the two former top-level boot checks (M1 forward + reverse) are
+// no longer needed; the type makes both failure modes unrepresentable.
 
 // ─── P4 — connect mode (`runAt: "link"` ephemeral connect-run) ───
 // When `CONNECT_LOGIN_JSON` is present the sidecar is NOT serving an agent

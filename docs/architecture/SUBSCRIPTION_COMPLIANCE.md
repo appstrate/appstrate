@@ -120,11 +120,12 @@ the frozen vend snapshot is the only token the agent ever sees, and it gets no
 fresher across the run. Two preconditions back the "cannot be exfiltrated" claim,
 both enforced fail-closed:
 
-1. **The egress lock must be active.** A vend run that reaches the sidecar with a
-   missing/malformed `EGRESS_ALLOWLIST_JSON` would otherwise run egress in
-   SSRF-block-only mode while still vending the live token. The sidecar **refuses
-   to boot** a vend run without a non-empty allowlist (`runtime-pi/sidecar/server.ts`)
-   rather than fail open.
+1. **The egress lock must be active.** The allowlist lives ON the vend credential
+   config (`LlmProxyVendConfig.egressAllowlist`), not a sibling env var, so the
+   `vend ⟺ egress-lock` invariant is structural: only a vend run can carry an
+   allowlist, and the sidecar **refuses to boot** a vend config without a non-empty
+   allowlist (`runtime-pi/sidecar/server.ts`, `assertLlmProxyConfig`) rather than
+   run egress in SSRF-block-only mode while vending the live token.
 2. **No untrusted peer shares the network.** `/credential-vend` is network-gated,
    and integration containers join the same per-run network, so a vend run is
    **refused if it declares integrations** (see §1.4). With that guard the only

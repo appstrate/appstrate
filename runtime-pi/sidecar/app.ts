@@ -603,7 +603,7 @@ export function createApp(deps: AppDeps): Hono {
   // reverse-proxied through `/llm`). The in-container runner GETs this ONCE at
   // run start, writes the resolved token into the binary's `auth.json`, and the
   // binary egresses straight to the provider — locked to the provider's hosts
-  // by the per-run egress allowlist (`SidecarConfig.egressAllowlist`).
+  // by the per-run egress allowlist (`LlmProxyVendConfig.egressAllowlist`).
   //
   // No inbound auth — same posture as `/mcp` and `/integrations/boot-report`:
   // the per-run internal Docker network is the boundary. Only a `vend`-mode run

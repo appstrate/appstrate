@@ -70,7 +70,11 @@ function tokenResponse(overrides: Partial<OAuthTokenResponse> = {}): Response {
 describe("GET /credential-vend", () => {
   it("vends the resolved token + account id for a vend-mode run", async () => {
     const deps = makeDeps(() => tokenResponse());
-    deps.config.llm = { authMode: "vend", credentialId: "conn-codex" };
+    deps.config.llm = {
+      authMode: "vend",
+      credentialId: "conn-codex",
+      egressAllowlist: ["chatgpt.com", "openai.com"],
+    };
     const app = createApp(deps);
 
     const res = await app.request("/credential-vend", { headers: SIDECAR_HOST });
@@ -82,7 +86,11 @@ describe("GET /credential-vend", () => {
 
   it("403s a request whose Host header is not allowlisted (DNS-rebind guard)", async () => {
     const deps = makeDeps(() => tokenResponse());
-    deps.config.llm = { authMode: "vend", credentialId: "conn-codex" };
+    deps.config.llm = {
+      authMode: "vend",
+      credentialId: "conn-codex",
+      egressAllowlist: ["chatgpt.com", "openai.com"],
+    };
     const app = createApp(deps);
 
     const res = await app.request("/credential-vend", { headers: { Host: "evil.example.com" } });
@@ -113,7 +121,11 @@ describe("GET /credential-vend", () => {
     };
     const deps = makeDeps(() => tokenResponse());
     deps.oauthTokenCache = countingCache as unknown as OAuthTokenCache;
-    deps.config.llm = { authMode: "vend", credentialId: "conn-codex" };
+    deps.config.llm = {
+      authMode: "vend",
+      credentialId: "conn-codex",
+      egressAllowlist: ["chatgpt.com", "openai.com"],
+    };
     const app = createApp(deps);
 
     const res1 = await app.request("/credential-vend", { headers: SIDECAR_HOST });
@@ -134,7 +146,11 @@ describe("GET /credential-vend", () => {
 
   it("returns account_id null when the credential has none", async () => {
     const deps = makeDeps(() => tokenResponse({ accountId: undefined }));
-    deps.config.llm = { authMode: "vend", credentialId: "conn-codex" };
+    deps.config.llm = {
+      authMode: "vend",
+      credentialId: "conn-codex",
+      egressAllowlist: ["chatgpt.com", "openai.com"],
+    };
     const app = createApp(deps);
 
     const res = await app.request("/credential-vend", { headers: SIDECAR_HOST });
@@ -170,7 +186,11 @@ describe("GET /credential-vend", () => {
         ? new Response(JSON.stringify({ detail: "reconnect" }), { status: 410 })
         : tokenResponse(),
     );
-    deps.config.llm = { authMode: "vend", credentialId: "conn-codex" };
+    deps.config.llm = {
+      authMode: "vend",
+      credentialId: "conn-codex",
+      egressAllowlist: ["chatgpt.com", "openai.com"],
+    };
     const app = createApp(deps);
 
     const res = await app.request("/credential-vend", { headers: SIDECAR_HOST });

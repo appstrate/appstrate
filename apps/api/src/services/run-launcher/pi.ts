@@ -252,7 +252,27 @@ async function runPlatformContainerImpl(
       // Vend mode: the sidecar hands the resolved token to the in-container
       // runner via `/credential-vend` instead of swapping the bearer in flight.
       // No model alias (subscription models aren't aliased).
-      sidecarLlm = { authMode: "vend", credentialId: llmConfig.credentialId! };
+      //
+      // The egress allowlist is REQUIRED on the vend config: a vend run hands the
+      // REAL subscription token into the container (the CLI talks to the upstream
+      // directly and can't be reverse-proxied), so egress MUST be locked to the
+      // provider's hosts — the allowlist is the sole compensating control. Fail
+      // closed rather than launch an unconstrained container holding a live
+      // credential. (A `"vend"` engine always carries an `egressAllowlist` in the
+      // registry; this guards any vend provider against shipping without its lock.)
+      // Carrying it ON the vend config (not a sibling spec field) makes the
+      // `vend ⟺ allowlist` invariant structural — the type can't express one
+      // without the other.
+      if (!egressAllowlist || egressAllowlist.length === 0) {
+        throw new Error(
+          "vend-mode run requires a non-empty egress allowlist (refusing to launch an unlocked container with a vended credential)",
+        );
+      }
+      sidecarLlm = {
+        authMode: "vend",
+        credentialId: llmConfig.credentialId!,
+        egressAllowlist,
+      };
     } else if (isOauthCredential) {
       // An `"oauth"` subscription engine (e.g. Claude Agent SDK). The official
       // binary signs its own fingerprint, so the sidecar just swaps the bearer
@@ -276,19 +296,6 @@ async function runPlatformContainerImpl(
       };
     }
 
-    // Invariant: a vend-mode run hands the REAL subscription token into the
-    // container (the CLI talks to the upstream directly and can't be reverse-
-    // proxied), so its egress MUST be locked to the provider's hosts — the
-    // allowlist is the sole compensating control. Fail closed rather than launch
-    // an unconstrained container holding a live credential. (A `"vend"` engine
-    // always carries an `egressAllowlist` in the registry; this guards any vend
-    // provider against shipping without its lock.)
-    if (sidecarLlm?.authMode === "vend" && (!egressAllowlist || egressAllowlist.length === 0)) {
-      throw new Error(
-        "vend-mode run requires a non-empty egress allowlist (refusing to launch an unlocked container with a vended credential)",
-      );
-    }
-
     // Native-output providers (e.g. claude-code) materialise `output` themselves
     // → strip it from the tools the sidecar serves so the model sees a single
     // output path. Driven by the PROVIDER's declared capability (not the engine),
@@ -310,8 +317,6 @@ async function runPlatformContainerImpl(
       // sidecar applies a conservative fallback when either is unset.
       ...(llmConfig.contextWindow != null ? { modelContextWindow: llmConfig.contextWindow } : {}),
       ...(llmConfig.maxTokens != null ? { modelMaxTokens: llmConfig.maxTokens } : {}),
-      // Codex runs: lock the forward proxy to OpenAI's hosts (in-container token).
-      ...(egressAllowlist ? { egressAllowlist } : {}),
       // Phase 1.4 — integrations the sidecar will spawn + multiplex onto
       // the agent-facing `/mcp` surface. Resolved upstream by
       // `resolveIntegrationSpawns` (run-context-builder).

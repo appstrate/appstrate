@@ -48,19 +48,6 @@ export interface SidecarConfig {
    * passes to Pi SDK's compaction settings.
    */
   modelMaxTokens?: number;
-  /**
-   * Per-run egress allowlist for the forward proxy. When set (non-empty), the
-   * agent's outbound traffic is restricted to ONLY these hosts (plus the
-   * trusted platform host) — every other destination is refused, on top of the
-   * always-on SSRF blocklist. A host matches by exact name or as a parent
-   * domain suffix (`chatgpt.com` allows `chatgpt.com` and `x.chatgpt.com`).
-   *
-   * Set for `vend`-mode runs (the Codex CLI), which hold the real upstream
-   * token in-container: locking egress to the provider's hosts means the token
-   * cannot be exfiltrated to an attacker-controlled endpoint. Unset (the
-   * default) keeps the open SSRF-block-only posture used by every other run.
-   */
-  egressAllowlist?: readonly string[];
 }
 
 /**
@@ -81,8 +68,6 @@ export interface SidecarLaunchSpec {
   modelContextWindow?: number;
   /** See {@link SidecarConfig.modelMaxTokens}. */
   modelMaxTokens?: number;
-  /** See {@link SidecarConfig.egressAllowlist}. Serialised as `EGRESS_ALLOWLIST_JSON`. */
-  egressAllowlist?: readonly string[];
   /**
    * Integrations to bootstrap inside the sidecar (Phase 1.4). Each entry
    * declares an `type: integration` AFPS package the agent depends on —
@@ -586,8 +571,8 @@ export interface LlmProxyOauthConfig {
  * instead it VENDS the resolved access token to the in-container runner once,
  * over the internal-network-gated `GET /credential-vend`. The runner writes it
  * into the binary's `auth.json` and the binary egresses straight to the upstream
- * — locked to the provider's hosts by the sidecar's per-run egress allowlist
- * ({@link SidecarConfig.egressAllowlist}). The real token therefore DOES enter
+ * — locked to the provider's hosts by the per-run egress allowlist carried on
+ * this config ({@link egressAllowlist}). The real token therefore DOES enter
  * the container (unlike {@link LlmProxyOauthConfig}); the compensating controls
  * are the locked egress + the no-refresh-token vend (the access token is
  * non-renewable and the container is ephemeral).
@@ -596,6 +581,21 @@ export interface LlmProxyVendConfig {
   authMode: "vend";
   /** ID of the `model_provider_credentials` row whose token is vended in-container. */
   credentialId: string;
+  /**
+   * Per-run egress allowlist for the forward proxy — REQUIRED and non-empty for
+   * a vend run. The agent's outbound traffic is restricted to ONLY these hosts
+   * (plus the trusted platform host); every other destination is refused, on top
+   * of the always-on SSRF blocklist. A host matches by exact name or as a parent
+   * domain suffix (`chatgpt.com` allows `chatgpt.com` and `x.chatgpt.com`).
+   *
+   * Living on the vend config (rather than a sibling top-level field) makes the
+   * `vend ⟺ egress-lock` invariant STRUCTURAL: only a vend run can carry an
+   * allowlist, and a vend run cannot exist without one. Locking egress to the
+   * provider's hosts is what keeps the in-container token from being exfiltrated
+   * to an attacker-controlled endpoint — the sole compensating control for the
+   * real token living at rest in the container.
+   */
+  egressAllowlist: readonly string[];
 }
 
 /**
