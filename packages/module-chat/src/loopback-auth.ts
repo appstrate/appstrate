@@ -18,8 +18,9 @@
  *     shape, and the strategy no-matches instantly on any other header.
  *
  * Contributed through the standard `authStrategies()` module extension
- * point; `assertBearerOnly` accepts the strategy id alongside the OIDC
- * JWT methods.
+ * point. The strategy declares the `firstPartyLoopback` capability on its
+ * `AuthResolution`; the bearer-only proxy gates accept on THAT declared
+ * capability (not on this module's auth-method id) — see `bearer-only.ts`.
  */
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";

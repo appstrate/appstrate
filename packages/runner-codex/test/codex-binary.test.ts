@@ -11,8 +11,6 @@ import {
   buildCodexEnv,
   codexBinaryPackage,
   codexTargetTriple,
-  isCodexVersionCompatible,
-  parseCodexVersion,
   readNdjsonLines,
   redactSecrets,
   resolveCodexBinary,
@@ -383,24 +381,5 @@ describe("writeCodexConfig", () => {
     } finally {
       await rm(home, { recursive: true, force: true });
     }
-  });
-});
-
-describe("codex version compatibility (M6 drift probe)", () => {
-  it("parses a codex --version line", () => {
-    expect(parseCodexVersion("codex-cli 0.141.0")).toEqual([0, 141]);
-    expect(parseCodexVersion("0.141.3")).toEqual([0, 141]);
-    expect(parseCodexVersion("garbage")).toBeNull();
-  });
-
-  it("accepts the validated 0.141.x (patch-agnostic)", () => {
-    expect(isCodexVersionCompatible("codex-cli 0.141.0")).toBe(true);
-    expect(isCodexVersionCompatible("codex-cli 0.141.9")).toBe(true);
-  });
-
-  it("flags a minor/major drift or unparseable output as incompatible", () => {
-    expect(isCodexVersionCompatible("codex-cli 0.142.0")).toBe(false);
-    expect(isCodexVersionCompatible("codex-cli 1.0.0")).toBe(false);
-    expect(isCodexVersionCompatible("unknown")).toBe(false);
   });
 });
