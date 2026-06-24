@@ -162,13 +162,19 @@ async function buildCallerContextBlock(
   const role = (c.get("orgRole") as string | undefined) ?? undefined;
   try {
     const svc = getIntegrationsService();
-    if (svc && applicationId) {
-      // In-process: identity/role from context, only connections hit the DB.
-      const connections = await svc.listUsableForActor({
-        orgId,
-        applicationId,
-        actor: { type: "user", id: user.id },
-      });
+    if (svc) {
+      // In-process: identity/role come from the request context. The connection
+      // list is app-scoped — fetch it only when an application id is known;
+      // without one we still emit the identity/role block (empty connections)
+      // rather than fall back to a loopback that would itself 400 without app
+      // context.
+      const connections = applicationId
+        ? await svc.listUsableForActor({
+            orgId,
+            applicationId,
+            actor: { type: "user", id: user.id },
+          })
+        : [];
       return formatCallerContext({
         user: { name: user.name ?? null, email: user.email ?? null },
         org: { role: role ?? null },
@@ -236,7 +242,11 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   const pinnedAppId = c.req.header("x-application-id");
   const phaseAStart = Date.now();
   const [models, applicationId] = await Promise.all([
-    listModels(origin, inferenceHeaders),
+    // metadata_only (skip credential decrypt) is safe only when an explicit
+    // model is pinned — that id came from the filtered picker, so it's reachable.
+    // Without a pin we resolve the org default from the full filtered list, so a
+    // dead-credential default is dropped rather than picked → inference error.
+    listModels(origin, inferenceHeaders, { metadataOnly: Boolean(modelId) }),
     pinnedAppId
       ? Promise.resolve(pinnedAppId)
       : resolveDefaultApplicationId(origin, headers, orgId),

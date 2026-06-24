@@ -62,12 +62,19 @@ interface ResolveArgs {
 export async function listModels(
   origin: string,
   headers: Record<string, string>,
+  opts?: { metadataOnly?: boolean },
 ): Promise<OrgModel[]> {
-  // `metadata_only`: the picker needs only id/modelId/apiShape/providerId/
-  // enabled/is_default, never a credential — skip the per-model credential
-  // decrypt + reachability filter the full listing does. (The real key is
-  // resolved later, server-side, by the llm-proxy on the actual inference call.)
-  const res = await platformFetch(`${origin}/api/models?metadata_only=true`, { headers });
+  // `metadata_only` skips the per-model credential decrypt + reachability filter
+  // — faster, but it also stops dropping models whose credential is dead
+  // (needs-reconnection). Safe ONLY when the caller will match an explicit,
+  // user-picked id (that id came from the browser's filtered picker, so it is
+  // already reachable). For DEFAULT resolution (no explicit id) we must use the
+  // full filtered list, or a dead org-default would be picked and fail at
+  // inference. The caller passes `metadataOnly` accordingly.
+  const url = opts?.metadataOnly
+    ? `${origin}/api/models?metadata_only=true`
+    : `${origin}/api/models`;
+  const res = await platformFetch(url, { headers });
   if (!res.ok) throw badGateway(`/api/models returned ${res.status}`);
   const body = (await res.json()) as { models?: OrgModel[]; data?: OrgModel[] };
   const models = body.models ?? body.data;

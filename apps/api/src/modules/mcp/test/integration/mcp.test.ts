@@ -385,7 +385,14 @@ describe("mcp tool round-trip", () => {
     expect(instructions).toContain("## Operation index");
     // ...and the index actually lists operations under it (compact form:
     // comma-separated operationIds per tag, no per-op summary).
-    expect(instructions!.split("## Operation index")[1]).toContain("listAgents");
+    const indexSection = instructions!.split("## Operation index")[1]!;
+    expect(indexSection).toContain("listAgents");
+    // Regression guard for the compact index (TTFT): operationIds only, never the
+    // old `- operationId — summary` form. The bullet+em-dash would re-bloat the
+    // index (~3.4k tokens) that every uncached turn re-sends. If summaries return,
+    // this fails — re-evaluate the token cost first.
+    expect(indexSection).not.toContain(" — ");
+    expect(indexSection).not.toMatch(/^- \w/m);
   });
 });
 

@@ -18,6 +18,11 @@ import {
   loadCredentialMetadata,
 } from "./model-providers/credentials.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import {
+  getResolvedModel,
+  setResolvedModel,
+  invalidateResolvedModel,
+} from "./resolved-model-cache.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import {
   mergeSystemAndDb,
@@ -323,6 +328,8 @@ export async function updateOrgModel(
     .update(orgModels)
     .set(updates)
     .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
+  // Drop the cached resolution (modelId/enabled/credential/cost may have changed).
+  invalidateResolvedModel(orgId, modelDbId);
 }
 
 export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<void> {
@@ -332,6 +339,7 @@ export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<
   await db
     .delete(orgModels)
     .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
+  invalidateResolvedModel(orgId, modelDbId);
   // If the deleted model was the org default, clear the now-dangling pointer so
   // the resolver falls cleanly to the system cascade (no stale-id badge).
   await defaultModel.clearDanglingPointer(orgId, modelDbId);
@@ -629,26 +637,6 @@ export async function resolveModel(
   return null;
 }
 
-// Short-TTL cache of resolved DB models. A single chat turn / agent run fans
-// out into many `loadModel(orgId, presetId)` calls (the llm-proxy resolves the
-// preset on EVERY inference request, up to MAX_STEPS per turn) — each otherwise
-// re-queries `org_models` + re-decrypts the credential. Caching the resolved
-// model for a few seconds collapses that to one resolve per window. Only the
-// successful (non-null) DB result is cached; system models are already in-memory
-// and not cached here. Trade-off: a credential rotation/disable is visible after
-// at most `RESOLVED_MODEL_TTL_MS`.
-const resolvedModelCache = new Map<string, { value: ResolvedModel; exp: number }>();
-const RESOLVED_MODEL_TTL_MS = 30_000;
-const RESOLVED_MODEL_CACHE_MAX = 500;
-
-function cacheResolvedModel(key: string, value: ResolvedModel): void {
-  if (resolvedModelCache.size >= RESOLVED_MODEL_CACHE_MAX && !resolvedModelCache.has(key)) {
-    const oldest = resolvedModelCache.keys().next().value;
-    if (oldest !== undefined) resolvedModelCache.delete(oldest);
-  }
-  resolvedModelCache.set(key, { value, exp: Date.now() + RESOLVED_MODEL_TTL_MS });
-}
-
 export async function loadModel(orgId: string, modelDbId: string): Promise<ResolvedModel | null> {
   // Check system models first
   const system = getSystemModels();
@@ -657,9 +645,11 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     return buildSystemResolvedModel(systemDef);
   }
 
-  const cacheKey = `${orgId}:${modelDbId}`;
-  const cached = resolvedModelCache.get(cacheKey);
-  if (cached && cached.exp > Date.now()) return cached.value;
+  // Short-TTL cache (see resolved-model-cache.ts). Only the successful (non-null)
+  // DB result is cached; system models are already in-memory. Invalidated
+  // eagerly by model + credential mutators, so the TTL is a backstop.
+  const cached = getResolvedModel(orgId, modelDbId);
+  if (cached) return cached;
 
   // Check DB. `orgModels.id` is a `uuid` column — a `modelDbId` that isn't a
   // valid UUID (e.g. a human-readable model name like `gpt-5.5`) makes Postgres
@@ -699,7 +689,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   if (!creds) return null;
 
   const resolved = buildDbResolvedModel(row, creds);
-  cacheResolvedModel(cacheKey, resolved);
+  setResolvedModel(orgId, modelDbId, resolved);
   return resolved;
 }
 
