@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createApp, buildSidecarRuntimeDeps, SIDECAR_IDLE_TIMEOUT_SECONDS } from "./app.ts";
+import { createRunAnonymizer } from "./anonymizer.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
 import type { CredentialsResponse, LlmProxyConfig, ModelSwap } from "./helpers.ts";
 import { logger } from "./logger.ts";
@@ -87,6 +88,7 @@ const config = {
   llm: readLlmConfigFromEnv(),
   modelContextWindow: readPositiveIntFromEnv("MODEL_CONTEXT_WINDOW"),
   modelMaxTokens: readPositiveIntFromEnv("MODEL_MAX_TOKENS"),
+  anonymize: process.env.ANONYMIZE === "1",
 };
 
 // ─── P4 — connect mode (`runAt: "link"` ephemeral connect-run) ───
@@ -260,6 +262,17 @@ const integrationBootPromise =
         })
     : Promise.resolve();
 
+// Per-run anonymizer (palier b2). Built only when the platform enabled
+// anonymization for this run (which it does ONLY when an anonymizer module is
+// loaded, so `/internal/anonymize` is guaranteed to answer). Off → undefined →
+// the `/llm/*` proxy passes bytes through untouched.
+const anonymizer = config.anonymize
+  ? createRunAnonymizer({
+      endpointUrl: `${config.platformApiUrl}/internal/anonymize`,
+      runToken: config.runToken,
+    })
+  : undefined;
+
 const app = createApp({
   config,
   fetchCredentials,
@@ -268,6 +281,7 @@ const app = createApp({
   runtimeDeps,
   isReady: () => proxy.readySync,
   oauthTokenCache,
+  anonymizer,
   additionalMcpToolsProvider: () => [...runtimeToolDefs, ...integrationTools],
   integrationBootPromise,
   integrationBootReportProvider: () => integrationBootReport,

@@ -1,0 +1,20 @@
+{
+  "name": "@appstrate/module-anonymizer",
+  "version": "0.1.0",
+  "description": "Appstrate module — reversible PII anonymization (in-process GLiNER2 + regex, no Python/torch) for chat and agent runs. Masks PII before the LLM, restores real values before tools, re-masks tool results. Opt-in: append `@appstrate/module-anonymizer` to MODULES to enable.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": null,
+  "module": null,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test test/"
+  },
+  "dependencies": {
+    "@appstrate/core": "workspace:*",
+    "@lmoe/gliner-onnx": "^0.1.0"
+  }
+}

@@ -10,6 +10,7 @@ import type {
   ModuleEvents,
   AuthStrategy,
   ModulePermissionContribution,
+  LlmBodyTransformerFactory,
 } from "@appstrate/core/module";
 import { getErrorMessage } from "@appstrate/core/errors";
 import {
@@ -376,6 +377,22 @@ export function getModuleModelProviders(): readonly ModelProviderDefinition[] {
     }
   }
   return collected;
+}
+
+/**
+ * Resolve the LLM-proxy body transformer factory (the anonymization seam).
+ *
+ * Single-owner seam: returns the first loaded module's `llmBodyTransformer()`
+ * factory, or null when no module contributes. The factory is stable for the
+ * process lifetime (it may own a loaded model), so the proxy can call it on
+ * every request. OSS invariant: null when `MODULES` carries no anonymizer.
+ */
+export function getModuleLlmBodyTransformer(): LlmBodyTransformerFactory | null {
+  for (const mod of _modules.values()) {
+    const factory = mod.llmBodyTransformer?.();
+    if (factory) return factory;
+  }
+  return null;
 }
 
 /** Collect OpenAPI tags contributed by all loaded modules. */

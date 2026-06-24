@@ -283,6 +283,7 @@ const expectedEndpoints = [
   "GET /internal/mcp-server-bundle/{scope}/{name}",
   "GET /internal/integration-credentials/{scope}/{name}",
   "POST /internal/integration-credentials/{scope}/{name}/refresh",
+  "POST /internal/anonymize",
 
   // Meta
   "GET /api/openapi.json",

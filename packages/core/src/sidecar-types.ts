@@ -48,6 +48,15 @@ export interface SidecarConfig {
    * passes to Pi SDK's compaction settings.
    */
   modelMaxTokens?: number;
+  /**
+   * Enable PII anonymization for this run (palier b2). When true, the sidecar
+   * masks the outbound LLM request body through the platform's
+   * `/internal/anonymize` endpoint and restores the response locally (the mask
+   * table lives in the sidecar — Option S). The platform sets this ONLY when an
+   * anonymizer module is loaded (so the endpoint is guaranteed to answer);
+   * unset (the default) keeps the zero-footprint passthrough.
+   */
+  anonymize?: boolean;
 }
 
 /**
@@ -68,6 +77,8 @@ export interface SidecarLaunchSpec {
   modelContextWindow?: number;
   /** See {@link SidecarConfig.modelMaxTokens}. */
   modelMaxTokens?: number;
+  /** See {@link SidecarConfig.anonymize}. Serialised as the `ANONYMIZE` env var. */
+  anonymize?: boolean;
   /**
    * Integrations to bootstrap inside the sidecar (Phase 1.4). Each entry
    * declares an `type: integration` AFPS package the agent depends on —

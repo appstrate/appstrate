@@ -49,6 +49,7 @@ import type {
   LlmProxyOauthConfig,
   SidecarLaunchSpec,
 } from "@appstrate/core/sidecar-types";
+import { getModuleLlmBodyTransformer } from "../../lib/modules/module-loader.ts";
 
 /** Terminal state reported back to the caller once the container has exited. */
 export interface PlatformContainerResult {
@@ -162,6 +163,12 @@ async function runPlatformContainerImpl(
     // is the ONLY path that routes agent egress through it — skipping the
     // sidecar would silently drop the proxy and leak the host IP.
     const hasIntegrations = (plan.integrations?.length ?? 0) > 0;
+    // PII anonymization (palier b2) is a FIFTH reason the sidecar is mandatory:
+    // the masking of the agent's outbound LLM body lives in the sidecar's
+    // `/llm` proxy. Skipping it (api_key + no integrations) would hand the agent
+    // the real endpoint and leak the PII unmasked — so anonymization forces the
+    // sidecar on. Same gate as the spec's `anonymize` flag below.
+    const anonymizeEnabled = !!getModuleLlmBodyTransformer();
     // A model alias MUST route through the sidecar — that's the only place the
     // `model` alias→real swap happens. Skipping it would hand the agent the
     // real backing id (in its own request) and the provider's real endpoint.
@@ -170,7 +177,8 @@ async function runPlatformContainerImpl(
       !!llmConfig.apiKey &&
       !isOauthCredential &&
       !plan.proxyUrl &&
-      !llmConfig.aliased;
+      !llmConfig.aliased &&
+      !anonymizeEnabled;
 
     // Model-alias swap descriptor (LLM-gateway alias pattern). The container is
     // handed the public alias as MODEL_ID (below); the sidecar swaps it for the
@@ -218,6 +226,10 @@ async function runPlatformContainerImpl(
       // sidecar applies a conservative fallback when either is unset.
       ...(llmConfig.contextWindow != null ? { modelContextWindow: llmConfig.contextWindow } : {}),
       ...(llmConfig.maxTokens != null ? { modelMaxTokens: llmConfig.maxTokens } : {}),
+      // PII anonymization (palier b2): on iff an anonymizer module is loaded, so
+      // the sidecar's /internal/anonymize calls are guaranteed to resolve. The
+      // same gate forces `skipSidecar` off above (masking needs the sidecar).
+      ...(anonymizeEnabled ? { anonymize: true } : {}),
       // Phase 1.4 — integrations the sidecar will spawn + multiplex onto
       // the agent-facing `/mcp` surface. Resolved upstream by
       // `resolveIntegrationSpawns` (run-context-builder).
