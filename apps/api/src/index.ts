@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { getEnv } from "@appstrate/env";
-import { initObservability, observability } from "./observability/index.ts";
+import { initObservability, observability, recordProcessAnomaly } from "./observability/index.ts";
 import { logger } from "./lib/logger.ts";
 import { boot } from "./lib/boot.ts";
 import { createShutdownHandler } from "./lib/shutdown.ts";
@@ -251,19 +251,34 @@ const shutdown = createShutdownHandler(() => {
 process.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());
 
-// Resilience net: a single request's BACKGROUND async failure must not take down
-// the whole multi-tenant server. The LLM engines (codex/claude) drive a streamed
-// subprocess/SDK whose teardown can throw or reject AFTER the request's own
-// try/catch has returned — e.g. an upstream gateway fetch failing mid-stream. Bun
-// crashes the process on any uncaught exception OR unhandled rejection; we log and
-// KEEP SERVING instead. In-band request failures are still owned by the route
-// error handler — these handlers fire only for what escaped it entirely.
+// Resilience net for a single request's BACKGROUND async failure escaping the
+// route error handler — e.g. a streamed LLM teardown that rejects AFTER the
+// response is on the wire (an upstream gateway dying mid-stream). The two cases
+// are NOT equivalent, so they are handled differently (per review on #749):
+//
+//   - unhandledRejection: a promise nobody awaited — no synchronous corruption
+//     is implied, so we log + KEEP SERVING. One tenant's stray rejection must
+//     not drop the whole multi-tenant server.
+//   - uncaughtException: the process state is now UNDEFINED (Node/V8: "not safe
+//     to resume normal operation"). Crash-only — log, drain gracefully via the
+//     existing shutdown() above (the orchestrator restarts), with a hard
+//     failsafe in case the drain hangs on a corrupted event loop. A "live but
+//     broken" server is harder to diagnose than a clean restart.
+//
+// Both bump a metric so an alert can page on the rate; the durable fix is
+// catching the offending teardown at its SOURCE (tracked separately) — this net
+// is the last resort AND the signal that will point us there.
 const fmtErr = (e: unknown): string => (e instanceof Error ? (e.stack ?? e.message) : String(e));
+const UNCAUGHT_DRAIN_FAILSAFE_MS = 15_000;
 process.on("unhandledRejection", (reason) => {
+  recordProcessAnomaly({ kind: "unhandledRejection" });
   logger.error("unhandledRejection — process kept alive", { err: fmtErr(reason) });
 });
 process.on("uncaughtException", (err, origin) => {
-  logger.error("uncaughtException — process kept alive", { origin, err: fmtErr(err) });
+  recordProcessAnomaly({ kind: "uncaughtException" });
+  logger.error("uncaughtException — graceful shutdown (crash-only)", { origin, err: fmtErr(err) });
+  void shutdown(1);
+  setTimeout(() => process.exit(1), UNCAUGHT_DRAIN_FAILSAFE_MS).unref();
 });
 
 // Routes

@@ -70,6 +70,7 @@ let runDuration: Histogram | undefined;
 let runTerminal: Counter | undefined;
 let containerSpawn: Histogram | undefined;
 let llmLatency: Histogram | undefined;
+let processAnomaly: Counter | undefined;
 
 /**
  * Pull provider for the scheduler queue-depth observable gauge. The scheduler
@@ -238,6 +239,10 @@ function createInstruments(m: Meter): void {
     unit: "s",
     description: "Upstream LLM call latency observed at the platform proxy seam.",
     advice: { explicitBucketBoundaries: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60] },
+  });
+  processAnomaly = m.createCounter("appstrate.process.anomaly", {
+    description:
+      "Escaped async errors caught by the process-level net, tagged by kind (unhandledRejection | uncaughtException).",
   });
   m.createObservableGauge("appstrate.scheduler.queue_depth", {
     description: "Pending jobs in the run-scheduler queue (BullMQ).",
@@ -480,6 +485,19 @@ export function recordLlmLatency(
     ...(status !== undefined ? { "http.response.status_code": status } : {}),
     ...(errorType !== undefined ? { "error.type": errorType } : {}),
   });
+}
+
+/**
+ * Record one escaped async error caught by the process-level resilience net
+ * (`apps/api/src/index.ts`). `kind` separates a kept-alive promise rejection
+ * from a crash-only uncaught exception, so an alert can page on the latter's
+ * rate — a spike is a real regression to fix at its source.
+ */
+export function recordProcessAnomaly(attrs: {
+  kind: "unhandledRejection" | "uncaughtException";
+}): void {
+  if (!enabled) return;
+  processAnomaly?.add(1, { kind: attrs.kind });
 }
 
 // ─── Test-only reset ─────────────────────────────────────────────

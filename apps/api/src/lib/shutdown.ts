@@ -21,10 +21,12 @@ import { shutdownObservability } from "../observability/index.ts";
 
 const SHUTDOWN_TIMEOUT_MS = 30_000;
 
-export function createShutdownHandler(setShuttingDown: () => void): () => Promise<void> {
+export function createShutdownHandler(
+  setShuttingDown: () => void,
+): (exitCode?: number) => Promise<void> {
   let called = false;
 
-  return async () => {
+  return async (exitCode = 0) => {
     if (called) return;
     called = true;
     setShuttingDown();
@@ -89,6 +91,6 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
     await Promise.all(closeOps);
 
     logger.info("Shutdown complete");
-    process.exit(0);
+    process.exit(exitCode);
   };
 }

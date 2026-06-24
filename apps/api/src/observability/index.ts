@@ -16,6 +16,7 @@ export {
   recordRunTerminal,
   recordContainerSpawn,
   recordLlmLatency,
+  recordProcessAnomaly,
 } from "./otel.ts";
 
 export { observability } from "./middleware.ts";
