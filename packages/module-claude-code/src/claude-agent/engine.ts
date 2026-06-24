@@ -47,19 +47,6 @@ const MAX_TURNS = 16;
 const TURN_DEADLINE_MS = 5 * 60_000;
 
 /**
- * Curated environment for the spawned `claude` binary. Thin wrapper over the
- * shared `@appstrate/runner-claude/binary` builder (single source for the
- * credential-isolation posture shared with the agent runner); keeps the chat's
- * positional signature for its existing call site + tests.
- */
-export function buildSdkEnv(
-  gatewayBaseUrl: string,
-  placeholderToken: string,
-): Record<string, string> {
-  return buildClaudeSdkEnv({ baseUrl: gatewayBaseUrl, placeholderToken });
-}
-
-/**
  * Build the `mcpServers` config: the platform HTTP MCP when available, else
  * none. (Typed loosely — the SDK's McpServerConfig union is broad and not
  * re-exported conveniently.)
@@ -114,7 +101,10 @@ export function runClaudeAgentChat(input: ChatEngineInput): Response {
             prompt: input.prompt,
             options: {
               pathToClaudeCodeExecutable: binary,
-              env: buildSdkEnv(input.gatewayBaseUrl, input.placeholderToken),
+              env: buildClaudeSdkEnv({
+                baseUrl: input.gatewayBaseUrl,
+                placeholderToken: input.placeholderToken,
+              }),
               model: input.modelId,
               systemPrompt: input.system,
               tools: [], // disable ALL built-ins — chat must not get host execution
