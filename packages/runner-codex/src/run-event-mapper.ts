@@ -32,28 +32,10 @@ import type { RunEvent } from "@appstrate/afps-runtime/types";
 import {
   truncateToolResult,
   zeroTokenUsage,
-  computeTokenCost,
   type RunError,
   type TokenUsage,
-  type TokenCost,
 } from "@appstrate/afps-runtime/runner";
 import type { CodexEvent, CodexUsage } from "./codex-binary.ts";
-
-/** Per-token cost rates for the resolved model (USD per 1e6 tokens). */
-export type CodexModelCost = TokenCost;
-
-/**
- * Compute equivalent cost (USD) from usage + the model's per-million rates.
- * Thin wrapper over the shared {@link computeTokenCost} (`@appstrate/afps-
- * runtime/runner`) so the per-token formula has ONE definition shared with the
- * LLM-proxy meter — see D1.
- */
-export function computeCodexCost(
-  usage: TokenUsage,
-  cost: CodexModelCost | null | undefined,
-): number {
-  return computeTokenCost(usage, cost);
-}
 
 function errorText(ev: CodexEvent): string {
   if (typeof ev.error === "string" && ev.error.length > 0) return ev.error;
