@@ -17,7 +17,6 @@ import {
   createSession,
   renameSession,
   deleteSession,
-  generateSessionTitle,
   type GetHeaders,
 } from "./sessions.ts";
 import { makeHistoryAdapter } from "./history-adapter.ts";
@@ -81,19 +80,15 @@ export function makeThreadListAdapter(getHeaders: GetHeaders): RemoteThreadListA
     async delete(remoteId) {
       await deleteSession(getHeaders, remoteId);
     },
-    // Called once after the first turn: ask the LLM for a short title, persist
-    // it (rename), and emit it on the stream so the runtime applies it live.
-    // Falls back to the trimmed first message if the model call fails.
+    // Called once after the first turn. The adapter interface requires this
+    // method, so we derive the title from the trimmed first user message
+    // (no model call) and emit it on the stream so the runtime applies it live.
+    // The server independently persists the same trim via deriveTitle() on the
+    // first message append.
     async generateTitle(remoteId, messages) {
       const items = titleInput(messages);
       if (items.length === 0) return createAssistantStream(() => {});
-      let title = "";
-      try {
-        title = await generateSessionTitle(getHeaders, items);
-      } catch {
-        title = "";
-      }
-      if (!title) title = fallbackTitle(items);
+      const title = fallbackTitle(items);
       if (title) void renameSession(getHeaders, remoteId, title).catch(() => {});
       return createAssistantStream((controller) => {
         if (title) controller.appendText(title);

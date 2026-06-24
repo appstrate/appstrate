@@ -25,14 +25,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AssistantRuntimeProvider, useRemoteThreadListRuntime } from "@assistant-ui/react";
 import { useChatRuntime, AssistantChatTransport } from "@assistant-ui/react-ai-sdk";
-import { PanelLeftIcon, PanelRightIcon, InfoIcon } from "lucide-react";
+import { PanelLeftIcon, InfoIcon } from "lucide-react";
 import { Thread } from "./thread.tsx";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { makeThreadListAdapter } from "./thread-list-adapter.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
-import { AgentRunPanel } from "./agent-run-panel.tsx";
-import { useThreadRuns } from "./use-thread-runs.ts";
 
 export interface ChatContext {
   /** What the conversation is anchored to (e.g. "document", "run"). */
@@ -184,11 +182,6 @@ export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
   // into a left drawer toggled from the card header.
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Right rail: closed by default — opens on the header toggle or when an agent
-  // run goes active (see AutoOpenAgentPanel).
-  const [panelCollapsed, setPanelCollapsed] = useState(true);
-  const openPanel = useCallback(() => setPanelCollapsed(false), []);
-
   const [models, setModels] = useState<OrgModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(() =>
     typeof localStorage === "undefined" ? null : localStorage.getItem(MODEL_STORAGE_KEY),
@@ -244,9 +237,7 @@ export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      {/* Auto-opens the rail when the conversation launches an agent. */}
-      <AutoOpenAgentPanel onActiveRun={openPanel} />
-      {/* One continuous surface: sidebar · chat · rail share the same
+      {/* One continuous surface: sidebar · chat share the same
             background, separated by hairline borders (no floating cards). */}
       <div className="bg-background flex h-full w-full">
         <aside className="hidden w-64 shrink-0 flex-col border-r md:flex">
@@ -287,15 +278,6 @@ export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
             <div className="min-w-0 flex-1">
               <ActiveConversationTitle />
             </div>
-            <button
-              type="button"
-              onClick={() => setPanelCollapsed((v) => !v)}
-              aria-label={panelCollapsed ? "Ouvrir le panneau" : "Fermer le panneau"}
-              title={panelCollapsed ? "Ouvrir le panneau" : "Fermer le panneau"}
-              className="text-muted-foreground hover:text-foreground hover:bg-accent hidden rounded-md p-1.5 lg:inline-flex"
-            >
-              <PanelRightIcon className="size-5" />
-            </button>
           </div>
           {toolsAvailable === false && (
             <div
@@ -317,32 +299,7 @@ export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
             />
           </main>
         </div>
-
-        {/* Right rail (desktop only): the launched agent's run panel.
-              Hidden until opened. */}
-        {!panelCollapsed && (
-          <AgentRunPanel
-            getHeaders={getHeaders}
-            railClass="hidden w-80 shrink-0 flex-col border-l lg:flex"
-          />
-        )}
       </div>
     </AssistantRuntimeProvider>
   );
-}
-
-/**
- * Invisible watcher (always mounted under the runtime) that opens the right
- * rail when a run goes active — i.e. the user just launched an agent (a
- * non-terminal run appears). Fires once per transition, so a manual close
- * isn't fought; historical conversations (all-terminal runs) don't auto-open.
- */
-function AutoOpenAgentPanel({ onActiveRun }: { onActiveRun: () => void }) {
-  const active = useThreadRuns().some(
-    (r) => !r.status || r.status === "running" || r.status === "pending",
-  );
-  useEffect(() => {
-    if (active) onActiveRun();
-  }, [active, onActiveRun]);
-  return null;
 }

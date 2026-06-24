@@ -1111,26 +1111,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/chat/title": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate a short conversation title (LLM)
-         * @description Runs a tiny non-streamed completion over the first few messages and returns a 3–6 word title. Inference goes through the org's configured models via the llm-proxy. The client persists the title via the session rename endpoint. Rate limited (20/min per caller).
-         */
-        post: operations["generateChatTitle"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/credential-proxy/proxy": {
         parameters: {
             query?: never;
@@ -8825,61 +8805,6 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-        };
-    };
-    generateChatTitle: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    messages: {
-                        role: string;
-                        text: string;
-                    }[];
-                    /** @description Optional. Title with the SAME model the turn used; falls back to the org default when omitted. */
-                    modelId?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Generated title */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        title: string;
-                        /** @description Optional. Present when the title is empty and LLM generation was skipped (e.g. `subscription-engine`, `unsupported-family`). */
-                        reason?: string;
-                    };
-                };
-            };
-            /** @description No enabled model configured, or invalid body */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            403: components["responses"]["Forbidden"];
-            /** @description Rate limited (20/min per caller) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
         };
     };
     credentialProxyGet: {
