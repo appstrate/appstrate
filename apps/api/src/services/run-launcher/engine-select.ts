@@ -27,7 +27,6 @@ import {
 } from "@appstrate/core/subscription-engines";
 import { isOAuthModelProvider } from "../model-providers/registry.ts";
 
-export { subscriptionEngineDef };
 export type { RunEngine };
 
 /**

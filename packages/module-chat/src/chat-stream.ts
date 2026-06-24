@@ -157,7 +157,7 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   //
   // The token lives 60 s, but a turn fans out into many inference calls over
   // up to MAX_STEPS steps (with a run long-poll blocking for ~55s between
-  // them), so we hand resolveModel a *minter* — the provider re-mints a fresh
+  // them), so we hand modelFromFamily a *minter* — the provider re-mints a fresh
   // bearer on every proxy call. The static header below is for the one-shot
   // calls (listModels) that fire immediately on this same line.
   const mintInferenceAuth = () =>
