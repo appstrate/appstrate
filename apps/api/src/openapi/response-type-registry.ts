@@ -26,7 +26,7 @@
 export type ResponseTypeEntry = {
   /** Named component schema under `components.schemas`. Mutually exclusive with path/method/status. */
   specSchemaName?: string;
-  /** Inline response: spec path (e.g. "/api/agents/{scope}/{name}/proxy"). */
+  /** Inline response: spec path (e.g. "/api/integrations/{packageId}/agent-resolution/{agentPackageId}"). */
   path?: string;
   /** Inline response: HTTP method (lowercase). */
   method?: string;
@@ -45,9 +45,11 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     description: "EndUserObject ↔ EndUserInfo",
   },
   {
-    specSchemaName: "IntegrationAgentResolution",
+    path: "/api/integrations/{packageId}/agent-resolution/{agentPackageId}",
+    method: "get",
+    status: "200",
     sharedTypeName: "IntegrationAgentResolution",
-    description: "IntegrationAgentResolution (bulk readiness integrations[].resolution)",
+    description: "GET .../agent-resolution/... 200 ↔ IntegrationAgentResolution",
   },
   {
     specSchemaName: "Run",
@@ -196,8 +198,6 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   UIHintsMap: "AFPS schema-wrapper sub-schema (structural map)",
   // Error + auth/credential wire with no SPA shared-type consumer.
   ProblemDetail: "RFC 9457 error envelope; never read through a shared-type",
-  AgentConnectionReadiness:
-    "bulk agent connection-readiness envelope; SPA uses the generated spec type (integrations[].resolution is the registered IntegrationAgentResolution)",
   OAuthClientObject: "OIDC oauth-admin wire; no shared-type (SPA uses the generated spec type)",
   OAuthClientWithSecret: "OIDC client-create wire; no shared-type",
   OAuthTokenResponse: "internal credential-proxy wire; mirrors @appstrate/core/sidecar-types",

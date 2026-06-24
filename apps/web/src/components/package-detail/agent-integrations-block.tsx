@@ -32,15 +32,15 @@ interface AgentIntegrationsBlockProps {
  * manifest. One card per dependency. A card with a per-agent context
  * (`agentPackageId`) renders the per-integration connection picker — list,
  * pick, disambiguate, connect, reconnect, upgrade, add-another — driven by the
- * server-authoritative `IntegrationAgentResolution`, selected from the bulk
- * `GET /api/agents/:scope/:name/connection-readiness` query — the same verdict
- * the launch-button readiness badge and the run-kickoff 412 consume, so the
- * three can never disagree.
+ * server-authoritative `IntegrationAgentResolution`
+ * (`GET /integrations/:id/agent-resolution/:agentId`), the same verdict the
+ * launch-button readiness badge and the run-kickoff 412 consume, so the three
+ * can never disagree.
  *
  * The picker renders for EVERY declared integration, independent of whether the
- * agent selected tools/scopes: connection management applies even to an inert
- * integration. Whether an integration BLOCKS the run (run semantics) is the
- * server's `run_blocking` flag on the same bulk query, not a client predicate.
+ * agent selected tools/scopes: the runtime activity gate
+ * (`isIntegrationEntryActive`) belongs to the launch badge, not to connection
+ * management — an inert integration still has connections to manage.
  */
 export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegrationsBlockProps) {
   // The list carries `active` (installed + enabled in this app). An agent can

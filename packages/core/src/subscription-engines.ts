@@ -115,18 +115,6 @@ export interface SubscriptionEngineBinding {
    * everything unregistered.
    */
   chatHandler?: (input: ChatEngineInput) => Response;
-  /**
-   * True iff this provider's chat surface is driven through an `/api/llm-proxy/
-   * <providerId>-sdk/:presetId/*` credential-injection gateway (the official
-   * vendor binary points its base URL there; the gateway swaps the placeholder
-   * bearer for the real token without forging). The gateway HANDLER itself stays
-   * in the platform (apps/api), keyed by provider id — but this flag lets the
-   * platform mount the gateway route DATA-DRIVEN from the registry instead of a
-   * hardcoded engine→handler map, so adding a chat-capable engine is a registry
-   * entry, not an llm-proxy edit. Only `"oauth"`-delivery engines set it (`vend`
-   * engines — codex — are agent-only, no chat surface).
-   */
-  chatGateway?: boolean;
 }
 
 /** A registered binding plus the identity (provider id + label) it was registered under. */

@@ -36,7 +36,6 @@
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   emptyRunResult,
-  finalizeFailure,
   reduceEvents,
   type RunOptions,
   type Runner,
@@ -237,18 +236,17 @@ export class ClaudeAgentRunner implements Runner {
       // Best-effort final drain: capture any runtime events journaled before the
       // SDK stream threw (log/note/pin/report the agent produced mid-run).
       await drainAndEmit(true);
-      // Shared failure epilogue (reduce → status="failed" → stamp usage →
-      // finalize); see `@appstrate/afps-runtime/runner` `finalizeFailure`. No
-      // redaction injected — the Claude path holds no in-run credential at rest
+      // Failure epilogue (reduce → status="failed" → stamp usage → finalize).
+      // No redaction needed — the Claude path holds no in-run credential at rest
       // (the sidecar gateway swaps the placeholder token in flight).
-      await finalizeFailure({
-        events,
+      const failed = reduceEvents(events, {
         error: { message, stack: err instanceof Error ? err.stack : undefined },
-        // Stamp the tokens already spent before the throw (the SDK never emitted
-        // its authoritative `result`, so without this they'd be lost as zero).
-        usage: mapper.liveUsageSnapshot(),
-        finalize: (result) => eventSink.finalize(result),
       });
+      failed.status = "failed";
+      // Stamp the tokens already spent before the throw (the SDK never emitted
+      // its authoritative `result`, so without this they'd be lost as zero).
+      failed.usage = mapper.liveUsageSnapshot();
+      await eventSink.finalize(failed);
       return;
     }
 

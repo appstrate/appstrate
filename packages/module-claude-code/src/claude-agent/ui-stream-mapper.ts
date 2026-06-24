@@ -29,6 +29,7 @@
  */
 
 import type { UIMessageChunk } from "ai";
+import { parseToolResultBlocks } from "@appstrate/runner-claude";
 
 /**
  * Strip the Agent SDK's `mcp__<server>__` prefix so tool names match the
@@ -59,12 +60,6 @@ interface RawStreamEvent {
   index?: number;
   content_block?: RawContentBlock;
   delta?: RawStreamDelta;
-}
-interface RawToolResultBlock {
-  type: string;
-  tool_use_id?: string;
-  content?: unknown;
-  is_error?: boolean;
 }
 export interface ClaudeSdkMessage {
   type: string;
@@ -243,24 +238,22 @@ export class SdkUiStreamMapper {
   }
 
   private mapToolResults(content: unknown): UIMessageChunk[] {
-    if (!Array.isArray(content)) return [];
     const chunks: UIMessageChunk[] = [];
-    for (const raw of content) {
-      const block = raw as RawToolResultBlock;
-      if (block?.type !== "tool_result" || !block.tool_use_id) continue;
-      if (block.is_error) {
-        chunks.push({
-          type: "tool-output-error",
-          toolCallId: block.tool_use_id,
-          errorText: stringifyToolContent(block.content),
-        });
-      } else {
-        chunks.push({
-          type: "tool-output-available",
-          toolCallId: block.tool_use_id,
-          output: block.content ?? null,
-        });
-      }
+    for (const r of parseToolResultBlocks(content)) {
+      if (!r.toolUseId) continue;
+      chunks.push(
+        r.isError
+          ? {
+              type: "tool-output-error",
+              toolCallId: r.toolUseId,
+              errorText: stringifyToolContent(r.content),
+            }
+          : {
+              type: "tool-output-available",
+              toolCallId: r.toolUseId,
+              output: r.content ?? null,
+            },
+      );
     }
     return chunks;
   }

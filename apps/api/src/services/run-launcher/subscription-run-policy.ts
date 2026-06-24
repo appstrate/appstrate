@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Runner engine selection.
+ * Subscription run policy for the run launcher.
+ *
+ * The engine vocabulary + provider→engine binding live in core
+ * (`@appstrate/core/subscription-engines`); this module is the launcher-side
+ * policy that consumes them — it resolves credential-delivery mode from that
+ * registry (`resolveCredentialDelivery`) and enforces the fail-closed guards a
+ * subscription run must pass before launch. It does NOT select the engine;
+ * `engineForProvider` does, in core.
  *
  * Which in-container agent engine a run executes on. Pi (the
  * `@mariozechner/pi-coding-agent` loop) runs every API-key provider; a

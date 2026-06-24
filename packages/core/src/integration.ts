@@ -425,32 +425,6 @@ export function manifestAuthKeySet(
 }
 
 /**
- * True when the integration declares at least one auth marked
- * `_meta["dev.appstrate/auth"].required: true`. This vendor flag (set on ~all
- * system integrations; `false` for credential-less public MCP servers like
- * github-mcp) expresses "this integration cannot operate without a connection".
- * The run connection-resolver uses it to keep such an integration ACTIVE even
- * when the agent selected no tools/scopes (otherwise the "inert" skip would let
- * the run launch without ever demanding a connection). `_meta` is preserved on
- * the parsed manifest (AFPS allows open `_meta` on auth objects).
- */
-export function manifestHasRequiredAuth(manifest: IntegrationManifest | null | undefined): boolean {
-  const auths = manifest?.auths ?? {};
-  for (const auth of Object.values(auths)) {
-    const meta =
-      auth && typeof auth === "object" ? (auth as Record<string, unknown>)._meta : undefined;
-    const block =
-      meta && typeof meta === "object"
-        ? (meta as Record<string, unknown>)["dev.appstrate/auth"]
-        : undefined;
-    const required =
-      block && typeof block === "object" ? (block as Record<string, unknown>).required : undefined;
-    if (required === true) return true;
-  }
-  return false;
-}
-
-/**
  * Tool names referenced as a run-start `connect.tool` across all auths.
  * Auto-hidden from the agent surface — these are credential-acquisition
  * primitives the platform invokes at boot, not agent capabilities.

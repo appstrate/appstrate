@@ -38,6 +38,7 @@ import {
   type RunResult,
   type TokenUsage,
 } from "@appstrate/afps-runtime/runner";
+import { parseToolResultBlocks } from "./claude-blocks.ts";
 
 // ─── Minimal structural view of the SDK messages we read ───────────────
 
@@ -51,13 +52,10 @@ interface SdkToolUseBlock {
   name?: string;
   input?: unknown;
 }
-interface SdkToolResultBlock {
-  type: "tool_result";
-  tool_use_id?: string;
-  content?: unknown;
-  is_error?: boolean;
-}
-type SdkContentBlock = SdkTextBlock | SdkToolUseBlock | SdkToolResultBlock | { type: string };
+// `tool_result` blocks (on `user` messages) are parsed via the shared
+// `parseToolResultBlocks`; this union covers only the `assistant` blocks
+// `mapAssistant` walks.
+type SdkContentBlock = SdkTextBlock | SdkToolUseBlock | { type: string };
 
 /** Anthropic usage counters — already snake_case, maps 1:1 onto {@link TokenUsage}. */
 export interface SdkUsage {
@@ -246,25 +244,20 @@ export class SdkRunEventMapper {
   }
 
   private mapUser(msg: SdkUserMessage): RunEvent[] {
-    const events: RunEvent[] = [];
     const ts = this.now();
-    for (const b of asContentBlocks(msg.message?.content)) {
-      if (b.type !== "tool_result") continue;
-      const r = b as SdkToolResultBlock;
-      const isError = r.is_error === true;
-      events.push({
+    return parseToolResultBlocks(msg.message?.content).map(
+      (r): RunEvent => ({
         type: "appstrate.progress",
         timestamp: ts,
         runId: this.runId,
-        message: isError ? "Tool error" : "Tool result",
+        message: r.isError ? "Tool error" : "Tool result",
         data: {
           result: truncateToolResult(r.content),
-          isError,
-          ...(r.tool_use_id !== undefined ? { toolCallId: r.tool_use_id } : {}),
+          isError: r.isError,
+          ...(r.toolUseId !== undefined ? { toolCallId: r.toolUseId } : {}),
         },
-      });
-    }
-    return events;
+      }),
+    );
   }
 
   private mapResult(msg: SdkResultMessage): RunEvent[] {

@@ -66,24 +66,18 @@ import {
 import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
-// Side-effect import: loading the gateway module runs its
-// `registerSubscriptionGateway(...)` so the handler is in the provider-id-keyed
-// registry the loop below reads. The router references no vendor handler directly.
-//
-// Why this Anthropic-specific handler lives in apps/api (not in the opt-in
-// `module-claude-code`, unlike the engine binding + chat driver, which DO live in
-// the module): it is wired to api-internal llm-proxy infrastructure — `metering`,
-// `subscription-token` resolution, `buildLlmProxyPrincipal`, `credentials`. A
-// module must not depend on the API package, so the handler cannot move without
-// either dragging that whole subsystem into the module or inverting the layering
-// behind a framework-neutral gateway contract (a larger refactor, tracked
-// separately). Runtime footprint is still zero when the module is off: the
-// registry stays empty (no `registerSubscriptionEngine` runs), the loop below
-// mounts nothing, and this handler is never reached. The asymmetry is in the
-// build graph only, not in behavior.
-import "../services/llm-proxy/claude-code-sdk-gateway.ts";
-import { subscriptionGatewayFor } from "../services/llm-proxy/subscription-gateways.ts";
-import { listSubscriptionEngines } from "@appstrate/core/subscription-engines";
+// The Claude Code subscription SDK gateway handler. It lives in apps/api (not in
+// the opt-in `module-claude-code`, unlike the engine binding + chat driver, which
+// DO live in the module) because it is wired to api-internal llm-proxy infra —
+// `metering`, credential resolution, `buildLlmProxyPrincipal`, `credentials` — and
+// a module must not depend on the API package. Runtime footprint is still zero
+// when the module is off: the subscription-engine registry stays empty, so the
+// guard below mounts nothing and this handler is never reached.
+import {
+  handleClaudeCodeSdkGateway,
+  CLAUDE_CODE_PROVIDER_ID,
+} from "../services/llm-proxy/claude-code-sdk-gateway.ts";
+import { subscriptionEngineDef } from "@appstrate/core/subscription-engines";
 import type { LlmProxyAdapter } from "../services/llm-proxy/types.ts";
 import { buildLlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
@@ -136,44 +130,34 @@ export function createLlmProxyRouter() {
     );
   }
 
-  // Subscription SDK gateways — credential-injection proxies the chat points an
-  // official vendor binary at (e.g. the Claude Agent SDK's `ANTHROPIC_BASE_URL`).
-  // Unlike the protocol adapters above they forge nothing — the binary signs its
-  // own client identity; we only swap the placeholder bearer for the real
+  // Claude Code subscription SDK gateway — the credential-injection proxy the
+  // chat points the official Claude Agent SDK at (`ANTHROPIC_BASE_URL`). Unlike
+  // the protocol adapters above it forges nothing — the binary signs its own
+  // client identity; we only swap the placeholder bearer for the real
   // subscription token, server-side.
   //
-  // Mounted FULLY DATA-DRIVEN: with no subscription module loaded the registry is
-  // empty and NO gateway route exists. For each engine binding that declares
-  // `chatGateway` (an `oauth`-delivery provider with a chat surface — `vend`
-  // engines like codex are agent-only), the handler is looked up by PROVIDER ID
-  // in the apps/api gateway registry (the gateway module self-registers it). The
-  // route PATH also derives from the provider id, so this router has NO vendor
-  // literal — adding a chat-capable engine is a registry entry + a self-
-  // registering handler, never an edit here. LOOPBACK ONLY — driven only by the
-  // chat loopback bearer (not API keys / dashboard tokens), so a subscription
-  // can't be spent as a bare proxy.
-  for (const def of listSubscriptionEngines()) {
-    if (!def.chatGateway) continue;
-    const handler = subscriptionGatewayFor(def.providerId);
-    if (!handler) {
-      // The engine advertises a chat gateway but no handler self-registered
-      // (decoupled boot paths — engine binding vs gateway module). The chat
-      // surface for this provider would 404 silently; surface the
-      // misconfiguration at boot instead of dead-ending quietly.
-      logger.warn("chatGateway engine has no registered handler — chat surface unavailable", {
-        providerId: def.providerId,
-      });
-      continue;
-    }
+  // Mounted only when the `claude-code` subscription engine is registered — i.e.
+  // `module-claude-code` is loaded. With no subscription module the registry is
+  // empty, the guard is false, and NO gateway route exists (zero footprint). The
+  // gate is the registry presence, so the route can't drift from the engine
+  // binding; the one vendor literal here is appropriate now there is a single
+  // chat-capable subscription gateway (a second one is a router edit, by design).
+  // LOOPBACK ONLY — driven only by the chat loopback bearer (not API keys /
+  // dashboard tokens), so a subscription can't be spent as a bare proxy.
+  const claudeCodeEngine = subscriptionEngineDef(CLAUDE_CODE_PROVIDER_ID);
+  if (claudeCodeEngine) {
     const gateway = async (c: Context<AppEnv>): Promise<Response> => {
-      assertLoopbackOnly(c.get("authMethod"), `${def.label} SDK gateway`, {
+      assertLoopbackOnly(c.get("authMethod"), `${claudeCodeEngine.label} SDK gateway`, {
         firstPartyLoopback: c.get("firstPartyLoopback"),
       });
-      return handler(c, limits.max_request_bytes);
+      return handleClaudeCodeSdkGateway(c, limits.max_request_bytes);
     };
     // Wildcard forwards whatever upstream subpath the SDK appends (`/v1/messages`,
     // …); the bare-preset route catches the SDK's connectivity probe.
-    for (const path of [`/${def.providerId}-sdk/:presetId/*`, `/${def.providerId}-sdk/:presetId`]) {
+    for (const path of [
+      `/${CLAUDE_CODE_PROVIDER_ID}-sdk/:presetId/*`,
+      `/${CLAUDE_CODE_PROVIDER_ID}-sdk/:presetId`,
+    ]) {
       router.all(
         path,
         rateLimit(limits.rate_per_min),

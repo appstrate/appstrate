@@ -134,10 +134,10 @@ const expectedEndpoints = [
   "GET /api/integrations/{packageId}/default",
   "PUT /api/integrations/{packageId}/default",
   "DELETE /api/integrations/{packageId}/default",
+  "GET /api/integrations/{packageId}/agent-resolution/{agentPackageId}",
 
   // Agent Proxy
   "GET /api/agents/{scope}/{name}/proxy",
-  "GET /api/agents/{scope}/{name}/connection-readiness",
   "PUT /api/agents/{scope}/{name}/proxy",
 
   // Model Provider Credentials

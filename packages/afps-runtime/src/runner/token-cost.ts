@@ -5,12 +5,11 @@
  * Single source of the per-token equivalent-cost formula.
  *
  * Both the LLM-proxy meter (`apps/api/.../metering.ts`, over its own camelCase
- * `UpstreamUsage`) and the codex runner's `computeCodexCost` (over the
- * snake_case {@link TokenUsage}) independently spelled out the same
- * `Σ(tokens × rate / 1e6)` arithmetic across input / output / cache-read /
- * cache-write. Centralising it here — where {@link TokenUsage} already lives —
- * means the four-bucket cost shape has ONE definition and cannot drift between
- * the two surfaces.
+ * `UpstreamUsage`) and the codex runner (over the snake_case {@link TokenUsage})
+ * independently spelled out the same `Σ(tokens × rate / 1e6)` arithmetic across
+ * input / output / cache-read / cache-write. Centralising it here — where
+ * {@link TokenUsage} already lives — means the four-bucket cost shape has ONE
+ * definition and cannot drift between the two surfaces.
  */
 
 import type { TokenUsage } from "../types/run-result.ts";

@@ -5,11 +5,10 @@
  *
  * Three endpoints drive the integration detail page's admin section:
  *
- *   GET    /api/agents/:scope/:name/connection-readiness
- *          Bulk per-agent verdict (resolver cascade + candidate list +
- *          pin/blocked state per declared integration). The SPA renders each
- *          integration's resolution verbatim — no client-side re-implementation
- *          of the cascade.
+ *   GET    /api/integrations/:packageId/agent-resolution/:agentPackageId
+ *          Single-source verdict for the agent-page picker (resolver cascade
+ *          + candidate list + pin/blocked state). The SPA renders this
+ *          verbatim — no client-side re-implementation of the cascade.
  *
  *   PUT    /api/integrations/:packageId/pins/:agentPackageId
  *   DELETE /api/integrations/:packageId/pins/:agentPackageId
@@ -149,45 +148,29 @@ describe("/api/integrations/:packageId admin surface", () => {
     await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION);
   });
 
-  // ─── GET /api/agents/:scope/:name/connection-readiness ─────────────
-  // The per-integration verdict is now served in bulk per agent; the resolution
-  // for one integration is read from `integrations[].resolution`.
+  // ─── GET /agent-resolution/:agentPackageId ─────────────
 
-  interface AgentResolutionDTO {
-    status: string;
-    resolved_connection_id: string | null;
-    resolved_missing_scopes: string[];
-    resolved_owned_by_actor: boolean;
-    admin_pinned_connection_id: string | null;
-    member_pinned_connection_id: string | null;
-    org_default_connection_id: string | null;
-    org_default_enforced: boolean;
-    can_add_connection: boolean;
-    candidates: Array<{ id: string; is_own: boolean; missing_scopes: string[] }>;
-  }
-
-  /** GET the bulk readiness and return one integration's resolution DTO. */
-  async function getResolution(
-    agentId: string,
-    integrationId: string,
-  ): Promise<AgentResolutionDTO> {
-    const res = await app.request(`/api/agents/${agentId}/connection-readiness`, {
-      headers: authHeaders(ctx),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      integrations: Array<{ integration_id: string; resolution: AgentResolutionDTO }>;
-    };
-    const entry = body.integrations.find((i) => i.integration_id === integrationId);
-    if (!entry) throw new Error(`integration ${integrationId} not in readiness`);
-    return entry.resolution;
-  }
-
-  describe("GET /api/agents/:scope/:name/connection-readiness — per-integration resolution", () => {
-    it("returns the full resolution verdict shape for a declared integration", async () => {
+  describe("GET /:packageId/agent-resolution/:agentPackageId", () => {
+    it("returns 200 with the full resolution verdict shape", async () => {
       const connId = await seedPrivateConnectionFor(ctx.user.id);
 
-      const body = await getResolution(AGENT, INTEGRATION);
+      const res = await app.request(`/api/integrations/${INTEGRATION}/agent-resolution/${AGENT}`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        status: string;
+        resolved_connection_id: string | null;
+        resolved_missing_scopes: string[];
+        resolved_owned_by_actor: boolean;
+        admin_pinned_connection_id: string | null;
+        member_pinned_connection_id: string | null;
+        org_default_connection_id: string | null;
+        org_default_enforced: boolean;
+        can_add_connection: boolean;
+        candidates: Array<{ id: string; is_own: boolean; missing_scopes: string[] }>;
+      };
 
       // Wire-shape contract — all fields present, snake_case.
       expect(body).toHaveProperty("status");
@@ -210,22 +193,30 @@ describe("/api/integrations/:packageId admin surface", () => {
 
     it("returns 'none' status when actor has no accessible connection", async () => {
       // No connection seeded — picker should surface "none".
-      const body = await getResolution(AGENT, INTEGRATION);
+      const res = await app.request(`/api/integrations/${INTEGRATION}/agent-resolution/${AGENT}`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { status: string; candidates: unknown[] };
       expect(body.status).toBe("none");
       expect(body.candidates).toEqual([]);
     });
 
     it("returns 401 without auth", async () => {
-      const res = await app.request(`/api/agents/${AGENT}/connection-readiness`);
+      const res = await app.request(`/api/integrations/${INTEGRATION}/agent-resolution/${AGENT}`);
       expect(res.status).toBe(401);
     });
 
     // Regression (#576 follow-up): an INERT integration entry (declared with an
-    // auth_key but no tools/scopes) is still listed in the bulk readiness with a
-    // resolution (includeInert), and that resolution must honour the member pin —
-    // otherwise a PUT /me/integration-pins succeeds (200) but the verdict stays
-    // "must_choose" and the picker can never reflect the selection.
+    // auth_key but no tools/scopes) is skipped by the run resolver, so
+    // resolveAgentIntegrationPick falls through to its inert branch. That branch
+    // must still honour the member pin — otherwise a PUT /me/integration-pins
+    // succeeds (200) but the verdict stays "must_choose" and the picker can
+    // never reflect the selection.
     it("honours the member pin on an INERT integration (no tools/scopes)", async () => {
+      // Inert agent: declares the integration with an auth_key only — no tools,
+      // no scopes — so the run resolver treats it as inert and emits no verdict.
       const INERT_AGENT = "@adminorg/agent-inert";
       await seedAgent({
         id: INERT_AGENT,
@@ -247,7 +238,14 @@ describe("/api/integrations/:packageId admin surface", () => {
       const connA = await seedPrivateConnectionFor(ctx.user.id);
       const connB = await seedSharedConnection();
 
-      const before = await getResolution(INERT_AGENT, INTEGRATION);
+      const beforeRes = await app.request(
+        `/api/integrations/${INTEGRATION}/agent-resolution/${INERT_AGENT}`,
+        { headers: authHeaders(ctx) },
+      );
+      const before = (await beforeRes.json()) as {
+        status: string;
+        resolved_connection_id: string | null;
+      };
       expect(before.status).toBe("must_choose");
       expect(before.resolved_connection_id).toBeNull();
 
@@ -263,7 +261,15 @@ describe("/api/integrations/:packageId admin surface", () => {
       });
       expect(pinRes.status).toBe(200);
 
-      const after = await getResolution(INERT_AGENT, INTEGRATION);
+      const afterRes = await app.request(
+        `/api/integrations/${INTEGRATION}/agent-resolution/${INERT_AGENT}`,
+        { headers: authHeaders(ctx) },
+      );
+      const after = (await afterRes.json()) as {
+        status: string;
+        resolved_connection_id: string | null;
+        member_pinned_connection_id: string | null;
+      };
       // The pin must now drive the verdict — not must_choose.
       expect(after.status).toBe("pinned");
       expect(after.resolved_connection_id).toBe(connB);

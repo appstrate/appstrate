@@ -19,3 +19,4 @@ export {
   type SdkTerminal,
   type SdkUsage,
 } from "./sdk-event-mapper.ts";
+export { parseToolResultBlocks, type ClaudeToolResult } from "./claude-blocks.ts";
