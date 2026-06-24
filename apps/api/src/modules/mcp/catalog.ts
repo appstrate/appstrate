@@ -209,16 +209,20 @@ export function buildOperationIndex(permissions?: ReadonlySet<string>): string {
   const byTag = new Map<string, string[]>();
   for (const op of operations.values()) {
     const tag = op.tags[0] ?? "Other";
-    const line = `- ${op.operationId}${op.summary ? ` — ${op.summary}` : ""}`;
-    (byTag.get(tag) ?? byTag.set(tag, []).get(tag)!).push(line);
+    // operationId ONLY — the per-op summary is dropped from the index to keep it
+    // compact (it's several KB across ~230 ops, re-sent every uncached turn).
+    // describe_operation remains the source of truth for what each op does + its
+    // schema, so the model gets the full detail when it picks an id from here.
+    (byTag.get(tag) ?? byTag.set(tag, []).get(tag)!).push(op.operationId);
   }
 
   const sections = [...byTag.keys()]
     .sort()
     .filter((tag) => !permissions || tagVisible(tag, permissions))
     .map((tag) => {
-      const lines = byTag.get(tag)!.sort();
-      return `## ${tag}\n${lines.join("\n")}`;
+      // One compact, comma-separated line of operationIds per tag.
+      const ids = byTag.get(tag)!.sort();
+      return `## ${tag}\n${ids.join(", ")}`;
     });
 
   const result = sections.join("\n\n");

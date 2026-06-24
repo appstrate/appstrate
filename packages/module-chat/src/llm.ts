@@ -17,8 +17,20 @@ import type { LanguageModel } from "ai";
 import { badGateway, invalidRequest } from "@appstrate/core/api-errors";
 import { CHAT_USABLE_FAMILIES } from "./chat-families.ts";
 import { logger } from "./logger.ts";
+import { getInProcessService } from "./platform-services.ts";
 
 const LLM_PROXY_PATH = "/api/llm-proxy";
+
+/**
+ * Reach the platform IN-PROCESS when the host wired `inProcess.dispatch`
+ * (re-enters the Hono app, no socket hop), else the loopback `fetch` the chat
+ * has always used. The auth pipeline runs either way — same headers, same RBAC.
+ */
+function platformFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  const svc = getInProcessService();
+  if (svc) return svc.dispatch(new Request(input, init));
+  return fetch(input, init);
+}
 
 export interface OrgModel {
   id: string;
@@ -51,7 +63,11 @@ export async function listModels(
   origin: string,
   headers: Record<string, string>,
 ): Promise<OrgModel[]> {
-  const res = await fetch(`${origin}/api/models`, { headers });
+  // `metadata_only`: the picker needs only id/modelId/apiShape/providerId/
+  // enabled/is_default, never a credential — skip the per-model credential
+  // decrypt + reachability filter the full listing does. (The real key is
+  // resolved later, server-side, by the llm-proxy on the actual inference call.)
+  const res = await platformFetch(`${origin}/api/models?metadata_only=true`, { headers });
   if (!res.ok) throw badGateway(`/api/models returned ${res.status}`);
   const body = (await res.json()) as { models?: OrgModel[]; data?: OrgModel[] };
   const models = body.models ?? body.data;
@@ -130,7 +146,7 @@ export function modelFromFamily(
   const fetchImpl = (async (input, init) => {
     const h = new Headers(init?.headers);
     h.set("authorization", `Bearer ${mintAuth()}`);
-    return fetch(input, { ...init, headers: h });
+    return platformFetch(input, { ...init, headers: h });
   }) as typeof fetch;
 
   // The proxy resolves `body.model` as the Appstrate **preset id** (the org
@@ -196,7 +212,7 @@ export async function resolveDefaultApplicationId(
   origin: string,
   headers: Record<string, string>,
   orgId: string,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = platformFetch as typeof fetch,
 ): Promise<string | undefined> {
   const cached = appCache.get(orgId);
   if (cached !== undefined) return cached;

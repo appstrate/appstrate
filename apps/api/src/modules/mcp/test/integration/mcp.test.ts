@@ -383,8 +383,9 @@ describe("mcp tool round-trip", () => {
     // chat splits on the same literal to strip it for uncached/no-tool
     // providers (see applyOperationIndexPolicy in module-chat). Keep in sync.
     expect(instructions).toContain("## Operation index");
-    // ...and the index actually lists operations under it.
-    expect(instructions!.split("## Operation index")[1]).toContain("- listAgents");
+    // ...and the index actually lists operations under it (compact form:
+    // comma-separated operationIds per tag, no per-op summary).
+    expect(instructions!.split("## Operation index")[1]).toContain("listAgents");
   });
 });
 

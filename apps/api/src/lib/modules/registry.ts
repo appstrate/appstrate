@@ -20,6 +20,8 @@ import { getEnv } from "@appstrate/env";
 import { logger } from "../logger.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { listLlmUsageForRun } from "../../services/state/runs.ts";
+import { listUsableIntegrationsForActor } from "../../services/integration-connections.ts";
+import { getPlatformApp } from "../platform-app.ts";
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
@@ -96,6 +98,21 @@ function buildPlatformServices(): PlatformServices {
       rateLimit: (maxPerMinute) => rateLimit(maxPerMinute) as MiddlewareHandler,
     },
     runs: { listLlmUsage: listLlmUsageForRun },
+    integrations: {
+      // The chat module's in-process replacement for its old GET
+      // /api/me/context loopback hop — identity + role come off the request
+      // context, only the integration list needs this single DB read.
+      listUsableForActor: ({ orgId, applicationId, actor }) =>
+        listUsableIntegrationsForActor({ orgId, applicationId }, actor),
+    },
+    inProcess: {
+      // Re-enter the fully-wired platform app in-process (no socket hop). The
+      // app is registered by `registerModuleRoutes`; this throws if called
+      // before that runs (a programming error, not a runtime condition).
+      // `app.fetch` is `Response | Promise<Response>`; the async wrapper
+      // normalizes it to the `Promise<Response>` the service contract declares.
+      dispatch: async (request) => getPlatformApp().fetch(request),
+    },
   };
 }
 

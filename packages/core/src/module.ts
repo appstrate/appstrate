@@ -992,4 +992,31 @@ export interface PlatformServices {
       sources: readonly string[];
     }): Promise<Array<{ id: number; costUsd: number; source: string }>>;
   };
+  /**
+   * Integration read surface. `listUsableForActor` returns the integrations an
+   * actor could attach when building an agent in the given application (the
+   * actor's own connections plus org-shared ones) — the same data the
+   * `get_me` / `GET /api/me/context` payload exposes, read in-process WITHOUT a
+   * loopback HTTP hop. The `chat` module assembles its system-prompt context
+   * block from this (identity + role come straight off the request context).
+   */
+  integrations: {
+    listUsableForActor(args: {
+      orgId: string;
+      applicationId: string;
+      actor: { type: "user" | "end_user"; id: string };
+    }): Promise<Array<{ integration_id: string; name: string; source: string }>>;
+  };
+  /**
+   * In-process dispatch into the fully-wired platform Hono app — the same
+   * request the loopback `fetch("http://127.0.0.1:<port>/api/…")` would make,
+   * but without the socket round-trip and HTTP (de)serialization. The auth
+   * pipeline + RBAC still run on every dispatched request (it goes through the
+   * whole middleware chain), so a caller can never exceed what the forwarded
+   * credential could do over REST. Callers MUST set the caller's auth/scoping
+   * headers on the `Request` exactly as they would for the loopback fetch.
+   */
+  inProcess: {
+    dispatch(request: Request): Promise<Response>;
+  };
 }

@@ -31,6 +31,7 @@ import {
 } from "./routes.ts";
 import { chatPaths, chatComponentSchemas } from "./openapi.ts";
 import { chatLoopbackStrategy } from "./loopback-auth.ts";
+import { setIntegrationsService, setInProcessService } from "./platform-services.ts";
 import { z } from "zod";
 
 declare module "@appstrate/core/permissions" {
@@ -47,6 +48,11 @@ const chatModule: AppstrateModule = {
     // No workers: chat is request-driven. Wire the platform rate limiter
     // into the router (POST /api/chat fans out into metered LLM traffic).
     setRateLimitFactory((maxPerMinute) => ctx.services.http.rateLimit(maxPerMinute));
+    // In-process platform reads — drop the chat's me/context loopback hop and
+    // the models/applications socket round-trips. Optional: absent under the
+    // OSS/test wiring, where the chat falls back to loopback fetch.
+    setIntegrationsService(ctx.services.integrations ?? null);
+    setInProcessService(ctx.services.inProcess ?? null);
   },
 
   createRouter() {

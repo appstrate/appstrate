@@ -15,8 +15,9 @@ import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-
 import {
   loadInferenceCredentials,
   loadCredentialRow,
-  type DecryptedModelProviderCredentials,
+  loadCredentialMetadata,
 } from "./model-providers/credentials.ts";
+import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { toISORequired } from "../lib/date-helpers.ts";
 import {
   mergeSystemAndDb,
@@ -130,7 +131,10 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
 
 // --- List (system + DB) ---
 
-export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
+export async function listOrgModels(
+  orgId: string,
+  opts?: { metadataOnly?: boolean },
+): Promise<OrgModelInfo[]> {
   const system = getSystemModels();
   const rows = await db.select().from(orgModels).where(scopedWhere(orgModels, { orgId }));
   // The default is an org-level pointer: when set, exactly that id is the
@@ -138,15 +142,26 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   const pointer = await defaultModel.getDefaultId(orgId);
   const now = toISORequired(new Date());
 
-  // Resolve apiShape/baseUrl from the registry via the credential's providerId.
-  // The DB row no longer stores these — they're derivatives of `providerId`.
-  // Rows whose credential is unreachable (deleted upstream, decryption failed,
-  // dead OAuth) are skipped silently — they can't be loaded for inference
-  // anyway, so surfacing them in the list would only confuse the UI.
-  const credByRow = new Map<string, DecryptedModelProviderCredentials>();
+  // Resolve apiShape/providerId/baseUrl per row (the DB row no longer stores
+  // them — they derive from the credential's `providerId`). Two modes:
+  //   - default: decrypt each credential (`loadInferenceCredentials`); a row
+  //     with an unreachable credential (deleted upstream, dead OAuth, decrypt
+  //     failure) is dropped — surfacing it would confuse the UI.
+  //   - metadataOnly: resolve from the registry WITHOUT touching the secret
+  //     (`loadCredentialMetadata`). Skips the decrypt for callers that only need
+  //     the protocol family (e.g. the chat model picker); the real secret is
+  //     resolved later at inference time. A row whose credential/provider is
+  //     gone is still dropped. mapRow below reads only providerId/apiShape/
+  //     baseUrl, so both resolvers feed it the same shape.
+  const credByRow = new Map<
+    string,
+    { providerId: string; apiShape: ModelApiShape; baseUrl: string }
+  >();
   await Promise.all(
     rows.map(async (r) => {
-      const creds = await loadInferenceCredentials(orgId, r.credentialId);
+      const creds = opts?.metadataOnly
+        ? await loadCredentialMetadata(r.credentialId, orgId)
+        : await loadInferenceCredentials(orgId, r.credentialId);
       if (creds) credByRow.set(r.id, creds);
     }),
   );
@@ -614,6 +629,26 @@ export async function resolveModel(
   return null;
 }
 
+// Short-TTL cache of resolved DB models. A single chat turn / agent run fans
+// out into many `loadModel(orgId, presetId)` calls (the llm-proxy resolves the
+// preset on EVERY inference request, up to MAX_STEPS per turn) — each otherwise
+// re-queries `org_models` + re-decrypts the credential. Caching the resolved
+// model for a few seconds collapses that to one resolve per window. Only the
+// successful (non-null) DB result is cached; system models are already in-memory
+// and not cached here. Trade-off: a credential rotation/disable is visible after
+// at most `RESOLVED_MODEL_TTL_MS`.
+const resolvedModelCache = new Map<string, { value: ResolvedModel; exp: number }>();
+const RESOLVED_MODEL_TTL_MS = 30_000;
+const RESOLVED_MODEL_CACHE_MAX = 500;
+
+function cacheResolvedModel(key: string, value: ResolvedModel): void {
+  if (resolvedModelCache.size >= RESOLVED_MODEL_CACHE_MAX && !resolvedModelCache.has(key)) {
+    const oldest = resolvedModelCache.keys().next().value;
+    if (oldest !== undefined) resolvedModelCache.delete(oldest);
+  }
+  resolvedModelCache.set(key, { value, exp: Date.now() + RESOLVED_MODEL_TTL_MS });
+}
+
 export async function loadModel(orgId: string, modelDbId: string): Promise<ResolvedModel | null> {
   // Check system models first
   const system = getSystemModels();
@@ -621,6 +656,10 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   if (systemDef) {
     return buildSystemResolvedModel(systemDef);
   }
+
+  const cacheKey = `${orgId}:${modelDbId}`;
+  const cached = resolvedModelCache.get(cacheKey);
+  if (cached && cached.exp > Date.now()) return cached.value;
 
   // Check DB. `orgModels.id` is a `uuid` column — a `modelDbId` that isn't a
   // valid UUID (e.g. a human-readable model name like `gpt-5.5`) makes Postgres
@@ -659,7 +698,9 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   const creds = await loadInferenceCredentials(orgId, row.credentialId);
   if (!creds) return null;
 
-  return buildDbResolvedModel(row, creds);
+  const resolved = buildDbResolvedModel(row, creds);
+  cacheResolvedModel(cacheKey, resolved);
+  return resolved;
 }
 
 /**
