@@ -74,6 +74,14 @@ Respect the user's role: actions beyond it will be refused by the platform — d
 // tells the model to be upfront about the limitation.
 const NO_TOOLS_SYSTEM_PROMPT = `You are Appstrate's assistant. Right now your instance tools are unavailable because the platform MCP module is not active, so you cannot search operations, run agents, inspect runs, or schedule. Answer the user's questions directly and conversationally. If the user asks for an action that needs those tools, say plainly that tools are disabled until the \`mcp\` module is enabled, rather than pretending to act.`;
 
+// The subscription (claude-code) path doesn't probe the platform MCP for
+// reachability (the SDK opens its own connection) — so unlike the ai-sdk path it
+// can't pre-select NO_TOOLS_SYSTEM_PROMPT when the `mcp` module is absent. This
+// note makes the tool-grounding prompt degrade gracefully in that rare config
+// (claude-code enabled, mcp disabled): the model reports tools are off instead
+// of looping on failing tool calls. Harmless when tools ARE present.
+const SUBSCRIPTION_TOOLS_NOTE = `If your tool calls fail because the platform tools are unavailable (the \`mcp\` module is disabled on this instance), do not retry — tell the user plainly that instance tools are off and answer conversationally instead.`;
+
 /** Shape of GET /api/me/context (the `get_me` payload). Validated loosely. */
 interface CallerContext {
   user?: { name?: string | null; email?: string | null } | null;
@@ -332,7 +340,7 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   // inline instructions (the SDK's own MCP handshake delivers them). ai-sdk
   // path: prompt + probe instructions, or the no-tools prompt when MCP is down.
   let system = isSubscription
-    ? SYSTEM_PROMPT
+    ? `${SYSTEM_PROMPT}\n\n${SUBSCRIPTION_TOOLS_NOTE}`
     : !mcp
       ? NO_TOOLS_SYSTEM_PROMPT
       : mcp.instructions
