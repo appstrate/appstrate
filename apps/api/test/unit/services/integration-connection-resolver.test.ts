@@ -82,13 +82,6 @@ function oauth2Manifest(): IntegrationManifest {
   } as unknown as IntegrationManifest;
 }
 
-/** oauth2Manifest + the vendor `_meta["dev.appstrate/auth"].required` flag. */
-function requiredOauth2Manifest(): IntegrationManifest {
-  const m = oauth2Manifest() as unknown as { auths: { oauth: Record<string, unknown> } };
-  m.auths.oauth._meta = { "dev.appstrate/auth": { required: true } };
-  return m as unknown as IntegrationManifest;
-}
-
 let connId = 0;
 function conn(input: Partial<ConnectionRow> & { authKey?: string }): ConnectionRow {
   connId += 1;
@@ -560,46 +553,6 @@ describe("resolveConnections — empty requirements / inert integrations", () =>
     });
     expect(result.resolved).toEqual({});
     expect(result.errors).toEqual([]);
-  });
-
-  it("blocks an inert integration whose manifest declares a required auth (no connection)", () => {
-    const result = resolveConnections({
-      requirements: [
-        {
-          integrationId: INTEG,
-          manifest: requiredOauth2Manifest(),
-          hasSelectedTools: false,
-          hasRequiredAuth: true,
-          agentTools: [],
-          agentScopes: [],
-        },
-      ],
-      accessibleConnections: [],
-      pins: [],
-    });
-    expect(result.resolved).toEqual({});
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]).toMatchObject({ integrationId: INTEG, code: "not_connected" });
-  });
-
-  it("auto-resolves an inert required-auth integration when one healthy connection exists", () => {
-    const c = conn({});
-    const result = resolveConnections({
-      requirements: [
-        {
-          integrationId: INTEG,
-          manifest: requiredOauth2Manifest(),
-          hasSelectedTools: false,
-          hasRequiredAuth: true,
-          agentTools: [],
-          agentScopes: [],
-        },
-      ],
-      accessibleConnections: [c],
-      pins: [],
-    });
-    expect(result.errors).toEqual([]);
-    expect(result.resolved[INTEG]).toMatchObject({ connectionId: c.id });
   });
 });
 

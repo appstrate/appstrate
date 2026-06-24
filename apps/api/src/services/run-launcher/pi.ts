@@ -239,7 +239,7 @@ async function runPlatformContainerImpl(
     // per-run network is the boundary; sidecar-internal endpoints are gated by
     // network membership alone). A vend run is the only one holding a real token
     // in-container, so it must not place untrusted integration siblings on that
-    // network. Single-source guard in engine-select (mirrors the runnable /
+    // network. Single-source guard in subscription-run-policy (mirrors the runnable /
     // isolation guards above); fails closed before any boundary is provisioned.
     assertVendRunHasNoIntegrations({
       mode: delivery.mode,

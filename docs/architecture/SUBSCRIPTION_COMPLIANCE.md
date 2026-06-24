@@ -52,7 +52,7 @@ Anchors: `packages/module-chat/src/claude-agent/engine.ts`,
   refused**, never forged onto the Pi loop:
   `assertRunnableOnEngine` throws `UnrunnableOauthProviderError` unless the
   engine is `claude` or `codex`
-  (`apps/api/src/services/run-launcher/engine-select.ts`).
+  (`apps/api/src/services/run-launcher/subscription-run-policy.ts`).
 
 ### 1.3 What the upstream actually receives
 
@@ -95,7 +95,7 @@ the container's egress is **locked** to the provider's hosts:
   the per-run network carries **no untrusted peers**, and integration runner
   containers join the _same_ network. A `vend` run therefore **must not declare
   integrations**: the launcher refuses one (`assertVendRunHasNoIntegrations` in
-  `apps/api/src/services/run-launcher/engine-select.ts`) and the sidecar refuses to
+  `apps/api/src/services/run-launcher/subscription-run-policy.ts`) and the sidecar refuses to
   boot one (`runtime-pi/sidecar/server.ts`), fail-closed on both sides. So when the
   token is served, the network holds only the agent (the legitimate consumer) and
   the sidecar — there is no sibling that could vend it.

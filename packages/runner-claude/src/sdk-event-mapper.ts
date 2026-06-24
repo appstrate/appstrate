@@ -52,13 +52,10 @@ interface SdkToolUseBlock {
   name?: string;
   input?: unknown;
 }
-interface SdkToolResultBlock {
-  type: "tool_result";
-  tool_use_id?: string;
-  content?: unknown;
-  is_error?: boolean;
-}
-type SdkContentBlock = SdkTextBlock | SdkToolUseBlock | SdkToolResultBlock | { type: string };
+// `tool_result` blocks (on `user` messages) are parsed via the shared
+// `parseToolResultBlocks`; this union covers only the `assistant` blocks
+// `mapAssistant` walks.
+type SdkContentBlock = SdkTextBlock | SdkToolUseBlock | { type: string };
 
 /** Anthropic usage counters — already snake_case, maps 1:1 onto {@link TokenUsage}. */
 export interface SdkUsage {

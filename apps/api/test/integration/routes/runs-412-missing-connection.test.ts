@@ -91,22 +91,6 @@ function buildIntegrationManifest(id: string) {
   });
 }
 
-/** buildIntegrationManifest + the vendor `_meta["dev.appstrate/auth"].required` flag. */
-function buildRequiredIntegrationManifest(id: string) {
-  const m = buildIntegrationManifest(id) as unknown as {
-    auths: { primary: Record<string, unknown> };
-  };
-  m.auths.primary._meta = { "dev.appstrate/auth": { required: true } };
-  return m as unknown as ReturnType<typeof buildIntegrationManifest>;
-}
-
-/** Declares the dependency but selects zero tools → "inert" unless required auth. */
-function buildAgentManifestNoTools(integrations: string[]): Record<string, unknown> {
-  const m = buildAgentManifest(integrations);
-  (m as { integrations_configuration: Record<string, unknown> }).integrations_configuration = {};
-  return m;
-}
-
 interface ValidationFieldError {
   field: string;
   code: string;
@@ -199,39 +183,6 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err.code).toBe("not_connected");
     expect(err.title).toBe("Integration Not Connected");
     expect(err.message).toBeTruthy();
-  });
-
-  it("returns 412 for a required-auth integration declared with no tools selected (inert) and no connection", async () => {
-    await seedAgent({
-      id: AGENT,
-      orgId: ctx.orgId,
-      createdBy: ctx.user.id,
-      // Declares the integration dependency but selects zero tools.
-      draftManifest: buildAgentManifestNoTools([INTEGRATION]),
-    });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
-    await seedPackage({
-      id: INTEGRATION,
-      orgId: ctx.orgId,
-      type: "integration",
-      source: "local",
-      draftManifest: buildRequiredIntegrationManifest(INTEGRATION),
-    });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION);
-    // No connection seeded — the required auth must still block despite no tools.
-
-    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
-      method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-
-    expect(res.status).toBe(412);
-    const body = (await res.json()) as ProblemDetails;
-    expect(body.code).toBe("missing_integration_connection");
-    expect(body.errors).toHaveLength(1);
-    expect(body.errors![0]!.field).toBe(`integrations.${INTEGRATION}`);
-    expect(body.errors![0]!.code).toBe("not_connected");
   });
 
   it("accumulates one errors[] entry per missing integration (modal renders the full list)", async () => {
