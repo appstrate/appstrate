@@ -136,6 +136,7 @@
   },
   "patchedDependencies": {
     "@redocly/openapi-core@2.25.2": "patches/@redocly%2Fopenapi-core@2.25.2.patch",
-    "@better-auth/oauth-provider@1.7.0-beta.4": "patches/@better-auth%2Foauth-provider@1.7.0-beta.4.patch"
+    "@better-auth/oauth-provider@1.7.0-beta.4": "patches/@better-auth%2Foauth-provider@1.7.0-beta.4.patch",
+    "@better-auth/cimd@1.7.0-beta.4": "patches/@better-auth%2Fcimd@1.7.0-beta.4.patch"
   }
 }

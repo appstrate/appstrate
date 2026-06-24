@@ -433,6 +433,7 @@
   },
   "patchedDependencies": {
     "@better-auth/oauth-provider@1.7.0-beta.4": "patches/@better-auth%2Foauth-provider@1.7.0-beta.4.patch",
+    "@better-auth/cimd@1.7.0-beta.4": "patches/@better-auth%2Fcimd@1.7.0-beta.4.patch",
   },
   "overrides": {
     "zod": "4.4.3",
