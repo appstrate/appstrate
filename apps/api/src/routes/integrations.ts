@@ -78,6 +78,7 @@ import {
   listAgentsConsumingIntegration,
   listIntegrationPins,
   loadConnectionOwnership,
+  resolveAgentIntegrationPick,
   setBlockUserConnections,
   updateConnectionMetadata,
   upsertIntegrationPin,
@@ -660,8 +661,34 @@ export function createIntegrationsRouter() {
     },
   );
 
-  // The per-integration agent-resolution verdict is now served in bulk by
-  // GET /api/agents/:scope/:name/connection-readiness (one call per agent).
+  /**
+   * GET /api/integrations/:packageId/agent-resolution/:agentPackageId
+   *
+   * Single-source verdict for the agent-page connection picker: which
+   * connection the next run would use (admin pin → overrides → member pin →
+   * fallback + scope check), plus the annotated candidate list and pin /
+   * blocked state. The picker renders this verbatim instead of
+   * re-implementing the resolver cascade client-side.
+   */
+  router.get(
+    "/:packageId{@[^/]+/[^/]+}/agent-resolution/:agentPackageId{@[^/]+/[^/]+}",
+    requirePermission("integrations", "read"),
+    async (c) => {
+      const packageId = c.req.param("packageId")!;
+      const agentPackageId = c.req.param("agentPackageId")!;
+      const scope = getAppScope(c);
+      const actor = getActor(c);
+      const role = c.get("orgRole");
+      const result = await resolveAgentIntegrationPick({
+        scope,
+        agentPackageId,
+        integrationId: packageId,
+        actor,
+        isAdmin: role === "owner" || role === "admin",
+      });
+      return c.json(result);
+    },
+  );
 
   // ─── Admin: block_user_connections + pins + connection metadata ──
 

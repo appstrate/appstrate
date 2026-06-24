@@ -84,7 +84,10 @@ function AgentRunButtonInline({
   const readiness = useAgentReadiness(detail, agentModel?.modelId, models, configSchemaOverride);
   // Launch-time integration readiness — drives the non-blocking orange badge.
   // Same server resolver as the run-kickoff 412 (see useAgentIntegrationsReadiness).
-  const integrationsReady = useAgentIntegrationsReadiness(packageId);
+  const integrationsReady = useAgentIntegrationsReadiness(
+    packageId,
+    detail?.dependencies.integrations,
+  );
 
   if (!detail) return null;
 

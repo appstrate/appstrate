@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from "bun:test";
 import type { IntegrationAgentResolution } from "@appstrate/shared-types";
-import { resolutionBlocksRun } from "../integration-run-readiness";
+import { isIntegrationEntryActive, resolutionBlocksRun } from "../integration-run-readiness";
 
 function resolution(over: Partial<IntegrationAgentResolution>): IntegrationAgentResolution {
   return {
@@ -27,6 +27,25 @@ function resolution(over: Partial<IntegrationAgentResolution>): IntegrationAgent
     ...over,
   };
 }
+
+describe("isIntegrationEntryActive", () => {
+  it("is active with selected tools", () => {
+    expect(isIntegrationEntryActive({ tools: ["search"] })).toBe(true);
+  });
+
+  it("is active with the `*` wildcard", () => {
+    expect(isIntegrationEntryActive({ tools: "*" })).toBe(true);
+  });
+
+  it("is active with selected scopes (apiCall integrations, no discrete tools)", () => {
+    expect(isIntegrationEntryActive({ scopes: ["read"] })).toBe(true);
+  });
+
+  it("is inert when nothing is selected", () => {
+    expect(isIntegrationEntryActive({})).toBe(false);
+    expect(isIntegrationEntryActive({ tools: [], scopes: [] })).toBe(false);
+  });
+});
 
 describe("resolutionBlocksRun", () => {
   it("does not block when a connection auto-resolves fully scoped", () => {

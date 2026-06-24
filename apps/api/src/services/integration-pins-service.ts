@@ -51,13 +51,11 @@ import { isSystemIntegration } from "./integration-client-registry.ts";
 import { conflict, notFound, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
 import type { Actor } from "../lib/actor.ts";
-import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
 import { fetchIntegrationManifest } from "./integration-service.ts";
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import {
   resolveConnectionsForRun,
-  translateResolutionError,
   isUserConnectionCreationBlocked,
 } from "./integration-connection-resolver.ts";
 
@@ -785,75 +783,5 @@ export async function resolveAgentIntegrationPick(args: {
     org_default_enforced: orgDefaultEnforced,
     can_add_connection: isAdmin || !blocked,
     candidates,
-  };
-}
-
-/** Bulk per-agent connection readiness — one call covering badge, picker, and pre-run check. */
-export interface AgentConnectionReadiness {
-  /** True iff the run-kickoff would reject with 412 (run semantics — identical authority). */
-  blocks_run: boolean;
-  /** The integration portion of the 412 envelope (same `field: integrations.<id>` shape). */
-  errors: ValidationFieldError[];
-  /** Every declared integration with its management verdict (includeInert) + run-blocking flag. */
-  integrations: Array<{
-    integration_id: string;
-    run_blocking: boolean;
-    resolution: IntegrationAgentResolution;
-  }>;
-}
-
-/**
- * Bulk connection readiness for an agent. Replaces the N per-integration
- * `resolveAgentIntegrationPick` round-trips with a single agent-level call.
- *
- * `blocks_run` / `errors` come from `resolveConnectionsForRun` with the RUN
- * semantics (`includeInert: false` + the required-auth carve-out) — the exact
- * resolver call the run-kickoff 412 uses — so the UI's pre-run signal can never
- * disagree with the actual gate. The per-integration `resolution` DTOs use
- * `includeInert: true` (inside `resolveAgentIntegrationPick`) so every declared
- * integration, even an inert one, stays manageable in the Connexions tab.
- */
-export async function resolveAgentConnectionReadiness(args: {
-  scope: AppScope;
-  agentPackageId: string;
-  actor: Actor;
-  isAdmin: boolean;
-}): Promise<AgentConnectionReadiness> {
-  const { scope, agentPackageId, actor, isAdmin } = args;
-  const agent = await getPackage(agentPackageId, scope.orgId);
-  if (!agent) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
-  const agentManifest = agent.manifest as unknown as Record<string, unknown>;
-  const declared = parseManifestIntegrations(agentManifest);
-
-  // Authoritative run-blocking verdict — the same resolver call the run gate runs.
-  const runResolution = await resolveConnectionsForRun({
-    agentManifest,
-    packageId: agent.id,
-    actor,
-    scope: { orgId: scope.orgId, applicationId: scope.applicationId },
-  });
-  const blockingIds = new Set(runResolution.errors.map((e) => e.integrationId));
-
-  // Per-integration management DTO (includeInert:true inside the pick).
-  const resolutions = await Promise.all(
-    declared.map((e) =>
-      resolveAgentIntegrationPick({
-        scope,
-        agentPackageId: agent.id,
-        integrationId: e.id,
-        actor,
-        isAdmin,
-      }),
-    ),
-  );
-
-  return {
-    blocks_run: runResolution.errors.length > 0,
-    errors: runResolution.errors.map(translateResolutionError),
-    integrations: declared.map((e, i) => ({
-      integration_id: e.id,
-      run_blocking: blockingIds.has(e.id),
-      resolution: resolutions[i]!,
-    })),
   };
 }
