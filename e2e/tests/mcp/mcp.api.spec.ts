@@ -129,7 +129,12 @@ test.describe("MCP over an API key (full stack)", () => {
     const names = ((list.envelope.result?.tools as Array<{ name: string }>) ?? [])
       .map((t) => t.name)
       .sort();
-    expect(names).toEqual(["describe_operation", "invoke_operation", "search_operations"]);
+    expect(names).toEqual([
+      "describe_operation",
+      "get_me",
+      "invoke_operation",
+      "search_operations",
+    ]);
 
     const search = await mcpRpc(request, url, headers, {
       jsonrpc: "2.0",

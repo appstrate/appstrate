@@ -359,6 +359,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       // Accumulate raw Buffers to avoid corrupting binary data after headers
       const chunks: Buffer[] = [];
       let bufferSize = 0;
+      let established = false;
       const onData = (chunk: Buffer) => {
         chunks.push(chunk);
         bufferSize += chunk.length;
@@ -383,6 +384,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
         const headerStr = combined.subarray(0, headerEnd).toString();
         const status = parseInt(headerStr.split(" ")[1] ?? "0");
         if (status === 200) {
+          established = true;
           clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
           const remaining = combined.subarray(headerEnd + 4);
           if (remaining.length) clientSocket.write(remaining);
@@ -398,6 +400,9 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       proxySocket.on("data", onData);
       proxySocket.on("error", (err) => {
         logger.error("CONNECT upstream error", { target, error: err.message });
+        if (!established && !clientSocket.destroyed) {
+          clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+        }
         clientSocket.destroy();
       });
       clientSocket.on("error", () => proxySocket.destroy());
@@ -414,13 +419,21 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
           clientSocket.destroy();
           return;
         }
+        let established = false;
         const targetSocket = netConnectWithTimeout(port, pinned, () => {
+          established = true;
           clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
           if (head.length) targetSocket.write(head);
           relay(clientSocket, targetSocket);
         });
         targetSocket.on("error", (err) => {
           logger.error("CONNECT direct error", { target, error: err.message });
+          // Surface a 502 to the waiting client before tearing down — but only
+          // pre-tunnel. Once established, writing into the relayed stream would
+          // corrupt it, so just destroy.
+          if (!established && !clientSocket.destroyed) {
+            clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+          }
           clientSocket.destroy();
         });
         clientSocket.on("error", () => targetSocket.destroy());
