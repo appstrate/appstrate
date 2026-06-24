@@ -427,3 +427,28 @@ describe("buildOperationIndex", () => {
     expect(b).toBe(a);
   });
 });
+
+describe("buildMcpTools contextInjected", () => {
+  beforeEach(() => resetCatalog());
+
+  it("exposes get_me by default (external MCP clients have no injected context)", () => {
+    const { byName } = makeTools(["mcp:read"]);
+    expect(byName.has("get_me")).toBe(true);
+  });
+
+  it("drops get_me when the caller already injected its context, keeping the rest", () => {
+    const dispatch: Dispatch = async () =>
+      new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    const tools = buildMcpTools({
+      origin: "https://test.local",
+      authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
+      permissions: new Set(["mcp:read"]),
+      dispatch,
+      contextInjected: true,
+    });
+    const names = tools.map((t) => t.descriptor.name).sort();
+    // get_me is redundant for a context-injected caller; search_operations stays
+    // (its best_match schema is not covered by the injected operation index).
+    expect(names).toEqual(["describe_operation", "invoke_operation", "search_operations"]);
+  });
+});

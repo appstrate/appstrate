@@ -25,6 +25,20 @@ export interface McpHandle {
   close: () => Promise<void>;
 }
 
+/**
+ * URL of the platform's org-scoped MCP endpoint, tagged `?context=injected`.
+ *
+ * The chat injects the get_me payload (`/api/me/context`) straight into its own
+ * system prompt, so the server's get_me tool would only re-fetch what the model
+ * already has. The tag tells the server to drop that redundant tool (and its
+ * "call get_me first" instruction). Both chat engines build their MCP URL
+ * through this helper — the ai-sdk client here and the subscription binary's
+ * own connection (chat-stream.ts) — so the two never drift.
+ */
+export function platformMcpUrl(origin: string, orgId: string): string {
+  return `${origin}/api/mcp/o/${encodeURIComponent(orgId)}?context=injected`;
+}
+
 export async function openPlatformMcp(args: {
   origin: string;
   headers: Record<string, string>;
@@ -39,7 +53,7 @@ export async function openPlatformMcp(args: {
   const client = await createMCPClient({
     transport: {
       type: "http",
-      url: `${args.origin}/api/mcp/o/${encodeURIComponent(args.orgId)}`,
+      url: platformMcpUrl(args.origin, args.orgId),
       headers,
     },
     onUncaughtError: (err) => logger.error("MCP uncaught error", { err: String(err) }),
