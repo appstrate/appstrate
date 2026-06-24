@@ -20,7 +20,7 @@ import { z } from "zod";
 import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
 import { logger } from "./logger.ts";
 import { listModels, pickModel, modelFromFamily, resolveDefaultApplicationId } from "./llm.ts";
-import { openPlatformMcp } from "./platform-mcp.ts";
+import { openPlatformMcp, platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
 import { subscriptionEngineDef } from "@appstrate/core/subscription-engines";
@@ -376,7 +376,7 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
       modelId: chosen.modelId,
       gatewayBaseUrl: `${origin}/api/llm-proxy/${subscriptionEngine.providerId}-sdk/${encodeURIComponent(chosen.id)}`,
       placeholderToken: loopbackToken,
-      platformMcp: { url: `${origin}/api/mcp/o/${encodeURIComponent(orgId)}`, headers: mcpHeaders },
+      platformMcp: { url: platformMcpUrl(origin, orgId), headers: mcpHeaders },
       abortSignal: c.req.raw.signal,
       onError: clientErrorMessage,
     });

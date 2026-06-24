@@ -88,6 +88,13 @@ export interface McpToolContext {
    * tests and any non-HTTP caller need not provide one.
    */
   observe?: McpObserver;
+  /**
+   * The caller already injects the get_me payload (`GET /api/me/context`) into
+   * its own system prompt, so the redundant get_me tool is dropped. Only the
+   * in-process chat consumer sets this (it injects that block + carries the
+   * server instructions); external MCP clients leave it false and keep get_me.
+   */
+  contextInjected?: boolean;
 }
 
 /** Never let an observer error affect the tool result. */
@@ -675,5 +682,12 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
 /** Build the per-request tool set. Handlers close over the caller's auth context. */
 export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
-  return [buildSearchTool(ctx), buildDescribeTool(ctx), buildInvokeTool(ctx), buildGetMeTool(ctx)];
+  const tools = [buildSearchTool(ctx), buildDescribeTool(ctx), buildInvokeTool(ctx)];
+  // get_me dispatches to GET /api/me/context. A consumer that already injects
+  // that payload into its own system prompt (the chat module) drops the tool —
+  // it would only re-fetch what the model already has. search_operations is
+  // kept either way: the operation index is injected too, but its `best_match`
+  // schema still saves a describe_operation round-trip, so it is not redundant.
+  if (!ctx.contextInjected) tools.push(buildGetMeTool(ctx));
+  return tools;
 }

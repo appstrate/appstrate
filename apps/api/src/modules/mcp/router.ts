@@ -121,8 +121,18 @@ const MCP_RATE_LIMIT_PER_MIN = 120;
  * surface grows without editing this text. describe_operation (or
  * search_operations' best_match) remains the source of truth for input schemas.
  */
-function buildServerInstructions(permissions?: ReadonlySet<string>): string {
-  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you discover and call any operation of the Appstrate REST API — their own descriptions tell you how. Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when building or configuring an agent). The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, then call describe_operation for its input schema and invoke_operation to run it. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema.
+function buildServerInstructions(
+  permissions?: ReadonlySet<string>,
+  contextInjected = false,
+): string {
+  // A `contextInjected` caller (the chat module) already injects the get_me
+  // payload into its own system prompt and we drop the get_me tool for it, so
+  // pushing "call get_me first" would point the model at a tool that isn't
+  // there. Tell it the context is already provided instead.
+  const grounding = contextInjected
+    ? "Your caller context — who you are acting for, your role in this organization, and which integrations are already connected (prefer those when building or configuring an agent) — is already provided to you; there is no get_me tool, do not look for one."
+    : "Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when building or configuring an agent).";
+  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you discover and call any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, then call describe_operation for its input schema and invoke_operation to run it. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema.
 
 ## Core model
 Organization → Applications (id \`app_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe_operation shows which; always keep the \`@\`, and the \`/\` when it's a single param.
@@ -267,7 +277,13 @@ export function createMcpRouter(): Hono<AppEnv> {
       throw forbidden("This MCP endpoint serves a different organization than your credentials.");
     }
 
-    const origin = new URL(c.req.url).origin;
+    const reqUrl = new URL(c.req.url);
+    const origin = reqUrl.origin;
+    // A consumer that injects the get_me payload (`/api/me/context`) into its
+    // own system prompt tags the session `?context=injected` so the redundant
+    // get_me tool — and its "call get_me first" instruction — are dropped. Only
+    // the in-process chat sets it; external MCP clients omit it and keep get_me.
+    const contextInjected = reqUrl.searchParams.get("context") === "injected";
     const permissions = c.get("permissions") ?? new Set<string>();
     const authHeaders = forwardAuthHeaders(c.req.raw.headers);
     const dispatch: Dispatch = async (req) => getPlatformApp().fetch(req);
@@ -321,11 +337,18 @@ export function createMcpRouter(): Hono<AppEnv> {
     // need no actor context. get_me likewise carries no actor context: it
     // dispatches in-process to /api/me/context, which resolves the caller from
     // the forwarded auth headers. The index is scoped to the caller's role.
-    const tools = buildMcpTools({ origin, permissions, authHeaders, dispatch, observe });
+    const tools = buildMcpTools({
+      origin,
+      permissions,
+      authHeaders,
+      dispatch,
+      observe,
+      contextInjected,
+    });
     const server = createMcpServer(
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
-      { instructions: buildServerInstructions(permissions) },
+      { instructions: buildServerInstructions(permissions, contextInjected) },
     );
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
