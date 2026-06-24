@@ -89,7 +89,9 @@ export function createCredentialProxyRouter() {
       // Cookie sessions are refused — they would let a drive-by CSRF
       // trigger arbitrary upstream calls on behalf of a logged-in user.
       const authMethod = c.get("authMethod");
-      assertBearerOnly(authMethod, "Credential proxy");
+      assertBearerOnly(authMethod, "Credential proxy", {
+        firstPartyLoopback: c.get("firstPartyLoopback"),
+      });
 
       // Canonical header is `X-Integration-Id` (suffix parity with `X-Connection-Id`).
       const integrationId = c.req.header("X-Integration-Id");

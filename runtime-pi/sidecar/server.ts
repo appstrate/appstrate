@@ -147,6 +147,21 @@ const config = {
   egressAllowlist: readEgressAllowlistFromEnv(),
 };
 
+// M1 — fail closed: a `vend`-mode run hands the REAL subscription token into the
+// container and relies on the per-run egress allowlist to keep that token from
+// being exfiltrated to an attacker host. `readEgressAllowlistFromEnv` fails OPEN
+// (returns `undefined`) on a missing/malformed `EGRESS_ALLOWLIST_JSON`, which
+// would leave the forward proxy in SSRF-block-only mode while still vending the
+// live token — a token-exfil window. The launcher always pairs the two env vars,
+// but the sidecar must not trust that: refuse to boot a vend run without a
+// non-empty allowlist rather than silently degrade.
+if (config.llm?.authMode === "vend" && (config.egressAllowlist?.length ?? 0) === 0) {
+  throw new Error(
+    "Sidecar refusing to boot: vend-mode run requires a non-empty EGRESS_ALLOWLIST_JSON " +
+      "(the real subscription token must never be served without the egress lock active).",
+  );
+}
+
 // ─── P4 — connect mode (`runAt: "link"` ephemeral connect-run) ───
 // When `CONNECT_LOGIN_JSON` is present the sidecar is NOT serving an agent
 // run: it runs the single integration's `login` tool exactly once via
@@ -278,6 +293,20 @@ const runtimeToolDefs = journalRuntimeToolDefs(
 let integrationTools: AppstrateToolDefinition[] = [];
 const specs = readIntegrationSpecsFromEnv();
 const declaredIntegrations = specs?.length ?? 0;
+
+// H1 (defense in depth) — a `vend`-mode run hands the real subscription token to
+// the in-container runner over the per-run network, where `/credential-vend` is
+// gated only by network membership (same trust model as `/mcp`). That is sound
+// only when the network has no untrusted peers. Integration runner containers
+// join the SAME network, so a vend run MUST NOT declare integrations. The
+// launcher already refuses this, but the sidecar must not trust the launcher:
+// fail closed rather than spawn integration siblings that could vend the token.
+if (config.llm?.authMode === "vend" && declaredIntegrations > 0) {
+  throw new Error(
+    "Sidecar refusing to boot: a vend-mode run cannot spawn integrations " +
+      "(integration containers share the per-run network and could vend the real token).",
+  );
+}
 // Boot report fetched by the agent via `GET /integrations/boot-report`. Starts
 // as a synthetic empty-OK report (covers the no-integrations run); the boot
 // `.then`/`.catch` below overwrite it with the real outcome.

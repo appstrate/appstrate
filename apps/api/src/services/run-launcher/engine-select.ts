@@ -110,15 +110,6 @@ export function resolveCredentialDelivery(params: {
 }
 
 /**
- * Pick the engine for a resolved model — delegates to the shared registry
- * ({@link engineForProvider}) so chat + runs agree. `claude-code` → `"claude"`,
- * `codex` → `"codex"`, everything else → `"pi"`. Pure for unit testing.
- */
-export function selectRunEngine(resolved: { providerId: string }): RunEngine {
-  return engineForProvider(resolved.providerId);
-}
-
-/**
  * Thrown when a run cannot execute because its credential is an OAuth
  * subscription with no official-binary engine (the only non-forging path).
  */
@@ -189,6 +180,44 @@ export function assertSubscriptionEngineIsolation(params: {
   const { providerId, orchestratorMode } = params;
   if (subscriptionEngineDef(providerId) && orchestratorMode !== "docker") {
     throw new SubscriptionRequiresDockerError(providerId);
+  }
+}
+
+/** Thrown when a `vend`-mode (subscription) run declares integrations. */
+export class VendRunIntegrationsError extends Error {
+  constructor(public readonly providerId: string) {
+    super(
+      `Provider "${providerId}" is a subscription (vend) credential: the real token is ` +
+        `served to the in-container runner over the per-run network, which integration ` +
+        `runner containers also join. A vend run therefore cannot declare integrations ` +
+        `until per-integration network isolation exists. Use an API-key model provider ` +
+        `for integration-backed runs.`,
+    );
+    this.name = "VendRunIntegrationsError";
+  }
+}
+
+/**
+ * Fail-closed guard keeping all three runners (pi / claude / codex) on ONE trust
+ * model: the per-run Docker network IS the boundary and every sidecar-internal
+ * endpoint (`/mcp`, `/integrations/boot-report`, `/credential-vend`) is gated by
+ * network membership alone — no per-endpoint auth. That is sound only when the
+ * network carries no untrusted peers. The vend path is the single runner that
+ * hands the REAL subscription token into the container, so a sibling integration
+ * container on the same network could otherwise vend it from `/credential-vend`.
+ * Rather than diverge codex with a bespoke endpoint secret, we keep the trust
+ * model uniform and enforce its precondition here: a vend run must not place
+ * untrusted integration containers on the network. Throws
+ * {@link VendRunIntegrationsError}. (No-op for `oauth`/`api_key`/`pi` runs, which
+ * never put a real token in the container.)
+ */
+export function assertVendRunHasNoIntegrations(params: {
+  mode: CredentialDeliveryMode;
+  providerId: string;
+  integrationCount: number;
+}): void {
+  if (params.mode === "vend" && params.integrationCount > 0) {
+    throw new VendRunIntegrationsError(params.providerId);
   }
 }
 

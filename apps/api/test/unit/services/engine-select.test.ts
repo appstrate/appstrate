@@ -6,11 +6,12 @@ import {
   resetSubscriptionEnginesForTesting,
 } from "@appstrate/core/subscription-engines";
 import {
-  selectRunEngine,
   assertRunnableOnEngine,
   assertSubscriptionEngineIsolation,
+  assertVendRunHasNoIntegrations,
   resolveCredentialDelivery,
   SubscriptionRequiresDockerError,
+  VendRunIntegrationsError,
   buildOauthSidecarLlm,
   UnrunnableOauthProviderError,
 } from "../../../src/services/run-launcher/engine-select.ts";
@@ -58,23 +59,6 @@ beforeAll(() => {
   });
 });
 afterAll(() => resetSubscriptionEnginesForTesting());
-
-describe("selectRunEngine", () => {
-  it("routes claude-code to the Claude engine (official Agent SDK)", () => {
-    expect(selectRunEngine({ providerId: "claude-code" })).toBe("claude");
-  });
-
-  it("routes codex to the Codex engine (official Codex CLI)", () => {
-    expect(selectRunEngine({ providerId: "codex" })).toBe("codex");
-  });
-
-  it("routes every api-key provider to Pi", () => {
-    // anthropic (api-key) shares the apiShape but must stay on Pi.
-    for (const providerId of ["anthropic", "openai", "openai-compatible"]) {
-      expect(selectRunEngine({ providerId })).toBe("pi");
-    }
-  });
-});
 
 describe("assertRunnableOnEngine", () => {
   it("allows claude-code (oauth credential) on the claude engine", () => {
@@ -165,6 +149,37 @@ describe("assertSubscriptionEngineIsolation", () => {
     ).not.toThrow();
     expect(() =>
       assertSubscriptionEngineIsolation({ providerId: "openai", orchestratorMode: "docker" }),
+    ).not.toThrow();
+  });
+});
+
+describe("assertVendRunHasNoIntegrations", () => {
+  it("rejects a vend run that declares integrations (token-on-shared-network)", () => {
+    expect(() =>
+      assertVendRunHasNoIntegrations({ mode: "vend", providerId: "codex", integrationCount: 1 }),
+    ).toThrow(VendRunIntegrationsError);
+  });
+
+  it("allows a vend run with no integrations", () => {
+    expect(() =>
+      assertVendRunHasNoIntegrations({ mode: "vend", providerId: "codex", integrationCount: 0 }),
+    ).not.toThrow();
+  });
+
+  it("allows oauth / api_key runs with integrations (no real token in container)", () => {
+    expect(() =>
+      assertVendRunHasNoIntegrations({
+        mode: "oauth",
+        providerId: "claude-code",
+        integrationCount: 3,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertVendRunHasNoIntegrations({
+        mode: "api_key",
+        providerId: "openai",
+        integrationCount: 3,
+      }),
     ).not.toThrow();
   });
 });

@@ -69,6 +69,18 @@ import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
 // Side-effect import: loading the gateway module runs its
 // `registerSubscriptionGateway(...)` so the handler is in the provider-id-keyed
 // registry the loop below reads. The router references no vendor handler directly.
+//
+// Why this Anthropic-specific handler lives in apps/api (not in the opt-in
+// `module-claude-code`, unlike the engine binding + chat driver, which DO live in
+// the module): it is wired to api-internal llm-proxy infrastructure — `metering`,
+// `subscription-token` resolution, `buildLlmProxyPrincipal`, `credentials`. A
+// module must not depend on the API package, so the handler cannot move without
+// either dragging that whole subsystem into the module or inverting the layering
+// behind a framework-neutral gateway contract (a larger refactor, tracked
+// separately). Runtime footprint is still zero when the module is off: the
+// registry stays empty (no `registerSubscriptionEngine` runs), the loop below
+// mounts nothing, and this handler is never reached. The asymmetry is in the
+// build graph only, not in behavior.
 import "../services/llm-proxy/claude-code-sdk-gateway.ts";
 import { subscriptionGatewayFor } from "../services/llm-proxy/subscription-gateways.ts";
 import { listSubscriptionEngines } from "@appstrate/core/subscription-engines";
@@ -154,7 +166,9 @@ export function createLlmProxyRouter() {
       continue;
     }
     const gateway = async (c: Context<AppEnv>): Promise<Response> => {
-      assertLoopbackOnly(c.get("authMethod"), `${def.label} SDK gateway`);
+      assertLoopbackOnly(c.get("authMethod"), `${def.label} SDK gateway`, {
+        firstPartyLoopback: c.get("firstPartyLoopback"),
+      });
       return handler(c, limits.max_request_bytes);
     };
     // Wildcard forwards whatever upstream subpath the SDK appends (`/v1/messages`,
@@ -179,7 +193,7 @@ async function handleProxy(
   limits: LlmProxyLimits,
 ): Promise<Response> {
   const authMethod = c.get("authMethod");
-  assertBearerOnly(authMethod, "LLM proxy");
+  assertBearerOnly(authMethod, "LLM proxy", { firstPartyLoopback: c.get("firstPartyLoopback") });
 
   const apiKeyId = c.get("apiKeyId");
   const orgId = c.get("orgId");

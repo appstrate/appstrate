@@ -99,6 +99,11 @@ export const chatLoopbackStrategy: AuthStrategy = {
       orgId: claims.orgId,
       orgRole: claims.orgRole as AuthResolution["orgRole"],
       authMethod: CHAT_LOOPBACK_AUTH_METHOD,
+      // Declare the first-party-loopback capability the bearer-only proxy gates
+      // read — so core gates on a property, not on this module's auth-method id.
+      // Safe to set: this bearer is server-minted from a process-local secret
+      // that never leaves the process (see top-of-file rationale).
+      firstPartyLoopback: true,
       // Least privilege: exactly what the inference loopback needs.
       permissions: ["llm-proxy:call", "models:read"],
     };

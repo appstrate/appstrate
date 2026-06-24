@@ -817,8 +817,12 @@ async function buildCodexAgentRunner(): Promise<CodexAgentRunner> {
   // Dynamic import: loaded ONLY for a codex run, so a pi/claude run (or a slim
   // image without @appstrate/runner-codex) never resolves the Codex package.
   const { CodexAgentRunner } = await import("@appstrate/runner-codex");
-  const { resolveCodexBinary, makeCodexScopeResolver, sweepStaleCodexHomes } =
-    await import("@appstrate/runner-codex/binary");
+  const {
+    resolveCodexBinary,
+    makeCodexScopeResolver,
+    sweepStaleCodexHomes,
+    isCodexVersionCompatible,
+  } = await import("@appstrate/runner-codex/binary");
   const base = sidecarUrl.replace(/\/$/, "");
 
   // Real-token-at-rest hygiene (Q1, backs H1): reap any orphaned `codex-run-*`
@@ -873,6 +877,28 @@ async function buildCodexAgentRunner(): Promise<CodexAgentRunner> {
     // worse outcome than failing the run.
     codexBinary = resolveCodexBinary({ resolve: makeCodexScopeResolver(import.meta.url) });
   }
+
+  // M6 — drift probe. The codex integration relies on UNDOCUMENTED CLI behavior
+  // (the `exec --json` NDJSON shape + the models-manager sending the access token
+  // verbatim), so a CLI minor bump can silently break it. Probe the resolved
+  // binary's version once and WARN on drift — surfacing it in the run log rather
+  // than failing a run on a patch bump or discovering the break mid-stream. The
+  // dependency pin (`~0.141.0`) is the hard gate; this is the observability net.
+  try {
+    const probe = Bun.spawnSync([codexBinary, "--version"]);
+    const version = probe.stdout.toString().trim();
+    if (!isCodexVersionCompatible(version)) {
+      await progress(
+        `Warning: codex CLI version "${version}" differs from the validated 0.141.x — ` +
+          `the run will proceed, but verify the exec --json + token-vend behavior if it misbehaves.`,
+        { codexVersion: version },
+      );
+    }
+  } catch {
+    // A failed --version probe is non-fatal: the spawn below surfaces a real
+    // binary problem with a better error than a version probe could.
+  }
+
   return new CodexAgentRunner({
     binaryPath: codexBinary,
     modelId: env.modelId,

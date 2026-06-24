@@ -788,6 +788,16 @@ export interface AuthResolution {
   /** Strategy-specific metadata to attach via `c.set` under `extra` namespace. */
   extra?: Record<string, unknown>;
   /**
+   * Declares this caller a first-party, server-minted loopback bearer: a request
+   * the server constructed for itself (process-local secret, never persisted or
+   * transmitted, not reachable from a browser). The bearer-only proxy surfaces
+   * gate on THIS capability rather than on a specific module id, so a strategy
+   * opts into the trusted-loopback path by declaring it here. Only set it on a
+   * strategy whose token never leaves the process. Propagated to
+   * `c.get("firstPartyLoopback")`.
+   */
+  firstPartyLoopback?: boolean;
+  /**
    * When true, the auth pipeline defers org resolution to the `X-Org-Id`
    * middleware (same path as session auth) and derives permissions from
    * `orgRole` after org-context resolves. Strategies that authenticate a

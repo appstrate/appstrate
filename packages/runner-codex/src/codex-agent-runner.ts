@@ -203,6 +203,69 @@ export class CodexAgentRunner implements Runner {
 
   constructor(private readonly opts: CodexAgentRunnerOptions) {}
 
+  /**
+   * Wire abort → SIGTERM, escalating to SIGKILL after the grace window (a wedged
+   * codex must not outlive an abort). `getChild` is a late-bound accessor because
+   * the child is spawned after this is armed. Returns the handler so the caller
+   * can re-invoke it (post-spawn abort race) and detach it in `finally`.
+   */
+  private armAbort(
+    signal: AbortSignal | undefined,
+    getChild: () => CodexChild | undefined,
+  ): () => void {
+    const onAbort = (): void => {
+      try {
+        getChild()?.kill(); // SIGTERM — let codex flush + exit cleanly first.
+      } catch {
+        // already exited
+      }
+      // Unref'd so this timer never keeps the process alive; a no-op throw if the
+      // child already exited.
+      const killTimer = setTimeout(() => {
+        try {
+          getChild()?.kill(9);
+        } catch {
+          // already exited
+        }
+      }, ABORT_KILL_GRACE_MS);
+      (killTimer as unknown as { unref?: () => void }).unref?.();
+    };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+    return onAbort;
+  }
+
+  /** Vend the real subscription token from the sidecar (internal-network-gated). */
+  private async vendCredential(fetchFn: typeof fetch): Promise<VendedCodexCredential> {
+    const vend = await fetchFn(this.opts.credentialUrl);
+    if (!vend.ok) {
+      throw new Error(
+        vend.status === 410
+          ? "The ChatGPT subscription credential needs reconnection (revoked or expired)."
+          : `Credential vend failed (${vend.status}).`,
+      );
+    }
+    return (await vend.json()) as VendedCodexCredential;
+  }
+
+  /**
+   * Write the ephemeral CODEX_HOME (auth.json 0600 + config.toml pointing the
+   * CLI's MCP client at the sidecar `/mcp`). Same 0600 home for both files — no
+   * new at-rest credential surface. Returns the home dir for teardown.
+   *
+   * CALLER ORDERING (security-critical, H1): the redaction set MUST already be
+   * armed before this runs — the token is about to hit disk. See `run()`.
+   */
+  private async prepareCodexHome(cred: VendedCodexCredential, nowMs: number): Promise<string> {
+    const home = await writeCodexAuthHome({ credential: cred, nowMs, prefix: "codex-run-" });
+    await writeCodexConfig({
+      home,
+      toml: buildCodexConfigToml({
+        ...(this.opts.sidecarMcp ? { platform: this.opts.sidecarMcp } : {}),
+      }),
+    });
+    return home;
+  }
+
   async run(options: RunOptions): Promise<void> {
     const { context, eventSink, signal } = options;
     signal?.throwIfAborted();
@@ -247,69 +310,28 @@ export class CodexAgentRunner implements Runner {
     let home: string | undefined;
     let child: CodexChild | undefined;
     let stderrTail: StreamTail | undefined;
-    const onAbort = () => {
-      try {
-        child?.kill(); // SIGTERM — let codex flush + exit cleanly first.
-      } catch {
-        // already exited
-      }
-      // Escalate to SIGKILL if it ignores SIGTERM past the grace window (a
-      // wedged codex must not outlive an abort). Unref'd so this timer never
-      // keeps the process alive; a no-op throw if the child already exited.
-      const killTimer = setTimeout(() => {
-        try {
-          child?.kill(9);
-        } catch {
-          // already exited
-        }
-      }, ABORT_KILL_GRACE_MS);
-      (killTimer as unknown as { unref?: () => void }).unref?.();
-    };
-    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+    const onAbort = this.armAbort(signal, () => child);
 
     try {
       // 1. Vend the real subscription token (internal-network-gated, no bearer).
-      const vend = await fetchFn(this.opts.credentialUrl);
-      if (!vend.ok) {
-        throw new Error(
-          vend.status === 410
-            ? "The ChatGPT subscription credential needs reconnection (revoked or expired)."
-            : `Credential vend failed (${vend.status}).`,
-        );
-      }
-      const cred = (await vend.json()) as VendedCodexCredential;
+      const cred = await this.vendCredential(fetchFn);
 
       // ORDERING INVARIANT (security-critical, H1): the redaction set MUST be
-      // armed HERE — synchronously, immediately after `vend.json()` and BEFORE
-      // the token is written to disk (step 2) or spawned/used (step 3). The
-      // `emit` closure scrubs by reading `knownSecrets` at emit time; if any
-      // token-bearing event or the terminal result could be produced before
-      // this push, it would leak the credential verbatim. Do NOT move this below
-      // writeCodexAuthHome/spawn. Guarded by the "scrub is armed before first
-      // use" test in test/scrub-armed-before-use.test.ts.
-      // Arm the redaction set now that the real credential is in hand: the
-      // access token always, plus the account id when it is a non-trivial value
-      // (it rides outbound as the `chatgpt-account-id` header and could be
-      // sensitive). The `>= 8` length guard inside the scrubber drops the
-      // placeholder/short ids. From here on every emitted string is scrubbed.
+      // armed HERE — synchronously, immediately after the vend and BEFORE the
+      // token is written to disk (`prepareCodexHome`) or spawned/used (step 3).
+      // The `emit` closure scrubs by reading `knownSecrets` at emit time; if any
+      // token-bearing event or the terminal result could be produced before this
+      // push, it would leak the credential verbatim. Kept INLINE (not folded into
+      // a helper) so the ordering is visible at the call site. Guarded by the
+      // "scrub is armed before first use" test in test/scrub-armed-before-use.test.ts.
+      // Arm the access token always, plus the account id when it is a non-trivial
+      // value (it rides outbound as the `chatgpt-account-id` header). The `>= 8`
+      // length guard inside the scrubber drops placeholder/short ids.
       knownSecrets.push(cred.access_token);
       if (typeof cred.account_id === "string") knownSecrets.push(cred.account_id);
 
-      // 2. Write the ephemeral CODEX_HOME/auth.json (real token, 0600).
-      home = await writeCodexAuthHome({ credential: cred, nowMs: now(), prefix: "codex-run-" });
-
-      // 2b. Write config.toml pointing codex's MCP client at the sidecar `/mcp`
-      //     (integrations + api_call + run_history + recall_memory + runtime
-      //     tools). The CLI auto-detects streamable HTTP from the url; auth +
-      //     host scoping ride as literal http_headers. Same 0600 home as
-      //     auth.json — no new at-rest credential surface. No-op when no
-      //     sidecar MCP is configured.
-      await writeCodexConfig({
-        home,
-        toml: buildCodexConfigToml({
-          ...(this.opts.sidecarMcp ? { platform: this.opts.sidecarMcp } : {}),
-        }),
-      });
+      // 2. Write the ephemeral CODEX_HOME (auth.json 0600 + sidecar-MCP config.toml).
+      home = await this.prepareCodexHome(cred, now());
 
       // 3. Spawn the official binary. No `chatgpt_base_url` (it talks to the
       //    upstream directly; egress is locked by the sidecar allowlist). The

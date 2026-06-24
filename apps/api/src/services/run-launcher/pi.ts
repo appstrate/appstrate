@@ -29,6 +29,7 @@ import { buildRuntimePiEnv } from "@appstrate/runner-pi";
 import {
   assertRunnableOnEngine,
   assertSubscriptionEngineIsolation,
+  assertVendRunHasNoIntegrations,
   buildOauthSidecarLlm,
   resolveCredentialDelivery,
 } from "./engine-select.ts";
@@ -223,6 +224,28 @@ async function runPlatformContainerImpl(
     // server-side by the gateway. Adding a new subscription engine is a registry
     // entry, not a branch here.
     const egressAllowlist = delivery.egressAllowlist;
+    // M4 — pre-flight: vend AND oauth both dereference `credentialId` below.
+    // Assert it HERE (before any boundary/container is provisioned) so a missing
+    // credential fails fast with a clear message instead of the non-null `!`
+    // shipping `undefined`, which would otherwise surface as an opaque sidecar
+    // boot crash AFTER both containers were already launched.
+    if ((delivery.mode === "vend" || isOauthCredential) && !llmConfig.credentialId) {
+      throw new Error(
+        `Run launcher: ${delivery.mode === "vend" ? "vend" : "oauth"}-mode run for provider ` +
+          `"${llmConfig.providerId}" has no resolved credentialId — cannot deliver the credential.`,
+      );
+    }
+    // H1 — keep all three runners (pi / claude / codex) on ONE trust model (the
+    // per-run network is the boundary; sidecar-internal endpoints are gated by
+    // network membership alone). A vend run is the only one holding a real token
+    // in-container, so it must not place untrusted integration siblings on that
+    // network. Single-source guard in engine-select (mirrors the runnable /
+    // isolation guards above); fails closed before any boundary is provisioned.
+    assertVendRunHasNoIntegrations({
+      mode: delivery.mode,
+      providerId: llmConfig.providerId,
+      integrationCount: plan.integrations?.length ?? 0,
+    });
     if (delivery.mode === "vend") {
       // Vend mode: the sidecar hands the resolved token to the in-container
       // runner via `/credential-vend` instead of swapping the bearer in flight.

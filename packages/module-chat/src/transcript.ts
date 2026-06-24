@@ -11,6 +11,14 @@
  * text survives into the transcript. An optional `system` persona is prepended
  * (the codex CLI takes no separate system arg; the Claude SDK does, so it omits
  * it here and passes system through the SDK instead).
+ *
+ * KNOWN LIMITATION (lossy vs the ai-sdk path): the ai-sdk chat path feeds the
+ * model `convertToModelMessages(messages)` — a structured array preserving tool
+ * calls, tool results, and file parts. This flattening keeps only text, so a
+ * multi-turn, tool-rich session is degraded on the binary-driven engines
+ * (codex / Claude Agent SDK). Acceptable for the current chat surface (the
+ * binaries take a prompt, not a message array); revisit with a structured
+ * adapter if/when the SDKs accept richer multi-part input.
  */
 
 import type { UIMessage } from "ai";

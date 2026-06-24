@@ -188,6 +188,18 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   // the turn usable for plain conversation instead of 500-ing. The UI surfaces
   // a "no tools" banner via the `mcp` app-config feature flag.
   let mcp: Awaited<ReturnType<typeof openPlatformMcp>> | null = null;
+  // Single MCP-teardown path. The session must be closed on EVERY exit (the
+  // claude engine's early return, the ai-sdk stream's `onError` AND `onFinish`,
+  // and a mid-stream client disconnect) or it leaks per turn — close failures are
+  // swallowed (warn only) so they never mask the turn result. `await` it on the
+  // synchronous paths, `void` it inside the stream callbacks.
+  const closeMcp = async (): Promise<void> => {
+    try {
+      await mcp?.close();
+    } catch (err) {
+      logger.warn("mcp close failed", { err: String(err) });
+    }
+  };
   try {
     mcp = await openPlatformMcp({ origin, headers, orgId, applicationId });
   } catch (err) {
@@ -254,7 +266,7 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
     const platformMcp = mcp
       ? { url: `${origin}/api/mcp/o/${encodeURIComponent(orgId)}`, headers: mcpHeaders }
       : undefined;
-    await mcp?.close();
+    await closeMcp();
     const loopbackToken = mintLoopbackToken(
       { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
       { ttlMs: ENGINE_LOOPBACK_TTL_MS },
@@ -274,7 +286,7 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   // ai-sdk path — API-key providers only, bound to the llm-proxy.
   const model = modelFromFamily(chosen, origin, inferenceHeaders, mintInferenceAuth);
   if (!model) {
-    await mcp?.close();
+    await closeMcp();
     throw invalidRequest(`Model family "${chosen.apiShape}" is not supported by the chat.`);
   }
 
@@ -323,7 +335,7 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
         logger.error("chat stream error", { err: String(error) });
         // AI-SDK fires onError (not onFinish) on a stream failure, so the MCP
         // session must be closed here too or it leaks on every failed turn.
-        void mcp?.close().catch((err) => logger.warn("mcp close failed", { err: String(err) }));
+        void closeMcp();
       },
       onFinish: ({ totalUsage, finishReason }) => {
         logger.info("chat turn done", {
@@ -332,21 +344,17 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
           usage: totalUsage as unknown as Record<string, unknown>,
           finishReason,
         });
-        void mcp?.close().catch((err) => logger.warn("mcp close failed", { err: String(err) }));
+        void closeMcp();
       },
     });
 
     // Close the MCP session if the client disconnects mid-stream.
-    c.req.raw.signal.addEventListener(
-      "abort",
-      () => void mcp?.close().catch((err) => logger.warn("mcp close failed", { err: String(err) })),
-      { once: true },
-    );
+    c.req.raw.signal.addEventListener("abort", () => void closeMcp(), { once: true });
 
     // Surface the real failure to the client (AI SDK masks errors otherwise).
     return result.toUIMessageStreamResponse({ onError: clientErrorMessage });
   } catch (err) {
-    await mcp?.close();
+    await closeMcp();
     throw err;
   }
 }

@@ -473,6 +473,38 @@ export function resolveCodexBinary(opts: {
 }
 
 /**
+ * Codex CLI minor version this runner was written and validated against (M6).
+ * The integration depends on UNDOCUMENTED CLI behavior — the `exec --json`
+ * NDJSON event shape, and the models-manager sending `tokens.access_token`
+ * verbatim while ignoring `chatgpt_base_url`. Those can shift across CLI
+ * releases, so we pin the optional dependency to `~0.141.0` AND probe the
+ * running binary at run start, surfacing a drift warning rather than discovering
+ * a contract break mid-run. Bump this in lockstep with the `@openai/codex` pin.
+ */
+export const COMPATIBLE_CODEX_MAJOR = 0;
+export const COMPATIBLE_CODEX_MINOR = 141;
+
+/** Parse a `codex --version` line (e.g. `codex-cli 0.141.0`) → `[major, minor]`. */
+export function parseCodexVersion(versionOutput: string): [number, number] | null {
+  const m = versionOutput.match(/(\d+)\.(\d+)\.\d+/);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2])];
+}
+
+/**
+ * Whether a `codex --version` output is the validated minor (`0.141.x`). A patch
+ * bump is compatible; a minor/major drift is not (the empirical contracts above
+ * may have changed). Unparseable output is treated as incompatible so the drift
+ * warning fires rather than silently trusting an unknown build.
+ */
+export function isCodexVersionCompatible(versionOutput: string): boolean {
+  const parsed = parseCodexVersion(versionOutput);
+  if (!parsed) return false;
+  const [major, minor] = parsed;
+  return major === COMPATIBLE_CODEX_MAJOR && minor === COMPATIBLE_CODEX_MINOR;
+}
+
+/**
  * Split a byte stream into newline-delimited, trimmed, non-empty strings
  * (UTF-8), flushing any unterminated tail. Used to read the `codex exec --json`
  * NDJSON event stream off the subprocess stdout — shared by the chat engine

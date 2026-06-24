@@ -37,6 +37,26 @@ describe("CodexRunEventMapper.map", () => {
     });
   });
 
+  it("maps an mcp_tool_call to a server-qualified tool breadcrumb", () => {
+    const m = new CodexRunEventMapper("run_1", now);
+    const events = m.map({
+      type: "item.completed",
+      item: { type: "mcp_tool_call", server: "platform", tool: "api_call" },
+    });
+    // Reads item.server/item.tool (NOT the nonexistent item.name) so the run
+    // timeline can attribute which platform tool the agent invoked.
+    expect(events[0]).toMatchObject({
+      message: "Tool: platform__api_call",
+      data: { tool: "platform__api_call" },
+    });
+  });
+
+  it("falls back gracefully when an mcp_tool_call carries no tool name", () => {
+    const m = new CodexRunEventMapper("run_1", now);
+    const events = m.map({ type: "item.completed", item: { type: "mcp_tool_call" } });
+    expect(events[0]).toMatchObject({ message: "Tool: mcp tool", data: { tool: "mcp tool" } });
+  });
+
   it("ignores framing and unknown item types", () => {
     const m = new CodexRunEventMapper("run_1", now);
     expect(m.map({ type: "thread.started", thread_id: "t1" })).toEqual([]);

@@ -150,7 +150,15 @@ export class CodexRunEventMapper {
           },
         ];
       case "mcp_tool_call": {
-        const name = typeof item.name === "string" ? item.name : "mcp tool";
+        // The codex `mcp_tool_call` event carries the MCP server in `item.server`
+        // and the bare tool in `item.tool` — there is NO `item.name` field, so the
+        // old `item.name` read always resolved to `undefined` (via the index
+        // signature) and every call rendered as a nameless "mcp tool". Compose the
+        // server-qualified name (e.g. `platform__api_call`) so run timelines can
+        // attribute which platform tool the agent invoked.
+        const tool = typeof item.tool === "string" ? item.tool : undefined;
+        const server = typeof item.server === "string" ? item.server : undefined;
+        const name = tool ? `${server ?? "mcp"}__${tool}` : "mcp tool";
         return [
           {
             type: "appstrate.progress",

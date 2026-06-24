@@ -264,6 +264,14 @@ const codexProvider: ModelProviderDefinition = {
   subscriptionEngine: {
     engine: "codex",
     sidecarAuthMode: "vend",
+    // Suffix-matched, so this permits the in-container token to egress to ANY
+    // `*.openai.com` / `*.chatgpt.com` host, which is broader than the few hosts
+    // the CLI actually needs (`auth.openai.com` + `chatgpt.com/backend-api`).
+    // Accepted threat-model decision, NOT an exfil path: OpenAI owns every
+    // `*.openai.com` subdomain, the vended token is non-renewable and the
+    // container is ephemeral, and the forward proxy pins allowlisted hosts to
+    // :443 — so the token cannot be tunnelled to an attacker endpoint. Narrow to
+    // exact hosts only if the CLI's host set is ever pinned down and stable.
     egressAllowlist: ["chatgpt.com", "openai.com"],
   },
 };
