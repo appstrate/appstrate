@@ -125,7 +125,6 @@ const expectedEndpoints = [
   "POST /api/integrations/{packageId}/auths/{authKey}/connect/fields",
   "POST /api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
   "GET /api/integrations/{packageId}/connections",
-  "GET /api/integrations/{packageId}/agent-resolution/{agentPackageId}",
   "GET /api/integrations/{packageId}/consuming-agents",
   "PATCH /api/integrations/{packageId}/connections/{connectionId}",
   "PATCH /api/integrations/{packageId}/settings",
@@ -138,6 +137,7 @@ const expectedEndpoints = [
 
   // Agent Proxy
   "GET /api/agents/{scope}/{name}/proxy",
+  "GET /api/agents/{scope}/{name}/connection-readiness",
   "PUT /api/agents/{scope}/{name}/proxy",
 
   // Model Provider Credentials
