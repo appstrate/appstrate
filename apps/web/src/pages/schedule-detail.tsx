@@ -31,7 +31,7 @@ import { MoreHorizontal, Pencil, Trash2, Play, Pause, Clock } from "lucide-react
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
-  const { isMember } = usePermissions();
+  const { isAdmin } = usePermissions();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -64,7 +64,7 @@ export function ScheduleDetailPage() {
           actions={
             <>
               <LiveScheduleStatusBadge schedule={schedule} />
-              {isMember && (
+              {isAdmin && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="icon">

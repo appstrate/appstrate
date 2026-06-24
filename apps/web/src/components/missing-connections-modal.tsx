@@ -82,10 +82,10 @@ interface MissingConnectionsModalProps {
   onClose: () => void;
   errors: MissingIntegrationFieldError[];
   /**
-   * The agent whose run 412'd. Keys the per-integration server resolution
-   * (`GET /agent-resolution/:agentId`) each picker consumes so its status +
-   * CTA stay in lockstep with the Connexions tab. Omitted only by callers
-   * without the agent in context (none today).
+   * The agent whose run 412'd. Keys the bulk server resolution
+   * (`GET /api/agents/:scope/:name/connection-readiness`) each picker consumes
+   * so its status + CTA stay in lockstep with the Connexions tab. Omitted only
+   * by callers without the agent in context (none today).
    */
   agentPackageId?: string;
   /**

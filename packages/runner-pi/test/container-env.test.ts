@@ -56,6 +56,46 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_API_KEY).toBe("sk-test");
   });
 
+  // Regression: #741 — a no-sidecar run (static API key, no integrations/proxy)
+  // talks to the provider directly, so MODEL_BASE_URL must carry the model's
+  // native endpoint. Without it the Pi SDK falls back to api.openai.com and
+  // sends an OpenAI-compatible key (DeepSeek/Mistral/z.ai/…) to the wrong host.
+  it("emits the model's native baseUrl when the sidecar is skipped (#741)", () => {
+    const env = buildRuntimePiEnv({
+      model: {
+        api: "openai-completions",
+        modelId: "deepseek-chat",
+        baseUrl: "https://api.deepseek.com/v1",
+        apiKey: "sk-deepseek-secret",
+      },
+      agentPrompt: "p",
+      noSidecar: true,
+    });
+    expect(env.MODEL_BASE_URL).toBe("https://api.deepseek.com/v1");
+    // No-sidecar path hands the real key directly to the agent.
+    expect(env.MODEL_API_KEY).toBe("sk-deepseek-secret");
+  });
+
+  it("does not emit MODEL_BASE_URL when the sidecar is skipped but baseUrl is empty", () => {
+    const env = buildRuntimePiEnv({
+      model: { api: "openai-completions", modelId: "gpt-4o", baseUrl: "", apiKey: "sk-x" },
+      agentPrompt: "p",
+      noSidecar: true,
+    });
+    // Empty baseUrl → keep the SDK's native default rather than emit "".
+    expect(env.MODEL_BASE_URL).toBeUndefined();
+  });
+
+  it("prefers the sidecar proxy URL over the model baseUrl when both could apply", () => {
+    const env = buildRuntimePiEnv({
+      model: { ...model, baseUrl: "https://api.deepseek.com/v1", apiKey: "sk-x" },
+      agentPrompt: "p",
+      sidecarProxyLlmUrl: "http://sidecar:8080/llm",
+      noSidecar: true,
+    });
+    expect(env.MODEL_BASE_URL).toBe("http://sidecar:8080/llm");
+  });
+
   it("emits MODEL_INPUT / MODEL_COST / MODEL_CONTEXT_WINDOW / MODEL_MAX_TOKENS conditionally", () => {
     const env = buildRuntimePiEnv({
       model: {

@@ -1,11 +1,11 @@
 {
   "anthropic": ["claude-fable-5", "claude-opus-4-8", "claude-opus-4-7"],
   "cerebras": ["zai-glm-4.7", "gpt-oss-120b"],
-  "deepseek": ["deepseek-chat", "deepseek-reasoner"],
+  "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat"],
   "fireworks-ai": [
-    "accounts/fireworks/models/glm-5p1",
-    "accounts/fireworks/models/kimi-k2p5",
-    "accounts/fireworks/models/gpt-oss-120b"
+    "accounts/fireworks/models/glm-5p2",
+    "accounts/fireworks/models/kimi-k2p7-code",
+    "accounts/fireworks/models/minimax-m3"
   ],
   "google-ai": ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-flash-lite-preview"],
   "groq": ["openai/gpt-oss-safeguard-20b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],

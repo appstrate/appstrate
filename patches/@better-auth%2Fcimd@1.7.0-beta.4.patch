@@ -1,0 +1,26 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index b9657a059117934c1a2245197e3ce044c6b0cf73..6ef29b4ca7da3d05c5818dcd474bb0e77645ba16 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -161,10 +161,17 @@ function validateCimdMetadata(fetchUrl, raw, originBoundFields) {
+ 		valid: false,
+ 		error: "redirect_uris must be a non-empty array of absolute HTTP(S) URIs"
+ 	};
+-	if (doc.grant_types !== void 0 && !(Array.isArray(doc.grant_types) && doc.grant_types.every((g) => typeof g === "string" && ALLOWED_GRANT_TYPES.has(g)))) return {
+-		valid: false,
+-		error: `grant_types must be a subset of [${[...ALLOWED_GRANT_TYPES].map((g) => `"${g}"`).join(", ")}]`
+-	};
++	if (doc.grant_types !== void 0) {
++		if (!Array.isArray(doc.grant_types)) return {
++			valid: false,
++			error: "grant_types must be an array of strings"
++		};
++		doc.grant_types = doc.grant_types.filter((g) => typeof g === "string" && ALLOWED_GRANT_TYPES.has(g));
++		if (doc.grant_types.length === 0) return {
++			valid: false,
++			error: `grant_types must include at least one of [${[...ALLOWED_GRANT_TYPES].map((g) => `"${g}"`).join(", ")}]`
++		};
++	}
+ 	if (doc.response_types !== void 0 && !(Array.isArray(doc.response_types) && doc.response_types.every((r) => typeof r === "string" && ALLOWED_RESPONSE_TYPES.has(r)))) return {
+ 		valid: false,
+ 		error: "response_types must be a subset of [\"code\"]"

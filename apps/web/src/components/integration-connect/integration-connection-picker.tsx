@@ -28,6 +28,7 @@ import {
 import {
   invalidateIntegrationQueries,
   useIntegrationAgentResolution,
+  useIntegrationRunBlocking,
   type IntegrationAuthStatus,
   type IntegrationCandidate,
   type IntegrationManifestView,
@@ -40,9 +41,9 @@ import { FieldsConnectModal } from "./fields-connect-modal";
 import { useIntegrationOAuthPopup } from "./use-integration-oauth-popup";
 import { connectionDisplayLabel } from "./connection-label";
 import { connectableAuthKeys } from "./connectable-auth-keys";
-import { isIntegrationEntryActive, resolutionBlocksRun } from "./integration-run-readiness";
 import { requiredScopesForAgent } from "@appstrate/core/integration";
 import { client } from "../../api/client";
+import { splitPackageRef } from "../../lib/package-paths";
 
 /**
  * How the picker persists the actor's pick:
@@ -108,6 +109,9 @@ export function IntegrationConnectionPicker({
     integrationId,
     agentPackageId,
   );
+  // Authoritative run-blocking flag for this integration (run semantics) — same
+  // bulk query as the launch badge, selected per-integration.
+  const { data: runBlocking } = useIntegrationRunBlocking(integrationId, agentPackageId);
   const upsertPin = useUpsertMemberIntegrationPin();
   const deletePin = useDeleteMemberIntegrationPin();
   const { openPopup, isPending: oauthPending } = useIntegrationOAuthPopup();
@@ -253,11 +257,12 @@ export function IntegrationConnectionPicker({
         await refresh();
         return;
       }
-      const { data: fresh } = await client.GET(
-        "/api/integrations/{packageId}/agent-resolution/{agentPackageId}",
-        { params: { path: { packageId: integrationId, agentPackageId } } },
-      );
-      const added = fresh?.candidates.find((c) => !before.has(c.id));
+      const { data: fresh } = await client.GET("/api/agents/{scope}/{name}/connection-readiness", {
+        params: { path: splitPackageRef(agentPackageId) },
+      });
+      const freshCandidates = fresh?.integrations.find((i) => i.integration_id === integrationId)
+        ?.resolution.candidates;
+      const added = freshCandidates?.find((c) => !before.has(c.id));
       if (added) await applyPick(added.id);
       else await refresh();
     } else {
@@ -282,20 +287,15 @@ export function IntegrationConnectionPicker({
   // under-scoped (run would be blocked). In override mode "no pick" is a valid
   // inherit state, so only the under-scoped case warns.
   //
-  // The trigger paints amber on exactly the states that gate a run — the SAME
-  // predicate (`resolutionBlocksRun`) the launch badge and the 412 modal use,
-  // so the picker can never disagree with the badge for a given integration.
-  //
-  // Gated on `entryActive`: an inert integration (agent selected no tool/scope)
-  // is never spawned at runtime, so it never gates Run — the launch badge skips
-  // it entirely (use-agent-integrations-readiness). A `must_choose` / `stale` /
-  // `none` on an inert entry is a manageable ambiguity, NOT a run-blocking
-  // error, so it stays neutral here too.
+  // The trigger paints amber on exactly the states that gate a run. In pin mode
+  // it reads the server's authoritative `run_blocking` flag (the same bulk
+  // connection-readiness query the launch badge uses — and the same resolver the
+  // run-kickoff 412 runs, including the required-auth carve-out for inert
+  // integrations), so the picker can never disagree with the badge.
   //
   // Override mode (schedule editor) keeps its own rule: "no pick" = inherit is
   // valid, so only the SELECTED override connection being under-scoped warns.
-  const entryActive = isIntegrationEntryActive({ tools: agentTools, scopes: agentScopes });
-  const triggerWarn = overrideMode ? underScoped : entryActive && resolutionBlocksRun(resolution);
+  const triggerWarn = overrideMode ? underScoped : (runBlocking ?? false);
   const TriggerIcon = triggerWarn ? AlertTriangle : displayConn ? Users : Plus;
 
   // Blocked for this member AND nothing to pick → dead end. Show a

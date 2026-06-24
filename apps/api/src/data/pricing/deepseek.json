@@ -77,5 +77,33 @@
       "input": 0.28,
       "output": 0.4
     }
+  },
+  "deepseek-v4-flash": {
+    "label": "Deepseek V4 Flash",
+    "contextWindow": 1000000,
+    "maxTokens": 8192,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 0.14,
+      "output": 0.28,
+      "cacheRead": 0.0028,
+      "cacheWrite": 0
+    }
+  },
+  "deepseek-v4-pro": {
+    "label": "Deepseek V4 Pro",
+    "contextWindow": 1000000,
+    "maxTokens": 8192,
+    "capabilities": [
+      "text"
+    ],
+    "cost": {
+      "input": 0.435,
+      "output": 0.87,
+      "cacheRead": 0.003625,
+      "cacheWrite": 0
+    }
   }
 }

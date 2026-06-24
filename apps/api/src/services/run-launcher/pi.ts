@@ -313,11 +313,12 @@ async function runPlatformContainerImpl(
       agentPrompt: prompt,
       runId,
       noSidecar: skipSidecar,
-      // Without a sidecar, MODEL_BASE_URL is omitted — the Pi SDK falls
-      // back to the api-shape's native default (e.g. api.openai.com).
-      // The model definition's baseUrl is already wired on the Model
-      // object via PiRunner; runtime-pi doesn't need MODEL_BASE_URL when
-      // talking directly to the upstream.
+      // Sidecar-backed runs route LLM traffic through the sidecar proxy
+      // (sidecarProxyLlmUrl below). No-sidecar runs talk to the upstream
+      // directly, so buildRuntimePiEnv derives MODEL_BASE_URL from the
+      // model's own baseUrl (passed in `model` above) — otherwise the Pi
+      // SDK falls back to the api-shape's native default (api.openai.com)
+      // and misroutes custom-baseUrl providers like DeepSeek. See #741.
       sidecarProxyLlmUrl: skipSidecar
         ? undefined
         : llmApiKey

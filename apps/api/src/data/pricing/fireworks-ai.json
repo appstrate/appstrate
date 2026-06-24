@@ -590,6 +590,34 @@
       "output": 1.68
     }
   },
+  "accounts/fireworks/models/deepseek-v4-flash": {
+    "label": "Accounts/fireworks/models/deepseek V4 Flash",
+    "contextWindow": 1048576,
+    "maxTokens": 384000,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.14,
+      "output": 0.28,
+      "cacheRead": 0.028
+    }
+  },
+  "accounts/fireworks/models/deepseek-v4-pro": {
+    "label": "Accounts/fireworks/models/deepseek V4 Pro",
+    "contextWindow": 1048576,
+    "maxTokens": 384000,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 1.74,
+      "output": 3.48,
+      "cacheRead": 0.145
+    }
+  },
   "accounts/fireworks/models/devstral-small-2505": {
     "label": "Accounts/fireworks/models/devstral Small 2505",
     "contextWindow": 131072,
@@ -899,7 +927,21 @@
   "accounts/fireworks/models/glm-5p1": {
     "label": "Accounts/fireworks/models/glm 5p1",
     "contextWindow": 202800,
-    "maxTokens": null,
+    "maxTokens": 131072,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 1.4,
+      "output": 4.4,
+      "cacheRead": 0.26
+    }
+  },
+  "accounts/fireworks/models/glm-5p2": {
+    "label": "Accounts/fireworks/models/glm 5p2",
+    "contextWindow": 1048576,
+    "maxTokens": 131072,
     "capabilities": [
       "text",
       "reasoning"
@@ -913,27 +955,29 @@
   "accounts/fireworks/models/gpt-oss-120b": {
     "label": "Accounts/fireworks/models/gpt Oss 120b",
     "contextWindow": 131072,
-    "maxTokens": null,
+    "maxTokens": 32768,
     "capabilities": [
       "text",
       "reasoning"
     ],
     "cost": {
       "input": 0.15,
-      "output": 0.6
+      "output": 0.6,
+      "cacheRead": 0.015
     }
   },
   "accounts/fireworks/models/gpt-oss-20b": {
     "label": "Accounts/fireworks/models/gpt Oss 20b",
     "contextWindow": 131072,
-    "maxTokens": null,
+    "maxTokens": 32768,
     "capabilities": [
       "text",
       "reasoning"
     ],
     "cost": {
-      "input": 0.05,
-      "output": 0.2
+      "input": 0.07,
+      "output": 0.3,
+      "cacheRead": 0.035
     }
   },
   "accounts/fireworks/models/gpt-oss-safeguard-120b": {
@@ -1091,6 +1135,36 @@
       "input": 0.6,
       "output": 3,
       "cacheRead": 0.1
+    }
+  },
+  "accounts/fireworks/models/kimi-k2p6": {
+    "label": "Accounts/fireworks/models/kimi K2p6",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.95,
+      "output": 4,
+      "cacheRead": 0.16
+    }
+  },
+  "accounts/fireworks/models/kimi-k2p7-code": {
+    "label": "Accounts/fireworks/models/kimi K2p7 Code",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.95,
+      "output": 4,
+      "cacheRead": 0.19
     }
   },
   "accounts/fireworks/models/llama-guard-2-8b": {
@@ -1490,6 +1564,34 @@
       "input": 0.3,
       "output": 1.2,
       "cacheRead": 0.03
+    }
+  },
+  "accounts/fireworks/models/minimax-m2p7": {
+    "label": "Accounts/fireworks/models/minimax M2p7",
+    "contextWindow": 196608,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.3,
+      "output": 1.2,
+      "cacheRead": 0.06
+    }
+  },
+  "accounts/fireworks/models/minimax-m3": {
+    "label": "Accounts/fireworks/models/minimax M3",
+    "contextWindow": 512000,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.3,
+      "output": 1.2,
+      "cacheRead": 0.06
     }
   },
   "accounts/fireworks/models/ministral-3-14b-instruct-2512": {
@@ -2731,6 +2833,21 @@
       "output": 0.2
     }
   },
+  "accounts/fireworks/models/qwen3p7-plus": {
+    "label": "Accounts/fireworks/models/qwen3p7 Plus",
+    "contextWindow": 262144,
+    "maxTokens": 65536,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.4,
+      "output": 1.6,
+      "cacheRead": 0.08
+    }
+  },
   "accounts/fireworks/models/qwq-32b": {
     "label": "Accounts/fireworks/models/qwq 32b",
     "contextWindow": 131072,
@@ -2923,6 +3040,78 @@
       "output": 0.2
     }
   },
+  "accounts/fireworks/routers/glm-5p1-fast": {
+    "label": "Accounts/fireworks/routers/glm 5p1 Fast",
+    "contextWindow": 202800,
+    "maxTokens": 131072,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 2.8,
+      "output": 8.8,
+      "cacheRead": 0.52
+    }
+  },
+  "accounts/fireworks/routers/kimi-k2p6-fast": {
+    "label": "Accounts/fireworks/routers/kimi K2p6 Fast",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 2,
+      "output": 8,
+      "cacheRead": 0.3
+    }
+  },
+  "accounts/fireworks/routers/kimi-k2p7-code-fast": {
+    "label": "Accounts/fireworks/routers/kimi K2p7 Code Fast",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 1.9,
+      "output": 8,
+      "cacheRead": 0.38
+    }
+  },
+  "deepseek-v4-flash": {
+    "label": "Deepseek V4 Flash",
+    "contextWindow": 1048576,
+    "maxTokens": 384000,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.14,
+      "output": 0.28,
+      "cacheRead": 0.028
+    }
+  },
+  "deepseek-v4-pro": {
+    "label": "Deepseek V4 Pro",
+    "contextWindow": 1048576,
+    "maxTokens": 384000,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 1.74,
+      "output": 3.48,
+      "cacheRead": 0.145
+    }
+  },
   "glm-4p7": {
     "label": "Glm 4p7",
     "contextWindow": 202800,
@@ -2940,7 +3129,7 @@
   "glm-5p1": {
     "label": "Glm 5p1",
     "contextWindow": 202800,
-    "maxTokens": null,
+    "maxTokens": 131072,
     "capabilities": [
       "text",
       "reasoning"
@@ -2949,6 +3138,62 @@
       "input": 1.4,
       "output": 4.4,
       "cacheRead": 0.26
+    }
+  },
+  "glm-5p1-fast": {
+    "label": "Glm 5p1 Fast",
+    "contextWindow": 202800,
+    "maxTokens": 131072,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 2.8,
+      "output": 8.8,
+      "cacheRead": 0.52
+    }
+  },
+  "glm-5p2": {
+    "label": "Glm 5p2",
+    "contextWindow": 1048576,
+    "maxTokens": 131072,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 1.4,
+      "output": 4.4,
+      "cacheRead": 0.26
+    }
+  },
+  "gpt-oss-120b": {
+    "label": "Gpt Oss 120b",
+    "contextWindow": 131072,
+    "maxTokens": 32768,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.15,
+      "output": 0.6,
+      "cacheRead": 0.015
+    }
+  },
+  "gpt-oss-20b": {
+    "label": "Gpt Oss 20b",
+    "contextWindow": 131072,
+    "maxTokens": 32768,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.07,
+      "output": 0.3,
+      "cacheRead": 0.035
     }
   },
   "kimi-k2p5": {
@@ -2964,6 +3209,66 @@
       "cacheRead": 0.1
     }
   },
+  "kimi-k2p6": {
+    "label": "Kimi K2p6",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.95,
+      "output": 4,
+      "cacheRead": 0.16
+    }
+  },
+  "kimi-k2p6-fast": {
+    "label": "Kimi K2p6 Fast",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 2,
+      "output": 8,
+      "cacheRead": 0.3
+    }
+  },
+  "kimi-k2p7-code": {
+    "label": "Kimi K2p7 Code",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.95,
+      "output": 4,
+      "cacheRead": 0.19
+    }
+  },
+  "kimi-k2p7-code-fast": {
+    "label": "Kimi K2p7 Code Fast",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 1.9,
+      "output": 8,
+      "cacheRead": 0.38
+    }
+  },
   "minimax-m2p1": {
     "label": "Minimax M2p1",
     "contextWindow": 204800,
@@ -2975,6 +3280,49 @@
       "input": 0.3,
       "output": 1.2,
       "cacheRead": 0.03
+    }
+  },
+  "minimax-m2p7": {
+    "label": "Minimax M2p7",
+    "contextWindow": 196608,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.3,
+      "output": 1.2,
+      "cacheRead": 0.06
+    }
+  },
+  "minimax-m3": {
+    "label": "Minimax M3",
+    "contextWindow": 512000,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.3,
+      "output": 1.2,
+      "cacheRead": 0.06
+    }
+  },
+  "qwen3p7-plus": {
+    "label": "Qwen3p7 Plus",
+    "contextWindow": 262144,
+    "maxTokens": 65536,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.4,
+      "output": 1.6,
+      "cacheRead": 0.08
     }
   }
 }

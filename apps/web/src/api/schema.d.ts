@@ -219,6 +219,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{scope}/{name}/connection-readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bulk integration connection readiness for an agent
+         * @description Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict (identical to the run-kickoff 412 — run semantics, includeInert false + required-auth carve-out). `integrations[]` lists every declared integration with its management verdict (includeInert true) so the Connexions tab and the launch badge share one source of truth.
+         */
+        get: operations["getAgentConnectionReadiness"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{scope}/{name}/model": {
         parameters: {
             query?: never;
@@ -1319,26 +1339,6 @@ export interface paths {
         put?: never;
         /** Activate an integration in the current application */
         post: operations["activateIntegration"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/integrations/{packageId}/agent-resolution/{agentPackageId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Resolve which connection an agent uses for an integration
-         * @description Single-source verdict for the agent-page connection picker. Returns which connection the next run would use (admin pin → run/schedule override → member pin → fallback + scope check), the annotated candidate list (own + shared, each with the scopes it lacks for the agent's selected tools), and the admin/member pin + blocked state. Computed by the same resolver the runtime uses so the UI never re-implements the cascade.
-         */
-        get: operations["resolveAgentIntegrationConnection"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4469,6 +4469,30 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Bulk integration connection readiness for an agent. `blocks_run`/`errors` mirror the run-kickoff 412 (run semantics); `integrations[]` carries every declared integration's management verdict for the Connexions tab. */
+        AgentConnectionReadiness: {
+            /** @description True iff POST /api/agents/{scope}/{name}/run would reject with 412. */
+            blocks_run: boolean;
+            /** @description Integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors). */
+            errors: {
+                field: string;
+                code: string;
+                title: string;
+                message: string;
+                candidate_connection_ids?: string[];
+                connection_id?: string;
+                missing_scopes?: string[];
+                owned_by_actor?: boolean;
+                required_auth_key?: string;
+                available_auth_keys?: string[];
+            }[];
+            integrations: {
+                integration_id: string;
+                /** @description True iff this integration is one of the run-blocking `errors`. */
+                run_blocking: boolean;
+                resolution: components["schemas"]["IntegrationAgentResolution"];
+            }[];
+        };
         AgentDetail: {
             id: string;
             display_name?: string;
@@ -4733,6 +4757,34 @@ export interface components {
                 /** @description Maximum file size in bytes */
                 max_size?: number;
             };
+        };
+        /** @description Per-integration connection verdict for an agent: which connection the next run uses (admin pin → run/schedule override → member pin → fallback + scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses. */
+        IntegrationAgentResolution: {
+            /** @enum {string} */
+            status: "admin_locked" | "pinned" | "auto" | "must_choose" | "none" | "stale" | "needs_reconnection";
+            resolved_connection_id: string | null;
+            resolved_missing_scopes: string[];
+            resolved_owned_by_actor: boolean;
+            admin_pinned_connection_id: string | null;
+            member_pinned_connection_id: string | null;
+            org_default_connection_id: string | null;
+            org_default_enforced: boolean;
+            can_add_connection: boolean;
+            candidates: {
+                /** Format: uuid */
+                id: string;
+                auth_key: string;
+                account_id: string;
+                label: string | null;
+                owner_user_id: string | null;
+                owner_end_user_id: string | null;
+                owner_name: string | null;
+                scopes_granted: string[];
+                shared_with_org: boolean;
+                needs_reconnection: boolean;
+                missing_scopes: string[];
+                is_own: boolean;
+            }[];
         };
         /** @description Live credentials + per-auth HTTP delivery plans + per-auth expiries for an installed integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`. All wire keys are snake_case per AFPS (see `docs/CASING_CONVENTIONS.md` — internal sidecar↔platform endpoints share the Zone 1 default). */
         IntegrationCredentialsResponse: {
@@ -6218,6 +6270,41 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    getAgentConnectionReadiness: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connection readiness */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConnectionReadiness"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     getAgentModel: {
         parameters: {
             query?: never;
@@ -6930,6 +7017,11 @@ export interface operations {
                     dependency_overrides?: {
                         [key: string]: string;
                     };
+                    /** @description Execution identity for runs this schedule fires (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to default to the calling identity. Requires `schedules:write`. */
+                    actor?: {
+                        user_id?: string;
+                        end_user_id?: string;
+                    } & (unknown | unknown);
                 };
             };
         };
@@ -9430,6 +9522,8 @@ export interface operations {
                 externalId?: string;
                 /** @description Filter by email address (exact match) */
                 email?: string;
+                /** @description Case-insensitive substring match across name, email, and external ID */
+                search?: string;
                 /** @description Maximum number of end-users to return */
                 limit?: number;
                 /** @description Cursor for forward pagination (end-user ID to start after) */
@@ -10027,65 +10121,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-        };
-    };
-    resolveAgentIntegrationConnection: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Integration package id (e.g. `@official/gmail`). */
-                packageId: string;
-                /** @description Agent package id (e.g. `@acme/my-agent`). */
-                agentPackageId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Resolution verdict */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        status: "admin_locked" | "pinned" | "auto" | "must_choose" | "none" | "stale" | "needs_reconnection";
-                        resolved_connection_id: string | null;
-                        resolved_missing_scopes: string[];
-                        resolved_owned_by_actor: boolean;
-                        admin_pinned_connection_id: string | null;
-                        member_pinned_connection_id: string | null;
-                        org_default_connection_id: string | null;
-                        org_default_enforced: boolean;
-                        can_add_connection: boolean;
-                        candidates: {
-                            /** Format: uuid */
-                            id: string;
-                            auth_key: string;
-                            account_id: string;
-                            label: string | null;
-                            owner_user_id: string | null;
-                            owner_end_user_id: string | null;
-                            owner_name: string | null;
-                            scopes_granted: string[];
-                            shared_with_org: boolean;
-                            needs_reconnection: boolean;
-                            missing_scopes: string[];
-                            is_own: boolean;
-                        }[];
-                    };
-                };
-            };
-            403: components["responses"]["Forbidden"];
         };
     };
     listIntegrationClients: {
@@ -18158,6 +18193,11 @@ export interface operations {
                     dependency_overrides?: {
                         [key: string]: string;
                     } | null;
+                    /** @description Re-point the schedule's execution identity (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`. */
+                    actor?: {
+                        user_id?: string;
+                        end_user_id?: string;
+                    } & (unknown | unknown);
                 };
             };
         };

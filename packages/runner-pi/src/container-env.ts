@@ -129,11 +129,21 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   if (opts.runId) env.AGENT_RUN_ID = opts.runId;
   if (opts.agentInput !== undefined) env.AGENT_INPUT = JSON.stringify(opts.agentInput);
 
-  // MODEL_BASE_URL is only emitted when going through a proxy — Pi SDK
-  // falls back to upstream defaults when unset, so emitting an empty
-  // string would silently override the SDK's per-API defaults.
+  // MODEL_BASE_URL tells the Pi SDK where to send inference. Two cases set it:
+  //   1. Sidecar-backed run — point at the sidecar LLM proxy, which injects the
+  //      real credential and forwards to the upstream provider.
+  //   2. No-sidecar run (static API key, no integrations/proxy) — the agent talks
+  //      to the provider directly, so it needs the model's native endpoint.
+  // Without (2), MODEL_BASE_URL stays empty and the entrypoint falls back to the
+  // Pi SDK's per-`api` default (api.openai.com for `openai-*`), which silently
+  // misroutes every OpenAI-compatible provider with a custom base URL (DeepSeek,
+  // Mistral, z.ai, OpenRouter, …) to OpenAI. See issue #741.
+  // We never emit an empty string: an absent key keeps the SDK default for the
+  // few providers whose native default is already correct.
   if (opts.sidecarProxyLlmUrl) {
     env.MODEL_BASE_URL = opts.sidecarProxyLlmUrl;
+  } else if (opts.noSidecar && model.baseUrl) {
+    env.MODEL_BASE_URL = model.baseUrl;
   }
   if (model.apiKey) {
     const placeholder = model.apiKeyPlaceholder ?? model.apiKey;
