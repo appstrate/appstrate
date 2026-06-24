@@ -24,6 +24,7 @@
     "@appstrate/mcp-transport": "workspace:*",
     "@appstrate/module-claude-code": "workspace:*",
     "@appstrate/module-codex": "workspace:*",
+    "@appstrate/module-search": "workspace:*",
     "@appstrate/module-storage": "workspace:*",
     "@appstrate/runner-pi": "workspace:*",
     "@appstrate/shared-types": "workspace:*",
