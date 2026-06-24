@@ -32,7 +32,7 @@ import {
   assertVendRunHasNoIntegrations,
   buildOauthSidecarLlm,
   resolveCredentialDelivery,
-} from "./engine-select.ts";
+} from "./subscription-run-policy.ts";
 import { getExecutionMode } from "../../infra/mode.ts";
 import { providerHasNativeOutput } from "@appstrate/core/subscription-engines";
 import {

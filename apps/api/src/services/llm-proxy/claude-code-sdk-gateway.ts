@@ -34,11 +34,11 @@
 import type { Context } from "hono";
 import { anthropicMessagesAdapter } from "./anthropic.ts";
 import { forwardMeteredResponse } from "./metering.ts";
-import { make410AuthTranslator, resolveSubscriptionToken } from "./subscription-token.ts";
+import { loadModel, modelNeedsReconnection, type ResolvedModel } from "../org-models.ts";
+import { resolveOAuthTokenForSidecar } from "../model-providers/token-resolver.ts";
 import { markCredentialNeedsReconnection } from "../model-providers/credentials.ts";
 import { buildLlmProxyPrincipal } from "./types.ts";
-import { registerSubscriptionGateway } from "./subscription-gateways.ts";
-import { invalidRequest } from "../../lib/errors.ts";
+import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
@@ -118,10 +118,65 @@ export function anthropicAuthErrorResponse(): Response {
  * Translate a token-resolution failure into {@link anthropicAuthErrorResponse}
  * when it is a `gone()` (HTTP 410) — a refresh-time revocation discovered by
  * `resolveOAuthTokenForSidecar`. (The pre-flagged `needsReconnection` case is
- * caught earlier, at `loadModel`, via `modelNeedsReconnection`.) See
- * {@link make410AuthTranslator}.
+ * caught earlier, at `loadModel`, via `modelNeedsReconnection`.) Any other error
+ * returns `null` so the caller rethrows it unchanged (an unexpected failure must
+ * not masquerade as an auth problem). Exported for unit testing.
  */
-export const subscriptionAuthErrorResponse = make410AuthTranslator(anthropicAuthErrorResponse);
+export function subscriptionAuthErrorResponse(err: unknown): Response | null {
+  if (!(err instanceof ApiError) || err.status !== 410) return null;
+  return anthropicAuthErrorResponse();
+}
+
+interface ResolvedClaudeSubscription {
+  resolved: ResolvedModel;
+  token: Awaited<ReturnType<typeof resolveOAuthTokenForSidecar>>;
+}
+
+/**
+ * Resolve the preset → claude-code credential + real model + cost + a fresh
+ * subscription token, scoped to the org. Returns a ready-to-return error
+ * `Response` for the two reconnect paths (pre-flagged + refresh-time 410); any
+ * other failure throws. Previously a generic `resolveSubscriptionToken` helper
+ * shared "with the Codex vend", but the Codex path vends sidecar-side and never
+ * used it — so this is inlined claude-code-specific (its sole caller).
+ */
+async function resolveClaudeSubscriptionToken(
+  orgId: string,
+  presetId: string,
+): Promise<ResolvedClaudeSubscription | Response> {
+  const logLabel = "claude-code-sdk gateway";
+
+  const resolved = await loadModel(orgId, presetId);
+  if (!resolved) {
+    if (await modelNeedsReconnection(orgId, presetId)) {
+      logger.warn(`${logLabel}: subscription needs reconnection (pre-flagged)`, { presetId });
+      return anthropicAuthErrorResponse();
+    }
+    throw invalidRequest(`Model preset "${presetId}" is not enabled for this org`);
+  }
+  if (resolved.providerId !== CLAUDE_CODE_PROVIDER_ID) {
+    throw invalidRequest(
+      `Model preset "${presetId}" is not a Claude Code subscription model (provider: ${resolved.providerId})`,
+    );
+  }
+  if (!resolved.credentialId) {
+    throw invalidRequest(`Model preset "${presetId}" has no OAuth credential to resolve`);
+  }
+
+  let token: Awaited<ReturnType<typeof resolveOAuthTokenForSidecar>>;
+  try {
+    token = await resolveOAuthTokenForSidecar(resolved.credentialId, orgId);
+  } catch (err) {
+    const authError = subscriptionAuthErrorResponse(err);
+    if (authError) {
+      logger.warn(`${logLabel}: subscription needs reconnection`, { presetId });
+      return authError;
+    }
+    throw err;
+  }
+
+  return { resolved, token };
+}
 
 /**
  * Handle one upstream call from the Claude Agent SDK. The route layer has
@@ -146,20 +201,9 @@ export async function handleClaudeCodeSdkGateway(
   }
 
   // Resolve the preset → credential + real model + cost + a fresh subscription
-  // token, scoped to the org (shared with the Codex vend). Must be a Claude Code
-  // subscription model: this route injects an OAuth subscription token, which
-  // only the claude-code provider may receive. The two reconnect paths
-  // (pre-flagged + refresh-time 410) return an Anthropic-native 401 the SDK
-  // surfaces as an actionable reconnect prompt.
-  const result = await resolveSubscriptionToken({
-    orgId,
-    presetId,
-    expectedProviderId: CLAUDE_CODE_PROVIDER_ID,
-    providerLabel: "Claude Code",
-    authErrorResponse: anthropicAuthErrorResponse,
-    translateAuthError: subscriptionAuthErrorResponse,
-    logLabel: "claude-code-sdk gateway",
-  });
+  // token, scoped to the org. The two reconnect paths (pre-flagged + refresh-time
+  // 410) return an Anthropic-native 401 the SDK surfaces as a reconnect prompt.
+  const result = await resolveClaudeSubscriptionToken(orgId, presetId);
   if (result instanceof Response) return result;
   const { resolved, token } = result;
 
@@ -233,10 +277,3 @@ export async function handleClaudeCodeSdkGateway(
     },
   );
 }
-
-// Self-register this handler in the provider-id-keyed gateway registry, so the
-// llm-proxy router mounts the route data-driven from the subscription-engine
-// registry (engine binding flagged `chatGateway`) with no vendor literal in the
-// router. Co-located with the handler so a new gateway provider's wiring lives
-// next to its implementation.
-registerSubscriptionGateway(CLAUDE_CODE_PROVIDER_ID, handleClaudeCodeSdkGateway);

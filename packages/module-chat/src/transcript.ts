@@ -8,9 +8,9 @@
  * A single user turn is sent verbatim; multiple turns become a labelled
  * `User:`/`Assistant:` transcript so a stateless driver gets the full
  * conversational context. Non-text parts (tool calls, files) are dropped — only
- * text survives into the transcript. An optional `system` persona is prepended
- * (the codex CLI takes no separate system arg; the Claude SDK does, so it omits
- * it here and passes system through the SDK instead).
+ * text survives into the transcript. The system persona is NOT prepended here:
+ * the only caller (the Claude Agent SDK chatHandler) passes system through the
+ * SDK's own system arg.
  *
  * KNOWN LIMITATION (lossy vs the ai-sdk path): the ai-sdk chat path feeds the
  * model `convertToModelMessages(messages)` — a structured array preserving tool
@@ -23,7 +23,7 @@
 
 import type { UIMessage } from "ai";
 
-export function buildTranscriptPrompt(messages: UIMessage[], opts?: { system?: string }): string {
+export function buildTranscriptPrompt(messages: UIMessage[]): string {
   const textOf = (m: UIMessage): string =>
     (m.parts ?? [])
       .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -43,6 +43,5 @@ export function buildTranscriptPrompt(messages: UIMessage[], opts?: { system?: s
         ? turns[0]!.text
         : turns.map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.text}`).join("\n\n");
 
-  const system = opts?.system;
-  return system ? `${system}\n\n---\n\n${transcript}` : transcript;
+  return transcript;
 }

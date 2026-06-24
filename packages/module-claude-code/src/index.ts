@@ -141,7 +141,7 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // sidecar fingerprint forging: a `claude-code` run executes on the official
   // Claude Agent SDK (the `claude` runner engine), whose binary signs its own
   // client fingerprint. The sidecar's OAuth mode only swaps the bearer + ensures
-  // the OAuth beta — see `runtime-pi/sidecar/app.ts` and `engine-select.ts`.
+  // the OAuth beta — see `runtime-pi/sidecar/app.ts` and `subscription-run-policy.ts`.
   //
   // Engine binding contributed to the core subscription-engine registry at
   // registration: runs + chat execute on the Claude Agent SDK (official binary,
@@ -157,13 +157,11 @@ const claudeCodeProvider: ModelProviderDefinition = {
     engine: "claude",
     sidecarAuthMode: "oauth",
     nativeOutput: true,
-    chatHandler: runClaudeAgentChat,
-    // The chat surface is driven through the `/api/llm-proxy/claude-code-sdk/…`
+    // The chat surface is also driven through the `/api/llm-proxy/claude-code-sdk/…`
     // credential-injection gateway (the official Claude Agent SDK points its
-    // ANTHROPIC_BASE_URL there). This flag lets the platform mount that gateway
-    // route data-driven from the registry — the handler stays in apps/api,
-    // keyed by provider id — instead of a hardcoded engine→handler map.
-    chatGateway: true,
+    // ANTHROPIC_BASE_URL there). The platform mounts that gateway whenever this
+    // `claude-code` subscription engine is registered — no separate flag needed.
+    chatHandler: runClaudeAgentChat,
   },
   hooks: claudeCodeHooks,
 };

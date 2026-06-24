@@ -14,7 +14,7 @@ import {
   VendRunIntegrationsError,
   buildOauthSidecarLlm,
   UnrunnableOauthProviderError,
-} from "../../../src/services/run-launcher/engine-select.ts";
+} from "../../../src/services/run-launcher/subscription-run-policy.ts";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 import {
   registerModelProvider,
