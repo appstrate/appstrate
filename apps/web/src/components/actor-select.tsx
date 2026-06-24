@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronsUpDown } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Button } from "@appstrate/ui/components/button";
+import { Badge } from "@appstrate/ui/components/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import {
   Command,
   CommandEmpty,
@@ -13,7 +13,7 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from "@/components/ui/command";
+} from "@appstrate/ui/components/command";
 import { cn } from "@/lib/utils";
 import { $api } from "../api/client";
 import { useCurrentOrgId } from "../hooks/use-org";
