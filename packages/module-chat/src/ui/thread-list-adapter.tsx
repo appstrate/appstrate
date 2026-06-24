@@ -36,10 +36,14 @@ function titleInput(messages: readonly ThreadMessage[]): { role: string; text: s
     .slice(0, 6);
 }
 
-/** Local fallback when the LLM title call fails — first user message, trimmed. */
+/**
+ * Local title from the first user message, trimmed. Mirrors the server's
+ * deriveTitle() truncation (60/57) so the live-emitted title matches the value
+ * the server persists — no re-render when list()/fetch() read it back.
+ */
 function fallbackTitle(items: { role: string; text: string }[]): string {
   const first = items.find((m) => m.role === "user")?.text ?? items[0]?.text ?? "";
-  return first.length > 50 ? `${first.slice(0, 47)}…` : first;
+  return first.length > 60 ? `${first.slice(0, 57)}…` : first;
 }
 
 export function makeThreadListAdapter(getHeaders: GetHeaders): RemoteThreadListAdapter {
@@ -83,13 +87,15 @@ export function makeThreadListAdapter(getHeaders: GetHeaders): RemoteThreadListA
     // Called once after the first turn. The adapter interface requires this
     // method, so we derive the title from the trimmed first user message
     // (no model call) and emit it on the stream so the runtime applies it live.
-    // The server independently persists the same trim via deriveTitle() on the
-    // first message append.
-    async generateTitle(remoteId, messages) {
+    // We do NOT persist it here: the server authoritatively persists the same
+    // trim via deriveTitle() on the first message append, and list()/fetch()
+    // read that back. A client PATCH would be redundant (and, if the trims ever
+    // drift, would cause a visible re-render when the server value wins) — so
+    // fallbackTitle mirrors deriveTitle's 60/57 truncation exactly.
+    async generateTitle(_remoteId, messages) {
       const items = titleInput(messages);
       if (items.length === 0) return createAssistantStream(() => {});
       const title = fallbackTitle(items);
-      if (title) void renameSession(getHeaders, remoteId, title).catch(() => {});
       return createAssistantStream((controller) => {
         if (title) controller.appendText(title);
       });

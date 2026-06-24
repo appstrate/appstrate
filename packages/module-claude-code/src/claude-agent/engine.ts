@@ -30,8 +30,7 @@ import { createLogger } from "@appstrate/core/logger";
 import type { ChatEngineInput } from "@appstrate/core/subscription-engines";
 import { resolveClaudeCodeBinary } from "./binary.ts";
 import { SdkUiStreamMapper, type ClaudeSdkMessage } from "./ui-stream-mapper.ts";
-import { acquireClaudeSlot } from "./concurrency.ts";
-import { chatCapacityResponse } from "./concurrency-gate.ts";
+import { acquireClaudeSlot, chatCapacityResponse } from "./concurrency.ts";
 
 const logger = createLogger(process.env.LOG_LEVEL ?? "info");
 
