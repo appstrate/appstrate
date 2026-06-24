@@ -53,6 +53,9 @@ const WebhookDetailPage = lazy(() =>
 const AuthCallbackPage = lazy(() =>
   import("./modules/oidc/pages/auth-callback").then((m) => ({ default: m.AuthCallbackPage })),
 );
+const StorageModulePage = lazy(() =>
+  import("./modules/storage/storage-page").then((m) => ({ default: m.StorageModulePage })),
+);
 
 // Route-level code splitting — heavy authenticated pages are lazy-loaded so
 // the entry chunk only carries the login/dashboard shell. Same Suspense +
@@ -787,6 +790,16 @@ export function App() {
                   }
                 />
               </>
+            )}
+            {features.storage && (
+              <Route
+                path="/storage"
+                element={
+                  <Suspense fallback={<LoadingState />}>
+                    <StorageModulePage />
+                  </Suspense>
+                }
+              />
             )}
             {/* App-scoped routes (read applicationId from store, like orgId) */}
             <Route

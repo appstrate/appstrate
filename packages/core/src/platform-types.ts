@@ -257,3 +257,39 @@ export interface PubSub {
   unsubscribe(channel: string): Promise<void>;
   shutdown(): Promise<void>;
 }
+
+// ---------------------------------------------------------------------------
+// Credential proxy — structural contract
+//
+// Lets a module make an authenticated outbound call to a third-party API
+// using one of the CALLER's existing integration connections: the platform
+// substitutes the credential server-side (the same credential-proxy the
+// agent runtime uses), so the module never sees the raw provider token and
+// never rolls its own OAuth. Consumer: module-storage cloud disks
+// (e.g. browse a Google Drive folder via the user's Drive connection).
+// ---------------------------------------------------------------------------
+
+export interface CredentialProxyCallInput {
+  /** Application that owns the credentials (the org's default app if unscoped). */
+  applicationId: string;
+  /** Actor whose integration connection is decrypted. */
+  actor: Actor;
+  /** Scoped integration package id, e.g. `@appstrate/google-drive`. */
+  integrationId: string;
+  /** Optional connection pin (multi-account) — the connection the user picked. */
+  connectionId?: string;
+  /** Upstream HTTP method. */
+  method: string;
+  /** Upstream URL — validated server-side against the integration's authorized URIs. */
+  target: string;
+  /** Headers forwarded upstream (the credential header is added server-side). */
+  headers?: Record<string, string>;
+  /** Optional request body. */
+  body?: string | Uint8Array | ReadableStream<Uint8Array> | null;
+}
+
+export interface CredentialProxyCallResult {
+  status: number;
+  headers: Headers;
+  body: ReadableStream<Uint8Array> | null;
+}
