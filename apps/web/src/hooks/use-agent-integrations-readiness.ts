@@ -1,13 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useAgentConnectionReadiness } from "./use-integrations";
+import { useQueries } from "@tanstack/react-query";
+import type { AgentIntegrationEntry } from "@appstrate/shared-types";
+import { useCurrentOrgId } from "./use-org";
+import { useCurrentApplicationId } from "./use-current-application";
+import { agentResolutionQueryOptions } from "./use-integrations";
+import {
+  isIntegrationEntryActive,
+  resolutionBlocksRun,
+} from "../components/integration-connect/integration-run-readiness";
 
 export interface AgentIntegrationsReadiness {
-  /** True while the readiness verdict is still loading. */
+  /** True while any active integration's resolution is still loading. */
   loading: boolean;
-  /** Declared integrations whose connection would 412 at run kickoff. */
+  /** Active integrations whose connection would 412 at run kickoff. */
   blockingCount: number;
-  /** No integration blocks the run. */
+  /** No active integration blocks the run. */
   ready: boolean;
 }
 
@@ -15,16 +23,36 @@ export interface AgentIntegrationsReadiness {
  * Launch-time integration readiness for an agent — the predicate behind the
  * run button's orange "connections needed" badge.
  *
- * Reads the single bulk `connection-readiness` query (server-authoritative —
- * the same resolver the run-kickoff 412 runs, including the required-auth
- * carve-out for declared-but-inert integrations). One call drives this badge,
- * the Connexions tab, and the pre-run check, so they can never disagree.
+ * Calls the per-integration agent-resolution endpoint (server-authoritative,
+ * the same resolver cascade the run-kickoff 412 runs) for every ACTIVE
+ * integration the agent declares, then aggregates with {@link resolutionBlocksRun}.
+ * The query options come from the same builder as `useIntegrationAgentResolution`,
+ * so when the Connexions tab is open the cache is shared — no duplicate
+ * fetches, and the badge can never disagree with the tab.
+ *
+ * Inert integrations (the agent selected no tool/scope) are skipped: the
+ * runtime never spawns them, so they never gate Run.
  */
 export function useAgentIntegrationsReadiness(
   agentPackageId: string | undefined,
+  entries: AgentIntegrationEntry[] | undefined,
 ): AgentIntegrationsReadiness {
-  const { data, isLoading } = useAgentConnectionReadiness(agentPackageId);
-  const blockingCount = data?.integrations.filter((i) => i.run_blocking).length ?? 0;
-  // `ready` stays true until data lands so the badge doesn't flash on load.
-  return { loading: isLoading, blockingCount, ready: data ? !data.blocks_run : true };
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+  const active = (entries ?? []).filter(isIntegrationEntryActive);
+
+  const results = useQueries({
+    // Shared options builder → same cache entry as `useIntegrationAgentResolution`,
+    // so the badge and the Connexions tab never fetch the verdict twice.
+    queries: active.map((entry) =>
+      agentResolutionQueryOptions(orgId, applicationId, entry.id, agentPackageId),
+    ),
+  });
+
+  const loading = results.some((r) => r.isLoading);
+  // Only resolved verdicts count, so the badge stays hidden until data lands
+  // (no warning flash before the resolutions arrive).
+  const blockingCount = results.filter((r) => r.data && resolutionBlocksRun(r.data)).length;
+
+  return { loading, blockingCount, ready: blockingCount === 0 };
 }
