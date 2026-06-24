@@ -24,7 +24,6 @@ import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { notFound, parseBody, invalidRequest } from "@appstrate/core/api-errors";
 import { handleChatStream } from "./chat-stream.ts";
-import { handleGenerateTitle } from "./title.ts";
 
 /** Minimal Hono Env mirroring what the platform auth pipeline sets. */
 type ChatEnv = {
@@ -239,14 +238,6 @@ export function createChatRouter() {
     rateLimited(20),
     requireModulePermission("chat", "write"),
     handleChatStream,
-  );
-
-  // POST /api/chat/title — short LLM-generated conversation title.
-  router.post(
-    "/api/chat/title",
-    rateLimited(20),
-    requireModulePermission("chat", "write"),
-    handleGenerateTitle,
   );
 
   return router;

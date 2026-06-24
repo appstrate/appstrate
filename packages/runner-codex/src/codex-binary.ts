@@ -94,7 +94,7 @@ const REDACTION_MARKER = "[REDACTED]";
  * (which must NOT apply shape heuristics — they could corrupt legitimate agent
  * output — only mask the exact vended credential).
  */
-export function redactSecretValues(text: string, knownSecrets: readonly string[]): string {
+function redactSecretValues(text: string, knownSecrets: readonly string[]): string {
   let out = text;
   for (const secret of [...knownSecrets]
     .filter((s) => s && s.length >= 8)
@@ -437,7 +437,7 @@ export function codexBinaryPackage(platform: NodeJS.Platform, arch: string): str
 }
 
 /** Binary file name inside a per-arch package (`codex.exe` on Windows). */
-export function codexBinaryFileName(platform: NodeJS.Platform): string {
+function codexBinaryFileName(platform: NodeJS.Platform): string {
   return platform === "win32" ? "codex.exe" : "codex";
 }
 

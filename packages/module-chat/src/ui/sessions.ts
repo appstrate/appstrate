@@ -62,22 +62,6 @@ export async function renameSession(
   });
 }
 
-/** Generate a short LLM title from the first messages (role + text). */
-export async function generateSessionTitle(
-  getHeaders: GetHeaders,
-  messages: { role: string; text: string }[],
-): Promise<string> {
-  const res = await fetch("/api/chat/title", {
-    method: "POST",
-    credentials: "include",
-    headers: headers(getHeaders, true),
-    body: JSON.stringify({ messages }),
-  });
-  if (!res.ok) throw new Error(`/api/chat/title returned ${res.status}`);
-  const body = (await res.json()) as { title?: string };
-  return body.title ?? "";
-}
-
 export async function deleteSession(getHeaders: GetHeaders, id: string): Promise<void> {
   await fetch(`/api/chat/sessions/${id}`, {
     method: "DELETE",
