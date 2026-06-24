@@ -33,6 +33,7 @@ import { z } from "zod";
 import { ApiError, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
+import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
 import {
   buildBundleForAgentExport,
   buildBundleFromAgentDraft,
@@ -153,6 +154,27 @@ export function createAgentsRouter() {
 
     return c.json({ proxyId, resolved: proxyId !== "none" });
   });
+
+  // GET /api/agents/:scope/:name/connection-readiness — bulk integration
+  // connection readiness for the agent: authoritative run-blocking verdict
+  // (identical to the run-kickoff 412) + per-integration management DTO.
+  router.get(
+    "/:scope{@[^/]+}/:name/connection-readiness",
+    requireAgent(),
+    requirePermission("integrations", "read"),
+    async (c) => {
+      const agent = c.get("package");
+      const role = c.get("orgRole");
+      return c.json(
+        await resolveAgentConnectionReadiness({
+          scope: getAppScope(c),
+          agentPackageId: agent.id,
+          actor: getActor(c),
+          isAdmin: role === "owner" || role === "admin",
+        }),
+      );
+    },
+  );
 
   // PUT /api/agents/:scope/:name/proxy — set agent proxy override (admin-only)
   router.put(

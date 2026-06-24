@@ -21,6 +21,7 @@ import type {
   IntegrationPin,
 } from "@appstrate/shared-types";
 import { $api, client, type paths } from "../api/client";
+import { splitPackageRef } from "../lib/package-paths";
 
 // Spec-pinned narrowings for the two integration read endpoints. They take the
 // generated OpenAPI response shape verbatim (so a rename/removal of any
@@ -88,7 +89,13 @@ export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
   return qc.invalidateQueries({
     predicate: (query) => {
       const path = query.queryKey[1];
-      return typeof path === "string" && path.startsWith("/api/integrations");
+      return (
+        typeof path === "string" &&
+        // The per-agent connection-readiness query lives under /api/agents but
+        // is driven entirely by connection state, so refresh it here too.
+        (path.startsWith("/api/integrations") ||
+          path === "/api/agents/{scope}/{name}/connection-readiness")
+      );
     },
   });
 }
@@ -151,39 +158,48 @@ export function useIntegrationConnections(packageId: string | undefined) {
  * silent cache split where the badge and the Connexions tab fetch the same
  * verdict twice and disagree.
  */
-export function agentResolutionQueryOptions(
+export function agentConnectionReadinessQueryOptions(
   orgId: string | null | undefined,
   applicationId: string | null | undefined,
-  integrationId: string | undefined,
   agentPackageId: string | undefined,
 ) {
+  const { scope, name } = agentPackageId
+    ? splitPackageRef(agentPackageId)
+    : { scope: "", name: "" };
   return $api.queryOptions(
     "get",
-    "/api/integrations/{packageId}/agent-resolution/{agentPackageId}",
+    "/api/agents/{scope}/{name}/connection-readiness",
     {
       params: {
-        path: { packageId: integrationId ?? "", agentPackageId: agentPackageId ?? "" },
+        path: { scope, name },
         header: {
           "X-Org-Id": orgId ?? undefined,
           "X-Application-Id": applicationId ?? undefined,
         },
       },
     },
-    {
-      enabled: Boolean(orgId && applicationId && integrationId && agentPackageId),
-      // No cast needed: now that the spec marks every resolver field required
-      // (incl. org_default_*), the generated response type already matches the
-      // shared `IntegrationAgentResolution` shape that consumers rely on.
-      select: (data) => data,
-    },
+    { enabled: Boolean(orgId && applicationId && agentPackageId) },
   );
+}
+
+/**
+ * Bulk connection readiness for an agent — ONE call that drives the launch
+ * badge, the Connexions tab pickers, and the pre-run check. `blocks_run` /
+ * `errors` mirror the run-kickoff 412 (run semantics); `integrations[]` carries
+ * every declared integration's management verdict (includeInert) + a
+ * `run_blocking` flag. Replaces the former N per-integration round-trips.
+ */
+export function useAgentConnectionReadiness(agentPackageId: string | undefined) {
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+  return useQuery(agentConnectionReadinessQueryOptions(orgId, applicationId, agentPackageId));
 }
 
 /**
  * Server-side picker verdict for a (agent, integration) on the agent page:
  * which connection the next run resolves to + the annotated candidate list
- * + pin/blocked state. The dropdown renders this verbatim — the resolver
- * cascade and scope diff live server-side (single source of truth).
+ * + pin/blocked state. Selected out of the single bulk readiness query so the
+ * picker, badge, and modal all share one cache entry per agent.
  */
 export function useIntegrationAgentResolution(
   integrationId: string | undefined,
@@ -191,7 +207,31 @@ export function useIntegrationAgentResolution(
 ) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
-  return useQuery(agentResolutionQueryOptions(orgId, applicationId, integrationId, agentPackageId));
+  return useQuery({
+    ...agentConnectionReadinessQueryOptions(orgId, applicationId, agentPackageId),
+    enabled: Boolean(orgId && applicationId && integrationId && agentPackageId),
+    select: (data) =>
+      data.integrations.find((i) => i.integration_id === integrationId)?.resolution ?? null,
+  });
+}
+
+/**
+ * Whether a given integration would block the next run (run semantics — inert
+ * optional integrations are NOT blocking, inert required ones ARE). Selected
+ * from the same bulk readiness query the picker uses.
+ */
+export function useIntegrationRunBlocking(
+  integrationId: string | undefined,
+  agentPackageId: string | undefined,
+) {
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+  return useQuery({
+    ...agentConnectionReadinessQueryOptions(orgId, applicationId, agentPackageId),
+    enabled: Boolean(orgId && applicationId && integrationId && agentPackageId),
+    select: (data) =>
+      data.integrations.find((i) => i.integration_id === integrationId)?.run_blocking ?? false,
+  });
 }
 
 export function useActivateIntegration() {
