@@ -466,6 +466,106 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err!.code).toBe("integration_not_active");
   });
 
+  it("returns 412 integration_not_found when a declared integration package does not exist (#737)", async () => {
+    // The agent declares `@runorg/svc` but no such package was ever seeded.
+    // resolveOne would `fetchIntegrationManifest` → `not_found` → skip silently
+    // at spawn, leaving the agent without the tools it depends on yet finishing
+    // `success`. Readiness must fail fast instead.
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    // Deliberately no integration package seeded.
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(412);
+    const body = (await res.json()) as ProblemDetails;
+    expect(body.code).toBe("missing_integration_connection");
+    // Exactly one error — the manifest failure, NOT a piled-on
+    // integration_not_active (a missing package is necessarily inactive too;
+    // the manifest cause is the precise one).
+    expect(body.errors).toHaveLength(1);
+    const err = body.errors![0]!;
+    expect(err.field).toBe(`integrations.${INTEGRATION}`);
+    expect(err.code).toBe("integration_not_found");
+    expect(err.title).toBeTruthy();
+    expect(err.message).toBeTruthy();
+  });
+
+  it("returns 412 integration_wrong_type when the declared package is not an integration (#737)", async () => {
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    // A package with that id exists but is a SKILL, not an integration.
+    await seedPackage({
+      id: INTEGRATION,
+      orgId: ctx.orgId,
+      type: "skill",
+      source: "local",
+      draftManifest: { name: INTEGRATION, version: "1.0.0", type: "skill" },
+    });
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(412);
+    const body = (await res.json()) as ProblemDetails;
+    expect(body.code).toBe("missing_integration_connection");
+    expect(body.errors).toHaveLength(1);
+    const err = body.errors![0]!;
+    expect(err.field).toBe(`integrations.${INTEGRATION}`);
+    expect(err.code).toBe("integration_wrong_type");
+  });
+
+  it("returns 412 integration_invalid_manifest when the integration manifest fails validation (#737)", async () => {
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    // Integration package of the right TYPE but with a manifest that fails
+    // `integrationManifestSchema` (missing every required field).
+    await seedPackage({
+      id: INTEGRATION,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: { not: "a valid integration manifest" },
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION);
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(412);
+    const body = (await res.json()) as ProblemDetails;
+    expect(body.code).toBe("missing_integration_connection");
+    expect(body.errors).toHaveLength(1);
+    const err = body.errors![0]!;
+    expect(err.field).toBe(`integrations.${INTEGRATION}`);
+    expect(err.code).toBe("integration_invalid_manifest");
+  });
+
   it("happy path: returns NON-412 status when the actor has exactly one accessible connection", async () => {
     // Sanity foil — proves the 412 only fires when there's a real gap.
     // Note: the run may still hit a downstream error (e.g. no model

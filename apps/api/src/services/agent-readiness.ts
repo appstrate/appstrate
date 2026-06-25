@@ -11,7 +11,11 @@ import {
   translateResolutionError,
 } from "./integration-connection-resolver.ts";
 import { listActiveIntegrationIds } from "./integration-connections.ts";
-import type { IntegrationManifestCache } from "./integration-service.ts";
+import {
+  fetchIntegrationManifest,
+  type IntegrationManifestCache,
+  type IntegrationManifestLoadFailure,
+} from "./integration-service.ts";
 import { validateConfig } from "./schema.ts";
 import { extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
@@ -63,6 +67,43 @@ export interface AgentReadinessParams {
  * `validateAgentReadiness` delegates to this. Fail-fast sequence:
  * prompt → skills → integration install/enable → integration connections → config.
  */
+/**
+ * Map an {@link IntegrationManifestLoadFailure} to a structured readiness
+ * error. The `integrations.` field prefix routes it into the 412 envelope
+ * in `validateAgentReadiness` (request runs) and into `failSchedule`
+ * (scheduled runs), so a declared-but-unspawnable integration produces a
+ * visible failed run instead of a silent success (#737).
+ */
+function manifestFailureError(
+  integrationId: string,
+  failure: IntegrationManifestLoadFailure,
+): ValidationFieldError {
+  const field = `integrations.${integrationId}`;
+  switch (failure.kind) {
+    case "not_found":
+      return {
+        field,
+        code: "integration_not_found",
+        title: "Integration Not Found",
+        message: `Integration '${integrationId}' is declared by the agent but no such package exists.`,
+      };
+    case "not_integration":
+      return {
+        field,
+        code: "integration_wrong_type",
+        title: "Invalid Integration",
+        message: `Package '${integrationId}' is declared as an integration but is a '${failure.actualType}'.`,
+      };
+    case "invalid_manifest":
+      return {
+        field,
+        code: "integration_invalid_manifest",
+        title: "Invalid Integration Manifest",
+        message: `Integration '${integrationId}' has an invalid manifest and cannot be loaded.`,
+      };
+  }
+}
+
 export async function collectAgentReadinessErrors(
   params: AgentReadinessParams,
 ): Promise<ValidationFieldError[]> {
@@ -106,11 +147,47 @@ export async function collectAgentReadinessErrors(
   // integration instead of N serial single-row queries (run-kickoff hot path).
   const declaredIntegrations = parseManifestIntegrations(manifest as Record<string, unknown>);
   if (declaredIntegrations.length > 0) {
+    // Integration manifest-health gate (#737) — mirrors the manifest drop
+    // conditions in `resolveOne` (integration-spawn-resolver.ts): a declared
+    // integration whose package is missing (`not_found`), is the wrong type
+    // (`not_integration`), or fails manifest validation (`invalid_manifest`)
+    // is silently skipped at spawn, so the agent launches without its tools
+    // yet the run finishes `success`. The connection resolver below
+    // deliberately ignores these (`buildRequirement` returns null and defers
+    // to this check), so readiness is the single place that surfaces them.
+    // Runs regardless of actor — manifest validity is a package-level fact.
+    // Fetched through the shared `manifestCache` so the connection-resolution
+    // and spawn passes reuse the same SELECT + Zod parse within this run.
+    const manifestResults = await Promise.all(
+      declaredIntegrations.map(async (entry) => ({
+        id: entry.id,
+        result: await fetchIntegrationManifest(entry.id, params.manifestCache),
+      })),
+    );
+    const manifestUnhealthy = new Set<string>();
+    for (const { id, result } of manifestResults) {
+      if (result.ok) continue;
+      manifestUnhealthy.add(id);
+      errors.push(manifestFailureError(id, result.failure));
+    }
+
+    // Install/enable gate — every declared integration MUST be installed AND
+    // enabled on the application. Without this the run silently degrades: the
+    // runtime spawn resolver skips an inactive integration (`isIntegrationActive`
+    // false) and the agent launches without its tools. The connection resolver
+    // below does NOT catch this — it gates on whether an accessible connection
+    // exists, and a disabled/uninstalled integration can still have lingering
+    // connections that resolve cleanly. Checked before connections so an
+    // inactive integration fails fast with a clear cause rather than a
+    // downstream `not_connected`. Integrations already flagged for a manifest
+    // failure are skipped here — a missing package is necessarily inactive too,
+    // and the manifest error is the more precise cause (no double-report).
     const activeIds = await listActiveIntegrationIds(
       declaredIntegrations.map((entry) => entry.id),
       applicationId,
     );
     for (const entry of declaredIntegrations) {
+      if (manifestUnhealthy.has(entry.id)) continue;
       if (!activeIds.has(entry.id)) {
         errors.push({
           field: `integrations.${entry.id}`,
