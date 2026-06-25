@@ -747,6 +747,56 @@ describeRequiresRedis("scheduler service", () => {
     });
   });
 
+  // ── triggerScheduledRun — declared-but-unspawnable integration (#737) ──
+  //
+  // Sibling of #735: here the schedule HAS an actor, but the agent declares an
+  // integration whose package does not exist. resolveOne would skip it silently
+  // at spawn (`fetchIntegrationManifest` → not_found → null), so the run would
+  // otherwise finish `success` without the integration's tools. The readiness
+  // manifest-health gate must turn this into a VISIBLE failed run on the
+  // scheduled path too (parity with the 412 on the request path).
+
+  describe("triggerScheduledRun integration manifest health (#737)", () => {
+    it("fails fast with a visible failed run when a declared integration package is missing", async () => {
+      const agent = await seedPackage({
+        orgId,
+        id: `@${orgSlug}/missing-integration-agent`,
+        draftManifest: {
+          name: `@${orgSlug}/missing-integration-agent`,
+          version: "0.1.0",
+          type: "agent",
+          description: "Agent declaring a non-existent integration",
+          dependencies: { integrations: { "@vendor/does-not-exist": "1.0.0" } },
+        },
+      });
+
+      const schedule = await createSchedule(
+        { orgId, applicationId: defaultAppId },
+        agent.id,
+        actor,
+        { cronExpression: "0 * * * *", versionOverride: "draft" },
+      );
+
+      await triggerScheduledRun(
+        schedule.id,
+        agent.id,
+        actor, // actor PRESENT — #735 guard does not apply
+        orgId,
+        defaultAppId,
+        undefined,
+        { versionOverride: "draft" },
+      );
+
+      const failed = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+      expect(failed).toHaveLength(1);
+      expect(failed[0]!.status).toBe("failed");
+      const err = (failed[0]!.error ?? "").toLowerCase();
+      // The manifest-not-found cause, NOT the #735 execution-identity message.
+      expect(err).not.toContain("execution identity");
+      expect(err).toContain("no such package");
+    });
+  });
+
   // Pure-predicate unit coverage — no DB, no fire path.
   describe("scheduleCannotResolveIntegrations (#735)", () => {
     const withIntegrations = {
