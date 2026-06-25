@@ -8587,11 +8587,6 @@ export interface operations {
                     modelId?: string;
                     /** @description Thread id (assistant-ui) */
                     id?: string;
-                    context?: {
-                        type: string;
-                        id: string;
-                        label?: string;
-                    };
                 };
             };
         };

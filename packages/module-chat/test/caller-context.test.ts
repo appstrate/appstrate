@@ -9,7 +9,33 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { formatCallerContext } from "../src/chat-stream.ts";
+import { formatCallerContext, buildCallerContextBlock } from "../src/chat-stream.ts";
+import type { ChatPlatformDeps } from "../src/platform-services.ts";
+
+/** Minimal Hono-context stub exposing the `c.get(key)` reads the builder makes. */
+ 
+function fakeContext(vars: Record<string, unknown>): any {
+  return { get: (k: string) => vars[k] };
+}
+
+/** Deps whose dispatch returns a scripted Response and records the request. */
+function fakeDeps(respond: (req: Request) => Response): {
+  deps: ChatPlatformDeps;
+  lastRequest: () => Request | null;
+} {
+  let last: Request | null = null;
+  return {
+    deps: {
+      dispatch: async (req) => {
+        last = req;
+        return respond(req);
+      },
+      rateLimit: () => async (_c, next) => next(),
+      chatEngine: () => undefined,
+    },
+    lastRequest: () => last,
+  };
+}
 
 describe("formatCallerContext", () => {
   it("renders identity, role, and connected integrations with their default tools", () => {
@@ -199,21 +225,20 @@ describe("formatCallerContext", () => {
     );
   });
 
-  it("renders org name/slug, the client clock+timezone, and the active language", () => {
+  it("renders org name/slug and grounds date/language from the server (UTC + fr)", () => {
     const out = formatCallerContext({
       user: { name: "Ada", email: "ada@acme.com" },
       org: { role: "member", name: "Acme", slug: "acme" },
-      client: { now: "2026-06-25T09:00:00.000Z", tz: "Europe/Paris", locale: "en" },
       connections: [],
     });
     expect(out).toContain('in the organization "Acme" (`acme`)');
-    expect(out).toContain(
-      "Current date and time: 2026-06-25T09:00:00.000Z (timezone Europe/Paris)",
-    );
-    expect(out).toContain("Reply in the user's language (en)");
+    // No browser clock/timezone is forwarded to this route — always server UTC.
+    expect(out).toContain("Current date and time:");
+    expect(out).toContain("(UTC)");
+    expect(out).toContain("Reply in the user's language (fr)");
   });
 
-  it("falls back to UTC + fr when the client block is absent", () => {
+  it("always grounds date/language from the server (UTC + fr)", () => {
     const out = formatCallerContext({ user: { name: "Ada" }, org: { role: "member" } });
     expect(out).toContain("(UTC)");
     expect(out).toContain("Reply in the user's language (fr)");
@@ -240,11 +265,77 @@ describe("formatCallerContext", () => {
     expect(out).toContain("`@acme/report` #6 — success");
   });
 
-  it("renders a context block from client/recent_runs alone (no identity)", () => {
+  it("renders a context block from recent_runs alone (no identity)", () => {
     const out = formatCallerContext({
-      client: { now: "2026-06-25T09:00:00.000Z", locale: "fr" },
+      recent_runs: [{ package_id: "@acme/report", status: "success", run_number: 1 }],
     });
     expect(out).toContain("## Your context");
     expect(out).toContain("Current date and time:");
+    expect(out).toContain("## The user's recent runs");
+  });
+});
+
+describe("buildCallerContextBlock", () => {
+  const user = { id: "u_1", name: "Ada", email: "ada@acme.com" };
+
+  it("builds the block from the dispatched GET /api/me/context payload", async () => {
+    const payload = {
+      user: { name: "Ada", email: "ada@acme.com" },
+      org: { role: "member", name: "Acme", slug: "acme" },
+      connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
+      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+    };
+    const { deps, lastRequest } = fakeDeps(() => Response.json(payload));
+    const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+      origin: "http://127.0.0.1:3000",
+      headers: { cookie: "session=abc", "x-org-id": "org_1" },
+      applicationId: "app_1",
+      user,
+      deps,
+    });
+    // Block is rendered from the dispatched payload, not from request context.
+    expect(out).toContain("`@appstrate/gmail`");
+    expect(out).toContain("## Existing agents you can run");
+    // The app-scoped read carries the resolved application id on the dispatch.
+    const req = lastRequest()!;
+    expect(new URL(req.url).pathname).toBe("/api/me/context");
+    expect(req.headers.get("x-application-id")).toBe("app_1");
+    expect(req.headers.get("cookie")).toBe("session=abc");
+  });
+
+  it("falls back to an identity-only block when there is no application context", async () => {
+    // No applicationId → never dispatches; identity/role from request context.
+    const { deps, lastRequest } = fakeDeps(() => new Response(null, { status: 500 }));
+    const out = await buildCallerContextBlock(
+      fakeContext({ orgRole: "owner", orgName: "Acme", orgSlug: "acme" }),
+      { origin: "http://127.0.0.1:3000", headers: {}, applicationId: undefined, user, deps },
+    );
+    expect(out).toContain("Ada (ada@acme.com)");
+    expect(out).toContain('whose role is "owner"');
+    expect(lastRequest()).toBeNull();
+  });
+
+  it("falls back to identity-only when the dispatch 400s (no app context)", async () => {
+    const { deps } = fakeDeps(() => new Response(null, { status: 400 }));
+    const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+      origin: "http://127.0.0.1:3000",
+      headers: {},
+      applicationId: "app_1",
+      user,
+      deps,
+    });
+    expect(out).toContain("Ada (ada@acme.com)");
+  });
+
+  it("degrades to no block on any other dispatch failure", async () => {
+    const { deps } = fakeDeps(() => new Response(null, { status: 503 }));
+    const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+      origin: "http://127.0.0.1:3000",
+      headers: {},
+      applicationId: "app_1",
+      user,
+      deps,
+    });
+    expect(out).toBe("");
   });
 });

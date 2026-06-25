@@ -143,24 +143,23 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // client fingerprint. The sidecar's OAuth mode only swaps the bearer + ensures
   // the OAuth beta — see `runtime-pi/sidecar/app.ts` and `subscription-run-policy.ts`.
   //
-  // Engine binding contributed to the core subscription-engine registry at
-  // registration: runs + chat execute on the Claude Agent SDK (official binary,
-  // no forging). `oauth` — the sidecar `/llm` gateway swaps the bearer
-  // server-side, so the real token never enters the container. `nativeOutput` —
-  // the SDK emits the structured deliverable via `outputFormat` →
-  // `structured_output`, so the run must NOT also be offered the MCP `output`.
-  // `chatHandler` — this module owns the chat driver too (Claude Agent SDK +
-  // ui-stream mapper live in `./claude-agent/`), contributed here so dropping
-  // the module sheds the chat surface as well; module-chat dispatches to it via
-  // the registry, never importing the vendor SDK.
+  // Engine binding read off this definition by the platform's model-provider
+  // registry helpers (run-launcher + chat + gateways resolve the engine by
+  // provider id off this one registration). Runs + chat execute on the Claude
+  // Agent SDK (official binary, no forging). `oauth` — the sidecar `/llm`
+  // gateway swaps the bearer server-side, so the real token never enters the
+  // container. `nativeOutput` — the SDK emits the structured deliverable via
+  // `outputFormat` → `structured_output`, so the run must NOT also be offered
+  // the MCP `output`. `chatHandler` — this module owns the chat driver too
+  // (Claude Agent SDK + ui-stream mapper live in `./claude-agent/`), declared
+  // here so dropping the module sheds the chat surface as well; the platform
+  // resolves it off this definition and injects it into module-chat, which
+  // dispatches to it without importing the vendor SDK (and core carries only the
+  // shared `ChatEngineInput` type, no vendor binding).
   subscriptionEngine: {
     engine: "claude",
     sidecarAuthMode: "oauth",
     nativeOutput: true,
-    // The chat surface is also driven through the `/api/llm-proxy/claude-code-sdk/…`
-    // credential-injection gateway (the official Claude Agent SDK points its
-    // ANTHROPIC_BASE_URL there). The platform mounts that gateway whenever this
-    // `claude-code` subscription engine is registered — no separate flag needed.
     chatHandler: runClaudeAgentChat,
   },
   hooks: claudeCodeHooks,

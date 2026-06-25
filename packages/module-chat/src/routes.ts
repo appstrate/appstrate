@@ -12,8 +12,8 @@
  * through `POST /api/chat` (streaming) — the history endpoints are pure
  * persistence.
  *
- * Rate limiting: `services.http.rateLimit` (platform capability) — wired
- * by index.ts after init, see `setRateLimitFactory`.
+ * Rate limiting: `services.http.rateLimit` (platform capability), captured into
+ * the router's `ChatPlatformDeps` at module init (see index.ts).
  */
 
 import { Hono, type MiddlewareHandler } from "hono";
@@ -24,6 +24,7 @@ import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { notFound, parseBody, invalidRequest } from "@appstrate/core/api-errors";
 import { handleChatStream } from "./chat-stream.ts";
+import type { ChatPlatformDeps } from "./platform-services.ts";
 
 /** Minimal Hono Env mirroring what the platform auth pipeline sets. */
 type ChatEnv = {
@@ -114,23 +115,16 @@ function deriveTitle(entries: MessageRow[]): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Rate limiting — injected platform capability (set by index.ts at init).
-// Before init (or on platforms without the capability) routes run unlimited.
+// Router — built once at module init with the platform deps captured from
+// `ctx.services` (rate limiter + in-process dispatch + chat-engine lookup).
 // ---------------------------------------------------------------------------
 
-type RateLimitFactory = (limitPerMinute: number) => MiddlewareHandler;
-let rateLimitFactory: RateLimitFactory | null = null;
-
-export function setRateLimitFactory(factory: RateLimitFactory | null): void {
-  rateLimitFactory = factory;
-}
-
-function rateLimited(limitPerMinute: number): MiddlewareHandler {
-  return (c, next) => (rateLimitFactory ? rateLimitFactory(limitPerMinute)(c, next) : next());
-}
-
-export function createChatRouter() {
+export function createChatRouter(deps: ChatPlatformDeps) {
   const router = new Hono<ChatEnv>();
+
+  // Platform per-route limiter (POST /api/chat fans out into metered LLM
+  // traffic). The platform always supplies it via deps — no unlimited fallback.
+  const rateLimited = (limitPerMinute: number): MiddlewareHandler => deps.rateLimit(limitPerMinute);
 
   // GET /api/chat/sessions — list the caller's sessions in the current org
   router.get("/api/chat/sessions", requireModulePermission("chat", "read"), async (c) => {
@@ -233,11 +227,8 @@ export function createChatRouter() {
 
   // POST /api/chat — the conversational loop (AI SDK UIMessage stream).
   // 20/min: every call fans out into metered LLM traffic.
-  router.post(
-    "/api/chat",
-    rateLimited(20),
-    requireModulePermission("chat", "write"),
-    handleChatStream,
+  router.post("/api/chat", rateLimited(20), requireModulePermission("chat", "write"), (c) =>
+    handleChatStream(c, deps),
   );
 
   return router;

@@ -23,14 +23,8 @@ import { listModels, pickModel, modelFromFamily, resolveDefaultApplicationId } f
 import { openPlatformMcp, platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
-import { subscriptionEngineDef } from "@appstrate/core/subscription-engines";
 import { buildTranscriptPrompt } from "./transcript.ts";
-import {
-  getIntegrationsService,
-  getAgentsService,
-  getSkillsService,
-  getRunsService,
-} from "./platform-services.ts";
+import type { ChatPlatformDeps } from "./platform-services.ts";
 
 const MAX_STEPS = 16;
 
@@ -137,12 +131,6 @@ interface CallerContext {
   user?: { name?: string | null; email?: string | null } | null;
   org?: { role?: string | null; name?: string | null; slug?: string | null } | null;
   /**
-   * Browser-side grounding forwarded in the request body (no tz/locale is
-   * persisted server-side): the user's clock, IANA timezone, and active UI
-   * language. Lets the model anchor "today" and reply in the right language.
-   */
-  client?: { now?: string | null; tz?: string | null; locale?: string | null } | null;
-  /**
    * The caller's most recent runs (actor-scoped), newest first — lets the model
    * reference the last run/failure without a discovery round-trip.
    */
@@ -207,16 +195,11 @@ export function formatCallerContext(raw: unknown): string {
   const role = ctx.org?.role?.trim();
   const orgName = ctx.org?.name?.trim();
   const orgSlug = ctx.org?.slug?.trim();
-  const now = ctx.client?.now?.trim();
-  const tz = ctx.client?.tz?.trim();
-  const locale = ctx.client?.locale?.trim();
   if (
     !name &&
     !email &&
     !role &&
     !orgName &&
-    !now &&
-    !locale &&
     !ctx.connections?.length &&
     !ctx.agents?.length &&
     !ctx.skills?.length &&
@@ -232,15 +215,15 @@ export function formatCallerContext(raw: unknown): string {
     "## Your context",
     `You are assisting ${who}${role ? `, whose role is "${role}"` : ""}${orgLabel}.`,
   ];
-  // Ground "today" from the browser clock (no server-side tz exists). Fall back
-  // to the server clock / UTC when the client did not send it.
-  const clockIso = now || new Date().toISOString();
+  // Ground "today" from the server clock. The chat carries no browser-supplied
+  // clock/timezone (none is persisted server-side), so this is always UTC.
   lines.push(
-    `Current date and time: ${clockIso}${tz ? ` (timezone ${tz})` : " (UTC)"}. ` +
+    `Current date and time: ${new Date().toISOString()} (UTC). ` +
       "Use this to resolve relative dates and schedules.",
   );
-  // The active UI language; default to French (the platform's default locale).
-  lines.push(`Reply in the user's language (${locale || "fr"}) unless they switch.`);
+  // Default to French (the platform's default locale) — the UI language is not
+  // forwarded to this route.
+  lines.push("Reply in the user's language (fr) unless they switch.");
   if (ctx.connections?.length) {
     // Render the exact package id (and version when known) so the model can use
     // it verbatim in an inline run's `dependencies.integrations` without a
@@ -331,20 +314,6 @@ const chatStreamSchema = z.object({
   id: z.string().optional(),
   messages: z.array(z.unknown()).min(1, "messages must not be empty"),
   modelId: z.string().optional(),
-  /** Host-injected anchor (e.g. the open document in the workspace panel). */
-  context: z.object({ type: z.string(), id: z.string(), label: z.string().optional() }).optional(),
-  /**
-   * Browser-side grounding (no tz/locale is persisted server-side): the user's
-   * clock, IANA timezone, and active UI language. All optional — the server
-   * falls back to its own clock / UTC / `fr` when absent.
-   */
-  client: z
-    .object({
-      now: z.string().optional(),
-      tz: z.string().optional(),
-      locale: z.string().optional(),
-    })
-    .optional(),
 });
 
 /** Truncated JSON preview for debug logs (keeps lines readable). */
@@ -368,92 +337,55 @@ function clientErrorMessage(error: unknown): string {
 }
 
 /**
- * Build the caller-context system-prompt block WITHOUT a loopback HTTP hop when
- * possible. Identity (name/email) and role come straight off the request
- * context (already authenticated by the platform pipeline); only the connected
- * integrations need a read, served in-process via the injected platform
- * service. Falls back to the `GET /api/me/context` loopback when the service
- * isn't wired (OSS/tests). Best-effort: any failure degrades to no block ("").
+ * Build the caller-context system-prompt block from `GET /api/me/context` — the
+ * canonical assembler the platform MCP `get_me` tool also uses, so the chat
+ * prompt and the MCP surface can never drift. Dispatched IN-PROCESS through the
+ * platform app (auth + RBAC re-run on the dispatched Request), with a loopback
+ * `fetch` fallback inside `deps.dispatch` for OSS/test wiring.
+ *
+ * The endpoint is app-scoped: without an application id `requireAppContext`
+ * would 400, so we skip straight to an identity-only block built from the
+ * already-authenticated request context (name/email/role/org). A 400 from the
+ * dispatch degrades to that same identity-only block; any other failure
+ * degrades to no block (""). Identity always survives so date/role grounding
+ * holds even with no application context.
  */
-async function buildCallerContextBlock(
+export async function buildCallerContextBlock(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   c: Context<any>,
   args: {
     origin: string;
     headers: Record<string, string>;
-    orgId: string;
     applicationId?: string;
     user: { id: string; name?: string | null; email?: string | null };
-    /** Browser-side clock/timezone/locale forwarded in the request body. */
-    client?: { now?: string; tz?: string; locale?: string };
+    deps: ChatPlatformDeps;
   },
 ): Promise<string> {
-  const { origin, headers, orgId, applicationId, user, client } = args;
+  const { origin, headers, applicationId, user, deps } = args;
   const role = (c.get("orgRole") as string | undefined) ?? undefined;
   const orgName = (c.get("orgName") as string | undefined) ?? undefined;
   const orgSlug = (c.get("orgSlug") as string | undefined) ?? undefined;
-  const clientCtx = client ?? null;
+
+  // Identity/role straight off the request context — the fallback when there is
+  // no application context to fetch the app-scoped lists against.
+  const identityOnly = (): string =>
+    formatCallerContext({
+      user: { name: user.name ?? null, email: user.email ?? null },
+      org: { role: role ?? null, name: orgName ?? null, slug: orgSlug ?? null },
+    });
+
+  if (!applicationId) return identityOnly();
   try {
-    const svc = getIntegrationsService();
-    if (svc) {
-      // In-process: identity/role come from the request context. The connection
-      // and agent lists are app-scoped — fetch them only when an application id
-      // is known; without one we still emit the identity/role block (empty
-      // lists) rather than fall back to a loopback that would itself 400 without
-      // app context.
-      const agentsSvc = getAgentsService();
-      const skillsSvc = getSkillsService();
-      const runsSvc = getRunsService();
-      // Runnable agents and attachable skills are hints — only when the caller
-      // holds `agents:run` (mirrors the REST /api/me/context gate, so the two
-      // never drift). Skills share the gate: useful only for building an agent.
-      const canRun = (c.get("permissions") as Set<string> | undefined)?.has("agents:run") ?? false;
-      const [connections, runnable, installedSkills, recentRuns] = await Promise.all([
-        applicationId
-          ? svc.listUsableForActor({
-              orgId,
-              applicationId,
-              actor: { type: "user", id: user.id },
-            })
-          : Promise.resolve([]),
-        applicationId && agentsSvc && canRun
-          ? agentsSvc.listRunnable({ orgId, applicationId })
-          : Promise.resolve({ agents: [], truncated: false, total: 0 }),
-        applicationId && skillsSvc && canRun
-          ? skillsSvc.listInstalled({ orgId, applicationId })
-          : Promise.resolve({ skills: [], truncated: false, total: 0 }),
-        // The caller's own recent runs (actor-scoped) — no extra permission;
-        // a user can always see their own run history.
-        applicationId && runsSvc
-          ? runsSvc.listRecentForActor({
-              orgId,
-              applicationId,
-              actor: { type: "user", id: user.id },
-            })
-          : Promise.resolve([]),
-      ]);
-      return formatCallerContext({
-        user: { name: user.name ?? null, email: user.email ?? null },
-        org: { role: role ?? null, name: orgName ?? null, slug: orgSlug ?? null },
-        client: clientCtx,
-        connections,
-        agents: runnable.agents,
-        agents_truncated: runnable.truncated,
-        skills: installedSkills.skills,
-        skills_truncated: installedSkills.truncated,
-        recent_runs: recentRuns,
-      });
-    }
-    // Fallback: the original loopback hop (kept for OSS/test wiring). The
-    // browser-side `client` block isn't part of the loopback payload — merge it
-    // in so date/locale grounding survives this path too.
-    const ctxHeaders: Record<string, string> = { ...headers };
-    if (applicationId) ctxHeaders["x-application-id"] = applicationId;
-    const res = await fetch(new URL("/api/me/context", origin), { headers: ctxHeaders });
-    if (res.ok) {
-      const payload = (await res.json()) as CallerContext;
-      return formatCallerContext({ ...payload, client: clientCtx });
-    }
+    const ctxHeaders = new Headers();
+    for (const [k, v] of Object.entries(headers)) ctxHeaders.set(k, v);
+    ctxHeaders.set("x-application-id", applicationId);
+    const res = await deps.dispatch(
+      new Request(new URL("/api/me/context", origin).toString(), { headers: ctxHeaders }),
+    );
+    if (res.ok) return formatCallerContext((await res.json()) as CallerContext);
+    // No application context (e.g. requireAppContext rejected) — keep the
+    // identity/role block rather than dropping context entirely.
+    if (res.status === 400) return identityOnly();
     return "";
   } catch (err) {
     logger.warn("me/context unavailable — chat degrades without caller context", {
@@ -463,8 +395,11 @@ async function buildCallerContextBlock(
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function handleChatStream(c: Context<any>): Promise<Response> {
+export async function handleChatStream(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  c: Context<any>,
+  deps: ChatPlatformDeps,
+): Promise<Response> {
   const orgId = c.get("orgId") as string;
   const user = c.get("user") as { id: string; email: string; name: string };
   const orgRole = (c.get("orgRole") as string | undefined) ?? "member";
@@ -474,6 +409,11 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
 
   const origin = selfOrigin();
   const headers = forwardedHeaders(c);
+  // Single platform-call seam: re-enter the platform app in-process (or loopback
+  // fetch when not wired) for every read the turn makes (/api/models,
+  // /api/applications, /api/me/context, the llm-proxy). Auth + RBAC run each hop.
+  const platformFetch: typeof fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
+    deps.dispatch(new Request(input, init))) as typeof fetch;
 
   // Per-turn observability: structured per-step logs to stdout. Full payloads
   // only under CHAT_DEBUG — they may carry PII/customer content.
@@ -514,10 +454,10 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
     // model is pinned — that id came from the filtered picker, so it's reachable.
     // Without a pin we resolve the org default from the full filtered list, so a
     // dead-credential default is dropped rather than picked → inference error.
-    listModels(origin, inferenceHeaders, { metadataOnly: Boolean(modelId) }),
+    listModels(origin, inferenceHeaders, platformFetch, { metadataOnly: Boolean(modelId) }),
     pinnedAppId
       ? Promise.resolve(pinnedAppId)
-      : resolveDefaultApplicationId(origin, headers, orgId),
+      : resolveDefaultApplicationId(origin, headers, orgId, platformFetch),
   ]);
   const chosen = pickModel(models, modelId);
   const phaseAMs = Date.now() - phaseAStart;
@@ -527,16 +467,16 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
     providerId: chosen.providerId,
   });
 
-  // Subscription engine with a chat surface — the binding AND its chat driver
-  // are contributed by the provider module via the shared core registry (the
-  // same mapping the run launcher + llm-proxy gateway read), so chat dispatches
-  // by provider id WITHOUT importing any vendor SDK. With the module absent
-  // there is no `chatHandler` and every provider falls through to the generic
-  // ai-sdk path below. Codex maps to a subscription engine too but is agent-only
-  // (filtered from the chat model list by CHAT_USABLE_FAMILIES) and contributes
-  // no chatHandler — so today only the Claude Agent SDK reaches this branch.
-  const subscriptionEngine = subscriptionEngineDef(chosen.providerId ?? "");
-  const isSubscription = Boolean(subscriptionEngine?.chatHandler);
+  // Subscription chat engine — the chat driver is contributed by the provider
+  // module (only `@appstrate/module-claude-code` today) into the chat-engine
+  // registry, surfaced here through `deps.chatEngine`. The chat dispatches by
+  // provider id WITHOUT importing any vendor SDK. With no provider module loaded
+  // the lookup is undefined and every provider falls through to the generic
+  // ai-sdk path below. Codex is agent-only (filtered from the chat model list by
+  // CHAT_USABLE_FAMILIES) and registers no chat engine, so today only the Claude
+  // Agent SDK reaches this branch.
+  const chatEngine = deps.chatEngine(chosen.providerId ?? "");
+  const isSubscription = Boolean(chatEngine);
 
   // Platform MCP wiring shared by both engines: the meta-tools live at
   // /api/mcp/o/:org and run with the caller's own credentials (RBAC fidelity).
@@ -570,10 +510,9 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   const contextPromise = buildCallerContextBlock(c, {
     origin,
     headers,
-    orgId,
     applicationId,
     user,
-    client: body.client,
+    deps,
   });
   let contextBlock: string;
   if (isSubscription) {
@@ -607,9 +546,6 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
       : mcp.instructions
         ? `${SYSTEM_PROMPT}\n\n${mcp.instructions}`
         : SYSTEM_PROMPT;
-  if (body.context) {
-    system += `\n\nThe user is currently looking at: ${body.context.type} "${body.context.label ?? body.context.id}" (id: ${body.context.id}). Prefer this context when the question is ambiguous.`;
-  }
   if (contextBlock) system += `\n\n${contextBlock}`;
   system = applyOperationIndexPolicy(system, chosen.apiShape);
 
@@ -626,16 +562,16 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   // the real subscription token never enters this process or the spawned
   // binary's env. The gateway slug derives from the provider id — no vendor
   // literal. `platformMcp` is passed unconditionally (see phase B note).
-  if (subscriptionEngine?.chatHandler) {
+  if (chatEngine) {
     const loopbackToken = mintLoopbackToken(
       { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
       { ttlMs: ENGINE_LOOPBACK_TTL_MS },
     );
-    return subscriptionEngine.chatHandler({
+    return chatEngine.handler({
       prompt: buildTranscriptPrompt(messages),
       system,
       modelId: chosen.modelId,
-      gatewayBaseUrl: `${origin}/api/llm-proxy/${subscriptionEngine.providerId}-sdk/${encodeURIComponent(chosen.id)}`,
+      gatewayBaseUrl: `${origin}/api/llm-proxy/${chatEngine.providerId}-sdk/${encodeURIComponent(chosen.id)}`,
       placeholderToken: loopbackToken,
       platformMcp: { url: platformMcpUrl(origin, orgId), headers: mcpHeaders },
       abortSignal: c.req.raw.signal,
@@ -644,7 +580,7 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
   }
 
   // ai-sdk path — API-key providers only, bound to the llm-proxy.
-  const model = modelFromFamily(chosen, origin, inferenceHeaders, mintInferenceAuth);
+  const model = modelFromFamily(chosen, origin, inferenceHeaders, mintInferenceAuth, platformFetch);
   if (!model) {
     await closeMcp();
     throw invalidRequest(`Model family "${chosen.apiShape}" is not supported by the chat.`);

@@ -16,7 +16,7 @@ import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
-import type { SubscriptionEngineBinding } from "./subscription-engines.ts";
+import type { SubscriptionEngineBinding, SubscriptionEngineDef } from "./subscription-engines.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -699,11 +699,11 @@ export interface ModelProviderDefinition {
 
   /**
    * Subscription-engine binding — set ONLY by OAuth-subscription providers
-   * whose runs/chat execute on a vendor's OFFICIAL binary instead of the
-   * generic `pi` loop (e.g. `claude-code` → Claude Agent SDK, `codex` → Codex
-   * CLI). When present, the platform contributes it to the core subscription-
-   * engine registry at registration ({@link registerSubscriptionEngine}), so
-   * run-launcher + chat + the llm-proxy gateways resolve this provider's engine
+   * whose runs execute on a vendor's OFFICIAL binary instead of the generic
+   * `pi` loop (e.g. `claude-code` → Claude Agent SDK, `codex` → Codex CLI).
+   * This binding IS the single source of truth for the provider's engine: the
+   * platform's model-provider registry reads it directly (no copied registry),
+   * so the run-launcher + the llm-proxy gateways resolve this provider's engine
    * by id. API-key providers omit it (they run on `pi`). Keeping the binding on
    * the provider definition is what lets core ship zero hardcoded subscription
    * machinery — disable the module and the engine vanishes with it.
@@ -991,86 +991,6 @@ export interface PlatformServices {
       orgId: string;
       sources: readonly string[];
     }): Promise<Array<{ id: number; costUsd: number; source: string }>>;
-    /**
-     * The given actor's most recent runs in an application (own runs only,
-     * newest first) — the data the chat module folds into its caller-context
-     * block so the model can reference a recent or failed run without a
-     * discovery round-trip. Read in-process WITHOUT a cross-module SQL join.
-     * Wire-shape (snake_case) fields; `error` is the failure message for
-     * non-success runs when available.
-     */
-    listRecentForActor(args: {
-      orgId: string;
-      applicationId: string;
-      actor: { type: "user" | "end_user"; id: string };
-      limit?: number;
-    }): Promise<
-      Array<{
-        package_id: string;
-        status: string;
-        run_number?: number | null;
-        started_at?: string | null;
-        error?: string | null;
-      }>
-    >;
-  };
-  /**
-   * Integration read surface. `listUsableForActor` returns the integrations an
-   * actor could attach when building an agent in the given application (the
-   * actor's own connections plus org-shared ones) — the same data the
-   * `get_me` / `GET /api/me/context` payload exposes, read in-process WITHOUT a
-   * loopback HTTP hop. The `chat` module assembles its system-prompt context
-   * block from this (identity + role come straight off the request context).
-   */
-  integrations: {
-    listUsableForActor(args: {
-      orgId: string;
-      applicationId: string;
-      actor: { type: "user" | "end_user"; id: string };
-    }): Promise<Array<{ integration_id: string; name: string; source: string }>>;
-  };
-  /**
-   * Agent read surface. `listRunnable` returns the agents an actor could run in
-   * the given application as a bounded hint for the `get_me` / chat-prompt
-   * caller context (capped — the long tail stays reachable via the MCP
-   * `search_operations` tool). Run authorization is NOT enforced here; the
-   * caller gates on the `agents:run` permission and the run route re-checks RBAC
-   * at invoke time, so the list is only a hint.
-   */
-  agents: {
-    listRunnable(args: { orgId: string; applicationId: string; limit?: number }): Promise<{
-      agents: Array<{
-        package_id: string;
-        display_name: string;
-        description: string;
-        takes_input: boolean;
-        source: string;
-      }>;
-      truncated: boolean;
-      total: number;
-    }>;
-  };
-  /**
-   * Skill read surface. `listInstalled` returns the skills an actor could attach
-   * to an agent in the given application as a bounded hint for the `get_me` /
-   * chat-prompt caller context (capped — the long tail stays reachable via the
-   * MCP `search_operations` tool). Unlike agents, skills are not run directly;
-   * they are declared under an agent manifest's `dependencies.skills`. Same
-   * `agents:run` gate as `agents` (a skill is only useful when building an agent
-   * run), the run route validating the declared skills exist at invoke time.
-   */
-  skills: {
-    listInstalled(args: { orgId: string; applicationId: string; limit?: number }): Promise<{
-      skills: Array<{
-        package_id: string;
-        display_name: string;
-        description: string;
-        version: string | null;
-        source: string;
-      }>;
-      truncated: boolean;
-      total: number;
-    }>;
   };
   /**
    * In-process dispatch into the fully-wired platform Hono app — the same
@@ -1084,4 +1004,15 @@ export interface PlatformServices {
   inProcess: {
     dispatch(request: Request): Promise<Response>;
   };
+  /**
+   * Resolve a provider's subscription-engine definition — including the
+   * `chatHandler` its provider module contributed — off the platform's
+   * model-provider registry, or `undefined` for an API-key / unknown provider.
+   * The `chat` module reads this to dispatch a vendor chat turn (e.g. Claude) by
+   * provider id WITHOUT importing the model-provider registry (an apps/api
+   * concern) or any vendor SDK; only the shared {@link ChatEngineInput} type is
+   * cross-cutting. A subscription engine with no chat surface (codex) resolves
+   * with `chatHandler` absent, so chat stays disabled for it.
+   */
+  chatEngineForProvider(providerId: string): SubscriptionEngineDef | undefined;
 }

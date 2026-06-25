@@ -10,10 +10,8 @@
  *   - REST surface under `/api/chat/*` (sessions CRUD + message append).
  *     Auto-exposed over MCP through the `mcp` module's `invoke_operation`
  *     once documented in the OpenAPI spec — no dedicated MCP tool needed.
- *   - Embeddable React UI exported from `@appstrate/module-chat/ui`
- *     (`ChatPanel` component-first; `ChatPage` is a thin wrapper). Other
- *     modules (e.g. documents/workspace) import `ChatPanel` directly to
- *     embed the chat next to their own UI.
+ *   - Full-page React UI exported from `@appstrate/module-chat/ui`
+ *     (`ChatPage`) — the app shell lazy-loads it behind `features.chat`.
  *
  * The conversational loop (`POST /api/chat`) is the transplant of the
  * appstrate-chat satellite: AI SDK `streamText` over the org's configured
@@ -27,18 +25,16 @@ import {
   createSessionSchema,
   renameSessionSchema,
   messageEntrySchema,
-  setRateLimitFactory,
 } from "./routes.ts";
 import { chatPaths, chatComponentSchemas } from "./openapi.ts";
 import { chatLoopbackStrategy } from "./loopback-auth.ts";
-import {
-  setIntegrationsService,
-  setAgentsService,
-  setSkillsService,
-  setRunsService,
-  setInProcessService,
-} from "./platform-services.ts";
+import { buildChatPlatformDeps, type ChatPlatformDeps } from "./platform-services.ts";
 import { z } from "zod";
+
+// Platform deps captured at init from `ctx.services` (immutable; no module-level
+// mutable service setters). `createRouter()` runs after `init()` in the module
+// lifecycle, so this is always populated by the time the router is built.
+let deps: ChatPlatformDeps | null = null;
 
 declare module "@appstrate/core/permissions" {
   interface ModuleResources {
@@ -50,22 +46,20 @@ const chatModule: AppstrateModule = {
   manifest: { id: "chat", name: "Chat", version: "0.1.0" },
 
   async init(ctx: ModuleInitContext) {
-    // Tables are centralized in the core schema — nothing to migrate.
-    // No workers: chat is request-driven. Wire the platform rate limiter
-    // into the router (POST /api/chat fans out into metered LLM traffic).
-    setRateLimitFactory((maxPerMinute) => ctx.services.http.rateLimit(maxPerMinute));
-    // In-process platform reads — drop the chat's me/context loopback hop and
-    // the models/applications socket round-trips. Optional: absent under the
-    // OSS/test wiring, where the chat falls back to loopback fetch.
-    setIntegrationsService(ctx.services.integrations ?? null);
-    setAgentsService(ctx.services.agents ?? null);
-    setSkillsService(ctx.services.skills ?? null);
-    setRunsService(ctx.services.runs ?? null);
-    setInProcessService(ctx.services.inProcess ?? null);
+    // Tables are centralized in the core schema — nothing to migrate. No
+    // workers: chat is request-driven. Capture the platform deps once: the
+    // rate limiter, the in-process dispatcher (re-enters the platform app for
+    // /api/models, /api/applications, /api/me/context, the llm-proxy — loopback
+    // fetch fallback inside), and the subscription chat-engine lookup.
+    deps = buildChatPlatformDeps(ctx);
   },
 
   createRouter() {
-    return createChatRouter();
+    // Production runs `init()` before `createRouter()`, so `deps` is populated.
+    // When a caller mounts the router without init (the apps/api test harness,
+    // OSS standalone wiring), fall back to the safe baseline deps (loopback
+    // dispatch, pass-through rate limiter, no chat engine).
+    return createChatRouter(deps ?? buildChatPlatformDeps());
   },
 
   // Loopback bearer for the module's own inference calls — the proxy

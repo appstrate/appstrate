@@ -68,6 +68,7 @@ import {
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
+  readRequestBodyBounded,
   substituteVars,
 } from "./helpers.ts";
 import { TokenBudget } from "./token-budget.ts";
@@ -1935,43 +1936,4 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
       await server.close();
     }
   });
-}
-
-/**
- * Stream-read a Request body into a Uint8Array, refusing the read if
- * the cumulative size crosses `maxBytes`. Returns `"exceeded"` if the
- * cap was hit, the bytes otherwise. We never materialise an
- * over-budget body — the read is cancelled the moment the limit is
- * crossed.
- */
-async function readRequestBodyBounded(
-  req: Request,
-  maxBytes: number,
-): Promise<Uint8Array | "exceeded"> {
-  if (!req.body) return new Uint8Array(0);
-  const reader = req.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      if (total + value.byteLength > maxBytes) {
-        await reader.cancel();
-        return "exceeded";
-      }
-      chunks.push(value);
-      total += value.byteLength;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const c of chunks) {
-    merged.set(c, offset);
-    offset += c.byteLength;
-  }
-  return merged;
 }

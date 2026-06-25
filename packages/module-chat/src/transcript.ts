@@ -9,7 +9,7 @@
  * `User:`/`Assistant:` transcript so a stateless driver gets the full
  * conversational context. Non-text parts (tool calls, files) are dropped — only
  * text survives into the transcript. The system persona is NOT prepended here:
- * the only caller (the Claude Agent SDK chatHandler) passes system through the
+ * the only caller (the Claude Agent SDK chat engine) passes system through the
  * SDK's own system arg.
  *
  * KNOWN LIMITATION (lossy vs the ai-sdk path): the ai-sdk chat path feeds the

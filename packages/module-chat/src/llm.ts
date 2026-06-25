@@ -17,20 +17,8 @@ import type { LanguageModel } from "ai";
 import { badGateway, invalidRequest } from "@appstrate/core/api-errors";
 import { CHAT_USABLE_FAMILIES } from "./chat-families.ts";
 import { logger } from "./logger.ts";
-import { getInProcessService } from "./platform-services.ts";
 
 const LLM_PROXY_PATH = "/api/llm-proxy";
-
-/**
- * Reach the platform IN-PROCESS when the host wired `inProcess.dispatch`
- * (re-enters the Hono app, no socket hop), else the loopback `fetch` the chat
- * has always used. The auth pipeline runs either way — same headers, same RBAC.
- */
-function platformFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
-  const svc = getInProcessService();
-  if (svc) return svc.dispatch(new Request(input, init));
-  return fetch(input, init);
-}
 
 export interface OrgModel {
   id: string;
@@ -47,6 +35,7 @@ export interface OrgModel {
 export async function listModels(
   origin: string,
   headers: Record<string, string>,
+  platformFetch: typeof fetch,
   opts?: { metadataOnly?: boolean },
 ): Promise<OrgModel[]> {
   // `metadata_only` skips the per-model credential decrypt + reachability filter
@@ -126,6 +115,7 @@ export function modelFromFamily(
   origin: string,
   headers: Record<string, string>,
   mintAuth: () => string,
+  platformFetch: typeof fetch,
 ): LanguageModel | null {
   const target = proxyTarget(model.apiShape);
   if (!target) return null;
@@ -187,7 +177,10 @@ export async function resolveDefaultApplicationId(
   origin: string,
   headers: Record<string, string>,
   orgId: string,
-  fetchImpl: typeof fetch = platformFetch as typeof fetch,
+  // Required (no default): callers must pass the platform's in-process dispatch
+  // so the default-application lookup rides the loopback-auth seam. A plain
+  // `fetch` default would silently bypass it — symmetry with listModels/modelFromFamily.
+  fetchImpl: typeof fetch,
 ): Promise<string | undefined> {
   const cached = appCache.get(orgId);
   if (cached !== undefined) return cached;

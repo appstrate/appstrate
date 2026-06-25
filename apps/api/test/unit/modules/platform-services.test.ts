@@ -32,15 +32,15 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.runs.listLlmUsage).toBe("function");
   });
 
-  it("wires the integration read (integrations.listUsableForActor — chat caller context)", () => {
-    expect(typeof services.integrations.listUsableForActor).toBe("function");
+  it("wires the per-route rate limiter (http.rateLimit)", () => {
+    expect(typeof services.http.rateLimit).toBe("function");
   });
 
-  it("wires the agent read (agents.listRunnable — chat caller-context hint)", () => {
-    expect(typeof services.agents.listRunnable).toBe("function");
-  });
-
-  it("wires in-process dispatch (inProcess.dispatch — chat loopback-free reads)", () => {
+  it("wires in-process dispatch (inProcess.dispatch — chat caller-context + model reads)", () => {
     expect(typeof services.inProcess.dispatch).toBe("function");
+  });
+
+  it("wires the subscription chat-engine lookup (chatEngineForProvider — chat dispatch)", () => {
+    expect(typeof services.chatEngineForProvider).toBe("function");
   });
 });

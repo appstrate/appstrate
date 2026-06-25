@@ -23,18 +23,16 @@ import {
 import {
   ArrowDownIcon,
   CheckIcon,
-  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  ChevronUpIcon,
   CopyIcon,
-  Loader2Icon,
   PencilIcon,
   RefreshCwIcon,
   SendHorizontalIcon,
   SquareIcon,
 } from "lucide-react";
 import { Button } from "./button.tsx";
+import { CollapsibleToolCard } from "./collapsible-tool-card.tsx";
 import { MarkdownText } from "./markdown-text.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import { InvokeOperationToolUI } from "./tool-uis.tsx";
@@ -237,31 +235,18 @@ function ToolGroup({
   running,
   children,
 }: React.PropsWithChildren<{ count: number; running: boolean }>) {
-  const [open, setOpen] = React.useState(false);
   return (
-    <div className="bg-card text-card-foreground my-3 w-full rounded-lg border">
-      <button
-        type="button"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm"
-        onClick={() => setOpen((v) => !v)}
-      >
-        {running ? (
-          <Loader2Icon className="text-muted-foreground size-4 shrink-0 animate-spin" />
-        ) : (
-          <CheckIcon className="text-primary size-4 shrink-0" />
-        )}
-        <span className="flex-1 truncate">
+    <CollapsibleToolCard
+      running={running}
+      header={
+        <>
           <span className="text-muted-foreground">tools</span>{" "}
           <span className="font-medium">{count} appels</span>
-        </span>
-        {open ? (
-          <ChevronUpIcon className="text-muted-foreground size-4" />
-        ) : (
-          <ChevronDownIcon className="text-muted-foreground size-4" />
-        )}
-      </button>
-      {open && <div className="border-t px-3 pt-3">{children}</div>}
-    </div>
+        </>
+      }
+    >
+      <div className="border-t px-3 pt-3">{children}</div>
+    </CollapsibleToolCard>
   );
 }
 

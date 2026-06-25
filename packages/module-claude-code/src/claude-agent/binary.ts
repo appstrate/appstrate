@@ -5,7 +5,8 @@
  * driver. Thin scope-anchored shim over the shared resolver in
  * `@appstrate/runner-claude/binary`: the universal per-arch matrix + fall-through
  * logic live there; this module only pins resolution to *this* package's
- * `node_modules`, where `@appstrate/module-chat` installed the SDK.
+ * `node_modules`, where this package's own `@anthropic-ai/claude-agent-sdk`
+ * dependency installed the SDK.
  */
 
 import {

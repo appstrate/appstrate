@@ -6,22 +6,11 @@ Module Appstrate — chat conversationnel first-party au-dessus de la plateforme
 
 ## Surfaces
 
-| Surface        | Contenu                                                                                                                                                 |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.` (backend)  | `AppstrateModule` : routes `/api/chat/*`, RBAC `chat:read/write`, flag `features.chat`, contribution OpenAPI (→ auto-exposé en MCP via le module `mcp`) |
-| `./ui` (front) | `ChatPanel` (composant embarquable, prop `context` injectable) + `ChatPage` (wrapper plein écran lazy-loadé par le shell derrière `features.chat`)      |
-
-## Composant-d'abord (combinabilité)
-
-`ChatPanel` est conçu pour être monté **dans** d'autres modules (ex. le panneau latéral du module documents/workspace) :
-
-```tsx
-import { ChatPanel } from "@appstrate/module-chat/ui";
-
-<ChatPanel context={{ type: "document", id: openFileId, label: title }} getHeaders={orgHeaders} />;
-```
-
-Discipline d'embarquabilité : pas de store global, pas de navigation interne, thème par tokens hérités, accès API par fetch + headers injectés.
+| Surface                | Contenu                                                                                                                                                                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.` (backend)          | `AppstrateModule` : routes `/api/chat/*`, RBAC `chat:read/write`, flag `features.chat`, contribution OpenAPI (→ auto-exposé en MCP via le module `mcp`)                                                                                     |
+| `./ui` (front)         | `ChatPage` (plein écran, lazy-loadé par le shell derrière `features.chat` ; liste de sessions + thread)                                                                                                                                     |
+| `./chat-engine` (leaf) | Contrat `ChatEngineInput` + registre `registerChatEngine`/`getChatEngine` — le seam par lequel un module fournisseur (ex. `@appstrate/module-claude-code`) branche un moteur de chat « binaire officiel » sans que core ne porte le contrat |
 
 ## Cerveau LLM (✅ transplanté du satellite appstrate-chat)
 

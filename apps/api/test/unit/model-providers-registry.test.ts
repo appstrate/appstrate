@@ -3,12 +3,15 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 import {
+  engineForProvider,
   getModelProvider,
   isOAuthModelProvider,
   listModelProviders,
+  providerHasNativeOutput,
   registerModelProvider,
   registerModelProviders,
   resetModelProviders,
+  subscriptionEngineForProvider,
 } from "../../src/services/model-providers/registry.ts";
 import { seedTestModelProviders } from "../helpers/model-providers.ts";
 
@@ -107,6 +110,78 @@ describe("model-providers runtime registry", () => {
         }),
       );
       expect(isOAuthModelProvider("oauth-test")).toBe(true);
+    });
+  });
+
+  // The provider→engine resolution reads the `subscriptionEngine` binding off
+  // the registered definition directly (no separate copied map). These helpers
+  // moved here from @appstrate/core/subscription-engines when the global engine
+  // registry was removed.
+  describe("subscription-engine read helpers", () => {
+    beforeEach(() => {
+      registerModelProvider(
+        fakeDef("claude-code", {
+          authMode: "oauth2",
+          subscriptionEngine: { engine: "claude", sidecarAuthMode: "oauth", nativeOutput: true },
+        }),
+      );
+      registerModelProvider(
+        fakeDef("codex", {
+          authMode: "oauth2",
+          subscriptionEngine: {
+            engine: "codex",
+            sidecarAuthMode: "vend",
+            egressAllowlist: ["chatgpt.com", "openai.com"],
+          },
+        }),
+      );
+      registerModelProvider(fakeDef("openai", { authMode: "api_key" }));
+    });
+
+    describe("engineForProvider", () => {
+      it("maps a provider to its contributed engine", () => {
+        expect(engineForProvider("claude-code")).toBe("claude");
+        expect(engineForProvider("codex")).toBe("codex");
+      });
+      it("falls back to pi for any api-key / unknown provider", () => {
+        expect(engineForProvider("openai")).toBe("pi");
+        expect(engineForProvider("not-here")).toBe("pi");
+        expect(engineForProvider("")).toBe("pi");
+      });
+    });
+
+    describe("subscriptionEngineForProvider", () => {
+      it("returns the binding with the provider's id + label", () => {
+        const claude = subscriptionEngineForProvider("claude-code");
+        expect(claude).toMatchObject({
+          providerId: "claude-code",
+          label: "claude-code",
+          engine: "claude",
+          sidecarAuthMode: "oauth",
+        });
+        expect(subscriptionEngineForProvider("codex")?.egressAllowlist).toEqual([
+          "chatgpt.com",
+          "openai.com",
+        ]);
+      });
+      it("claude has no egress allowlist (token swapped server-side)", () => {
+        expect(subscriptionEngineForProvider("claude-code")?.egressAllowlist).toBeUndefined();
+      });
+      it("returns undefined for a non-subscription / unknown provider", () => {
+        expect(subscriptionEngineForProvider("openai")).toBeUndefined();
+        expect(subscriptionEngineForProvider("not-here")).toBeUndefined();
+      });
+    });
+
+    describe("providerHasNativeOutput", () => {
+      it("is true only for a provider that materialises output natively", () => {
+        expect(providerHasNativeOutput("claude-code")).toBe(true);
+        expect(providerHasNativeOutput("codex")).toBe(false);
+      });
+      it("is false for an unregistered / api-key provider", () => {
+        expect(providerHasNativeOutput("openai")).toBe(false);
+        expect(providerHasNativeOutput("")).toBe(false);
+      });
     });
   });
 

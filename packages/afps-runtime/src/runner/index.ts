@@ -11,6 +11,11 @@ export {
 } from "./reducer.ts";
 export { truncateToolResult, toolResultByteLimit } from "./tool-result.ts";
 export { computeTokenCost, type TokenCost } from "./token-cost.ts";
+export { runInputToText } from "./run-input-to-text.ts";
+export {
+  finalizeThrownFailure,
+  type FinalizeThrownFailureOptions,
+} from "./finalize-thrown-failure.ts";
 export {
   runContainerLifecycle,
   RunTimeoutError,

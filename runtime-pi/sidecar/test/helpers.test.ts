@@ -16,6 +16,7 @@ import {
   OUTBOUND_TIMEOUT_MS,
   readPositiveByteEnv,
   readPositiveIntEnv,
+  readRequestBodyBounded,
 } from "../helpers.ts";
 
 // --- Constants ---
@@ -566,5 +567,39 @@ describe("readPositiveIntEnv", () => {
     } finally {
       delete process.env[name];
     }
+  });
+});
+
+describe("readRequestBodyBounded", () => {
+  it("returns an empty array when the request has no body", async () => {
+    const result = await readRequestBodyBounded(new Request("https://x/", { method: "GET" }), 1024);
+    expect(result).toBeInstanceOf(Uint8Array);
+    expect((result as Uint8Array).byteLength).toBe(0);
+  });
+
+  it("buffers the full body when it stays under the cap", async () => {
+    const payload = new Uint8Array([1, 2, 3, 4, 5]);
+    const req = new Request("https://x/", { method: "POST", body: payload });
+    const result = await readRequestBodyBounded(req, 1024);
+    expect(result).toEqual(payload);
+  });
+
+  it('returns "exceeded" and cancels the reader once the cap is crossed', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(8));
+        // Subsequent chunk would push past the cap; the read must be
+        // cancelled before it is materialised.
+        controller.enqueue(new Uint8Array(8));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const req = new Request("https://x/", { method: "POST", body, duplex: "half" } as RequestInit);
+    const result = await readRequestBodyBounded(req, 10);
+    expect(result).toBe("exceeded");
+    expect(cancelled).toBe(true);
   });
 });

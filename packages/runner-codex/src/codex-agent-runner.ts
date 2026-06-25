@@ -44,7 +44,9 @@ import { rm } from "node:fs/promises";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   computeTokenCost,
+  finalizeThrownFailure,
   reduceEvents,
+  runInputToText,
   type RunError,
   type RunResult,
   type TokenCost,
@@ -64,7 +66,6 @@ import {
   type VendedCodexCredential,
 } from "./codex-binary.ts";
 import { drainAndEmitInto, type RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { CodexRunEventMapper } from "./run-event-mapper.ts";
 
 /** Subprocess handle shape (Bun.spawn) — the minimum the runner drives. */
@@ -130,20 +131,9 @@ export interface CodexAgentRunnerOptions {
   now?: () => number;
 }
 
-/** Normalise the run input (`z.unknown()`) into prompt text. */
-function inputToText(input: unknown): string {
-  if (typeof input === "string") return input.trim();
-  if (input == null) return "";
-  try {
-    return JSON.stringify(input);
-  } catch {
-    return "";
-  }
-}
-
 /** Fold the system persona + run input into a single `codex exec` prompt. */
 export function buildCodexRunPrompt(systemPrompt: string, input: unknown): string {
-  const task = inputToText(input) || "Begin the task described in your instructions.";
+  const task = runInputToText(input) || "Begin the task described in your instructions.";
   return systemPrompt ? `${systemPrompt}\n\n---\n\n${task}` : task;
 }
 
@@ -432,32 +422,35 @@ export class CodexAgentRunner implements Runner {
       const result = redactSecretsDeep(reduced, knownSecrets);
       await eventSink.finalize(result);
     } catch (err) {
-      if (signal?.aborted) {
-        // Cancellation: propagate without finalizing — the caller's finally
-        // block decides (mirrors the Claude/Pi runners).
-        throw err;
-      }
-      const message = getErrorMessage(err);
-      await emit({ type: "appstrate.error", timestamp: now(), runId, message });
-      // Best-effort final drain: a mid-run throw may leave journaled events the
-      // agent produced before failing (memory.added / log.written / output).
-      await drainAndEmit(true);
-      // Failure epilogue (reduceEvents — NOT emptyRunResult — so any partial
-      // canonical output the agent emitted before the throw [memory.added /
-      // output.emitted / log.written] survives into the failed result; then
-      // status="failed" → stamp usage/cost/duration → deep-scrub → finalize).
-      // The final `redactSecretsDeep` scrubs the WHOLE result by VALUE: a thrown
-      // error's text can carry the vended token verbatim, and the terminal
-      // RunResult.error is the raw `message` (the emitted appstrate.error above
-      // is already scrubbed by the emit() sink). `knownSecrets` is armed after
-      // vend; empty if the throw predates it.
+      // Shared thrown-failure epilogue (abort-rethrow → emit appstrate.error →
+      // best-effort final drain → reduceEvents [NOT emptyRunResult, so any
+      // partial canonical output the agent emitted before the throw survives] →
+      // status="failed" → stamp usage/cost/duration → finalize).
+      //
+      // The `transform` keeps codex's redaction posture intact: it deep-scrubs
+      // BOTH the emitted appstrate.error event and the WHOLE terminal result by
+      // VALUE, so a thrown error's text (which can carry the vended token
+      // verbatim) and the terminal RunResult.error (the raw `message`) cannot
+      // leak the credential. `knownSecrets` is armed after vend; empty if the
+      // throw predates it. The `error.code = "adapter_error"` shape is preserved.
       const usage = mapper.usage();
-      const failed = reduceEvents(events, { error: { code: "adapter_error", message } });
-      failed.status = "failed";
-      failed.usage = usage;
-      failed.cost = computeTokenCost(usage, this.opts.modelCost);
-      failed.durationMs = now() - startTime;
-      await eventSink.finalize(redactSecretsDeep(failed, knownSecrets));
+      await finalizeThrownFailure({
+        events,
+        err,
+        signal,
+        runId,
+        now,
+        emit,
+        drainAndEmit: () => drainAndEmit(true),
+        eventSink,
+        usage,
+        buildError: (message) => ({ code: "adapter_error", message }),
+        stamp: (failed) => {
+          failed.cost = computeTokenCost(usage, this.opts.modelCost);
+          failed.durationMs = now() - startTime;
+        },
+        transform: (value) => redactSecretsDeep(value, knownSecrets),
+      });
     } finally {
       if (signal) signal.removeEventListener("abort", onAbort);
       // Let the stderr drain settle so its reader unwinds (no dangling lock /

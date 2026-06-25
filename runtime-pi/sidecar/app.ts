@@ -15,6 +15,7 @@ import {
   filterHeaders,
   isBlockedUrl,
   readPositiveIntEnv,
+  readRequestBodyBounded,
   type SidecarConfig,
   type CredentialsResponse,
   type LlmProxyOauthConfig,
@@ -384,42 +385,6 @@ function llmBodyOversizeError(actual: number | null) {
 }
 
 /**
- * Stream-read a Request body into bytes, refusing the read the moment the
- * cumulative size crosses `maxBytes`. Returns `"exceeded"` if the cap was
- * hit (the read is cancelled — an over-budget body is never materialised),
- * the bytes otherwise. Mirrors mcp.ts's `readRequestBodyBounded`; kept
- * local because that one is module-private to mcp.ts.
- */
-async function readBodyBounded(req: Request, maxBytes: number): Promise<Uint8Array | "exceeded"> {
-  if (!req.body) return new Uint8Array(0);
-  const reader = req.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      if (total + value.byteLength > maxBytes) {
-        await reader.cancel();
-        return "exceeded";
-      }
-      chunks.push(value);
-      total += value.byteLength;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return merged;
-}
-
-/**
  * Buffer an inbound `/llm` request body as text under a hard byte cap.
  * Enforces a `Content-Length` precheck when declared AND the actual
  * buffered byte length (a missing/spoofed Content-Length is still
@@ -444,7 +409,7 @@ async function bufferLlmBodyBounded(
       return c.json(llmBodyOversizeError(declaredLength), 413);
     }
   }
-  const bytes = await readBodyBounded(c.req.raw, maxBytes);
+  const bytes = await readRequestBodyBounded(c.req.raw, maxBytes);
   if (bytes === "exceeded") {
     return c.json(llmBodyOversizeError(null), 413);
   }

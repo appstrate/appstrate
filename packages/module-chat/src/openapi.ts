@@ -244,15 +244,6 @@ export const chatPaths = {
                 },
                 modelId: { type: "string" },
                 id: { type: "string", description: "Thread id (assistant-ui)" },
-                context: {
-                  type: "object",
-                  required: ["type", "id"],
-                  properties: {
-                    type: { type: "string" },
-                    id: { type: "string" },
-                    label: { type: "string" },
-                  },
-                },
               },
             },
           },

@@ -26,10 +26,7 @@
  */
 
 import type { ModelProviderDefinition } from "@appstrate/core/module";
-import {
-  registerSubscriptionEngine,
-  resetSubscriptionEnginesForTesting,
-} from "@appstrate/core/subscription-engines";
+import type { RunEngine, SubscriptionEngineDef } from "@appstrate/core/subscription-engines";
 import { hasCatalog, lookupCatalogModel } from "../pricing-catalog.ts";
 
 // ---------------------------------------------------------------------------
@@ -60,20 +57,6 @@ export function registerModelProvider(def: ModelProviderDefinition): void {
   }
   validateCatalogReferences(def);
   _byId.set(def.providerId, def);
-
-  // Contribute the provider's execution-engine binding to the core
-  // subscription-engine registry (run-launcher + chat + gateways resolve the
-  // engine by provider id). API-key providers omit `subscriptionEngine` and run
-  // on `pi`; only OAuth-subscription providers (claude-code, codex) carry one.
-  // This is what keeps core free of hardcoded subscription machinery — the
-  // binding lives with the opt-in module that registers the provider.
-  if (def.subscriptionEngine) {
-    registerSubscriptionEngine({
-      ...def.subscriptionEngine,
-      providerId: def.providerId,
-      label: def.displayName,
-    });
-  }
 }
 
 /**
@@ -126,7 +109,6 @@ export function registerModelProviders(defs: readonly ModelProviderDefinition[])
  */
 export function resetModelProviders(): void {
   _byId.clear();
-  resetSubscriptionEnginesForTesting();
 }
 
 // ---------------------------------------------------------------------------
@@ -147,4 +129,47 @@ export function isOAuthModelProvider(providerId: string): boolean {
 /** Iterate all registered model providers (insertion order). */
 export function listModelProviders(): readonly ModelProviderDefinition[] {
   return Array.from(_byId.values());
+}
+
+// ---------------------------------------------------------------------------
+// Subscription-engine read helpers
+//
+// The provider definition's `subscriptionEngine` binding is the SINGLE source
+// of truth for which engine a provider runs on. These helpers read it directly
+// (no separate copied map), so the run launcher, chat, and llm-proxy gateways
+// resolve the engine by provider id off the SAME registration. API-key /
+// unregistered providers carry no binding and resolve to the `pi` engine.
+// ---------------------------------------------------------------------------
+
+/**
+ * The subscription-engine definition for a provider id (binding + the provider's
+ * own id/label), or `undefined` for an API-key / unregistered provider. Pure read.
+ */
+export function subscriptionEngineForProvider(
+  providerId: string,
+): SubscriptionEngineDef | undefined {
+  const def = _byId.get(providerId);
+  if (!def?.subscriptionEngine) return undefined;
+  return { ...def.subscriptionEngine, providerId: def.providerId, label: def.displayName };
+}
+
+/**
+ * The engine for a provider id: its contributed subscription engine, or `"pi"`
+ * for every API-key / unregistered provider. Pure read.
+ */
+export function engineForProvider(providerId: string): RunEngine {
+  return _byId.get(providerId)?.subscriptionEngine?.engine ?? "pi";
+}
+
+/**
+ * True iff PROVIDER materialises the structured deliverable natively (see
+ * {@link SubscriptionEngineBinding.nativeOutput}). The launcher uses this to
+ * decide whether to serve the MCP `output` runtime tool to a run — a
+ * native-output provider must not be offered it. Provider-specific, NOT
+ * engine-wide: a second provider on the same engine that does NOT emit output
+ * natively keeps its MCP `output` path. An unregistered / API-key provider is
+ * always false.
+ */
+export function providerHasNativeOutput(providerId: string): boolean {
+  return _byId.get(providerId)?.subscriptionEngine?.nativeOutput === true;
 }

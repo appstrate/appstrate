@@ -40,10 +40,10 @@ import {
 } from "./pi-sdk.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
-import { getErrorMessage } from "@appstrate/core/errors";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   emptyRunResult,
+  finalizeThrownFailure,
   reduceEvents,
   truncateToolResult,
   toolResultByteLimit,
@@ -246,26 +246,31 @@ export class PiRunner implements Runner {
     try {
       await this.executeSession(context, internalSink, signal, captureBridge);
     } catch (err) {
-      if (signal?.aborted) {
-        // Cancellation: propagate without finalizing — the caller's
-        // finally block decides.
-        throw err;
-      }
-      const message = getErrorMessage(err);
-      await emit({
-        type: "appstrate.error",
-        timestamp: Date.now(),
+      // Shared thrown-failure epilogue (abort-rethrow → emit appstrate.error →
+      // best-effort drain → reduce → stamp usage/cost → finalize). The Pi runner
+      // leaves `status` unset on this path (setFailedStatus: false, preserved
+      // verbatim) and sources usage + cost from the session bridge — both only
+      // when the bridge was captured (an early throw can predate it). The "drain"
+      // here converges the bridge's pending fire-and-forget emits
+      // (`drainPending`) before finalize closes the sink, not a runtime-event
+      // journal; it emits nothing new, so reducing before vs after it is
+      // equivalent.
+      const bridge = bridgeRef.current;
+      await finalizeThrownFailure({
+        events,
+        err,
+        signal,
         runId,
-        message,
+        now: Date.now,
+        emit,
+        drainAndEmit: () => bridge?.drainPending() ?? Promise.resolve(),
+        eventSink,
+        usage: bridge ? bridge.getUsage() : undefined,
+        setFailedStatus: false,
+        stamp: (result) => {
+          if (bridge) result.cost = bridge.getCost();
+        },
       });
-      const result = reduceEvents(events, {
-        error: { message, stack: err instanceof Error ? err.stack : undefined },
-      });
-      attachAccumulators(result);
-      if (bridgeRef.current) {
-        await bridgeRef.current.drainPending();
-      }
-      await eventSink.finalize(result);
       return;
     }
 

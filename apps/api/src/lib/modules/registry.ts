@@ -19,9 +19,8 @@ import { getEnv } from "@appstrate/env";
 // ---- Platform service imports (for buildPlatformServices) -----------------
 import { logger } from "../logger.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
-import { listLlmUsageForRun, listRecentForActor } from "../../services/state/runs.ts";
-import { listUsableIntegrationsForActor } from "../../services/integration-connections.ts";
-import { listRunnableAgents, listInstalledSkills } from "../../services/application-packages.ts";
+import { listLlmUsageForRun } from "../../services/state/runs.ts";
+import { subscriptionEngineForProvider } from "../../services/model-providers/registry.ts";
 import { getPlatformApp } from "../platform-app.ts";
 
 // ---------------------------------------------------------------------------
@@ -86,9 +85,10 @@ export function getModuleRegistry(): string[] {
 /**
  * Wire concrete platform services into the structural `PlatformServices`
  * contract declared in `@appstrate/core/module`. The surface is intentionally
- * minimal — only `runs.listLlmUsage` (the cloud billing module's per-run
- * ledger read) is exposed. See the `PlatformServices` doc in core for the
- * razor and the history of the previous (chat-era) broad surface.
+ * minimal — `runs.listLlmUsage` (the cloud billing module's per-run ledger
+ * read), `inProcess.dispatch`, and `chatEngineForProvider` (the chat module's
+ * subscription chat-engine lookup). See the `PlatformServices` doc in core for
+ * the razor and the history of the previous (chat-era) broad surface.
  */
 function buildPlatformServices(): PlatformServices {
   return {
@@ -100,28 +100,6 @@ function buildPlatformServices(): PlatformServices {
     },
     runs: {
       listLlmUsage: listLlmUsageForRun,
-      listRecentForActor: ({ orgId, applicationId, actor, limit }) =>
-        listRecentForActor({ orgId, applicationId }, actor, { limit }),
-    },
-    integrations: {
-      // The chat module's in-process replacement for its old GET
-      // /api/me/context loopback hop — identity + role come off the request
-      // context, only the integration list needs this single DB read.
-      listUsableForActor: ({ orgId, applicationId, actor }) =>
-        listUsableIntegrationsForActor({ orgId, applicationId }, actor),
-    },
-    agents: {
-      // In-process runnable-agent hint for the chat's caller-context block —
-      // app-scoped (same for every actor), capped for prompt size.
-      listRunnable: ({ orgId, applicationId, limit }) =>
-        listRunnableAgents({ orgId, applicationId }, { limit }),
-    },
-    skills: {
-      // In-process installed-skill hint for the chat's caller-context block —
-      // app-scoped, capped for prompt size. Attachable under an agent
-      // manifest's `dependencies.skills` (skills aren't run directly).
-      listInstalled: ({ orgId, applicationId, limit }) =>
-        listInstalledSkills({ orgId, applicationId }, { limit }),
     },
     inProcess: {
       // Re-enter the fully-wired platform app in-process (no socket hop). The
@@ -131,6 +109,11 @@ function buildPlatformServices(): PlatformServices {
       // normalizes it to the `Promise<Response>` the service contract declares.
       dispatch: async (request) => getPlatformApp().fetch(request),
     },
+    // Resolve a provider's subscription-engine def (incl. its module-contributed
+    // chatHandler) off the model-provider registry. apps/api owns that registry;
+    // the chat module reads the engine through this injected lookup rather than
+    // importing the registry or any vendor SDK.
+    chatEngineForProvider: subscriptionEngineForProvider,
   };
 }
 

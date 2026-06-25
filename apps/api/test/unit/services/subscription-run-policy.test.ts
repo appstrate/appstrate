@@ -2,10 +2,6 @@
 
 import { afterAll, beforeAll, describe, it, expect } from "bun:test";
 import {
-  registerSubscriptionEngine,
-  resetSubscriptionEnginesForTesting,
-} from "@appstrate/core/subscription-engines";
-import {
   assertRunnableOnEngine,
   assertSubscriptionEngineIsolation,
   assertVendRunHasNoIntegrations,
@@ -39,26 +35,29 @@ function fakeProvider(
   };
 }
 
-// The engine registry is contributed at boot by the provider modules; seed the
-// two reference bindings so these pure-unit assertions have data to resolve.
+// The provider→engine binding lives on the model-provider definition, read by
+// the policy through the model-provider registry. Seed the two reference
+// subscription providers so these pure-unit assertions have data to resolve.
 beforeAll(() => {
-  resetSubscriptionEnginesForTesting();
-  registerSubscriptionEngine({
-    providerId: "claude-code",
-    label: "Claude Code",
-    engine: "claude",
-    sidecarAuthMode: "oauth",
-    nativeOutput: true,
-  });
-  registerSubscriptionEngine({
-    providerId: "codex",
-    label: "Codex",
-    engine: "codex",
-    sidecarAuthMode: "vend",
-    egressAllowlist: ["chatgpt.com", "openai.com"],
-  });
+  resetModelProviders();
+  registerModelProvider(
+    fakeProvider("claude-code", {
+      authMode: "oauth2",
+      subscriptionEngine: { engine: "claude", sidecarAuthMode: "oauth", nativeOutput: true },
+    }),
+  );
+  registerModelProvider(
+    fakeProvider("codex", {
+      authMode: "oauth2",
+      subscriptionEngine: {
+        engine: "codex",
+        sidecarAuthMode: "vend",
+        egressAllowlist: ["chatgpt.com", "openai.com"],
+      },
+    }),
+  );
 });
-afterAll(() => resetSubscriptionEnginesForTesting());
+afterAll(() => seedTestModelProviders());
 
 describe("assertRunnableOnEngine", () => {
   it("allows claude-code (oauth credential) on the claude engine", () => {
@@ -191,7 +190,6 @@ describe("resolveCredentialDelivery (single classification axis)", () => {
   // come from the SAME registration — the drift this resolver eliminates.
   beforeAll(() => {
     resetModelProviders();
-    resetSubscriptionEnginesForTesting();
     registerModelProvider(
       fakeProvider("claude-code", {
         authMode: "oauth2",
@@ -213,23 +211,9 @@ describe("resolveCredentialDelivery (single classification axis)", () => {
     registerModelProvider(fakeProvider("openai", { authMode: "api_key" }));
   });
   afterAll(() => {
-    // Restore the canonical cross-file baselines (both registries).
+    // Restore the canonical cross-file baseline (model-provider registry, which
+    // carries each module's subscriptionEngine binding).
     seedTestModelProviders();
-    resetSubscriptionEnginesForTesting();
-    registerSubscriptionEngine({
-      providerId: "claude-code",
-      label: "Claude Code",
-      engine: "claude",
-      sidecarAuthMode: "oauth",
-      nativeOutput: true,
-    });
-    registerSubscriptionEngine({
-      providerId: "codex",
-      label: "Codex",
-      engine: "codex",
-      sidecarAuthMode: "vend",
-      egressAllowlist: ["chatgpt.com", "openai.com"],
-    });
   });
 
   it("derives an oauth subscription engine's authMode from the registry (single source)", () => {

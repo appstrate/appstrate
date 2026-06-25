@@ -1,7 +1,7 @@
 {
   "name": "@appstrate/module-chat",
   "version": "0.1.0",
-  "description": "Appstrate module — conversational chat over the platform (sessions, message tree, embeddable ChatPanel UI). Opt-in: append `@appstrate/module-chat` to MODULES to enable.",
+  "description": "Appstrate module — conversational chat over the platform (sessions, message tree, full-page ChatPage UI). Opt-in: append `@appstrate/module-chat` to MODULES to enable.",
   "license": "Apache-2.0",
   "type": "module",
   "main": null,

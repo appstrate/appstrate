@@ -34,7 +34,7 @@ import {
   resolveCredentialDelivery,
 } from "./subscription-run-policy.ts";
 import { getExecutionMode } from "../../infra/mode.ts";
-import { providerHasNativeOutput } from "@appstrate/core/subscription-engines";
+import { providerHasNativeOutput } from "../model-providers/registry.ts";
 import {
   getOrchestrator,
   type ContainerOrchestrator,

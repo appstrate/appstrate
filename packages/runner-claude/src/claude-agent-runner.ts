@@ -36,7 +36,9 @@
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   emptyRunResult,
+  finalizeThrownFailure,
   reduceEvents,
+  runInputToText,
   type RunOptions,
   type Runner,
   type RunResult,
@@ -100,15 +102,9 @@ const DEFAULT_MAX_TURNS = 100;
 
 function resolveStartMessage(context: ExecutionContext, explicit: string | undefined): string {
   if (typeof explicit === "string" && explicit.length > 0) return explicit;
-  if (typeof context.input === "string" && context.input.trim().length > 0) return context.input;
-  if (context.input != null) {
-    try {
-      return JSON.stringify(context.input);
-    } catch {
-      /* fall through */
-    }
-  }
-  return "Begin the task according to your instructions.";
+  // Shared string|null|JSON.stringify normalisation; the fallback sentence
+  // stays owned here (the helper returns "" for empty input).
+  return runInputToText(context.input) || "Begin the task according to your instructions.";
 }
 
 export class ClaudeAgentRunner implements Runner {
@@ -226,27 +222,24 @@ export class ClaudeAgentRunner implements Runner {
         await drainAndEmit();
       }
     } catch (err) {
-      if (signal?.aborted) {
-        // Cancellation: propagate without finalizing — the caller's finally
-        // block decides (mirrors PiRunner).
-        throw err;
-      }
-      const message = getErrorMessage(err);
-      await emit({ type: "appstrate.error", timestamp: now(), runId, message });
-      // Best-effort final drain: capture any runtime events journaled before the
-      // SDK stream threw (log/note/pin/report the agent produced mid-run).
-      await drainAndEmit(true);
-      // Failure epilogue (reduce → status="failed" → stamp usage → finalize).
-      // No redaction needed — the Claude path holds no in-run credential at rest
-      // (the sidecar gateway swaps the placeholder token in flight).
-      const failed = reduceEvents(events, {
-        error: { message, stack: err instanceof Error ? err.stack : undefined },
+      // Shared thrown-failure epilogue (abort-rethrow → emit appstrate.error →
+      // best-effort final drain → reduce → status="failed" → stamp usage →
+      // finalize). No redaction needed — the Claude path holds no in-run
+      // credential at rest (the sidecar gateway swaps the placeholder token in
+      // flight), so the transform stays identity.
+      await finalizeThrownFailure({
+        events,
+        err,
+        signal,
+        runId,
+        now,
+        emit,
+        drainAndEmit: () => drainAndEmit(true),
+        eventSink,
+        // Stamp the tokens already spent before the throw (the SDK never emitted
+        // its authoritative `result`, so without this they'd be lost as zero).
+        usage: mapper.liveUsageSnapshot(),
       });
-      failed.status = "failed";
-      // Stamp the tokens already spent before the throw (the SDK never emitted
-      // its authoritative `result`, so without this they'd be lost as zero).
-      failed.usage = mapper.liveUsageSnapshot();
-      await eventSink.finalize(failed);
       return;
     }
 

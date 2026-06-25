@@ -26,13 +26,15 @@
 
 import type { LlmProxyOauthConfig, ModelSwap } from "@appstrate/core/sidecar-types";
 import {
-  engineForProvider,
   isSubscriptionEngine,
-  subscriptionEngineDef,
   type RunEngine,
   type SubscriptionEngineDef,
 } from "@appstrate/core/subscription-engines";
-import { isOAuthModelProvider } from "../model-providers/registry.ts";
+import {
+  engineForProvider,
+  isOAuthModelProvider,
+  subscriptionEngineForProvider,
+} from "../model-providers/registry.ts";
 
 export type { RunEngine };
 
@@ -57,7 +59,7 @@ export type CredentialDeliveryMode = "oauth" | "vend" | "api_key";
  *
  * Reads the provider→engine registry ONCE (plus the oauth-class flag for the
  * no-subscription-engine refuse path) so the launcher no longer maintains a
- * parallel `isOAuthModelProvider` axis alongside `subscriptionEngineDef`. The
+ * parallel `isOAuthModelProvider` axis alongside `subscriptionEngineForProvider`. The
  * delivery mode, the oauth-class boolean, the resolved engine, and the egress
  * allowlist all flow from this one value.
  *
@@ -80,7 +82,7 @@ export function resolveCredentialDelivery(params: {
   egressAllowlist: readonly string[] | undefined;
 } {
   const { providerId, hasCredentialId } = params;
-  const subscriptionEngine = subscriptionEngineDef(providerId);
+  const subscriptionEngine = subscriptionEngineForProvider(providerId);
   const engine = engineForProvider(providerId);
 
   // A credential is oauth-class when it has a stored credential id AND its
@@ -184,7 +186,7 @@ export function assertSubscriptionEngineIsolation(params: {
   orchestratorMode: "docker" | "process";
 }): void {
   const { providerId, orchestratorMode } = params;
-  if (subscriptionEngineDef(providerId) && orchestratorMode !== "docker") {
+  if (subscriptionEngineForProvider(providerId) && orchestratorMode !== "docker") {
     throw new SubscriptionRequiresDockerError(providerId);
   }
 }

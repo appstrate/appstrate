@@ -3,23 +3,12 @@
 /**
  * Chat module UI — exported from `@appstrate/module-chat/ui`.
  *
- * Component-first design: `ChatPanel` is the embeddable unit (the documents/
- * workspace module mounts it in a side panel and injects a `context`);
- * `ChatPage` is the thin full-page wrapper the app shell lazy-loads behind
- * `features.chat`.
- *
- * The conversation runs on assistant-ui's native AI SDK runtime
- * (`useChatRuntime` + `AssistantChatTransport` → `POST /api/chat`,
- * UIMessage streaming). `ChatPage` adds the native remote thread-list
- * (persisted sessions); the embedded `ChatPanel` is single-thread and
- * ephemeral by design.
- *
- * Embeddability discipline (keep it that way):
- *   - no global store: every instance owns its runtime (multiple panels OK)
- *   - no internal navigation: the host decides where the panel lives
- *   - theme via inherited Tailwind tokens only
- *   - API access via fetch + injected headers (the host shell passes its
- *     org/app headers through `getHeaders`)
+ * `ChatPage` is the full-page chat the app shell lazy-loads behind
+ * `features.chat`. The conversation runs on assistant-ui's native AI SDK
+ * runtime (`useChatRuntime` + `AssistantChatTransport` → `POST /api/chat`,
+ * UIMessage streaming), with the native remote thread-list (persisted
+ * sessions). API access is fetch + injected org/app headers (passed through
+ * `getHeaders` by the host shell).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -32,163 +21,7 @@ import { makeThreadListAdapter } from "./thread-list-adapter.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
 
-export interface ChatContext {
-  /** What the conversation is anchored to (e.g. "document", "run"). */
-  type: string;
-  id: string;
-  label?: string;
-}
-
-export interface ChatPanelProps {
-  /** Optional anchor injected by the host (e.g. the open file in the workspace). */
-  context?: ChatContext;
-  /** Org/app scoping headers supplied by the host shell (X-Org-Id, …). */
-  getHeaders?: () => Record<string, string>;
-  /** Pin a model (preset id) — hides the picker. Default: user-picked, then org default. */
-  modelId?: string;
-  className?: string;
-}
-
 const MODEL_STORAGE_KEY = "appstrate.chat.model";
-
-/** Host app's i18next persistence key (shared localStorage). */
-const I18N_STORAGE_KEY = "i18nextLng";
-
-/**
- * Browser-side grounding for the system prompt: current clock + timezone and
- * the active UI language. None of these are persisted server-side, so the
- * client is the source of truth. Best-effort — every field is optional and the
- * server falls back (UTC / fr) when absent.
- */
-function readClientContext(): { now: string; tz?: string; locale?: string } {
-  let tz: string | undefined;
-  try {
-    tz = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
-  } catch {
-    // Intl unavailable — leave undefined.
-  }
-  let locale: string | undefined;
-  try {
-    locale =
-      (typeof localStorage === "undefined" ? null : localStorage.getItem(I18N_STORAGE_KEY)) ||
-      (typeof navigator === "undefined" ? undefined : navigator.language) ||
-      undefined;
-  } catch {
-    // localStorage blocked — leave undefined.
-  }
-  return { now: new Date().toISOString(), tz, locale };
-}
-
-export function ChatPanel({ context, getHeaders, modelId, className }: ChatPanelProps) {
-  // The context + selected model ride in refs so the transport (memoized once)
-  // reads the latest value at request time without rebuilding mid-thread. Synced
-  // in effects, not during render (Rules of React: no ref writes in render) — a
-  // one-render-late ref is fine, the transport only reads it when a turn is sent.
-  const contextRef = useRef(context);
-  useEffect(() => {
-    contextRef.current = context;
-  }, [context]);
-
-  // Model picker (hidden when the host pins `modelId`).
-  const [models, setModels] = useState<OrgModelOption[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string | null>(() =>
-    typeof localStorage === "undefined" ? null : localStorage.getItem(MODEL_STORAGE_KEY),
-  );
-  const selectedModelRef = useRef(selectedModel);
-  useEffect(() => {
-    selectedModelRef.current = modelId ?? selectedModel;
-  }, [modelId, selectedModel]);
-
-  useEffect(() => {
-    if (modelId) return;
-    void fetchModels(getHeaders).then((list) => {
-      setModels(list);
-      setSelectedModel((cur) => {
-        if (cur && list.some((m) => m.id === cur)) return cur;
-        return (list.find((m) => m.is_default) ?? list[0])?.id ?? null;
-      });
-    });
-  }, [getHeaders, modelId]);
-
-  const selectModel = (id: string) => {
-    setSelectedModel(id);
-    localStorage.setItem(MODEL_STORAGE_KEY, id);
-  };
-
-  // Ref reads live in these callbacks (request-time, not render) — the
-  // sanctioned place to read a ref. Stable identities keep the transport memo
-  // from rebuilding when only the selected model / context changes.
-  const buildHeaders = useCallback(
-    (): Record<string, string> => ({
-      ...getHeaders?.(),
-      ...(selectedModelRef.current ? { "X-Model-Id": selectedModelRef.current } : {}),
-    }),
-    [getHeaders],
-  );
-  // Inject the host context into the JSON body — done in a fetch wrapper so we
-  // stay on the transport's native request shape. `client` carries the
-  // browser's clock/timezone and the active UI language so the system prompt
-  // can ground "today" and reply in the user's language without a DB lookup
-  // (no tz/locale is persisted server-side). The UI language is read from the
-  // host app's i18next key (shared localStorage), falling back to the browser.
-  const fetchWithContext = useCallback(
-    async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-      let body = init?.body;
-      if (typeof body === "string") {
-        try {
-          body = JSON.stringify({
-            ...(JSON.parse(body) as Record<string, unknown>),
-            context: contextRef.current,
-            client: readClientContext(),
-          });
-        } catch {
-          // Not JSON — forward untouched.
-        }
-      }
-      return fetch(input, { ...init, body });
-    },
-    [],
-  );
-
-  const transport = useMemo(
-    () =>
-      // buildHeaders/fetchWithContext read refs only at REQUEST time;
-      // AssistantChatTransport stores them, it doesn't invoke them during
-      // construction. The refs rule can't see past the constructor boundary, so
-      // it false-flags this as a render-time ref read.
-      // eslint-disable-next-line react-hooks/refs
-      new AssistantChatTransport({
-        api: "/api/chat",
-        credentials: "include",
-        headers: buildHeaders,
-        fetch: fetchWithContext as typeof fetch,
-      }),
-    [buildHeaders, fetchWithContext],
-  );
-
-  const runtime = useChatRuntime({ transport });
-
-  return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <div className={`flex h-full min-h-0 flex-col ${className ?? ""}`}>
-        {context && (
-          <div className="text-muted-foreground border-b px-3 py-2 text-xs">
-            Contexte : {context.label ?? `${context.type} ${context.id}`}
-          </div>
-        )}
-        <div className="min-h-0 flex-1">
-          <Thread
-            composerSlot={
-              modelId ? undefined : (
-                <ModelSelect models={models} selectedId={selectedModel} onSelect={selectModel} />
-              )
-            }
-          />
-        </div>
-      </div>
-    </AssistantRuntimeProvider>
-  );
-}
 
 export interface ChatPageProps {
   getHeaders?: () => Record<string, string>;
@@ -205,8 +38,7 @@ export interface ChatPageProps {
  * Full-page chat — what the app shell lazy-loads on `/chat`. Runs
  * assistant-ui's native remote thread-list runtime: conversation list on
  * the left (create/rename/delete), per-thread history restored from
- * `chat_sessions`/`chat_messages` through the history adapter. The
- * embeddable `ChatPanel` stays single-thread (ephemeral) by design.
+ * `chat_sessions`/`chat_messages` through the history adapter.
  */
 export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
   const adapter = useMemo(() => makeThreadListAdapter(getHeaders), [getHeaders]);

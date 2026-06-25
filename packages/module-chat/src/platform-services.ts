@@ -1,142 +1,81 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Injected platform capabilities (set by index.ts at module init from
- * `ctx.services`). They let the chat read the platform IN-PROCESS instead of
- * over a loopback HTTP hop:
+ * Platform capabilities the chat module depends on, captured ONCE at module
+ * init from `ctx.services` into an immutable {@link ChatPlatformDeps} object and
+ * threaded explicitly into the router, the stream handler, and the model
+ * helpers. No module-level mutable globals: there used to be a handful of
+ * `let xService = null` slots with `setX` setters, which leaked state across
+ * tests/inits; the deps object replaces them.
  *
- *   - `integrations.listUsableForActor` replaces the `GET /api/me/context`
- *     round-trip used only to list the caller's connected integrations
- *     (identity + role come straight off the request context).
- *   - `inProcess.dispatch` re-enters the fully-wired platform Hono app without
- *     the socket hop (auth + RBAC still run on the dispatched Request).
- *
- * Both are OPTIONAL: before init, in tests, or on a platform that doesn't wire
- * them, the chat falls back to the loopback `fetch` it has always used. Mirrors
- * the `setRateLimitFactory` injection in routes.ts.
+ *   - `dispatch` re-enters the fully-wired platform Hono app IN-PROCESS (auth +
+ *     RBAC still run on the dispatched Request). The loopback `fetch` fallback —
+ *     used in OSS/test wiring where `ctx.services.inProcess` is absent — lives
+ *     INSIDE this object, so callers never branch on it.
+ *   - `rateLimit` is the platform's authenticated per-route limiter.
+ *   - `chatEngine` looks up a subscription chat engine (e.g. Claude) by provider
+ *     id — platform-injected (`ctx.services.chatEngineForProvider` reads the
+ *     model-provider registry, an apps/api concern, and returns the core engine
+ *     def incl. its module-contributed `chatHandler`). This module never imports
+ *     that registry or any vendor SDK; only the shared `ChatEngineInput` type
+ *     crosses the boundary.
  */
 
-export interface ChatIntegrationsService {
-  listUsableForActor(args: {
-    orgId: string;
-    applicationId: string;
-    actor: { type: "user" | "end_user"; id: string };
-  }): Promise<
-    Array<{
-      integration_id: string;
-      name: string;
-      source: string;
-      version?: string;
-      /**
-       * AFPS §4.4 `default_tools` — the tool(s) an agent inherits when it
-       * declares the integration without an `integrations_configuration`
-       * entry. Surfaced in the chat's caller context so the model knows
-       * what it gets for free vs what it must select explicitly.
-       */
-      default_tools?: readonly string[] | "*";
-    }>
-  >;
+import type { MiddlewareHandler } from "hono";
+import type { ModuleInitContext } from "@appstrate/core/module";
+import type { ChatEngineInput } from "@appstrate/core/subscription-engines";
+
+/**
+ * A subscription chat engine surfaced to the chat: the provider it serves + its
+ * turn handler. Normalised from the core `SubscriptionEngineDef` the platform
+ * resolves — only providers that carry a `chatHandler` (Claude) become a
+ * `ChatEngine`; codex (no chat surface) resolves to `undefined`.
+ */
+export interface ChatEngine {
+  providerId: string;
+  handler: (input: ChatEngineInput) => Response;
 }
 
-export interface ChatRunnableAgent {
-  package_id: string;
-  display_name: string;
-  description: string;
-  takes_input: boolean;
-  source: string;
-}
-
-export interface ChatAgentsService {
-  listRunnable(args: { orgId: string; applicationId: string; limit?: number }): Promise<{
-    agents: ChatRunnableAgent[];
-    truncated: boolean;
-    total: number;
-  }>;
-}
-
-export interface ChatSkill {
-  package_id: string;
-  display_name: string;
-  description: string;
-  /** The skill's own manifest version, when known — pin a `dependencies.skills`
-   * range from it. */
-  version: string | null;
-  source: string;
-}
-
-export interface ChatSkillsService {
-  listInstalled(args: { orgId: string; applicationId: string; limit?: number }): Promise<{
-    skills: ChatSkill[];
-    truncated: boolean;
-    total: number;
-  }>;
-}
-
-export interface ChatRecentRun {
-  package_id: string;
-  status: string;
-  run_number?: number | null;
-  started_at?: string | null;
-  /** Failure message for non-success runs, when available. */
-  error?: string | null;
-}
-
-export interface ChatRunsService {
-  /** The caller's own recent runs (actor-scoped), newest first. */
-  listRecentForActor(args: {
-    orgId: string;
-    applicationId: string;
-    actor: { type: "user" | "end_user"; id: string };
-    limit?: number;
-  }): Promise<ChatRecentRun[]>;
-}
-
-export interface ChatInProcessService {
+export interface ChatPlatformDeps {
+  /**
+   * Dispatch a request into the platform. In-process via the wired platform app
+   * when available, else a loopback `fetch` (OSS/tests). The auth pipeline runs
+   * either way.
+   */
   dispatch(request: Request): Promise<Response>;
+  /** Platform per-route rate limiter factory. */
+  rateLimit(maxPerMinute: number): MiddlewareHandler;
+  /** Subscription chat engine for a provider id, or `undefined` (→ ai-sdk path). */
+  chatEngine(providerId: string): ChatEngine | undefined;
 }
 
-let integrationsService: ChatIntegrationsService | null = null;
-let agentsService: ChatAgentsService | null = null;
-let skillsService: ChatSkillsService | null = null;
-let runsService: ChatRunsService | null = null;
-let inProcessService: ChatInProcessService | null = null;
+/**
+ * Build the immutable deps object from the module init context. Called once in
+ * `chatModule.init(ctx)`.
+ *
+ * `ctx` is optional: when the module's router is built WITHOUT `init()` having
+ * run (the test harness mounts module routers directly, and OSS standalone
+ * wiring may skip init), the deps degrade to the safe baseline — loopback
+ * `fetch` dispatch, a pass-through rate limiter, and no subscription chat engine
+ * — the same posture this module had before deps were threaded explicitly.
+ */
+/** Pass-through limiter used when no init context supplied a real one. */
+const passThroughRateLimit: MiddlewareHandler = (_c, next) => next();
 
-export function setIntegrationsService(svc: ChatIntegrationsService | null): void {
-  integrationsService = svc;
-}
-
-export function getIntegrationsService(): ChatIntegrationsService | null {
-  return integrationsService;
-}
-
-export function setAgentsService(svc: ChatAgentsService | null): void {
-  agentsService = svc;
-}
-
-export function getAgentsService(): ChatAgentsService | null {
-  return agentsService;
-}
-
-export function setSkillsService(svc: ChatSkillsService | null): void {
-  skillsService = svc;
-}
-
-export function getSkillsService(): ChatSkillsService | null {
-  return skillsService;
-}
-
-export function setRunsService(svc: ChatRunsService | null): void {
-  runsService = svc;
-}
-
-export function getRunsService(): ChatRunsService | null {
-  return runsService;
-}
-
-export function setInProcessService(svc: ChatInProcessService | null): void {
-  inProcessService = svc;
-}
-
-export function getInProcessService(): ChatInProcessService | null {
-  return inProcessService;
+export function buildChatPlatformDeps(ctx?: ModuleInitContext): ChatPlatformDeps {
+  const inProcess = ctx?.services.inProcess ?? null;
+  return {
+    dispatch: (request) => (inProcess ? inProcess.dispatch(request) : fetch(request)),
+    rateLimit: (maxPerMinute) =>
+      ctx ? ctx.services.http.rateLimit(maxPerMinute) : passThroughRateLimit,
+    chatEngine: (providerId) => {
+      const def = ctx?.services.chatEngineForProvider(providerId);
+      // Only an engine with a chat surface (a contributed chatHandler) is usable
+      // by the chat — codex resolves with no chatHandler → undefined → ai-sdk
+      // path / disabled.
+      return def?.chatHandler
+        ? { providerId: def.providerId, handler: def.chatHandler }
+        : undefined;
+    },
+  };
 }

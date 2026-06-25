@@ -77,7 +77,7 @@ import {
   handleClaudeCodeSdkGateway,
   CLAUDE_CODE_PROVIDER_ID,
 } from "../services/llm-proxy/claude-code-sdk-gateway.ts";
-import { subscriptionEngineDef } from "@appstrate/core/subscription-engines";
+import { subscriptionEngineForProvider } from "../services/model-providers/registry.ts";
 import type { LlmProxyAdapter } from "../services/llm-proxy/types.ts";
 import { buildLlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
@@ -144,7 +144,7 @@ export function createLlmProxyRouter() {
   // chat-capable subscription gateway (a second one is a router edit, by design).
   // LOOPBACK ONLY — driven only by the chat loopback bearer (not API keys /
   // dashboard tokens), so a subscription can't be spent as a bare proxy.
-  const claudeCodeEngine = subscriptionEngineDef(CLAUDE_CODE_PROVIDER_ID);
+  const claudeCodeEngine = subscriptionEngineForProvider(CLAUDE_CODE_PROVIDER_ID);
   if (claudeCodeEngine) {
     const gateway = async (c: Context<AppEnv>): Promise<Response> => {
       assertLoopbackOnly(c.get("authMethod"), `${claudeCodeEngine.label} SDK gateway`, {
