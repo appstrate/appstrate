@@ -11296,7 +11296,18 @@ export interface operations {
                      *         }
                      *       ],
                      *       "agents_truncated": false,
-                     *       "agents_total": 1
+                     *       "agents_total": 1,
+                     *       "skills": [
+                     *         {
+                     *           "package_id": "@appstrate/web-research",
+                     *           "display_name": "Web Research",
+                     *           "description": "Multi-source web search and synthesis.",
+                     *           "version": "1.2.0",
+                     *           "source": "system"
+                     *         }
+                     *       ],
+                     *       "skills_truncated": false,
+                     *       "skills_total": 1
                      *     }
                      */
                     "application/json": {
@@ -11336,6 +11347,21 @@ export interface operations {
                         agents_truncated: boolean;
                         /** @description Total runnable agents before the cap. */
                         agents_total: number;
+                        /** @description Skills the caller could attach to an agent in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the long tail is reachable via the MCP `search_operations` tool. */
+                        skills: {
+                            /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
+                            package_id: string;
+                            display_name: string;
+                            description: string;
+                            /** @description The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range. */
+                            version: string | null;
+                            /** @enum {string} */
+                            source: "system" | "local";
+                        }[];
+                        /** @description True when the skill list was capped (more via search_operations). */
+                        skills_truncated: boolean;
+                        /** @description Total installed skills before the cap. */
+                        skills_total: number;
                     };
                 };
             };

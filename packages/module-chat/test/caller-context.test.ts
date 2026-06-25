@@ -135,6 +135,62 @@ describe("formatCallerContext", () => {
     expect(out).not.toContain("Existing agents you can run");
   });
 
+  it("renders the attachable-skills block with id, version and dependencies.skills guidance", () => {
+    const out = formatCallerContext({
+      user: { name: "Ada", email: "ada@acme.com" },
+      org: { role: "member" },
+      connections: [],
+      skills: [
+        {
+          package_id: "@appstrate/web-research",
+          display_name: "Web Research",
+          description: "Multi-source web search.",
+          version: "1.2.0",
+        },
+        { package_id: "@acme/pdf", display_name: "PDF", description: "Reads PDFs.", version: null },
+      ],
+    });
+    expect(out).toContain("## Skills you can attach to an agent");
+    expect(out).toContain("`@appstrate/web-research`");
+    expect(out).toContain("(v1.2.0)");
+    expect(out).toContain("Web Research: Multi-source web search.");
+    expect(out).toContain("`@acme/pdf`");
+    // No version → no version suffix rendered.
+    expect(out).not.toContain("@acme/pdf` (v");
+    expect(out).toContain("dependencies.skills");
+    // Not truncated → no search hint within the skills section.
+    expect(out).not.toContain("More skills are available");
+  });
+
+  it("adds the skill search hint only when the skill list is truncated", () => {
+    const out = formatCallerContext({
+      user: { name: "Ada" },
+      org: { role: "member" },
+      connections: [],
+      skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+      skills_truncated: true,
+    });
+    expect(out).toContain("More skills are available");
+  });
+
+  it("renders a context block from skills alone (no identity/connections/agents)", () => {
+    const out = formatCallerContext({
+      skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+    });
+    expect(out).toContain("## Skills you can attach to an agent");
+    expect(out).toContain("`@appstrate/web-research`");
+  });
+
+  it("omits the skills block when there are no installed skills", () => {
+    const out = formatCallerContext({
+      user: { name: "Ada" },
+      org: { role: "member" },
+      connections: [],
+      skills: [],
+    });
+    expect(out).not.toContain("Skills you can attach");
+  });
+
   it("returns an empty string for an unusable payload (so injection is skipped)", () => {
     expect(formatCallerContext({})).toBe("");
     expect(formatCallerContext(null)).toBe("");

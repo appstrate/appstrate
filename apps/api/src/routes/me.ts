@@ -46,7 +46,7 @@ import {
   deleteIntegrationConnection,
   listUsableIntegrationsForActor,
 } from "../services/integration-connections.ts";
-import { listRunnableAgents } from "../services/application-packages.ts";
+import { listRunnableAgents, listInstalledSkills } from "../services/application-packages.ts";
 import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { parseBody, unauthorized, invalidRequest } from "../lib/errors.ts";
@@ -333,12 +333,18 @@ router.get("/context", requireAppContext(), async (c) => {
   // `agents:run` (otherwise the model would propose agents that 403 at invoke).
   // The list is app-scoped (same for every actor in the app), capped for prompt
   // size, and authoritative execution still re-checks RBAC at the run route.
+  // Skills, like agents, are only useful for building/configuring an agent run,
+  // so they share the `agents:run` gate. They aren't run directly — the model
+  // declares them under an agent manifest's `dependencies.skills`.
   const canRun = (c.get("permissions") as Set<string> | undefined)?.has("agents:run") ?? false;
-  const [connections, runnable] = await Promise.all([
+  const [connections, runnable, installedSkills] = await Promise.all([
     listUsableIntegrationsForActor(scope, actor),
     canRun
       ? listRunnableAgents(scope)
       : Promise.resolve({ agents: [], truncated: false, total: 0 }),
+    canRun
+      ? listInstalledSkills(scope)
+      : Promise.resolve({ skills: [], truncated: false, total: 0 }),
   ]);
 
   return c.json({
@@ -348,6 +354,9 @@ router.get("/context", requireAppContext(), async (c) => {
     agents: runnable.agents,
     agents_truncated: runnable.truncated,
     agents_total: runnable.total,
+    skills: installedSkills.skills,
+    skills_truncated: installedSkills.truncated,
+    skills_total: installedSkills.total,
   });
 });
 

@@ -54,12 +54,31 @@ export interface ChatAgentsService {
   }>;
 }
 
+export interface ChatSkill {
+  package_id: string;
+  display_name: string;
+  description: string;
+  /** The skill's own manifest version, when known — pin a `dependencies.skills`
+   * range from it. */
+  version: string | null;
+  source: string;
+}
+
+export interface ChatSkillsService {
+  listInstalled(args: { orgId: string; applicationId: string; limit?: number }): Promise<{
+    skills: ChatSkill[];
+    truncated: boolean;
+    total: number;
+  }>;
+}
+
 export interface ChatInProcessService {
   dispatch(request: Request): Promise<Response>;
 }
 
 let integrationsService: ChatIntegrationsService | null = null;
 let agentsService: ChatAgentsService | null = null;
+let skillsService: ChatSkillsService | null = null;
 let inProcessService: ChatInProcessService | null = null;
 
 export function setIntegrationsService(svc: ChatIntegrationsService | null): void {
@@ -76,6 +95,14 @@ export function setAgentsService(svc: ChatAgentsService | null): void {
 
 export function getAgentsService(): ChatAgentsService | null {
   return agentsService;
+}
+
+export function setSkillsService(svc: ChatSkillsService | null): void {
+  skillsService = svc;
+}
+
+export function getSkillsService(): ChatSkillsService | null {
+  return skillsService;
 }
 
 export function setInProcessService(svc: ChatInProcessService | null): void {

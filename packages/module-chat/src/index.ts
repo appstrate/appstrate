@@ -34,6 +34,7 @@ import { chatLoopbackStrategy } from "./loopback-auth.ts";
 import {
   setIntegrationsService,
   setAgentsService,
+  setSkillsService,
   setInProcessService,
 } from "./platform-services.ts";
 import { z } from "zod";
@@ -57,6 +58,7 @@ const chatModule: AppstrateModule = {
     // OSS/test wiring, where the chat falls back to loopback fetch.
     setIntegrationsService(ctx.services.integrations ?? null);
     setAgentsService(ctx.services.agents ?? null);
+    setSkillsService(ctx.services.skills ?? null);
     setInProcessService(ctx.services.inProcess ?? null);
   },
 

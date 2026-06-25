@@ -25,7 +25,7 @@ import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
 import { subscriptionEngineDef } from "@appstrate/core/subscription-engines";
 import { buildTranscriptPrompt } from "./transcript.ts";
-import { getIntegrationsService, getAgentsService } from "./platform-services.ts";
+import { getIntegrationsService, getAgentsService, getSkillsService } from "./platform-services.ts";
 
 const MAX_STEPS = 16;
 
@@ -70,7 +70,7 @@ Choosing what to do:
 - If the request is a pure Appstrate operation (list or inspect runs, schedule, manage agents, search documents), call that operation directly with \`invoke_operation\`. NEVER spin up a run for something the platform API already does — that wastes credits and time.
 - If the request needs an integration, an MCP, or any external action, run an agent:
   1. Prefer an existing agent the user can run (listed in your context below) when one matches the intent — trigger it with the run-agent operation.
-  2. Otherwise invoke the \`runInline\` operation (\`POST /api/runs/inline\`): pass a full AFPS agent \`manifest\` plus a \`prompt\`. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version from your context), then select that integration's tools under \`integrations_configuration.<id>.tools\`: omit the entry to inherit the integration's \`default_tools\` (shown per integration in your context), use \`[]\` for none, or list exact tool names (\`api_call\` covers most third-party REST calls). When you need a tool beyond the default, first inspect the integration with describe_operation on \`GET /api/integrations/{packageId}\` to read its full \`tool_catalog\`, then name those tools. Set \`runtime_tools: ["output"]\`, and define an \`output.schema\` for the data you want back. In the \`prompt\`, tell the agent it is a sub-agent: do the work, then return the result by calling the \`output\` tool with a payload that satisfies the schema. Without that output schema and instruction you will receive nothing back.
+  2. Otherwise invoke the \`runInline\` operation (\`POST /api/runs/inline\`): pass a full AFPS agent \`manifest\` plus a \`prompt\`. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version from your context), then select that integration's tools under \`integrations_configuration.<id>.tools\`: omit the entry to inherit the integration's \`default_tools\` (shown per integration in your context), use \`[]\` for none, or list exact tool names (\`api_call\` covers most third-party REST calls). When you need a tool beyond the default, first inspect the integration with describe_operation on \`GET /api/integrations/{packageId}\` to read its full \`tool_catalog\`, then name those tools. When one of the skills listed in your context fits the task, attach it under \`dependencies.skills\` keyed by its \`@scope/name\` id with a satisfiable range (use the version shown in your context, e.g. \`"^1.2.0"\`, or \`"*"\` if none); the agent then has that skill's instructions available. Set \`runtime_tools: ["output"]\`, and define an \`output.schema\` for the data you want back. In the \`prompt\`, tell the agent it is a sub-agent: do the work, then return the result by calling the \`output\` tool with a payload that satisfies the schema. Without that output schema and instruction you will receive nothing back.
 
 Runs are asynchronous. The trigger returns the created run resource — take its \`id\`. Then call the run-get operation (path param \`id\`, not \`runId\`) with \`query: { wait: true }\` to long-poll until the run is terminal (it returns after ~55s; if still running, call it again); never busy-poll in a tight loop yourself. Then read the run's \`result\` field — that is the sub-agent's deliverable. Answer the user from \`result\`; never fabricate it. If the run fails, read its error and report it plainly.
 
@@ -84,7 +84,10 @@ Example — summarising the user's latest emails (adapt the integration id, vers
     "type": "agent",
     "version": "1.0.0",
     "timeout": 300,
-    "dependencies": { "integrations": { "@appstrate/gmail": "^1.1.0" } },
+    "dependencies": {
+      "integrations": { "@appstrate/gmail": "^1.1.0" },
+      "skills": { "@appstrate/web-research": "^1.2.0" }
+    },
     "integrations_configuration": { "@appstrate/gmail": { "tools": ["api_call"] } },
     "runtime_tools": ["output"],
     "output": {
@@ -143,6 +146,15 @@ interface CallerContext {
       }[]
     | null;
   agents_truncated?: boolean | null;
+  skills?:
+    | {
+        package_id: string;
+        display_name?: string | null;
+        description?: string | null;
+        version?: string | null;
+      }[]
+    | null;
+  skills_truncated?: boolean | null;
 }
 
 /**
@@ -166,7 +178,15 @@ export function formatCallerContext(raw: unknown): string {
   const name = ctx.user?.name?.trim();
   const email = ctx.user?.email?.trim();
   const role = ctx.org?.role?.trim();
-  if (!name && !email && !role && !ctx.connections?.length && !ctx.agents?.length) return "";
+  if (
+    !name &&
+    !email &&
+    !role &&
+    !ctx.connections?.length &&
+    !ctx.agents?.length &&
+    !ctx.skills?.length
+  )
+    return "";
 
   const who = name && email ? `${name} (${email})` : (name ?? email ?? "the user");
   const lines = [
@@ -211,6 +231,26 @@ export function formatCallerContext(raw: unknown): string {
     lines.push(
       "Prefer running an existing agent over doing the work inline when one fits the task. " +
         "Trigger it through invoke_operation (the agent run route), then track it with wait_for_run.",
+    );
+  }
+  if (ctx.skills?.length) {
+    lines.push("", "## Skills you can attach to an agent");
+    for (const s of ctx.skills) {
+      const desc = s.description?.trim();
+      const label = s.display_name?.trim() || s.package_id;
+      lines.push(
+        `- \`${s.package_id}\`${s.version ? ` (v${s.version})` : ""} — ${label}` +
+          (desc ? `: ${desc}` : ""),
+      );
+    }
+    if (ctx.skills_truncated) {
+      lines.push("More skills are available — use the search_operations tool to find them.");
+    }
+    lines.push(
+      "Skills are not run on their own. When you build or configure an agent and one of these " +
+        "skills fits the task, declare it under the agent manifest's `dependencies.skills` keyed by " +
+        'its id (e.g. `"@appstrate/web-research": "^1.2.0"`) — use the version shown, or `"*"` ' +
+        "if none. The run route validates that declared skills exist.",
     );
   }
   return lines.join("\n");
@@ -277,10 +317,12 @@ async function buildCallerContextBlock(
       // lists) rather than fall back to a loopback that would itself 400 without
       // app context.
       const agentsSvc = getAgentsService();
-      // Runnable agents are a hint — only when the caller holds `agents:run`
-      // (mirrors the REST /api/me/context gate, so the two never drift).
+      const skillsSvc = getSkillsService();
+      // Runnable agents and attachable skills are hints — only when the caller
+      // holds `agents:run` (mirrors the REST /api/me/context gate, so the two
+      // never drift). Skills share the gate: useful only for building an agent.
       const canRun = (c.get("permissions") as Set<string> | undefined)?.has("agents:run") ?? false;
-      const [connections, runnable] = await Promise.all([
+      const [connections, runnable, installedSkills] = await Promise.all([
         applicationId
           ? svc.listUsableForActor({
               orgId,
@@ -291,6 +333,9 @@ async function buildCallerContextBlock(
         applicationId && agentsSvc && canRun
           ? agentsSvc.listRunnable({ orgId, applicationId })
           : Promise.resolve({ agents: [], truncated: false, total: 0 }),
+        applicationId && skillsSvc && canRun
+          ? skillsSvc.listInstalled({ orgId, applicationId })
+          : Promise.resolve({ skills: [], truncated: false, total: 0 }),
       ]);
       return formatCallerContext({
         user: { name: user.name ?? null, email: user.email ?? null },
@@ -298,6 +343,8 @@ async function buildCallerContextBlock(
         connections,
         agents: runnable.agents,
         agents_truncated: runnable.truncated,
+        skills: installedSkills.skills,
+        skills_truncated: installedSkills.truncated,
       });
     }
     // Fallback: the original loopback hop (kept for OSS/test wiring).

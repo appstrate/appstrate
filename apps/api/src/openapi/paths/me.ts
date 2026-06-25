@@ -421,6 +421,9 @@ export const mePaths = {
                   "agents",
                   "agents_truncated",
                   "agents_total",
+                  "skills",
+                  "skills_truncated",
+                  "skills_total",
                 ],
                 properties: {
                   user: {
@@ -510,6 +513,43 @@ export const mePaths = {
                     type: "integer",
                     description: "Total runnable agents before the cap.",
                   },
+                  skills: {
+                    type: "array",
+                    description:
+                      "Skills the caller could attach to an agent in the current application " +
+                      "(capped). Only present when the caller holds the `agents:run` permission; " +
+                      "empty otherwise. Skills are not run directly — declare them under an agent " +
+                      "manifest's `dependencies.skills`. When `skills_truncated` is true, the long " +
+                      "tail is reachable via the MCP `search_operations` tool.",
+                    items: {
+                      type: "object",
+                      required: ["package_id", "display_name", "description", "version", "source"],
+                      properties: {
+                        package_id: {
+                          type: "string",
+                          description:
+                            'Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills.',
+                        },
+                        display_name: { type: "string" },
+                        description: { type: "string" },
+                        version: {
+                          type: ["string", "null"],
+                          description:
+                            "The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range.",
+                        },
+                        source: { type: "string", enum: ["system", "local"] },
+                      },
+                    },
+                  },
+                  skills_truncated: {
+                    type: "boolean",
+                    description:
+                      "True when the skill list was capped (more via search_operations).",
+                  },
+                  skills_total: {
+                    type: "integer",
+                    description: "Total installed skills before the cap.",
+                  },
                 },
               },
               example: {
@@ -530,6 +570,17 @@ export const mePaths = {
                 ],
                 agents_truncated: false,
                 agents_total: 1,
+                skills: [
+                  {
+                    package_id: "@appstrate/web-research",
+                    display_name: "Web Research",
+                    description: "Multi-source web search and synthesis.",
+                    version: "1.2.0",
+                    source: "system",
+                  },
+                ],
+                skills_truncated: false,
+                skills_total: 1,
               },
             },
           },

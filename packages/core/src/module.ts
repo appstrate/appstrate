@@ -1029,6 +1029,28 @@ export interface PlatformServices {
     }>;
   };
   /**
+   * Skill read surface. `listInstalled` returns the skills an actor could attach
+   * to an agent in the given application as a bounded hint for the `get_me` /
+   * chat-prompt caller context (capped — the long tail stays reachable via the
+   * MCP `search_operations` tool). Unlike agents, skills are not run directly;
+   * they are declared under an agent manifest's `dependencies.skills`. Same
+   * `agents:run` gate as `agents` (a skill is only useful when building an agent
+   * run), the run route validating the declared skills exist at invoke time.
+   */
+  skills: {
+    listInstalled(args: { orgId: string; applicationId: string; limit?: number }): Promise<{
+      skills: Array<{
+        package_id: string;
+        display_name: string;
+        description: string;
+        version: string | null;
+        source: string;
+      }>;
+      truncated: boolean;
+      total: number;
+    }>;
+  };
+  /**
    * In-process dispatch into the fully-wired platform Hono app — the same
    * request the loopback `fetch("http://127.0.0.1:<port>/api/…")` would make,
    * but without the socket round-trip and HTTP (de)serialization. The auth

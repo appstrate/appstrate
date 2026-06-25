@@ -241,6 +241,47 @@ describe("Me API (/api/me)", () => {
       expect(body.agents_truncated).toBe(false);
     });
 
+    it("lists installed skills (enabled only) with attachable id and version", async () => {
+      // Enabled installed skill → appears with its manifest version.
+      await seedPackage({
+        id: "@ctx/web-research",
+        orgId: ctx.orgId,
+        type: "skill",
+        draftManifest: {
+          name: "@ctx/web-research",
+          version: "1.2.0",
+          type: "skill",
+          display_name: "Web Research",
+          description: "Searches the web.",
+        },
+      });
+      await seedInstalledPackage(ctx.defaultAppId, "@ctx/web-research");
+
+      // Installed but disabled in the app → must NOT appear.
+      await seedPackage({ id: "@ctx/skill-disabled", orgId: ctx.orgId, type: "skill" });
+      await seedInstalledPackage(ctx.defaultAppId, "@ctx/skill-disabled", { enabled: false });
+
+      // Owned by the org but NOT installed in this app → must NOT appear.
+      await seedPackage({ id: "@ctx/skill-uninstalled", orgId: ctx.orgId, type: "skill" });
+
+      const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        skills: { package_id: string; display_name: string; version: string | null }[];
+        skills_truncated: boolean;
+        skills_total: number;
+      };
+
+      const ids = new Set(body.skills.map((s) => s.package_id));
+      expect(ids.has("@ctx/web-research")).toBe(true);
+      expect(ids.has("@ctx/skill-disabled")).toBe(false);
+      expect(ids.has("@ctx/skill-uninstalled")).toBe(false);
+      const skill = body.skills.find((s) => s.package_id === "@ctx/web-research");
+      expect(skill?.display_name).toBe("Web Research");
+      expect(skill?.version).toBe("1.2.0");
+      expect(body.skills_truncated).toBe(false);
+    });
+
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/me/context");
       expect(res.status).toBe(401);
