@@ -28,7 +28,7 @@ import {
   integrationManifestSchema as afpsIntegrationManifestSchema,
   type IntegrationManifest as AfpsIntegrationManifest,
 } from "@afps-spec/schema";
-import { isToolsWildcard, type ManifestIntegrationEntry } from "./dependencies.ts";
+import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
 
 // ─────────────────────────────────────────────
 // Appstrate vendor extension: api_call (`_meta["dev.appstrate/api"]`)
@@ -334,6 +334,50 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       }
     }
   }
+
+  // (6) `default_tools` (AFPS §4.4) — the tool selection an agent inherits when
+  // it depends on this integration but omits `integrations_configuration.<id>`.
+  //   - `"*"` requires `allow_undeclared_tools: true` (same gate as an agent's
+  //     wildcard selection — a default cannot grant the passthrough surface the
+  //     integration author did not opt into).
+  //   - an array MUST contain strings; for `source.kind: "none"` (api-only — the
+  //     full catalog is knowable from this manifest alone) every entry MUST be a
+  //     real catalog tool, which catches typos like `["api_calll"]`. For
+  //     local/remote sources the authoritative tool list lives in the referenced
+  //     mcp-server (not resolvable in a pure-manifest superRefine), so array
+  //     membership is left to runtime — mirroring the agent-side leniency.
+  const defaultTools = (manifest as { default_tools?: unknown }).default_tools;
+  if (defaultTools !== undefined) {
+    if (isToolsWildcard(defaultTools)) {
+      if ((manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools !== true) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            'default_tools "*" requires allow_undeclared_tools: true — a wildcard default cannot grant the full upstream surface unless the integration explicitly authorizes it',
+          path: ["default_tools"],
+        });
+      }
+    } else if (!Array.isArray(defaultTools) || defaultTools.some((v) => typeof v !== "string")) {
+      ctx.addIssue({
+        code: "custom",
+        message: 'default_tools must be an array of tool names or the wildcard "*"',
+        path: ["default_tools"],
+      });
+    } else if (manifest.source?.kind === "none") {
+      const catalog = new Set(
+        resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
+      );
+      for (const name of defaultTools) {
+        if (!catalog.has(name)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `default_tools contains "${name}" which is not a tool this integration exposes`,
+            path: ["default_tools"],
+          });
+        }
+      }
+    }
+  }
 });
 
 /**
@@ -615,6 +659,47 @@ export function getApiCallConfigs(manifest: IntegrationManifest): ApiCallConfig[
       uploadProtocols,
     };
   });
+}
+
+/**
+ * Read the integration's declared `default_tools` (AFPS §4.4 — the tools an
+ * agent inherits when it depends on the integration but omits
+ * `integrations_configuration.<id>` or omits its `tools`). This is a loose
+ * field on the integration manifest (validated by {@link integrationManifestSchema}
+ * but not yet part of the base structural type), so it is read via a narrowed
+ * cast. Returns the wildcard literal `"*"`, a string array, or `undefined` when
+ * absent / malformed (defence in depth — the install-time superRefine already
+ * rejects malformed values).
+ */
+export function readDefaultTools(
+  manifest: IntegrationManifest,
+): readonly string[] | "*" | undefined {
+  const raw = (manifest as { default_tools?: unknown }).default_tools;
+  if (isToolsWildcard(raw)) return TOOLS_WILDCARD;
+  if (Array.isArray(raw) && raw.every((v) => typeof v === "string")) return raw as string[];
+  return undefined;
+}
+
+/**
+ * Resolve the effective per-integration tool selection for an agent. An
+ * explicit agent selection — including an empty array (`[]`, "use zero tools")
+ * and the wildcard (`"*"`) — always wins. Only when the agent declared NO
+ * selection (`undefined`: no `integrations_configuration.<id>` entry, or one
+ * without `tools`) does the integration's declared {@link readDefaultTools}
+ * default apply.
+ *
+ * Precedence: explicit `[]`/`["…"]`/`"*"` ⟶ as-is; `undefined` ⟶ integration
+ * `default_tools` (or `undefined` if the integration declares none).
+ *
+ * Applied once at every site that consumes the agent's tool selection (spawn
+ * resolution AND OAuth scope inference) so the default is honoured uniformly.
+ */
+export function resolveEffectiveToolSelection(
+  agentSelection: readonly string[] | "*" | undefined,
+  manifest: IntegrationManifest,
+): readonly string[] | "*" | undefined {
+  if (agentSelection !== undefined) return agentSelection;
+  return readDefaultTools(manifest);
 }
 
 /**

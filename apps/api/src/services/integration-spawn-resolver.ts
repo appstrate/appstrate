@@ -32,7 +32,7 @@ import {
   resolveAfpsHttpDelivery,
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
-import { getApiCallConfigs } from "@appstrate/core/integration";
+import { getApiCallConfigs, resolveEffectiveToolSelection } from "@appstrate/core/integration";
 import type {
   IntegrationManifest,
   ResolvedConnection,
@@ -184,6 +184,14 @@ async function resolveOne(
   }
   const manifest = res.manifest;
 
+  // Resolve the EFFECTIVE tool selection: the agent's explicit selection wins
+  // (including `[]` "zero tools" and `"*"` wildcard); only an unspecified
+  // selection (`undefined`) falls back to the integration's declared
+  // `default_tools` (AFPS §4.4). Computed once here and used for both the
+  // api_call filter (below) and the sidecar `toolAllowlist` (Phase 3) so the
+  // default is honoured identically on both paths.
+  const effectiveSelection = resolveEffectiveToolSelection(agentToolSelection, manifest);
+
   // (b) Installed in the application
   if (!(await isIntegrationActive(integrationId, applicationId))) {
     logger.info("integration not installed in application; skipping", {
@@ -210,8 +218,8 @@ async function resolveOne(
   // AFPS §4.4 wildcard — when the agent opted into all upstream tools, the
   // synthetic api_call tool(s) are auto-granted alongside the upstream surface.
   // Otherwise filter to what the agent explicitly picked.
-  const wildcardSelection = isToolsWildcard(agentToolSelection);
-  const selectedTools = wildcardSelection ? null : new Set(agentToolSelection ?? []);
+  const wildcardSelection = isToolsWildcard(effectiveSelection);
+  const selectedTools = wildcardSelection ? null : new Set(effectiveSelection ?? []);
   const apiCalls: ApiCallSpec[] = getApiCallConfigs(manifest)
     .filter((cfg) => wildcardSelection || selectedTools!.has(cfg.toolName))
     .map((cfg) => {
@@ -376,7 +384,7 @@ async function resolveOne(
   // LLM can never invoke it directly. (It is normally not in the selection
   // anyway, but defence-in-depth: an author could have listed it.)
   //
-  // AFPS §4.4 wildcard — when `agentToolSelection === "*"`, emit `undefined`
+  // AFPS §4.4 wildcard — when the effective selection is `"*"`, emit `undefined`
   // so the sidecar's McpHost passes every upstream tool through (legacy
   // "all tools allowed" path). The connect-login tool would otherwise reach
   // the agent surface under that passthrough, so we append its name to
@@ -388,7 +396,7 @@ async function resolveOne(
   if (wildcardSelection) {
     toolAllowlist = undefined;
   } else {
-    const baseAllowlist = agentToolSelection ?? [];
+    const baseAllowlist = effectiveSelection ?? [];
     toolAllowlist = deliveries.connectLogin
       ? (baseAllowlist as readonly string[]).filter((t) => t !== deliveries.connectLogin!.toolName)
       : baseAllowlist;
