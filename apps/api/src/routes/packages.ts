@@ -14,6 +14,7 @@ import { postInstallPackage } from "../services/post-install-package.ts";
 import { handleImportBundle } from "../services/bundle-import.ts";
 import { parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
 import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
+import { resolveIntegrationActivations } from "../services/integration-connections.ts";
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
@@ -415,12 +416,28 @@ function makeListHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const applicationId = c.get("applicationId");
-    // `?active=true` narrows to packages active (installed + enabled) in this
-    // app — the agent editor's integration picker uses it so it doesn't pull
-    // the whole catalogue.
-    const activeOnly = c.req.query("active") === "true";
-    const items = await listOrgItems(orgId, rcfg.cfg, applicationId, { activeOnly });
-    const enriched = await enrichWithCreatorNames(items);
+    // `?active=true` narrows to packages active in this app (agent-editor
+    // integration picker). For most types "active" means an installed +
+    // enabled `application_packages` row (generic SQL narrowing in
+    // `listOrgItems`). INTEGRATIONS additionally auto-activate env-backed
+    // SYSTEM integrations that have no row — so they resolve through the
+    // canonical activation rule (`resolveIntegrationActivations`), the single
+    // source of truth shared with the settings list + detail endpoints, rather
+    // than the generic SQL filter (which would hide them).
+    const wantActive = c.req.query("active") === "true";
+    const isIntegration = rcfg.cfg.type === "integration";
+    const items = await listOrgItems(orgId, rcfg.cfg, applicationId, {
+      activeOnly: wantActive && !isIntegration,
+    });
+    let visible = items;
+    if (wantActive && isIntegration) {
+      const activations = await resolveIntegrationActivations(
+        items.map((i) => i.id),
+        applicationId,
+      );
+      visible = items.filter((i) => activations.get(i.id)?.active);
+    }
+    const enriched = await enrichWithCreatorNames(visible);
     return c.json(listResponse(enriched));
   };
 }
