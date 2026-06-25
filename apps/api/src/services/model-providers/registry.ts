@@ -26,7 +26,7 @@
  */
 
 import type { ModelProviderDefinition } from "@appstrate/core/module";
-import type { RunEngine, SubscriptionEngineDef } from "@appstrate/core/subscription-engines";
+import type { SubscriptionEngineDef } from "@appstrate/core/subscription-engines";
 import { hasCatalog, lookupCatalogModel } from "../pricing-catalog.ts";
 
 // ---------------------------------------------------------------------------
@@ -151,25 +151,4 @@ export function subscriptionEngineForProvider(
   const def = _byId.get(providerId);
   if (!def?.subscriptionEngine) return undefined;
   return { ...def.subscriptionEngine, providerId: def.providerId, label: def.displayName };
-}
-
-/**
- * The engine for a provider id: its contributed subscription engine, or `"pi"`
- * for every API-key / unregistered provider. Pure read.
- */
-export function engineForProvider(providerId: string): RunEngine {
-  return _byId.get(providerId)?.subscriptionEngine?.engine ?? "pi";
-}
-
-/**
- * True iff PROVIDER materialises the structured deliverable natively (see
- * {@link SubscriptionEngineBinding.nativeOutput}). The launcher uses this to
- * decide whether to serve the MCP `output` runtime tool to a run — a
- * native-output provider must not be offered it. Provider-specific, NOT
- * engine-wide: a second provider on the same engine that does NOT emit output
- * natively keeps its MCP `output` path. An unregistered / API-key provider is
- * always false.
- */
-export function providerHasNativeOutput(providerId: string): boolean {
-  return _byId.get(providerId)?.subscriptionEngine?.nativeOutput === true;
 }

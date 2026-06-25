@@ -40,7 +40,7 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.inProcess.dispatch).toBe("function");
   });
 
-  it("wires the subscription chat-engine lookup (chatEngineForProvider — chat dispatch)", () => {
-    expect(typeof services.chatEngineForProvider).toBe("function");
+  it("wires the subscription chat-handler lookup (chatHandlerForProvider — chat dispatch)", () => {
+    expect(typeof services.chatHandlerForProvider).toBe("function");
   });
 });

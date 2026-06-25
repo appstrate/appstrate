@@ -86,8 +86,8 @@ export function getModuleRegistry(): string[] {
  * Wire concrete platform services into the structural `PlatformServices`
  * contract declared in `@appstrate/core/module`. The surface is intentionally
  * minimal — `runs.listLlmUsage` (the cloud billing module's per-run ledger
- * read), `inProcess.dispatch`, and `chatEngineForProvider` (the chat module's
- * subscription chat-engine lookup). See the `PlatformServices` doc in core for
+ * read), `inProcess.dispatch`, and `chatHandlerForProvider` (the chat module's
+ * subscription chat-handler lookup). See the `PlatformServices` doc in core for
  * the razor and the history of the previous (chat-era) broad surface.
  */
 function buildPlatformServices(): PlatformServices {
@@ -109,11 +109,11 @@ function buildPlatformServices(): PlatformServices {
       // normalizes it to the `Promise<Response>` the service contract declares.
       dispatch: async (request) => getPlatformApp().fetch(request),
     },
-    // Resolve a provider's subscription-engine def (incl. its module-contributed
-    // chatHandler) off the model-provider registry. apps/api owns that registry;
-    // the chat module reads the engine through this injected lookup rather than
-    // importing the registry or any vendor SDK.
-    chatEngineForProvider: subscriptionEngineForProvider,
+    // Resolve a provider's module-contributed chat handler off the model-provider
+    // registry. apps/api owns that registry; the chat module reads only the
+    // handler through this injected lookup rather than importing the registry or
+    // any vendor SDK — the full engine def never crosses the boundary.
+    chatHandlerForProvider: (providerId) => subscriptionEngineForProvider(providerId)?.chatHandler,
   };
 }
 

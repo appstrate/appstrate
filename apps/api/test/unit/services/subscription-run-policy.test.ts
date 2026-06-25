@@ -41,7 +41,7 @@ beforeAll(() => {
   registerModelProvider(
     fakeProvider("claude-code", {
       authMode: "oauth2",
-      subscriptionEngine: { engine: "claude", nativeOutput: true },
+      subscriptionEngine: { engine: "claude" },
     }),
   );
 });
@@ -138,7 +138,7 @@ describe("resolveCredentialDelivery (single classification axis)", () => {
     registerModelProvider(
       fakeProvider("claude-code", {
         authMode: "oauth2",
-        subscriptionEngine: { engine: "claude", nativeOutput: true },
+        subscriptionEngine: { engine: "claude" },
       }),
     );
     // An oauth-class provider with NO official engine — the hard-refuse path.
@@ -154,16 +154,14 @@ describe("resolveCredentialDelivery (single classification axis)", () => {
   it("resolves an oauth subscription credential + engine from the registry (single source)", () => {
     const d = resolveCredentialDelivery({ providerId: "claude-code", hasCredentialId: true });
     expect(d.isOauthCredential).toBe(true);
+    // The engine comes from the SAME registry entry the launcher reads.
     expect(d.engine).toBe("claude");
-    // The engine binding comes from the SAME registry entry the launcher reads.
-    expect(d.subscriptionEngine?.engine).toBe("claude");
   });
 
   it("classifies an oauth-class credential with no official engine as oauth on pi — then hard-refuses", () => {
     const d = resolveCredentialDelivery({ providerId: "oauth-no-engine", hasCredentialId: true });
     expect(d.isOauthCredential).toBe(true);
     expect(d.engine).toBe("pi");
-    expect(d.subscriptionEngine).toBeUndefined();
     // The launcher feeds this into assertRunnableOnEngine, which MUST refuse
     // (no forging fallback for an oauth credential without an official engine).
     expect(() =>

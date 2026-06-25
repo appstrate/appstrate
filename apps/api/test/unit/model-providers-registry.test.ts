@@ -3,11 +3,9 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 import {
-  engineForProvider,
   getModelProvider,
   isOAuthModelProvider,
   listModelProviders,
-  providerHasNativeOutput,
   registerModelProvider,
   registerModelProviders,
   resetModelProviders,
@@ -122,7 +120,7 @@ describe("model-providers runtime registry", () => {
       registerModelProvider(
         fakeDef("claude-code", {
           authMode: "oauth2",
-          subscriptionEngine: { engine: "claude", nativeOutput: true },
+          subscriptionEngine: { engine: "claude" },
         }),
       );
       // codex is registered as a model provider (inference / model-listing) but
@@ -130,18 +128,6 @@ describe("model-providers runtime registry", () => {
       // subscription are deferred to a follow-up PR.
       registerModelProvider(fakeDef("codex", { authMode: "oauth2" }));
       registerModelProvider(fakeDef("openai", { authMode: "api_key" }));
-    });
-
-    describe("engineForProvider", () => {
-      it("maps a provider to its contributed engine", () => {
-        expect(engineForProvider("claude-code")).toBe("claude");
-      });
-      it("falls back to pi for any api-key / non-engine / unknown provider", () => {
-        expect(engineForProvider("codex")).toBe("pi");
-        expect(engineForProvider("openai")).toBe("pi");
-        expect(engineForProvider("not-here")).toBe("pi");
-        expect(engineForProvider("")).toBe("pi");
-      });
     });
 
     describe("subscriptionEngineForProvider", () => {
@@ -157,17 +143,6 @@ describe("model-providers runtime registry", () => {
         expect(subscriptionEngineForProvider("codex")).toBeUndefined();
         expect(subscriptionEngineForProvider("openai")).toBeUndefined();
         expect(subscriptionEngineForProvider("not-here")).toBeUndefined();
-      });
-    });
-
-    describe("providerHasNativeOutput", () => {
-      it("is true only for a provider that materialises output natively", () => {
-        expect(providerHasNativeOutput("claude-code")).toBe(true);
-        expect(providerHasNativeOutput("codex")).toBe(false);
-      });
-      it("is false for an unregistered / api-key provider", () => {
-        expect(providerHasNativeOutput("openai")).toBe(false);
-        expect(providerHasNativeOutput("")).toBe(false);
       });
     });
   });

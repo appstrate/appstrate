@@ -16,7 +16,7 @@ import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
-import type { SubscriptionEngineBinding, SubscriptionEngineDef } from "./subscription-engines.ts";
+import type { ChatEngineInput, SubscriptionEngineBinding } from "./subscription-engines.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -1005,14 +1005,13 @@ export interface PlatformServices {
     dispatch(request: Request): Promise<Response>;
   };
   /**
-   * Resolve a provider's subscription-engine definition — including the
-   * `chatHandler` its provider module contributed — off the platform's
-   * model-provider registry, or `undefined` for an API-key / unknown provider.
-   * The `chat` module reads this to dispatch a vendor chat turn (e.g. Claude) by
-   * provider id WITHOUT importing the model-provider registry (an apps/api
-   * concern) or any vendor SDK; only the shared {@link ChatEngineInput} type is
-   * cross-cutting. A subscription engine with no chat surface (codex) resolves
-   * with `chatHandler` absent, so chat stays disabled for it.
+   * Resolve the chat-turn handler a provider module contributed (e.g. Claude),
+   * off the platform's model-provider registry, or `undefined` for an API-key /
+   * unknown provider OR a subscription engine with no chat surface (codex). The
+   * `chat` module reads this to dispatch a vendor chat turn by provider id
+   * WITHOUT importing the model-provider registry (an apps/api concern) or any
+   * vendor SDK; only the shared {@link ChatEngineInput} type is cross-cutting.
+   * Just the handler crosses the boundary — never the full engine definition.
    */
-  chatEngineForProvider(providerId: string): SubscriptionEngineDef | undefined;
+  chatHandlerForProvider(providerId: string): ((input: ChatEngineInput) => Response) | undefined;
 }
