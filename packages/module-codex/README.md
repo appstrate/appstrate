@@ -20,7 +20,7 @@ The platform resolves it via dynamic import — workspace resolution finds it lo
 
 ## What it contributes
 
-- `modelProviders()` → one `ModelProviderDefinition` with `providerId: "codex"`, `apiShape: "openai-codex-responses"`, OAuth metadata pointing at `auth.openai.com`, the chatgpt.com Codex backend URL, and a `subscriptionEngine` binding (`engine: "codex"`, `sidecarAuthMode: "vend"`, egress locked to `chatgpt.com` / `openai.com`). It declares **no** `oauthWireFormat` — nothing is forged; execution runs the official Codex CLI (see Execution status below).
+- `modelProviders()` → one `ModelProviderDefinition` with `providerId: "codex"`, `apiShape: "openai-codex-responses"`, OAuth metadata pointing at `auth.openai.com`, and the chatgpt.com Codex backend URL. It contributes **no** `subscriptionEngine` binding (codex agent execution is deferred to follow-up PR #767 — see Execution status below) and **no** `oauthWireFormat` (nothing is forged).
 - Provider `hooks` — `extractTokenIdentity` decodes the access JWT to surface `chatgpt_account_id` / `email`; `buildApiKeyPlaceholder` builds the synthetic JWT the agent container sees; `validateCredential` validates a credential **offline** (no network) by decoding the access JWT and confirming it carries `chatgpt_account_id` and is unexpired. It declares `credentialValidation: "offline"`, so the platform issues **zero** Codex API calls to test a credential or discover models — discovery persists the static `modelDiscoveryCandidates` (∩ catalog), and real per-model availability is validated at first official-binary run.
 
 No DB tables, no routes, no workers — the unified `model_provider_credentials` table in core holds the OAuth blob.

@@ -17,7 +17,6 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^2",
     "@ai-sdk/mcp": "^1.0.46",
-    "@ai-sdk/openai": "^3.0.68",
     "@ai-sdk/openai-compatible": "^1",
     "@appstrate/core": "workspace:*",
     "@appstrate/db": "workspace:*",

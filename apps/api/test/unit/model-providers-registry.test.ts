@@ -122,7 +122,7 @@ describe("model-providers runtime registry", () => {
       registerModelProvider(
         fakeDef("claude-code", {
           authMode: "oauth2",
-          subscriptionEngine: { engine: "claude", sidecarAuthMode: "oauth", nativeOutput: true },
+          subscriptionEngine: { engine: "claude", nativeOutput: true },
         }),
       );
       // codex is registered as a model provider (inference / model-listing) but
@@ -151,7 +151,6 @@ describe("model-providers runtime registry", () => {
           providerId: "claude-code",
           label: "claude-code",
           engine: "claude",
-          sidecarAuthMode: "oauth",
         });
       });
       it("returns undefined for a non-subscription / unknown provider", () => {

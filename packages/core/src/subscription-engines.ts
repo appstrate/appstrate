@@ -68,17 +68,6 @@ export interface SubscriptionEngineBinding {
   /** Engine that drives this provider's official binary. */
   engine: SubscriptionRunEngine;
   /**
-   * How the sidecar delivers the subscription credential to the run:
-   *
-   * - `"oauth"` — the official binary points at the sidecar's `/llm` gateway,
-   *   which swaps the placeholder bearer for the real token server-side. The
-   *   real token never enters the agent container, so egress need not be locked.
-   *
-   * Only the no-forging `"oauth"` delivery is supported: the binary points at
-   * the sidecar gateway and never holds the real token in-container.
-   */
-  sidecarAuthMode: "oauth";
-  /**
    * True iff this engine materialises the structured deliverable NATIVELY (its
    * binary emits `output` directly — e.g. the Claude SDK's `outputFormat` →
    * `structured_output`) rather than via the platform's MCP `output` runtime

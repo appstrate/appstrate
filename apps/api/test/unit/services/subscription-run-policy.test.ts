@@ -41,7 +41,7 @@ beforeAll(() => {
   registerModelProvider(
     fakeProvider("claude-code", {
       authMode: "oauth2",
-      subscriptionEngine: { engine: "claude", sidecarAuthMode: "oauth", nativeOutput: true },
+      subscriptionEngine: { engine: "claude", nativeOutput: true },
     }),
   );
 });
@@ -138,7 +138,7 @@ describe("resolveCredentialDelivery (single classification axis)", () => {
     registerModelProvider(
       fakeProvider("claude-code", {
         authMode: "oauth2",
-        subscriptionEngine: { engine: "claude", sidecarAuthMode: "oauth", nativeOutput: true },
+        subscriptionEngine: { engine: "claude", nativeOutput: true },
       }),
     );
     // An oauth-class provider with NO official engine — the hard-refuse path.
@@ -151,18 +151,16 @@ describe("resolveCredentialDelivery (single classification axis)", () => {
     seedTestModelProviders();
   });
 
-  it("derives an oauth subscription engine's authMode from the registry (single source)", () => {
+  it("resolves an oauth subscription credential + engine from the registry (single source)", () => {
     const d = resolveCredentialDelivery({ providerId: "claude-code", hasCredentialId: true });
-    expect(d.mode).toBe("oauth");
     expect(d.isOauthCredential).toBe(true);
     expect(d.engine).toBe("claude");
-    // authMode comes from the SAME registry entry selectRunEngine reads.
-    expect(d.subscriptionEngine?.sidecarAuthMode).toBe("oauth");
+    // The engine binding comes from the SAME registry entry the launcher reads.
+    expect(d.subscriptionEngine?.engine).toBe("claude");
   });
 
   it("classifies an oauth-class credential with no official engine as oauth on pi — then hard-refuses", () => {
     const d = resolveCredentialDelivery({ providerId: "oauth-no-engine", hasCredentialId: true });
-    expect(d.mode).toBe("oauth");
     expect(d.isOauthCredential).toBe(true);
     expect(d.engine).toBe("pi");
     expect(d.subscriptionEngine).toBeUndefined();
@@ -177,19 +175,17 @@ describe("resolveCredentialDelivery (single classification axis)", () => {
     ).toThrow(UnrunnableOauthProviderError);
   });
 
-  it("classifies an api-key provider as api_key on pi, never oauth", () => {
+  it("classifies an api-key provider as non-oauth on pi", () => {
     const d = resolveCredentialDelivery({ providerId: "openai", hasCredentialId: true });
-    expect(d.mode).toBe("api_key");
     expect(d.isOauthCredential).toBe(false);
     expect(d.engine).toBe("pi");
   });
 
   it("is not oauth-class when no credential id is present (e.g. unconfigured)", () => {
     const d = resolveCredentialDelivery({ providerId: "claude-code", hasCredentialId: false });
+    // With no oauth credential it is NOT routed to oauth delivery.
     expect(d.isOauthCredential).toBe(false);
     // Engine still resolves from the registry regardless of credential presence.
     expect(d.engine).toBe("claude");
-    // With no oauth credential it is NOT routed to oauth delivery.
-    expect(d.mode).toBe("api_key");
   });
 });

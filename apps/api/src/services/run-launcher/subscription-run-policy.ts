@@ -39,38 +39,24 @@ import {
 export type { RunEngine };
 
 /**
- * The sidecar credential-delivery mode for a resolved run, derived from a SINGLE
- * source of truth.
- *
- * - `"oauth"` — the credential's bearer is swapped server-side by the sidecar
- *   `/llm` gateway (the official binary points at the gateway). Either an
- *   `"oauth"`-mode subscription engine (e.g. claude-code → Claude Agent SDK) OR
- *   an oauth-class credential with no subscription engine (which {@link
- *   assertRunnableOnEngine} then hard-refuses — there is no forging fallback).
- * - `"api_key"` — a static API-key provider (Pi engine).
- */
-export type CredentialDeliveryMode = "oauth" | "api_key";
-
-/**
- * Single resolver for "what kind of credential is this and how is it delivered".
+ * Single resolver for "what kind of credential is this and which engine runs it".
  *
  * Reads the provider→engine registry ONCE (plus the oauth-class flag for the
  * no-subscription-engine refuse path) so the launcher no longer maintains a
- * parallel `isOAuthModelProvider` axis alongside `subscriptionEngineForProvider`. The
- * delivery mode, the oauth-class boolean, and the resolved engine all flow from
- * this one value.
+ * parallel `isOAuthModelProvider` axis alongside `subscriptionEngineForProvider`.
+ * The oauth-class boolean and the resolved engine both flow from this one value.
  *
- * Precedence: an oauth-class credential (one whose provider declares
- * `authMode: "oauth2"`) is `"oauth"` — if it has no subscription engine it will
- * be hard-refused downstream by {@link assertRunnableOnEngine}; everything else
- * is a static `"api_key"` provider.
+ * An oauth-class credential (one whose provider declares `authMode: "oauth2"`)
+ * has its bearer swapped server-side by the sidecar `/llm` gateway — if it has
+ * no subscription engine it is hard-refused downstream by {@link
+ * assertRunnableOnEngine} (there is no forging fallback). Everything else is a
+ * static API-key provider on the Pi engine.
  */
 export function resolveCredentialDelivery(params: {
   providerId: string;
   /** Whether the resolved run actually carries a stored credential id. */
   hasCredentialId: boolean;
 }): {
-  mode: CredentialDeliveryMode;
   /** True for any oauth-class credential — subscription OR engine-less. */
   isOauthCredential: boolean;
   engine: RunEngine;
@@ -85,20 +71,7 @@ export function resolveCredentialDelivery(params: {
   // for an oauth provider with no official engine (the refuse path).
   const isOauthCredential = hasCredentialId && isOAuthModelProvider(providerId);
 
-  if (isOauthCredential) {
-    return {
-      mode: "oauth",
-      isOauthCredential,
-      engine,
-      subscriptionEngine,
-    };
-  }
-  return {
-    mode: "api_key",
-    isOauthCredential,
-    engine,
-    subscriptionEngine,
-  };
+  return { isOauthCredential, engine, subscriptionEngine };
 }
 
 /**
