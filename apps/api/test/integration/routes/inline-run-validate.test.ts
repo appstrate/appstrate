@@ -73,6 +73,16 @@ describe("POST /api/runs/inline/validate", () => {
     expect(body.valid).toBe(true);
   });
 
+  it("accepts a manifest with no display_name (defaulted from name)", async () => {
+    // display_name is AFPS-required but pure ceremony for an ephemeral inline
+    // agent — the preflight defaults it from `name` so callers (e.g. an LLM
+    // assembling the manifest) never trigger a needless retry for it.
+    const { display_name: _omit, ...noDisplayName } = validManifest();
+    const res = await post({ manifest: noDisplayName, prompt: "do something" });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { valid: boolean }).valid).toBe(true);
+  });
+
   it("does NOT insert a shadow row on success", async () => {
     expect(await shadowCount()).toBe(0);
     const res = await post({ manifest: validManifest(), prompt: "do something" });

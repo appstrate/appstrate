@@ -70,11 +70,11 @@ Choosing what to do:
 - If the request is a pure Appstrate operation (list or inspect runs, schedule, manage agents, search documents), call that operation directly with \`invoke_operation\`. NEVER spin up a run for something the platform API already does — that wastes credits and time.
 - If the request needs an integration, an MCP, or any external action, run an agent:
   1. Prefer an existing agent the user can run (listed in your context below) when one matches the intent — trigger it with the run-agent operation.
-  2. Otherwise build a one-shot inline run (\`POST /api/runs/inline\`): pass a full AFPS agent \`manifest\` plus a \`prompt\`. In the manifest, declare the integration(s) under \`dependencies.integrations\`, grant the needed tools under \`integrations_configuration\`, set \`runtime_tools: ["output"]\`, and define an \`output.schema\` for the data you want back. In the \`prompt\`, tell the agent it is a sub-agent: do the work, then return the result by calling the \`output\` tool with a payload that satisfies the schema. Without that output schema and instruction you will receive nothing back.
+  2. Otherwise invoke the \`runInline\` operation (\`POST /api/runs/inline\`): pass a full AFPS agent \`manifest\` plus a \`prompt\`. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version from your context), grant the needed tools under \`integrations_configuration\` (\`api_call\` covers most third-party calls), set \`runtime_tools: ["output"]\`, and define an \`output.schema\` for the data you want back. In the \`prompt\`, tell the agent it is a sub-agent: do the work, then return the result by calling the \`output\` tool with a payload that satisfies the schema. Without that output schema and instruction you will receive nothing back.
 
-Runs are asynchronous. After triggering one (inline or existing), call the run-get operation with \`query: { wait: true }\` to long-poll until the run is terminal (it returns after ~55s; if still running, call it again); never busy-poll in a tight loop yourself. Then read the run's \`result\` field — that is the sub-agent's deliverable. Answer the user from \`result\`; never fabricate it. If the run fails, read its error and report it plainly.
+Runs are asynchronous. The trigger returns the created run resource — take its \`id\`. Then call the run-get operation (path param \`id\`, not \`runId\`) with \`query: { wait: true }\` to long-poll until the run is terminal (it returns after ~55s; if still running, call it again); never busy-poll in a tight loop yourself. Then read the run's \`result\` field — that is the sub-agent's deliverable. Answer the user from \`result\`; never fabricate it. If the run fails, read its error and report it plainly.
 
-Example — summarising the user's latest emails (adapt the integration, tools, and schema to the actual request; the integration id below is a placeholder):
+Example — summarising the user's latest emails (adapt the integration id, version, tools, and schema to the actual request):
 \`\`\`json
 {
   "manifest": {
@@ -84,8 +84,8 @@ Example — summarising the user's latest emails (adapt the integration, tools, 
     "type": "agent",
     "version": "1.0.0",
     "timeout": 300,
-    "dependencies": { "integrations": { "@appstrate/<integration>": "^1.0.0" } },
-    "integrations_configuration": { "@appstrate/<integration>": { "tools": ["api_call"] } },
+    "dependencies": { "integrations": { "@appstrate/gmail": "^1.1.0" } },
+    "integrations_configuration": { "@appstrate/gmail": { "tools": ["api_call"] } },
     "runtime_tools": ["output"],
     "output": {
       "schema": {
@@ -100,6 +100,8 @@ Example — summarising the user's latest emails (adapt the integration, tools, 
 }
 \`\`\`
 Then call run-get with \`query: { wait: true }\`, read \`result.summary\`, and reply to the user from it.
+
+You already have the exact shapes for these two operations: the inline-run trigger body is \`{ manifest, prompt }\` exactly as shown above, and run-get takes path param \`id\` + \`query: { wait: true }\`. Do NOT call \`describe_operation\` for the inline-run trigger or run-get — invoke them directly. (You still discover any OTHER operation's schema via search/describe as usual.)
 
 When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.
 
@@ -123,7 +125,7 @@ const SUBSCRIPTION_TOOLS_NOTE = `If your tool calls fail because the platform to
 interface CallerContext {
   user?: { name?: string | null; email?: string | null } | null;
   org?: { role?: string | null } | null;
-  connections?: { integration_id: string; name: string; source: string }[] | null;
+  connections?: { integration_id: string; name: string; source: string; version?: string }[] | null;
   agents?:
     | {
         package_id: string;
@@ -152,9 +154,17 @@ export function formatCallerContext(raw: unknown): string {
     `You are assisting ${who}${role ? `, whose role in this organization is "${role}"` : ""}.`,
   ];
   if (ctx.connections?.length) {
-    const list = ctx.connections.map((c) => `${c.name} (${c.source})`).join(", ");
+    // Render the exact package id (and version when known) so the model can use
+    // it verbatim in an inline run's `dependencies.integrations` without a
+    // discovery round-trip — the display name alone forced a lookup detour.
+    const list = ctx.connections
+      .map((c) => {
+        const ver = c.version ? `@${c.version}` : "";
+        return `${c.name} — \`${c.integration_id}\`${ver} (${c.source})`;
+      })
+      .join(", ");
     lines.push(
-      `Integrations the user has connected and could attach to an agent: ${list}. Prefer these when building or configuring an agent.`,
+      `Integrations the user has connected and could attach to an agent: ${list}. Prefer these when building or configuring an agent; use the \`@scope/name\` id verbatim.`,
     );
   } else {
     lines.push("The user has no connected integrations yet.");

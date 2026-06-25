@@ -11285,6 +11285,8 @@ export interface operations {
                             name: string;
                             /** @enum {string} */
                             source: "own" | "shared" | "both";
+                            /** @description The integration package's own manifest version, when known. Use it to pin a satisfiable dependencies.integrations range. */
+                            version?: string;
                         }[];
                         /** @description Agents the caller can run in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the long tail is reachable via the MCP `search_operations` tool. */
                         agents: {

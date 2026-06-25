@@ -453,6 +453,11 @@ export const mePaths = {
                         integration_id: { type: "string" },
                         name: { type: "string" },
                         source: { type: "string", enum: ["own", "shared", "both"] },
+                        version: {
+                          type: "string",
+                          description:
+                            "The integration package's own manifest version, when known. Use it to pin a satisfiable dependencies.integrations range.",
+                        },
                       },
                     },
                   },

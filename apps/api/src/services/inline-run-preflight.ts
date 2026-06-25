@@ -76,8 +76,15 @@ export async function runInlinePreflight(params: {
   };
 
   // ----- 1. Manifest shape -----
+  // Inline agents are ephemeral one-shots, never shown in a catalog, so the
+  // AFPS-required `display_name` is pure ceremony here — a missing one is the
+  // single most common cause of a needless trigger→retry round-trip for an LLM
+  // assembling the manifest. Default it from the manifest `name` before
+  // validation so callers never have to supply it. (`author` is already relaxed
+  // to optional for local/inline manifests in `@appstrate/core/validation`.)
+  const normalizedManifest = defaultInlineDisplayName(body.manifest);
   const validated = validateInlineManifest({
-    manifest: body.manifest,
+    manifest: normalizedManifest,
     prompt: body.prompt,
     limits: getInlineRunLimits(),
   });
@@ -214,4 +221,21 @@ export async function runInlinePreflight(params: {
  */
 function toFieldError(raw: string, code: string): ValidationFieldError {
   return parsePathMessage(raw, { code, title: "Invalid Inline Manifest" });
+}
+
+/**
+ * Return a shallow copy of an inline manifest with `display_name` filled from
+ * `name` when it is absent or blank. Non-object inputs pass through untouched so
+ * the downstream shape validation still reports them. Pure (no mutation of the
+ * caller's object) so the original request body stays intact.
+ */
+function defaultInlineDisplayName(manifest: unknown): unknown {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return manifest;
+  const m = manifest as Record<string, unknown>;
+  const current = typeof m.display_name === "string" ? m.display_name.trim() : "";
+  if (current) return manifest;
+  const name = typeof m.name === "string" ? m.name : "";
+  // Strip a leading `@scope/` for a friendlier label; fall back to a constant.
+  const label = name.replace(/^@[^/]+\//, "").trim() || "Inline agent";
+  return { ...m, display_name: label };
 }

@@ -1913,6 +1913,12 @@ export interface UsableIntegration {
   integration_id: string;
   name: string;
   source: "own" | "shared" | "both";
+  /**
+   * The integration package's own manifest version (e.g. "1.1.0"), when known.
+   * Lets a caller building an agent (or an inline run) pin a satisfiable
+   * `dependencies.integrations` range without guessing.
+   */
+  version?: string;
 }
 
 /**
@@ -1965,6 +1971,15 @@ export async function listUsableIntegrationsForActor(
     .from(packages)
     .where(inArray(packages.id, ids));
   const nameMap = new Map(pkgRows.map((p) => [p.id, getPackageDisplayName(p)]));
+  // The integration package's own version, read straight off the draft manifest
+  // (already selected — no extra query). Surfaced so a caller pinning a
+  // `dependencies.integrations` range doesn't have to guess it.
+  const versionMap = new Map(
+    pkgRows.map((p) => {
+      const m = p.draftManifest as { version?: unknown } | null;
+      return [p.id, typeof m?.version === "string" ? m.version : undefined] as const;
+    }),
+  );
 
   return ids.map((integrationId) => {
     const { own, shared } = acc.get(integrationId)!;
@@ -1973,6 +1988,7 @@ export async function listUsableIntegrationsForActor(
       integration_id: integrationId,
       name: nameMap.get(integrationId) ?? integrationId,
       source,
+      version: versionMap.get(integrationId),
     };
   });
 }
