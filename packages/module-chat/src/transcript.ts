@@ -2,23 +2,23 @@
 
 /**
  * Flatten an assistant-ui `UIMessage[]` thread into a single prompt string —
- * shared by the engines that drive a binary which takes a prompt, not a
- * structured message array (the codex CLI and the Claude Agent SDK).
+ * used by the Claude Agent SDK chat engine, which takes a prompt rather than a
+ * structured message array.
  *
  * A single user turn is sent verbatim; multiple turns become a labelled
  * `User:`/`Assistant:` transcript so a stateless driver gets the full
  * conversational context. Non-text parts (tool calls, files) are dropped — only
  * text survives into the transcript. The system persona is NOT prepended here:
- * the only caller (the Claude Agent SDK chat engine) passes system through the
- * SDK's own system arg.
+ * the caller (the Claude Agent SDK chat engine) passes system through the SDK's
+ * own system arg.
  *
  * KNOWN LIMITATION (lossy vs the ai-sdk path): the ai-sdk chat path feeds the
  * model `convertToModelMessages(messages)` — a structured array preserving tool
  * calls, tool results, and file parts. This flattening keeps only text, so a
- * multi-turn, tool-rich session is degraded on the binary-driven engines
- * (codex / Claude Agent SDK). Acceptable for the current chat surface (the
- * binaries take a prompt, not a message array); revisit with a structured
- * adapter if/when the SDKs accept richer multi-part input.
+ * multi-turn, tool-rich session is degraded on the SDK-driven engine. Acceptable
+ * for the current chat surface (the SDK takes a prompt, not a message array);
+ * revisit with a structured adapter if/when the SDK accepts richer multi-part
+ * input.
  */
 
 import type { UIMessage } from "ai";

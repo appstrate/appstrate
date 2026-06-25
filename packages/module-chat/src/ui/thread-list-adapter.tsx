@@ -21,29 +21,26 @@ import {
 } from "./sessions.ts";
 import { makeHistoryAdapter } from "./history-adapter.ts";
 
-/** First few messages flattened to role + text (input for title generation). */
-function titleInput(messages: readonly ThreadMessage[]): { role: string; text: string }[] {
-  return messages
-    .map((m) => ({
-      role: m.role,
-      text: m.content
-        .filter((p): p is { type: "text"; text: string } => p.type === "text")
-        .map((p) => p.text)
-        .join(" ")
-        .trim(),
-    }))
-    .filter((m) => m.text.length > 0)
-    .slice(0, 6);
+/** Flatten one message's text parts into a single trimmed string. */
+function messageText(m: ThreadMessage): string {
+  return m.content
+    .filter((p): p is { type: "text"; text: string } => p.type === "text")
+    .map((p) => p.text)
+    .join(" ")
+    .trim();
 }
 
 /**
- * Local title from the first user message, trimmed. Mirrors the server's
- * deriveTitle() truncation (60/57) so the live-emitted title matches the value
- * the server persists — no re-render when list()/fetch() read it back.
+ * Local title from the first user message (or the first non-empty message),
+ * trimmed. Mirrors the server's deriveTitle() truncation (60/57) so the
+ * live-emitted title matches the value the server persists — no re-render when
+ * list()/fetch() read it back. Returns "" when there is no text to title.
  */
-function fallbackTitle(items: { role: string; text: string }[]): string {
-  const first = items.find((m) => m.role === "user")?.text ?? items[0]?.text ?? "";
-  return first.length > 60 ? `${first.slice(0, 57)}…` : first;
+function fallbackTitle(messages: readonly ThreadMessage[]): string {
+  const texts = messages.map(messageText).filter((t) => t.length > 0);
+  const first = messages.find((m) => m.role === "user" && messageText(m).length > 0);
+  const text = (first ? messageText(first) : texts[0]) ?? "";
+  return text.length > 60 ? `${text.slice(0, 57)}…` : text;
 }
 
 export function makeThreadListAdapter(getHeaders: GetHeaders): RemoteThreadListAdapter {
@@ -93,9 +90,8 @@ export function makeThreadListAdapter(getHeaders: GetHeaders): RemoteThreadListA
     // drift, would cause a visible re-render when the server value wins) — so
     // fallbackTitle mirrors deriveTitle's 60/57 truncation exactly.
     async generateTitle(_remoteId, messages) {
-      const items = titleInput(messages);
-      if (items.length === 0) return createAssistantStream(() => {});
-      const title = fallbackTitle(items);
+      const title = fallbackTitle(messages);
+      if (!title) return createAssistantStream(() => {});
       return createAssistantStream((controller) => {
         if (title) controller.appendText(title);
       });
