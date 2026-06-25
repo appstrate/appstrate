@@ -522,8 +522,8 @@ describe("POST /mcp — api_call multipart/form-data", () => {
       }>;
     };
     const proxy = result.tools.find((t) => t.name === "test__api_call")!;
-    // string | { fromFile } | { fromBytes } | { multipart }
-    expect(proxy.inputSchema.properties.body?.oneOf?.length).toBe(4);
+    // string | { fromFile } | { fromBytes } | { multipart } | JSON object
+    expect(proxy.inputSchema.properties.body?.oneOf?.length).toBe(5);
     expect(proxy.inputSchema.properties.body?.description).toContain("multipart");
     expect(proxy.inputSchema.properties.body?.description).toContain("fromFile");
   });

@@ -211,6 +211,18 @@ function sanitiseApiCallHeaders(raw: Record<string, string> | undefined): {
 }
 
 /**
+ * Case-insensitive presence check over a sanitised header map. HTTP
+ * header names are case-insensitive, but a plain `Record` lookup is
+ * not — so a caller's `content-type` would not be seen by a literal
+ * `headers["Content-Type"]` read. Used to decide whether the sidecar
+ * may inject a default Content-Type without clobbering an explicit one.
+ */
+function hasHeader(headers: Record<string, string>, name: string): boolean {
+  const lower = name.toLowerCase();
+  return Object.keys(headers).some((k) => k.toLowerCase() === lower);
+}
+
+/**
  * Legacy byte-based inline threshold. Kept as a defence-in-depth
  * fallback when no {@link TokenBudget} is configured (today: never in
  * production, but the option keeps tests and embedders simple).
@@ -504,7 +516,11 @@ function buildSidecarTools(options: MountMcpOptions): {
       body: {
         description:
           "Request body. Shapes:\n" +
-          "  - string: text/JSON endpoints.\n" +
+          '  - JSON object (e.g. { "url": "https://…" }): serialized to a JSON ' +
+          "string and sent with Content-Type: application/json by default (unless you set " +
+          "the header yourself). Use this for ordinary JSON request bodies.\n" +
+          "  - string: pre-serialized text/JSON/XML/form bodies. No Content-Type is added " +
+          "automatically — set it yourself when the endpoint needs one.\n" +
           "  - { fromFile: <workspace-relative path> }: send a workspace file's bytes as the " +
           "body without base64-encoding it into this argument. Resolved agent-side (read + " +
           "base64) before the call, so the file never enters the model context. Capped at " +
@@ -593,6 +609,20 @@ function buildSidecarTools(options: MountMcpOptions): {
                   ],
                 },
               },
+            },
+          },
+          {
+            // Plain JSON object: serialized to a JSON string and sent with
+            // a default `Content-Type: application/json` (unless the caller
+            // set one). `not` excludes the reserved wrapper shapes above so
+            // this variant stays disjoint from them under strict oneOf.
+            type: "object",
+            not: {
+              anyOf: [
+                { required: ["fromFile"] },
+                { required: ["fromBytes"] },
+                { required: ["multipart"] },
+              ],
             },
           },
         ],
@@ -827,7 +857,9 @@ function buildSidecarTools(options: MountMcpOptions): {
         body?:
           | string
           | { fromBytes: string; encoding: "base64" }
-          | { multipart: MultipartPartArg[] };
+          | { multipart: MultipartPartArg[] }
+          | { fromFile: string }
+          | Record<string, unknown>;
         substituteBody?: boolean;
       };
 
@@ -899,6 +931,10 @@ function buildSidecarTools(options: MountMcpOptions): {
       //    Content-Type so the boundary token matches the body bytes.
       let buffered: ArrayBuffer | undefined;
       let bodyText: string | undefined;
+      // Set when the body was a plain JSON object we serialized ourselves
+      // — the only case where the sidecar may safely default the
+      // Content-Type (we know the wire bytes are JSON).
+      let jsonSerialized = false;
       let multipartBody:
         | {
             build: (activeCreds: Record<string, string>) => FormData;
@@ -953,7 +989,7 @@ function buildSidecarTools(options: MountMcpOptions): {
             _meta: API_CALL_PREFLIGHT_META,
           };
         }
-        const decoded = decodeStrictBase64(args.body.fromBytes);
+        const decoded = decodeStrictBase64((args.body as { fromBytes: string }).fromBytes);
         if (decoded === "invalid") {
           return {
             content: [
@@ -999,6 +1035,69 @@ function buildSidecarTools(options: MountMcpOptions): {
           decoded.byteOffset,
           decoded.byteOffset + decoded.byteLength,
         ) as ArrayBuffer;
+      } else if (args.body && typeof args.body === "object" && "fromFile" in args.body) {
+        // `{ fromFile }` is resolved agent-side into `{ fromBytes }`
+        // BEFORE the call reaches the sidecar (see the body schema): the
+        // runtime reads the workspace file and base64-encodes it so the
+        // bytes never enter the model context. If a raw `{ fromFile }`
+        // arrives here, that resolver did not run — error rather than
+        // JSON-stringify the wrapper object and POST a bogus `{"fromFile":…}`.
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `${ctx.label}: body.fromFile was not resolved before the call — this is a ` +
+                "runtime bug. The file should be materialised into " +
+                "{ fromBytes, encoding: 'base64' } agent-side before invoking api_call.",
+            },
+          ],
+          isError: true,
+          _meta: API_CALL_PREFLIGHT_META,
+        };
+      } else if (args.body !== null && typeof args.body === "object") {
+        // Plain JSON object — the LLM's natural reflex for a JSON body.
+        // Earlier branches already consumed the `multipart` / `fromBytes`
+        // / `fromFile` object shapes, so anything still an object here is
+        // a JSON payload. Serialize it ONCE and remember we did, so we
+        // can default the Content-Type below. This mirrors the HTTP-client
+        // convention (fetch/axios/`PostAsJsonAsync`): the caller passes the
+        // object, the client serializes and sets the header together.
+        // String bodies above pass through untouched → no double-encoding.
+        bodyText = JSON.stringify(args.body);
+        buffered = new TextEncoder().encode(bodyText).buffer;
+        jsonSerialized = true;
+      }
+
+      // A body that was PRESENT but no branch could turn into bytes must
+      // error — never silently fall through to `{ kind: "none" }` and ship
+      // an empty-bodied request (the silent-drop footgun: the upstream
+      // returns "field X missing" while the agent believes it sent X).
+      // Gate on `!= null` so an explicit `null` / absent body still means
+      // "no body" and is allowed through as `{ kind: "none" }`.
+      if (args.body != null && buffered === undefined && multipartBody === undefined) {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `${ctx.label}: 'body' has an unsupported shape and cannot be sent. Pass a JSON ` +
+                "object, a string, { fromBytes, encoding: 'base64' }, or { multipart: [...] }.",
+            },
+          ],
+          isError: true,
+          _meta: API_CALL_PREFLIGHT_META,
+        };
+      }
+
+      // Default Content-Type for a body we serialized from a JSON object:
+      // we KNOW the wire bytes are JSON, and most JSON APIs require the
+      // header to parse the body. Only when the caller did not set one —
+      // never override an explicit choice. Raw string bodies are left
+      // alone on purpose (they may be XML / form-encoded / NDJSON, and
+      // guessing the media type there would be wrong).
+      if (jsonSerialized && !hasHeader(callerHeaders, "content-type")) {
+        callerHeaders["Content-Type"] = "application/json";
       }
 
       const result = await executeApiCall(
