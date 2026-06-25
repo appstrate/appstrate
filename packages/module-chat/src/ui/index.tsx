@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AssistantRuntimeProvider, useRemoteThreadListRuntime } from "@assistant-ui/react";
 import { useChatRuntime, AssistantChatTransport } from "@assistant-ui/react-ai-sdk";
-import { PanelLeftIcon, InfoIcon } from "lucide-react";
+import { PanelLeftIcon } from "lucide-react";
 import { Thread } from "./thread.tsx";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { makeThreadListAdapter } from "./thread-list-adapter.tsx";
@@ -25,13 +25,6 @@ const MODEL_STORAGE_KEY = "appstrate.chat.model";
 
 export interface ChatPageProps {
   getHeaders?: () => Record<string, string>;
-  /**
-   * Whether platform tools (run agents, inspect runs, search…) are available —
-   * i.e. the `mcp` module is active. When `false`, the chat still works for
-   * plain conversation (the backend degrades gracefully) and a banner explains
-   * that tools are off. Left `undefined` by embedders that don't gate on it.
-   */
-  toolsAvailable?: boolean;
 }
 
 /**
@@ -40,7 +33,7 @@ export interface ChatPageProps {
  * the left (create/rename/delete), per-thread history restored from
  * `chat_sessions`/`chat_messages` through the history adapter.
  */
-export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
+export function ChatPage({ getHeaders }: ChatPageProps) {
   const adapter = useMemo(() => makeThreadListAdapter(getHeaders), [getHeaders]);
 
   // Thread-list column is a fixed sidebar on desktop; on mobile it collapses
@@ -144,18 +137,6 @@ export function ChatPage({ getHeaders, toolsAvailable }: ChatPageProps) {
               <ActiveConversationTitle />
             </div>
           </div>
-          {toolsAvailable === false && (
-            <div
-              role="status"
-              className="flex shrink-0 items-center gap-2 border-b bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-400"
-            >
-              <InfoIcon className="size-3.5 shrink-0" />
-              <span>
-                Aucun outil disponible — le module <code>mcp</code> n'est pas actif. Le chat répond
-                en conversation simple (pas d'agents, runs ni recherche).
-              </span>
-            </div>
-          )}
           <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
             <Thread
               composerSlot={

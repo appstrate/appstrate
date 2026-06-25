@@ -112,20 +112,6 @@ When a tool call fails with a recoverable error (e.g. a validation error naming 
 
 Respect the user's role: actions beyond it will be refused by the platform — don't attempt them. When building or configuring an agent, prefer integrations the user already has connected (listed in their context below) over asking them to connect new ones.`;
 
-// Fallback when the platform MCP module isn't reachable (e.g. `mcp` absent
-// from MODULES). The chat keeps working for plain conversation — it just has
-// no instance tools — so the prompt drops the tool-grounding instructions and
-// tells the model to be upfront about the limitation.
-const NO_TOOLS_SYSTEM_PROMPT = `You are Appstrate's assistant. Right now your instance tools are unavailable because the platform MCP module is not active, so you cannot search operations, run agents, inspect runs, or schedule. Answer the user's questions directly and conversationally. If the user asks for an action that needs those tools, say plainly that tools are disabled until the \`mcp\` module is enabled, rather than pretending to act.`;
-
-// The subscription (claude-code) path doesn't probe the platform MCP for
-// reachability (the SDK opens its own connection) — so unlike the ai-sdk path it
-// can't pre-select NO_TOOLS_SYSTEM_PROMPT when the `mcp` module is absent. This
-// note makes the tool-grounding prompt degrade gracefully in that rare config
-// (claude-code enabled, mcp disabled): the model reports tools are off instead
-// of looping on failing tool calls. Harmless when tools ARE present.
-const SUBSCRIPTION_TOOLS_NOTE = `If your tool calls fail because the platform tools are unavailable (the \`mcp\` module is disabled on this instance), do not retry — tell the user plainly that instance tools are off and answer conversationally instead.`;
-
 /** Shape of GET /api/me/context (the `get_me` payload). Validated loosely. */
 interface CallerContext {
   user?: { name?: string | null; email?: string | null } | null;
@@ -518,17 +504,13 @@ export async function handleChatStream(
   if (isSubscription) {
     contextBlock = await contextPromise;
   } else {
-    // Graceful degradation: the chat's tools come from the platform MCP module
-    // (`/api/mcp/o/:org`). If it's unreachable (e.g. `mcp` not in MODULES), keep
-    // the turn usable for plain conversation instead of 500-ing. The UI surfaces
-    // a "no tools" banner via the `mcp` app-config feature flag.
+    // The chat's tools come from the platform MCP module (`/api/mcp/o/:org`).
+    // `mcp` is a hard peer requirement (declared in the chat manifest, enforced
+    // at boot), so a failure to open it here is a genuine misconfiguration —
+    // let it propagate to a 5xx rather than silently degrading to a no-tools
+    // chat.
     const [openedMcp, block] = await Promise.all([
-      openPlatformMcp({ origin, headers, orgId, applicationId }).catch((err) => {
-        logger.warn("platform MCP unavailable — chat degrades to no-tools", {
-          err: String(err),
-        });
-        return null;
-      }),
+      openPlatformMcp({ origin, headers, orgId, applicationId }),
       contextPromise,
     ]);
     mcp = openedMcp;
@@ -538,14 +520,13 @@ export async function handleChatStream(
 
   // Assemble the system prompt. Subscription path: tool-grounding prompt, no
   // inline instructions (the SDK's own MCP handshake delivers them). ai-sdk
-  // path: prompt + probe instructions, or the no-tools prompt when MCP is down.
+  // path: prompt + the platform MCP server instructions (mcp is required, so
+  // it's always present here).
   let system = isSubscription
-    ? `${SYSTEM_PROMPT}\n\n${SUBSCRIPTION_TOOLS_NOTE}`
-    : !mcp
-      ? NO_TOOLS_SYSTEM_PROMPT
-      : mcp.instructions
-        ? `${SYSTEM_PROMPT}\n\n${mcp.instructions}`
-        : SYSTEM_PROMPT;
+    ? SYSTEM_PROMPT
+    : mcp?.instructions
+      ? `${SYSTEM_PROMPT}\n\n${mcp.instructions}`
+      : SYSTEM_PROMPT;
   if (contextBlock) system += `\n\n${contextBlock}`;
   system = applyOperationIndexPolicy(system, chosen.apiShape);
 

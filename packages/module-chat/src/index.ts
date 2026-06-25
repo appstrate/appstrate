@@ -43,7 +43,12 @@ declare module "@appstrate/core/permissions" {
 }
 
 const chatModule: AppstrateModule = {
-  manifest: { id: "chat", name: "Chat", version: "0.1.0" },
+  // `mcp` is a HARD peer requirement: the chat's whole value is piloting the
+  // platform through the MCP meta-tools. Declaring it here both orders boot
+  // (mcp first) and — via the loader's declared-dependency presence check —
+  // turns a missing `mcp` module into a fatal boot/config error rather than a
+  // silently degraded no-tools chat.
+  manifest: { id: "chat", name: "Chat", version: "0.1.0", dependencies: ["mcp"] },
 
   async init(ctx: ModuleInitContext) {
     // Tables are centralized in the core schema — nothing to migrate. No
