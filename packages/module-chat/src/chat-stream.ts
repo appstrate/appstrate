@@ -25,7 +25,12 @@ import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
 import { subscriptionEngineDef } from "@appstrate/core/subscription-engines";
 import { buildTranscriptPrompt } from "./transcript.ts";
-import { getIntegrationsService, getAgentsService, getSkillsService } from "./platform-services.ts";
+import {
+  getIntegrationsService,
+  getAgentsService,
+  getSkillsService,
+  getRunsService,
+} from "./platform-services.ts";
 
 const MAX_STEPS = 16;
 
@@ -59,6 +64,9 @@ export function applyOperationIndexPolicy(system: string, apiShape: string): str
  * is a generous ceiling for a single interactive turn.
  */
 const ENGINE_LOOPBACK_TTL_MS = 30 * 60_000;
+
+/** Max length of a run error message rendered in the caller-context block. */
+const RUN_ERROR_MAX_CHARS = 200;
 
 const SYSTEM_PROMPT = `You are Appstrate's assistant. You help the user operate their Appstrate instance through the available tools.
 
@@ -127,7 +135,26 @@ const SUBSCRIPTION_TOOLS_NOTE = `If your tool calls fail because the platform to
 /** Shape of GET /api/me/context (the `get_me` payload). Validated loosely. */
 interface CallerContext {
   user?: { name?: string | null; email?: string | null } | null;
-  org?: { role?: string | null } | null;
+  org?: { role?: string | null; name?: string | null; slug?: string | null } | null;
+  /**
+   * Browser-side grounding forwarded in the request body (no tz/locale is
+   * persisted server-side): the user's clock, IANA timezone, and active UI
+   * language. Lets the model anchor "today" and reply in the right language.
+   */
+  client?: { now?: string | null; tz?: string | null; locale?: string | null } | null;
+  /**
+   * The caller's most recent runs (actor-scoped), newest first — lets the model
+   * reference the last run/failure without a discovery round-trip.
+   */
+  recent_runs?:
+    | {
+        package_id: string;
+        status: string;
+        run_number?: number | null;
+        started_at?: string | null;
+        error?: string | null;
+      }[]
+    | null;
   connections?:
     | {
         integration_id: string;
@@ -178,21 +205,42 @@ export function formatCallerContext(raw: unknown): string {
   const name = ctx.user?.name?.trim();
   const email = ctx.user?.email?.trim();
   const role = ctx.org?.role?.trim();
+  const orgName = ctx.org?.name?.trim();
+  const orgSlug = ctx.org?.slug?.trim();
+  const now = ctx.client?.now?.trim();
+  const tz = ctx.client?.tz?.trim();
+  const locale = ctx.client?.locale?.trim();
   if (
     !name &&
     !email &&
     !role &&
+    !orgName &&
+    !now &&
+    !locale &&
     !ctx.connections?.length &&
     !ctx.agents?.length &&
-    !ctx.skills?.length
+    !ctx.skills?.length &&
+    !ctx.recent_runs?.length
   )
     return "";
 
   const who = name && email ? `${name} (${email})` : (name ?? email ?? "the user");
+  const orgLabel = orgName
+    ? ` in the organization "${orgName}"${orgSlug ? ` (\`${orgSlug}\`)` : ""}`
+    : "";
   const lines = [
     "## Your context",
-    `You are assisting ${who}${role ? `, whose role in this organization is "${role}"` : ""}.`,
+    `You are assisting ${who}${role ? `, whose role is "${role}"` : ""}${orgLabel}.`,
   ];
+  // Ground "today" from the browser clock (no server-side tz exists). Fall back
+  // to the server clock / UTC when the client did not send it.
+  const clockIso = now || new Date().toISOString();
+  lines.push(
+    `Current date and time: ${clockIso}${tz ? ` (timezone ${tz})` : " (UTC)"}. ` +
+      "Use this to resolve relative dates and schedules.",
+  );
+  // The active UI language; default to French (the platform's default locale).
+  lines.push(`Reply in the user's language (${locale || "fr"}) unless they switch.`);
   if (ctx.connections?.length) {
     // Render the exact package id (and version when known) so the model can use
     // it verbatim in an inline run's `dependencies.integrations` without a
@@ -253,7 +301,27 @@ export function formatCallerContext(raw: unknown): string {
         "if none. The run route validates that declared skills exist.",
     );
   }
+  if (ctx.recent_runs?.length) {
+    lines.push("", "## The user's recent runs (newest first)");
+    for (const r of ctx.recent_runs) {
+      const num = typeof r.run_number === "number" ? ` #${r.run_number}` : "";
+      const when = r.started_at?.trim() ? `, ${r.started_at.trim()}` : "";
+      const err = r.error?.trim()
+        ? ` — error: ${truncate(r.error.trim(), RUN_ERROR_MAX_CHARS)}`
+        : "";
+      lines.push(`- \`${r.package_id}\`${num} — ${r.status}${when}${err}`);
+    }
+    lines.push(
+      "Reference these when the user asks about a recent or failed run, or wants to re-run " +
+        "something; fetch full details with the run get operation when needed.",
+    );
+  }
   return lines.join("\n");
+}
+
+/** Clamp a string for prompt size, appending an ellipsis when truncated. */
+function truncate(s: string, max: number): string {
+  return s.length <= max ? s : `${s.slice(0, max)}…`;
 }
 
 // The client (assistant-ui / useChat) posts the full thread plus optional
@@ -265,6 +333,18 @@ const chatStreamSchema = z.object({
   modelId: z.string().optional(),
   /** Host-injected anchor (e.g. the open document in the workspace panel). */
   context: z.object({ type: z.string(), id: z.string(), label: z.string().optional() }).optional(),
+  /**
+   * Browser-side grounding (no tz/locale is persisted server-side): the user's
+   * clock, IANA timezone, and active UI language. All optional — the server
+   * falls back to its own clock / UTC / `fr` when absent.
+   */
+  client: z
+    .object({
+      now: z.string().optional(),
+      tz: z.string().optional(),
+      locale: z.string().optional(),
+    })
+    .optional(),
 });
 
 /** Truncated JSON preview for debug logs (keeps lines readable). */
@@ -304,10 +384,15 @@ async function buildCallerContextBlock(
     orgId: string;
     applicationId?: string;
     user: { id: string; name?: string | null; email?: string | null };
+    /** Browser-side clock/timezone/locale forwarded in the request body. */
+    client?: { now?: string; tz?: string; locale?: string };
   },
 ): Promise<string> {
-  const { origin, headers, orgId, applicationId, user } = args;
+  const { origin, headers, orgId, applicationId, user, client } = args;
   const role = (c.get("orgRole") as string | undefined) ?? undefined;
+  const orgName = (c.get("orgName") as string | undefined) ?? undefined;
+  const orgSlug = (c.get("orgSlug") as string | undefined) ?? undefined;
+  const clientCtx = client ?? null;
   try {
     const svc = getIntegrationsService();
     if (svc) {
@@ -318,11 +403,12 @@ async function buildCallerContextBlock(
       // app context.
       const agentsSvc = getAgentsService();
       const skillsSvc = getSkillsService();
+      const runsSvc = getRunsService();
       // Runnable agents and attachable skills are hints — only when the caller
       // holds `agents:run` (mirrors the REST /api/me/context gate, so the two
       // never drift). Skills share the gate: useful only for building an agent.
       const canRun = (c.get("permissions") as Set<string> | undefined)?.has("agents:run") ?? false;
-      const [connections, runnable, installedSkills] = await Promise.all([
+      const [connections, runnable, installedSkills, recentRuns] = await Promise.all([
         applicationId
           ? svc.listUsableForActor({
               orgId,
@@ -336,22 +422,38 @@ async function buildCallerContextBlock(
         applicationId && skillsSvc && canRun
           ? skillsSvc.listInstalled({ orgId, applicationId })
           : Promise.resolve({ skills: [], truncated: false, total: 0 }),
+        // The caller's own recent runs (actor-scoped) — no extra permission;
+        // a user can always see their own run history.
+        applicationId && runsSvc
+          ? runsSvc.listRecentForActor({
+              orgId,
+              applicationId,
+              actor: { type: "user", id: user.id },
+            })
+          : Promise.resolve([]),
       ]);
       return formatCallerContext({
         user: { name: user.name ?? null, email: user.email ?? null },
-        org: { role: role ?? null },
+        org: { role: role ?? null, name: orgName ?? null, slug: orgSlug ?? null },
+        client: clientCtx,
         connections,
         agents: runnable.agents,
         agents_truncated: runnable.truncated,
         skills: installedSkills.skills,
         skills_truncated: installedSkills.truncated,
+        recent_runs: recentRuns,
       });
     }
-    // Fallback: the original loopback hop (kept for OSS/test wiring).
+    // Fallback: the original loopback hop (kept for OSS/test wiring). The
+    // browser-side `client` block isn't part of the loopback payload — merge it
+    // in so date/locale grounding survives this path too.
     const ctxHeaders: Record<string, string> = { ...headers };
     if (applicationId) ctxHeaders["x-application-id"] = applicationId;
     const res = await fetch(new URL("/api/me/context", origin), { headers: ctxHeaders });
-    if (res.ok) return formatCallerContext(await res.json());
+    if (res.ok) {
+      const payload = (await res.json()) as CallerContext;
+      return formatCallerContext({ ...payload, client: clientCtx });
+    }
     return "";
   } catch (err) {
     logger.warn("me/context unavailable — chat degrades without caller context", {
@@ -471,6 +573,7 @@ export async function handleChatStream(c: Context<any>): Promise<Response> {
     orgId,
     applicationId,
     user,
+    client: body.client,
   });
   let contextBlock: string;
   if (isSubscription) {

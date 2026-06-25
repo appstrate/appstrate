@@ -991,6 +991,28 @@ export interface PlatformServices {
       orgId: string;
       sources: readonly string[];
     }): Promise<Array<{ id: number; costUsd: number; source: string }>>;
+    /**
+     * The given actor's most recent runs in an application (own runs only,
+     * newest first) — the data the chat module folds into its caller-context
+     * block so the model can reference a recent or failed run without a
+     * discovery round-trip. Read in-process WITHOUT a cross-module SQL join.
+     * Wire-shape (snake_case) fields; `error` is the failure message for
+     * non-success runs when available.
+     */
+    listRecentForActor(args: {
+      orgId: string;
+      applicationId: string;
+      actor: { type: "user" | "end_user"; id: string };
+      limit?: number;
+    }): Promise<
+      Array<{
+        package_id: string;
+        status: string;
+        run_number?: number | null;
+        started_at?: string | null;
+        error?: string | null;
+      }>
+    >;
   };
   /**
    * Integration read surface. `listUsableForActor` returns the integrations an

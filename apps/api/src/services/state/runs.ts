@@ -644,6 +644,61 @@ export async function getRecentRuns(
   });
 }
 
+/**
+ * The given actor's most recent runs in an application (own runs only, newest
+ * first) — feeds the chat module's caller-context block. Unlike `getRecentRuns`
+ * this spans all packages and all statuses (so failures surface), and returns a
+ * minimal wire-shape (snake_case) tuned for the system prompt. Actor isolation
+ * is mandatory: a user never sees another actor's runs.
+ */
+export async function listRecentForActor(
+  scope: AppScope,
+  actor: Actor | null,
+  options: { limit?: number } = {},
+): Promise<
+  Array<{
+    package_id: string;
+    status: string;
+    run_number: number | null;
+    started_at: string | null;
+    error: string | null;
+  }>
+> {
+  const limit = options.limit ?? 5;
+  const conditions = [eq(runs.orgId, scope.orgId), eq(runs.applicationId, scope.applicationId)];
+  if (actor) {
+    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
+  }
+
+  const rows = await db
+    .select({
+      packageId: runs.packageId,
+      status: runs.status,
+      runNumber: runs.runNumber,
+      startedAt: runs.startedAt,
+      error: runs.error,
+    })
+    .from(runs)
+    .where(and(...conditions))
+    .orderBy(desc(runs.startedAt))
+    .limit(limit);
+
+  return (
+    rows
+      // Skip runs whose package was deleted (packageId set null on delete) —
+      // there is nothing useful to reference in the prompt.
+      .filter((row): row is typeof row & { packageId: string } => row.packageId != null)
+      .map((row) => ({
+        package_id: row.packageId,
+        status: row.status,
+        run_number: row.runNumber,
+        started_at: toISO(row.startedAt),
+        // Only surface the error message for non-success runs.
+        error: row.status === "success" ? null : (row.error ?? null),
+      }))
+  );
+}
+
 export async function getLastRun(scope: AppScope, packageId: string, actor: Actor | null) {
   const conditions = [
     eq(runs.packageId, packageId),

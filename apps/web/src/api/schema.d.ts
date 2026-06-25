@@ -11272,7 +11272,9 @@ export interface operations {
                      *       },
                      *       "org": {
                      *         "id": "org_abc123",
-                     *         "role": "member"
+                     *         "role": "member",
+                     *         "name": "Acme",
+                     *         "slug": "acme"
                      *       },
                      *       "connections": [
                      *         {
@@ -11284,6 +11286,15 @@ export interface operations {
                      *           "integration_id": "@appstrate/clickup",
                      *           "name": "ClickUp",
                      *           "source": "shared"
+                     *         }
+                     *       ],
+                     *       "recent_runs": [
+                     *         {
+                     *           "package_id": "@appstrate/triage",
+                     *           "status": "failed",
+                     *           "run_number": 7,
+                     *           "started_at": "2026-06-25T09:12:00.000Z",
+                     *           "error": "Gmail token expired"
                      *         }
                      *       ],
                      *       "agents": [
@@ -11320,7 +11331,21 @@ export interface operations {
                             id: string;
                             /** @enum {string} */
                             role: "owner" | "admin" | "member" | "viewer" | "end_user";
+                            /** @description Human-readable organization name. */
+                            name?: string | null;
+                            /** @description Organization slug. */
+                            slug?: string | null;
                         };
+                        /** @description The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip. */
+                        recent_runs: {
+                            package_id: string;
+                            status: string;
+                            run_number?: number | null;
+                            /** Format: date-time */
+                            started_at?: string | null;
+                            /** @description Failure message for non-success runs, when available. */
+                            error?: string | null;
+                        }[];
                         /** @description Integrations the caller could attach to an agent. */
                         connections: {
                             integration_id: string;

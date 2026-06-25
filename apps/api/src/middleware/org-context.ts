@@ -44,6 +44,7 @@ export function requireOrgContext() {
       .select({
         role: organizationMembers.role,
         slug: organizations.slug,
+        name: organizations.name,
         // Piggyback the settings JSONB on the membership join so downstream
         // per-request consumers (API-version middleware) don't issue a
         // second organizations query on every authenticated request.
@@ -66,6 +67,7 @@ export function requireOrgContext() {
     c.set("orgId", orgId);
     c.set("orgRole", rows[0].role as OrgRole);
     c.set("orgSlug", rows[0].slug);
+    c.set("orgName", rows[0].name);
     c.set("orgSettings", (rows[0].orgSettings ?? {}) as OrgSettings);
     return next();
   };

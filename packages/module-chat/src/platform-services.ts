@@ -72,6 +72,25 @@ export interface ChatSkillsService {
   }>;
 }
 
+export interface ChatRecentRun {
+  package_id: string;
+  status: string;
+  run_number?: number | null;
+  started_at?: string | null;
+  /** Failure message for non-success runs, when available. */
+  error?: string | null;
+}
+
+export interface ChatRunsService {
+  /** The caller's own recent runs (actor-scoped), newest first. */
+  listRecentForActor(args: {
+    orgId: string;
+    applicationId: string;
+    actor: { type: "user" | "end_user"; id: string };
+    limit?: number;
+  }): Promise<ChatRecentRun[]>;
+}
+
 export interface ChatInProcessService {
   dispatch(request: Request): Promise<Response>;
 }
@@ -79,6 +98,7 @@ export interface ChatInProcessService {
 let integrationsService: ChatIntegrationsService | null = null;
 let agentsService: ChatAgentsService | null = null;
 let skillsService: ChatSkillsService | null = null;
+let runsService: ChatRunsService | null = null;
 let inProcessService: ChatInProcessService | null = null;
 
 export function setIntegrationsService(svc: ChatIntegrationsService | null): void {
@@ -103,6 +123,14 @@ export function setSkillsService(svc: ChatSkillsService | null): void {
 
 export function getSkillsService(): ChatSkillsService | null {
   return skillsService;
+}
+
+export function setRunsService(svc: ChatRunsService | null): void {
+  runsService = svc;
+}
+
+export function getRunsService(): ChatRunsService | null {
+  return runsService;
 }
 
 export function setInProcessService(svc: ChatInProcessService | null): void {

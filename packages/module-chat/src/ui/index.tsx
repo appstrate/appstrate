@@ -51,6 +51,34 @@ export interface ChatPanelProps {
 
 const MODEL_STORAGE_KEY = "appstrate.chat.model";
 
+/** Host app's i18next persistence key (shared localStorage). */
+const I18N_STORAGE_KEY = "i18nextLng";
+
+/**
+ * Browser-side grounding for the system prompt: current clock + timezone and
+ * the active UI language. None of these are persisted server-side, so the
+ * client is the source of truth. Best-effort — every field is optional and the
+ * server falls back (UTC / fr) when absent.
+ */
+function readClientContext(): { now: string; tz?: string; locale?: string } {
+  let tz: string | undefined;
+  try {
+    tz = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    // Intl unavailable — leave undefined.
+  }
+  let locale: string | undefined;
+  try {
+    locale =
+      (typeof localStorage === "undefined" ? null : localStorage.getItem(I18N_STORAGE_KEY)) ||
+      (typeof navigator === "undefined" ? undefined : navigator.language) ||
+      undefined;
+  } catch {
+    // localStorage blocked — leave undefined.
+  }
+  return { now: new Date().toISOString(), tz, locale };
+}
+
 export function ChatPanel({ context, getHeaders, modelId, className }: ChatPanelProps) {
   // The context + selected model ride in refs so the transport (memoized once)
   // reads the latest value at request time without rebuilding mid-thread. Synced
@@ -98,7 +126,11 @@ export function ChatPanel({ context, getHeaders, modelId, className }: ChatPanel
     [getHeaders],
   );
   // Inject the host context into the JSON body — done in a fetch wrapper so we
-  // stay on the transport's native request shape.
+  // stay on the transport's native request shape. `client` carries the
+  // browser's clock/timezone and the active UI language so the system prompt
+  // can ground "today" and reply in the user's language without a DB lookup
+  // (no tz/locale is persisted server-side). The UI language is read from the
+  // host app's i18next key (shared localStorage), falling back to the browser.
   const fetchWithContext = useCallback(
     async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       let body = init?.body;
@@ -107,6 +139,7 @@ export function ChatPanel({ context, getHeaders, modelId, className }: ChatPanel
           body = JSON.stringify({
             ...(JSON.parse(body) as Record<string, unknown>),
             context: contextRef.current,
+            client: readClientContext(),
           });
         } catch {
           // Not JSON — forward untouched.

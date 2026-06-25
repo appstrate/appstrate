@@ -28,7 +28,7 @@ describe("formatCallerContext", () => {
     });
     expect(out).toContain("## Your context");
     expect(out).toContain("Ada Lovelace (ada@acme.com)");
-    expect(out).toContain('role in this organization is "member"');
+    expect(out).toContain('whose role is "member"');
     expect(out).toContain("`@appstrate/gmail`");
     // Declared default is rendered inline so the model knows what it inherits.
     expect(out).toContain("(own; default: api_call)");
@@ -197,5 +197,54 @@ describe("formatCallerContext", () => {
     expect(formatCallerContext({ user: { name: null, email: null }, org: { role: null } })).toBe(
       "",
     );
+  });
+
+  it("renders org name/slug, the client clock+timezone, and the active language", () => {
+    const out = formatCallerContext({
+      user: { name: "Ada", email: "ada@acme.com" },
+      org: { role: "member", name: "Acme", slug: "acme" },
+      client: { now: "2026-06-25T09:00:00.000Z", tz: "Europe/Paris", locale: "en" },
+      connections: [],
+    });
+    expect(out).toContain('in the organization "Acme" (`acme`)');
+    expect(out).toContain(
+      "Current date and time: 2026-06-25T09:00:00.000Z (timezone Europe/Paris)",
+    );
+    expect(out).toContain("Reply in the user's language (en)");
+  });
+
+  it("falls back to UTC + fr when the client block is absent", () => {
+    const out = formatCallerContext({ user: { name: "Ada" }, org: { role: "member" } });
+    expect(out).toContain("(UTC)");
+    expect(out).toContain("Reply in the user's language (fr)");
+  });
+
+  it("renders recent runs, surfacing the error for a failed run", () => {
+    const out = formatCallerContext({
+      user: { name: "Ada" },
+      org: { role: "member" },
+      recent_runs: [
+        {
+          package_id: "@appstrate/triage",
+          status: "failed",
+          run_number: 7,
+          started_at: "2026-06-25T09:00:00.000Z",
+          error: "Gmail token expired",
+        },
+        { package_id: "@acme/report", status: "success", run_number: 6 },
+      ],
+    });
+    expect(out).toContain("## The user's recent runs");
+    expect(out).toContain("`@appstrate/triage` #7 — failed");
+    expect(out).toContain("error: Gmail token expired");
+    expect(out).toContain("`@acme/report` #6 — success");
+  });
+
+  it("renders a context block from client/recent_runs alone (no identity)", () => {
+    const out = formatCallerContext({
+      client: { now: "2026-06-25T09:00:00.000Z", locale: "fr" },
+    });
+    expect(out).toContain("## Your context");
+    expect(out).toContain("Current date and time:");
   });
 });

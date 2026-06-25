@@ -19,7 +19,7 @@ import { getEnv } from "@appstrate/env";
 // ---- Platform service imports (for buildPlatformServices) -----------------
 import { logger } from "../logger.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
-import { listLlmUsageForRun } from "../../services/state/runs.ts";
+import { listLlmUsageForRun, listRecentForActor } from "../../services/state/runs.ts";
 import { listUsableIntegrationsForActor } from "../../services/integration-connections.ts";
 import { listRunnableAgents, listInstalledSkills } from "../../services/application-packages.ts";
 import { getPlatformApp } from "../platform-app.ts";
@@ -98,7 +98,11 @@ function buildPlatformServices(): PlatformServices {
       // identical guard semantics (keying, headers, 429 shape).
       rateLimit: (maxPerMinute) => rateLimit(maxPerMinute) as MiddlewareHandler,
     },
-    runs: { listLlmUsage: listLlmUsageForRun },
+    runs: {
+      listLlmUsage: listLlmUsageForRun,
+      listRecentForActor: ({ orgId, applicationId, actor, limit }) =>
+        listRecentForActor({ orgId, applicationId }, actor, { limit }),
+    },
     integrations: {
       // The chat module's in-process replacement for its old GET
       // /api/me/context loopback hop — identity + role come off the request

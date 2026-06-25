@@ -418,6 +418,7 @@ export const mePaths = {
                   "user",
                   "org",
                   "connections",
+                  "recent_runs",
                   "agents",
                   "agents_truncated",
                   "agents_total",
@@ -443,6 +444,31 @@ export const mePaths = {
                       role: {
                         type: "string",
                         enum: ["owner", "admin", "member", "viewer", "end_user"],
+                      },
+                      name: {
+                        type: ["string", "null"],
+                        description: "Human-readable organization name.",
+                      },
+                      slug: { type: ["string", "null"], description: "Organization slug." },
+                    },
+                  },
+                  recent_runs: {
+                    type: "array",
+                    description:
+                      "The caller's own most recent runs (actor-scoped), newest first — lets " +
+                      "an agent reference a recent or failed run without a discovery round-trip.",
+                    items: {
+                      type: "object",
+                      required: ["package_id", "status"],
+                      properties: {
+                        package_id: { type: "string" },
+                        status: { type: "string" },
+                        run_number: { type: ["integer", "null"] },
+                        started_at: { type: ["string", "null"], format: "date-time" },
+                        error: {
+                          type: ["string", "null"],
+                          description: "Failure message for non-success runs, when available.",
+                        },
                       },
                     },
                   },
@@ -554,10 +580,19 @@ export const mePaths = {
               },
               example: {
                 user: { id: "user_abc", name: "Ada Lovelace", email: "ada@acme.com" },
-                org: { id: "org_abc123", role: "member" },
+                org: { id: "org_abc123", role: "member", name: "Acme", slug: "acme" },
                 connections: [
                   { integration_id: "@appstrate/gmail", name: "Gmail", source: "own" },
                   { integration_id: "@appstrate/clickup", name: "ClickUp", source: "shared" },
+                ],
+                recent_runs: [
+                  {
+                    package_id: "@appstrate/triage",
+                    status: "failed",
+                    run_number: 7,
+                    started_at: "2026-06-25T09:12:00.000Z",
+                    error: "Gmail token expired",
+                  },
                 ],
                 agents: [
                   {

@@ -33,6 +33,7 @@ export type AppEnv = {
     package: LoadedPackage;
     orgId: string;
     orgSlug: string;
+    orgName: string;
     orgRole: import("@appstrate/shared-types").OrgRole;
     permissions?: Set<string>;
     /**

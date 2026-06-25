@@ -47,6 +47,7 @@ import {
   listUsableIntegrationsForActor,
 } from "../services/integration-connections.ts";
 import { listRunnableAgents, listInstalledSkills } from "../services/application-packages.ts";
+import { listRecentForActor } from "../services/state/runs.ts";
 import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { parseBody, unauthorized, invalidRequest } from "../lib/errors.ts";
@@ -337,7 +338,7 @@ router.get("/context", requireAppContext(), async (c) => {
   // so they share the `agents:run` gate. They aren't run directly — the model
   // declares them under an agent manifest's `dependencies.skills`.
   const canRun = (c.get("permissions") as Set<string> | undefined)?.has("agents:run") ?? false;
-  const [connections, runnable, installedSkills] = await Promise.all([
+  const [connections, runnable, installedSkills, recentRuns] = await Promise.all([
     listUsableIntegrationsForActor(scope, actor),
     canRun
       ? listRunnableAgents(scope)
@@ -345,12 +346,20 @@ router.get("/context", requireAppContext(), async (c) => {
     canRun
       ? listInstalledSkills(scope)
       : Promise.resolve({ skills: [], truncated: false, total: 0 }),
+    // The caller's own recent runs (actor-scoped) — no extra permission needed.
+    listRecentForActor(scope, actor),
   ]);
 
   return c.json({
     user: identity,
-    org: { id: scope.orgId, role },
+    org: {
+      id: scope.orgId,
+      role,
+      name: (c.get("orgName") as string | undefined) ?? null,
+      slug: (c.get("orgSlug") as string | undefined) ?? null,
+    },
     connections,
+    recent_runs: recentRuns,
     agents: runnable.agents,
     agents_truncated: runnable.truncated,
     agents_total: runnable.total,

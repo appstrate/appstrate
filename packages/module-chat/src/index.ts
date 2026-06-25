@@ -35,6 +35,7 @@ import {
   setIntegrationsService,
   setAgentsService,
   setSkillsService,
+  setRunsService,
   setInProcessService,
 } from "./platform-services.ts";
 import { z } from "zod";
@@ -59,6 +60,7 @@ const chatModule: AppstrateModule = {
     setIntegrationsService(ctx.services.integrations ?? null);
     setAgentsService(ctx.services.agents ?? null);
     setSkillsService(ctx.services.skills ?? null);
+    setRunsService(ctx.services.runs ?? null);
     setInProcessService(ctx.services.inProcess ?? null);
   },
 
