@@ -36,7 +36,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applicationPackages, integrationConnections, packages } from "@appstrate/db/schema";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { requiredScopesForAgent } from "@appstrate/core/integration";
+import { requiredScopesForAgent, resolveEffectiveToolSelection } from "@appstrate/core/integration";
 
 import type { Actor } from "../lib/actor.ts";
 import { actorFilter } from "../lib/actor.ts";
@@ -101,18 +101,24 @@ export async function computeRequiredScopes(
     const entry = integEntries.find((e) => e.id === input.integrationId);
     if (!entry) continue;
 
-    // AFPS §4.4 wildcard — when the agent set `tools: "*"`, scopes fall
-    // back to the auth's `default_scopes` (§7.4) instead of the per-tool
-    // union. Otherwise:
-    //   entry.tools = undefined → no integrations_configuration entry (or
-    //                             one without `tools`) → "no tools used".
-    //   entry.tools = [] (explicit empty array) → "no tools used" — agents
-    //                             that configured zero tools also want zero
-    //                             inferred scopes.
+    // Resolve the effective selection BEFORE inferring scopes so a tool the
+    // agent inherits via the integration's `default_tools` (AFPS §4.4)
+    // contributes its OAuth scopes — otherwise a zero-config agent would spawn
+    // the default `api_call` but request no scopes, leaving the connection
+    // under-scoped. Precedence (mirrors the spawn resolver):
+    //   entry.tools = "*"  → wildcard, scopes fall back to the auth's
+    //                        `default_scopes` (§7.4).
+    //   entry.tools = []   → explicit "zero tools" → zero inferred scopes
+    //                        (overrides any default).
+    //   entry.tools = [..] → per-tool scope union.
+    //   entry.tools = undefined (no integrations_configuration entry, or one
+    //                        without `tools`) → integration `default_tools`,
+    //                        or still "no tools used" if none declared.
+    const effectiveTools = resolveEffectiveToolSelection(entry.tools, integration.manifest);
     for (const s of requiredScopesForAgent({
       manifest: integration.manifest,
       authKey: input.authKey,
-      agentTools: entry.tools,
+      agentTools: effectiveTools,
       agentScopes: entry.scopes,
     }))
       required.add(s);

@@ -21,10 +21,14 @@
  * `setResourceEntries('integrations')`.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { expandScopesGranted, isApiCallToolName } from "@appstrate/core/integration";
+import {
+  expandScopesGranted,
+  isApiCallToolName,
+  readDefaultTools,
+} from "@appstrate/core/integration";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "../spinner";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
@@ -40,31 +44,6 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const { t } = useTranslation("settings");
   const { data: detail, isLoading } = useIntegrationDetail(packageId);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-
-  // api_call integrations expose generic credential-injecting tool(s), which the
-  // runtime injects only when present in the agent's `tools[]`. Default them on
-  // when a freshly-added integration (`tools` still undefined) exposes api_call
-  // as its ONLY surface (no native MCP tools) so it works out of the box. When
-  // the integration ALSO ships native tools (attachable api_call), the generic
-  // tool is an opt-in escape hatch — don't grant it by default; the native tools
-  // are the primary surface and the user opts into api_call below.
-  useEffect(() => {
-    if (!detail || entry.tools !== undefined) return;
-    const catalog = detail.tool_catalog ?? [];
-    const apiCallNames = catalog.filter((t) => isApiCallToolName(t.name)).map((t) => t.name);
-    if (apiCallNames.length === 0) return;
-    // Only default-on when api_call is the integration's ONLY surface (no
-    // discrete native MCP tools).
-    const hasNative = catalog.some((t) => !isApiCallToolName(t.name));
-    if (hasNative) return;
-    onChange({ ...entry, tools: apiCallNames });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail, entry.tools]);
-
-  // AFPS §4.4 wildcard — the agent set `tools: "*"`, bypassing the per-tool
-  // picker. Tracked separately because `entry.tools === "*"` and the array
-  // form share the same field but the UI branches.
-  const wildcardSelected = entry.tools === "*";
 
   if (isLoading) {
     return (
@@ -94,6 +73,25 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const nativeCatalog = fullCatalog.filter((t) => !isApiCallToolName(t.name));
   const declaredToolNames = nativeCatalog.map((t) => t.name);
   const hasToolCatalog = declaredToolNames.length > 0;
+
+  // Reflect the server's `resolveEffectiveToolSelection`: when the agent
+  // declared no selection (`tools === undefined`, i.e. no
+  // `integrations_configuration.<id>`), the runtime inherits the integration's
+  // declared `default_tools` (AFPS §4.4). Mirror that here so the picker shows
+  // what will actually run — generically, from whatever the integration
+  // declares, with no hard-coded api_call special-casing. The default is NOT
+  // materialised into the manifest: the inheritance is preserved until the
+  // author makes an explicit pick, and the first toggle/Select-* promotes it to
+  // an explicit array (which overrides the default, mirroring runtime
+  // precedence). An explicit selection — including `[]` and `"*"` — passes
+  // through untouched.
+  const effectiveTools =
+    entry.tools === undefined ? readDefaultTools(detail.manifest) : entry.tools;
+
+  // AFPS §4.4 wildcard — `tools: "*"` (explicit, or inherited from a wildcard
+  // `default_tools`) bypasses the per-tool picker. Tracked separately because
+  // the wildcard and the array form share the same field but the UI branches.
+  const wildcardSelected = effectiveTools === "*";
 
   // Multi-auth surface (AFPS §4.4 `auth_key`): when the integration
   // declares >1 auth method, the agent author can pin which `auths.<key>`
@@ -131,13 +129,14 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   }
   const hasScopeCatalog = scopeCatalog.size > 0;
 
-  // Least-privilege: `entry.tools === undefined` and `entry.tools === []`
-  // both mean "0 tools picked, integration inert at runtime". The first
-  // toggle promotes to `[]`-then-add so subsequent renders see the
-  // explicit form. The wildcard form `"*"` short-circuits the picker
-  // (see `wildcardSelected` above) — fall back to an empty set so the
-  // checkbox lookups below stay safe.
-  const arrayTools = Array.isArray(entry.tools) ? entry.tools : [];
+  // Least-privilege: an explicit `entry.tools === []` still means "0 tools
+  // picked, integration inert at runtime". `undefined` is reflected through
+  // `effectiveTools` above so an inherited `default_tools` shows as checked
+  // without being written back; the first toggle promotes that to an explicit
+  // array. The wildcard form `"*"` short-circuits the picker (see
+  // `wildcardSelected` above) — fall back to an empty set so the checkbox
+  // lookups below stay safe.
+  const arrayTools = Array.isArray(effectiveTools) ? effectiveTools : [];
   const selectedTools = new Set(arrayTools);
   const selectedScopes = new Set(entry.scopes ?? []);
   const allSelected =
