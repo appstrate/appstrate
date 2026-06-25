@@ -1200,6 +1200,127 @@ export const schemas = {
       },
     },
   },
+  IntegrationAgentResolution: {
+    type: "object",
+    description:
+      "Per-integration connection verdict for an agent: which connection the next run uses (admin pin → run/schedule override → member pin → fallback + scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses.",
+    required: [
+      "status",
+      "resolved_connection_id",
+      "resolved_missing_scopes",
+      "resolved_owned_by_actor",
+      "admin_pinned_connection_id",
+      "member_pinned_connection_id",
+      "org_default_connection_id",
+      "org_default_enforced",
+      "can_add_connection",
+      "candidates",
+    ],
+    properties: {
+      status: {
+        type: "string",
+        enum: [
+          "admin_locked",
+          "pinned",
+          "auto",
+          "must_choose",
+          "none",
+          "stale",
+          "needs_reconnection",
+        ],
+      },
+      resolved_connection_id: { type: ["string", "null"] },
+      resolved_missing_scopes: { type: "array", items: { type: "string" } },
+      resolved_owned_by_actor: { type: "boolean" },
+      admin_pinned_connection_id: { type: ["string", "null"] },
+      member_pinned_connection_id: { type: ["string", "null"] },
+      org_default_connection_id: { type: ["string", "null"] },
+      org_default_enforced: { type: "boolean" },
+      can_add_connection: { type: "boolean" },
+      candidates: {
+        type: "array",
+        items: {
+          type: "object",
+          required: [
+            "id",
+            "auth_key",
+            "account_id",
+            "label",
+            "owner_user_id",
+            "owner_end_user_id",
+            "owner_name",
+            "scopes_granted",
+            "shared_with_org",
+            "needs_reconnection",
+            "missing_scopes",
+            "is_own",
+          ],
+          properties: {
+            id: { type: "string", format: "uuid" },
+            auth_key: { type: "string" },
+            account_id: { type: "string" },
+            label: { type: ["string", "null"] },
+            owner_user_id: { type: ["string", "null"] },
+            owner_end_user_id: { type: ["string", "null"] },
+            owner_name: { type: ["string", "null"] },
+            scopes_granted: { type: "array", items: { type: "string" } },
+            shared_with_org: { type: "boolean" },
+            needs_reconnection: { type: "boolean" },
+            missing_scopes: { type: "array", items: { type: "string" } },
+            is_own: { type: "boolean" },
+          },
+        },
+      },
+    },
+  },
+  AgentConnectionReadiness: {
+    type: "object",
+    description:
+      "Bulk integration connection readiness for an agent. `blocks_run`/`errors` mirror the run-kickoff 412 (run semantics); `integrations[]` carries every declared integration's management verdict for the Connexions tab.",
+    required: ["blocks_run", "errors", "integrations"],
+    properties: {
+      blocks_run: {
+        type: "boolean",
+        description: "True iff POST /api/agents/{scope}/{name}/run would reject with 412.",
+      },
+      errors: {
+        type: "array",
+        description:
+          "Integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors).",
+        items: {
+          type: "object",
+          required: ["field", "code", "title", "message"],
+          properties: {
+            field: { type: "string" },
+            code: { type: "string" },
+            title: { type: "string" },
+            message: { type: "string" },
+            candidate_connection_ids: { type: "array", items: { type: "string" } },
+            connection_id: { type: "string" },
+            missing_scopes: { type: "array", items: { type: "string" } },
+            owned_by_actor: { type: "boolean" },
+            required_auth_key: { type: "string" },
+            available_auth_keys: { type: "array", items: { type: "string" } },
+          },
+        },
+      },
+      integrations: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["integration_id", "run_blocking", "resolution"],
+          properties: {
+            integration_id: { type: "string" },
+            run_blocking: {
+              type: "boolean",
+              description: "True iff this integration is one of the run-blocking `errors`.",
+            },
+            resolution: { $ref: "#/components/schemas/IntegrationAgentResolution" },
+          },
+        },
+      },
+    },
+  },
   IntegrationPin: {
     type: "object",
     required: [

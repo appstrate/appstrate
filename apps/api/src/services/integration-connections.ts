@@ -346,9 +346,22 @@ export async function selectAccessibleConnection(
 }
 
 /**
- * `true` when the integration is active in the app. Single precedence rule —
- * the one source of truth every call site (spawn resolver, agent readiness,
- * sidecar guards, UI list) consults:
+ * Per-app activation state for an integration: the `active` flag plus the admin
+ * `block_user_connections` gate. `blockUserConnections` defaults to `false` when
+ * no per-app row exists.
+ */
+export interface IntegrationActivation {
+  active: boolean;
+  blockUserConnections: boolean;
+}
+
+/**
+ * THE activation resolver — the single source of truth every call site (spawn
+ * resolver, agent readiness, sidecar guards, settings list, agent-editor detail)
+ * consults, directly or via the {@link isIntegrationActive} /
+ * {@link listActiveIntegrationIds} wrappers below. One SELECT over
+ * `application_packages` for the whole set; the precedence rule lives here and
+ * nowhere else:
  *
  *   1. An `application_packages` row EXISTS → its `enabled` flag wins. This is
  *      the explicit, sticky operator decision: an installed-and-enabled row is
@@ -362,43 +375,22 @@ export async function selectAccessibleConnection(
  *
  * Disabling a never-installed system integration materializes a row with
  * `enabled = false` (see the enable/disable upsert), which then wins via rule 1
- * — that is what makes the opt-out sticky. Use {@link assertIntegrationActive}
- * when the caller needs a structured 404 instead of a boolean.
+ * — that is what makes the opt-out sticky.
+ *
+ * Returns a map keyed by package id; every requested id is present (rows absent
+ * from the table resolve via the system-integration fallback).
  */
-export async function isIntegrationActive(
-  packageId: string,
-  applicationId: string,
-): Promise<boolean> {
-  const [row] = await db
-    .select({ enabled: applicationPackages.enabled })
-    .from(applicationPackages)
-    .where(
-      and(
-        eq(applicationPackages.applicationId, applicationId),
-        eq(applicationPackages.packageId, packageId),
-      ),
-    )
-    .limit(1);
-  // Rule 1: explicit row wins. Rule 2: no row → auto-active iff system.
-  return row !== undefined ? row.enabled : isSystemIntegration(packageId);
-}
-
-/**
- * Batched variant of {@link isIntegrationActive} — one SELECT over
- * `application_packages` for the whole set instead of N serial queries. Applies
- * the exact same precedence (explicit row wins, else auto-active iff system).
- * Used on the run-kickoff hot path (agent readiness) where an agent may declare
- * several integrations.
- */
-export async function listActiveIntegrationIds(
+export async function resolveIntegrationActivations(
   packageIds: readonly string[],
   applicationId: string,
-): Promise<Set<string>> {
-  if (packageIds.length === 0) return new Set();
+): Promise<Map<string, IntegrationActivation>> {
+  const result = new Map<string, IntegrationActivation>();
+  if (packageIds.length === 0) return result;
   const rows = await db
     .select({
       packageId: applicationPackages.packageId,
       enabled: applicationPackages.enabled,
+      blockUserConnections: applicationPackages.blockUserConnections,
     })
     .from(applicationPackages)
     .where(
@@ -407,13 +399,44 @@ export async function listActiveIntegrationIds(
         inArray(applicationPackages.packageId, packageIds as string[]),
       ),
     );
-  const enabledById = new Map(rows.map((r) => [r.packageId, r.enabled]));
-  const active = new Set<string>();
+  const byId = new Map(rows.map((r) => [r.packageId, r]));
   for (const id of packageIds) {
-    const explicit = enabledById.get(id);
-    if (explicit !== undefined ? explicit : isSystemIntegration(id)) {
-      active.add(id);
-    }
+    const row = byId.get(id);
+    result.set(id, {
+      // Rule 1: explicit row wins. Rule 2: no row → auto-active iff system.
+      active: row !== undefined ? row.enabled : isSystemIntegration(id),
+      blockUserConnections: row?.blockUserConnections ?? false,
+    });
+  }
+  return result;
+}
+
+/**
+ * `true` when the integration is active in the app — thin wrapper over
+ * {@link resolveIntegrationActivations}. Use {@link assertIntegrationActive}
+ * when the caller needs a structured 404 instead of a boolean.
+ */
+export async function isIntegrationActive(
+  packageId: string,
+  applicationId: string,
+): Promise<boolean> {
+  const map = await resolveIntegrationActivations([packageId], applicationId);
+  return map.get(packageId)!.active;
+}
+
+/**
+ * Active subset of `packageIds` — thin wrapper over
+ * {@link resolveIntegrationActivations}. Used on the run-kickoff hot path
+ * (agent readiness) where an agent may declare several integrations.
+ */
+export async function listActiveIntegrationIds(
+  packageIds: readonly string[],
+  applicationId: string,
+): Promise<Set<string>> {
+  const map = await resolveIntegrationActivations(packageIds, applicationId);
+  const active = new Set<string>();
+  for (const [id, activation] of map) {
+    if (activation.active) active.add(id);
   }
   return active;
 }
@@ -1523,6 +1546,12 @@ export interface StoreConnectionInput {
    */
   connectionId?: string;
   /**
+   * Optional display-name seed used ONLY on INSERT when no upstream identity
+   * was extracted (e.g. a masked API-key fingerprint from FieldsStrategy).
+   * Identity still wins; ignored on reconnect (label is never re-derived).
+   */
+  labelHint?: string;
+  /**
    * Which registered client minted this connection — a flat client id (system
    * env id or custom `integration_oauth_clients.id`). Pinned on the row so token
    * refresh resolves the same credentials. Set by OAuth2Strategy on every oauth2
@@ -1590,6 +1619,11 @@ export interface PersistCredentialInput {
   accountId?: string;
   identityClaims?: Record<string, unknown>;
   scopesGranted?: string[];
+  /**
+   * INSERT-only label seed (masked secret fingerprint). Used after identity
+   * but before the "Connexion N" counter. Never applied on UPDATE paths.
+   */
+  labelHint?: string;
   /** INSERT only — the `(packageId, authKey)` the new row belongs to. */
   packageId?: string;
   authKey?: string;
@@ -1661,6 +1695,7 @@ export async function persistCredentialBundle(
     const ownerFilter = userId ? sql`user_id = ${userId}` : sql`end_user_id = ${endUserId}`;
     const labelValue: string | SQL =
       identityLabel ??
+      input.labelHint ??
       sql<string>`'Connexion ' || ((SELECT COUNT(*) FROM integration_connections WHERE application_id = ${target.scope.applicationId} AND integration_package_id = ${input.packageId} AND ${ownerFilter}) + 1)`;
     const inserted = await db
       .insert(integrationConnections)
@@ -1861,6 +1896,7 @@ export async function saveIntegrationConnection(
     scopesGranted: input.scopesGranted ?? [],
     needsReconnection: false,
     expiresAt: input.expiresAt ?? null,
+    ...(input.labelHint ? { labelHint: input.labelHint } : {}),
     ...(input.clientRef !== undefined ? { clientRef: input.clientRef } : {}),
   };
   const summary = input.connectionId
@@ -2135,19 +2171,11 @@ export async function getIntegrationAuthStatuses(
   });
 
   const allConnections = await listIntegrationConnections(scope, packageId, actor);
-  const [installedRow] = await db
-    .select({
-      enabled: applicationPackages.enabled,
-      blockUserConnections: applicationPackages.blockUserConnections,
-    })
-    .from(applicationPackages)
-    .where(
-      and(
-        eq(applicationPackages.applicationId, scope.applicationId),
-        eq(applicationPackages.packageId, packageId),
-      ),
-    )
-    .limit(1);
+  // Same precedence rule as the settings list endpoint, via the shared
+  // resolver — env-backed SYSTEM integrations stay `active` here too.
+  const activation = (await resolveIntegrationActivations([packageId], scope.applicationId)).get(
+    packageId,
+  )!;
   const oauthClients = await db
     .select({ authKey: integrationOauthClients.authKey })
     .from(integrationOauthClients)
@@ -2194,8 +2222,8 @@ export async function getIntegrationAuthStatuses(
     tool_catalog: toolCatalog,
     allow_undeclared_tools:
       (manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools === true,
-    active: installedRow !== undefined && installedRow.enabled,
-    block_user_connections: installedRow?.blockUserConnections ?? false,
+    active: activation.active,
+    block_user_connections: activation.blockUserConnections,
   };
 }
 

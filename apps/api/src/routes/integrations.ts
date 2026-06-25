@@ -28,9 +28,6 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
-import { applicationPackages, packages } from "@appstrate/db/schema";
 import {
   handleIntegrationOAuthCallback,
   OAuthCallbackError,
@@ -54,7 +51,6 @@ import { getAppScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "./../services/audit.ts";
 import { updateInstalledPackage } from "../services/application-packages.ts";
 import { listIntegrations } from "../services/integration-service.ts";
-import { isSystemIntegration } from "../services/integration-client-registry.ts";
 import {
   assertIsIntegration,
   createIntegrationOAuthClient,
@@ -63,6 +59,7 @@ import {
   listIntegrationClients,
   listIntegrationConnections,
   readIntegrationAuth,
+  resolveIntegrationActivations,
   serializeIntegrationConnection,
   setDefaultIntegrationClient,
   toPublicClient,
@@ -78,7 +75,6 @@ import {
   listAgentsConsumingIntegration,
   listIntegrationPins,
   loadConnectionOwnership,
-  resolveAgentIntegrationPick,
   setBlockUserConnections,
   updateConnectionMetadata,
   upsertIntegrationPin,
@@ -213,34 +209,20 @@ export function createIntegrationsRouter() {
     const fields = parseFieldSelection(c, INTEGRATION_FIELDS);
     const pagination = parseListPagination(c, { defaultLimit: 100 });
     const summaries = await listIntegrations(scope.orgId);
-    // Decorate with `active` + `blockUserConnections` flags for the
-    // current application. Same precedence as `isIntegrationActive` (the one
-    // source of truth): an explicit `application_packages` row wins via its
-    // `enabled` flag; with no row, a system integration (offered via
-    // `SYSTEM_INTEGRATIONS`, with or without a shared OAuth client) is
-    // auto-active. `blockUserConnections` defaults to false when no per-app row
-    // exists.
-    const installedRows = await db
-      .select({
-        packageId: applicationPackages.packageId,
-        enabled: applicationPackages.enabled,
-        blockUserConnections: applicationPackages.blockUserConnections,
-      })
-      .from(applicationPackages)
-      .innerJoin(packages, eq(applicationPackages.packageId, packages.id))
-      .where(
-        and(
-          eq(applicationPackages.applicationId, scope.applicationId),
-          eq(packages.type, "integration"),
-        ),
-      );
-    const installedMap = new Map(installedRows.map((r) => [r.packageId, r]));
+    // Decorate with `active` + `block_user_connections` flags for the current
+    // application via the shared resolver — the single source of truth, also
+    // used by the agent-editor detail endpoint, so the two surfaces can never
+    // diverge (env-backed SYSTEM integrations stay active on both).
+    const activations = await resolveIntegrationActivations(
+      summaries.map((s) => s.id),
+      scope.applicationId,
+    );
     const enriched = summaries.map((s) => {
-      const row = installedMap.get(s.id);
+      const a = activations.get(s.id)!;
       return {
         ...s,
-        active: row !== undefined ? row.enabled : isSystemIntegration(s.id),
-        block_user_connections: row?.blockUserConnections ?? false,
+        active: a.active,
+        block_user_connections: a.blockUserConnections,
       };
     });
     const { page, total, hasMore } = paginate(enriched, pagination);
@@ -661,34 +643,8 @@ export function createIntegrationsRouter() {
     },
   );
 
-  /**
-   * GET /api/integrations/:packageId/agent-resolution/:agentPackageId
-   *
-   * Single-source verdict for the agent-page connection picker: which
-   * connection the next run would use (admin pin → overrides → member pin →
-   * fallback + scope check), plus the annotated candidate list and pin /
-   * blocked state. The picker renders this verbatim instead of
-   * re-implementing the resolver cascade client-side.
-   */
-  router.get(
-    "/:packageId{@[^/]+/[^/]+}/agent-resolution/:agentPackageId{@[^/]+/[^/]+}",
-    requirePermission("integrations", "read"),
-    async (c) => {
-      const packageId = c.req.param("packageId")!;
-      const agentPackageId = c.req.param("agentPackageId")!;
-      const scope = getAppScope(c);
-      const actor = getActor(c);
-      const role = c.get("orgRole");
-      const result = await resolveAgentIntegrationPick({
-        scope,
-        agentPackageId,
-        integrationId: packageId,
-        actor,
-        isAdmin: role === "owner" || role === "admin",
-      });
-      return c.json(result);
-    },
-  );
+  // The per-integration agent-resolution verdict is now served in bulk by
+  // GET /api/agents/:scope/:name/connection-readiness (one call per agent).
 
   // ─── Admin: block_user_connections + pins + connection metadata ──
 

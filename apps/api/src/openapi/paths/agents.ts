@@ -223,6 +223,38 @@ export const agentsPaths = {
       },
     },
   },
+  "/api/agents/{scope}/{name}/connection-readiness": {
+    get: {
+      operationId: "getAgentConnectionReadiness",
+      tags: ["Agents"],
+      summary: "Bulk integration connection readiness for an agent",
+      description:
+        "Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict (identical to the run-kickoff 412 — run semantics, includeInert false + required-auth carve-out). `integrations[]` lists every declared integration with its management verdict (includeInert true) so the Connexions tab and the launch badge share one source of truth.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "Connection readiness",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/AgentConnectionReadiness" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/agents/{scope}/{name}/persistence": {
     get: {
       operationId: "listAgentPersistence",

@@ -38,6 +38,7 @@ import {
 import {
   missingScopesForConnection,
   manifestAuthKeySet,
+  manifestHasRequiredAuth,
   type IntegrationManifest,
   type ConnectionOverrides,
   type ConnectionResolutionError,
@@ -86,6 +87,14 @@ export interface IntegrationRequirement {
    * the only scope signal for them. Empty when none selected.
    */
   agentScopes: readonly string[];
+  /**
+   * True when the integration manifest declares at least one auth marked
+   * `_meta["dev.appstrate/auth"].required: true`. Keeps the integration ACTIVE
+   * (non-inert) even with no tools/scopes selected, so a declared dependency on
+   * a connection-requiring integration still demands a connection at run launch.
+   * Optional so inline-built requirements (tests) default to inert semantics.
+   */
+  hasRequiredAuth?: boolean;
   /**
    * AFPS §4.1 `auth_key` — when set, restricts the candidate
    * connection set to rows whose `authKey === requiredAuthKey`
@@ -177,11 +186,21 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
   const { adminPins, memberPins } = indexPins(input.pins, input.actorUserId ?? null);
 
   for (const req of input.requirements) {
-    // Inert when the agent picked neither tools nor scopes. apiCall integrations
-    // expose no tools, so scope selection keeps them active. The runtime skips
-    // inert integrations (never spawned); the picker opts in via `includeInert`
-    // so it gets the same cascade verdict for connections it still manages.
-    if (!req.hasSelectedTools && req.agentScopes.length === 0 && !input.includeInert) continue;
+    // Inert only when the agent picked neither tools nor scopes AND the
+    // integration declares no required auth. apiCall integrations expose no
+    // tools, so scope selection keeps them active; an auth marked
+    // `_meta["dev.appstrate/auth"].required` keeps a declared dependency active
+    // even with no selection, so a missing connection still blocks the run. The
+    // runtime skips inert integrations (never spawned); the picker opts in via
+    // `includeInert` so it gets the same cascade verdict for connections it
+    // still manages.
+    if (
+      !req.hasSelectedTools &&
+      req.agentScopes.length === 0 &&
+      !req.hasRequiredAuth &&
+      !input.includeInert
+    )
+      continue;
 
     // Orphaned-auth guard: drop this integration's connections whose `authKey`
     // no longer exists in its CURRENT manifest. A version bump can rename the
@@ -692,6 +711,7 @@ async function buildRequirement(
     integrationId: entry.id,
     manifest: res.manifest,
     hasSelectedTools: wildcard || hasArrayTools,
+    hasRequiredAuth: manifestHasRequiredAuth(res.manifest),
     agentTools: wildcard ? "*" : (entry.tools ?? []),
     agentScopes: entry.scopes ?? [],
     ...(entry.auth_key !== undefined ? { requiredAuthKey: entry.auth_key } : {}),

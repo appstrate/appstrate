@@ -26,6 +26,8 @@ import {
   missingScopesForConnection,
   validateAgentIntegrationScopes,
   RESERVED_INTEGRATION_UPLOAD_PROTOCOLS,
+  readDefaultTools,
+  resolveEffectiveToolSelection,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
 
@@ -1421,5 +1423,107 @@ describe("_meta namespace key validation (delegated to upstream 0.1 schema)", ()
   it("accepts a vendor reverse-DNS _meta key (`dev.appstrate/foo`)", () => {
     const r = metaSchema.safeParse({ "dev.appstrate/foo": {} });
     expect(r.success).toBe(true);
+  });
+});
+
+describe("integrationManifestSchema — default_tools (AFPS §4.4)", () => {
+  // An api-only integration (source.kind "none") exposing `api_call` on `key`.
+  // For a "none" source the full tool catalog is knowable from this manifest
+  // alone, so array membership is validated.
+  function apiManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return baseManifest({
+      source: { kind: "none" },
+      auths: {
+        key: {
+          type: "api_key",
+          credentials: { schema: { type: "object", properties: {} } },
+          authorized_uris: ["https://api/**"],
+          delivery: { env: { K: { value: "{$credential.k}" } } },
+        },
+      },
+      _meta: { "dev.appstrate/api": { auths: { key: {} } } },
+      ...overrides,
+    });
+  }
+
+  it("accepts default_tools naming a real exposed tool (api_call) on an api-only source", () => {
+    const r = integrationManifestSchema.safeParse(apiManifest({ default_tools: ["api_call"] }));
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects a default_tools entry that is not an exposed tool (source none → catalog known)", () => {
+    expect(errorPaths(apiManifest({ default_tools: ["api_call", "nope"] }))).toContain(
+      "default_tools",
+    );
+  });
+
+  it("rejects a non-string / non-wildcard default_tools value", () => {
+    expect(errorPaths(apiManifest({ default_tools: [42] }))).toContain("default_tools");
+    expect(errorPaths(apiManifest({ default_tools: "all" }))).toContain("default_tools");
+  });
+
+  it('rejects default_tools "*" without allow_undeclared_tools', () => {
+    expect(errorPaths(apiManifest({ default_tools: "*" }))).toContain("default_tools");
+  });
+
+  it('accepts default_tools "*" when allow_undeclared_tools is true', () => {
+    // The api_key auth is wildcard-usable (non-oauth2), satisfying the base
+    // `allow_undeclared_tools` rule.
+    const r = integrationManifestSchema.safeParse(
+      apiManifest({ default_tools: "*", allow_undeclared_tools: true }),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("does not validate array membership for non-none sources (catalog lives in the mcp-server)", () => {
+    // A remote source's authoritative tool list is the upstream MCP server's,
+    // unknowable in a pure-manifest superRefine — so an arbitrary name is left
+    // for runtime rather than falsely rejected.
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({ default_tools: ["some_remote_tool"] }),
+    );
+    expect(r.success).toBe(true);
+  });
+});
+
+describe("readDefaultTools", () => {
+  const mk = (d: unknown) => ({ default_tools: d }) as unknown as IntegrationManifest;
+
+  it("reads a string array", () => {
+    expect(readDefaultTools(mk(["api_call"]))).toEqual(["api_call"]);
+  });
+  it("reads the wildcard literal", () => {
+    expect(readDefaultTools(mk("*"))).toBe("*");
+  });
+  it("returns undefined when absent", () => {
+    expect(readDefaultTools({} as IntegrationManifest)).toBeUndefined();
+  });
+  it("returns undefined for malformed values (defence in depth)", () => {
+    expect(readDefaultTools(mk([1, 2]))).toBeUndefined();
+    expect(readDefaultTools(mk("all"))).toBeUndefined();
+    expect(readDefaultTools(mk(null))).toBeUndefined();
+  });
+});
+
+describe("resolveEffectiveToolSelection", () => {
+  const withDefault = (d: unknown) => ({ default_tools: d }) as unknown as IntegrationManifest;
+  const noDefault = {} as IntegrationManifest;
+
+  it("an explicit array selection wins over the default", () => {
+    expect(resolveEffectiveToolSelection(["x"], withDefault(["api_call"]))).toEqual(["x"]);
+  });
+  it("an explicit empty array overrides the default (zero tools)", () => {
+    expect(resolveEffectiveToolSelection([], withDefault(["api_call"]))).toEqual([]);
+  });
+  it("an explicit wildcard wins over the default", () => {
+    expect(resolveEffectiveToolSelection("*", withDefault(["api_call"]))).toBe("*");
+  });
+  it("an undefined selection falls back to the declared default", () => {
+    expect(resolveEffectiveToolSelection(undefined, withDefault(["api_call"]))).toEqual([
+      "api_call",
+    ]);
+  });
+  it("an undefined selection with no declared default stays undefined", () => {
+    expect(resolveEffectiveToolSelection(undefined, noDefault)).toBeUndefined();
   });
 });

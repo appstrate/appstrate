@@ -832,6 +832,57 @@
         }
       }
     },
+    "/api/agents/{scope}/{name}/connection-readiness": {
+      "get": {
+        "operationId": "getAgentConnectionReadiness",
+        "tags": ["Agents"],
+        "summary": "Bulk integration connection readiness for an agent",
+        "description": "Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict (identical to the run-kickoff 412 — run semantics, includeInert false + required-auth carve-out). `integrations[]` lists every declared integration with its management verdict (includeInert true) so the Connexions tab and the launch badge share one source of truth.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Connection readiness",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentConnectionReadiness"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/api/agents/{scope}/{name}/persistence": {
       "get": {
         "operationId": "listAgentPersistence",
@@ -6065,183 +6116,6 @@
         }
       }
     },
-    "/api/integrations/{packageId}/agent-resolution/{agentPackageId}": {
-      "get": {
-        "operationId": "resolveAgentIntegrationConnection",
-        "tags": ["Integrations"],
-        "summary": "Resolve which connection an agent uses for an integration",
-        "description": "Single-source verdict for the agent-page connection picker. Returns which connection the next run would use (admin pin → run/schedule override → member pin → fallback + scope check), the annotated candidate list (own + shared, each with the scopes it lacks for the agent's selected tools), and the admin/member pin + blocked state. Computed by the same resolver the runtime uses so the UI never re-implements the cascade.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "packageId",
-            "in": "path",
-            "required": true,
-            "description": "Integration package id (e.g. `@official/gmail`).",
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
-            }
-          },
-          {
-            "name": "agentPackageId",
-            "in": "path",
-            "required": true,
-            "description": "Agent package id (e.g. `@acme/my-agent`).",
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Resolution verdict",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "status",
-                    "resolved_connection_id",
-                    "resolved_missing_scopes",
-                    "resolved_owned_by_actor",
-                    "admin_pinned_connection_id",
-                    "member_pinned_connection_id",
-                    "org_default_connection_id",
-                    "org_default_enforced",
-                    "can_add_connection",
-                    "candidates"
-                  ],
-                  "properties": {
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "admin_locked",
-                        "pinned",
-                        "auto",
-                        "must_choose",
-                        "none",
-                        "stale",
-                        "needs_reconnection"
-                      ]
-                    },
-                    "resolved_connection_id": {
-                      "type": ["string", "null"]
-                    },
-                    "resolved_missing_scopes": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "resolved_owned_by_actor": {
-                      "type": "boolean"
-                    },
-                    "admin_pinned_connection_id": {
-                      "type": ["string", "null"]
-                    },
-                    "member_pinned_connection_id": {
-                      "type": ["string", "null"]
-                    },
-                    "org_default_connection_id": {
-                      "type": ["string", "null"]
-                    },
-                    "org_default_enforced": {
-                      "type": "boolean"
-                    },
-                    "can_add_connection": {
-                      "type": "boolean"
-                    },
-                    "candidates": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "id",
-                          "auth_key",
-                          "account_id",
-                          "label",
-                          "owner_user_id",
-                          "owner_end_user_id",
-                          "owner_name",
-                          "scopes_granted",
-                          "shared_with_org",
-                          "needs_reconnection",
-                          "missing_scopes",
-                          "is_own"
-                        ],
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "auth_key": {
-                            "type": "string"
-                          },
-                          "account_id": {
-                            "type": "string"
-                          },
-                          "label": {
-                            "type": ["string", "null"]
-                          },
-                          "owner_user_id": {
-                            "type": ["string", "null"]
-                          },
-                          "owner_end_user_id": {
-                            "type": ["string", "null"]
-                          },
-                          "owner_name": {
-                            "type": ["string", "null"]
-                          },
-                          "scopes_granted": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "shared_with_org": {
-                            "type": "boolean"
-                          },
-                          "needs_reconnection": {
-                            "type": "boolean"
-                          },
-                          "missing_scopes": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "is_own": {
-                            "type": "boolean"
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          }
-        }
-      }
-    },
     "/api/integrations/{packageId}/connections/{connectionId}": {
       "patch": {
         "operationId": "updateIntegrationConnectionMetadata",
@@ -8600,8 +8474,8 @@
       "post": {
         "operationId": "refreshModelProviderCredentialModels",
         "tags": ["Model Provider Credentials"],
-        "summary": "Empirically discover the models this credential serves",
-        "description": "Probes every discovery-candidate model against the live credential (1-token inference requests on the account's own quota) and persists the ids that answered as `available_model_ids`. Designed for subscription-backed OAuth providers (codex, claude-code) whose served model set depends on the account's plan and has no discovery endpoint. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.",
+        "summary": "Discover the models this credential serves",
+        "description": "Discovers the models a credential serves and persists them as `available_model_ids`. For `probe`-validation (API-key) providers this is empirical: each discovery candidate is probed against the live credential (1-token inference requests on the account's own quota) and the ids that answered are persisted. For `offline`-validation providers (subscription: codex, claude-code) NO upstream call is made — the provider's static candidate set (intersected with the catalog) is persisted instead; real per-model availability is validated at first run by the official binary. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8638,7 +8512,8 @@
                       "description": "`ok` — list persisted. `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — every probe failed (network incident or none served), previous list kept. `no_candidates` — provider declares no discovery candidates."
                     },
                     "probed_count": {
-                      "type": "integer"
+                      "type": "integer",
+                      "description": "Number of candidates considered, not necessarily models live-probed. For `offline`-validation providers (codex, claude-code) candidates are considered with zero upstream calls."
                     },
                     "available_model_ids": {
                       "type": ["array", "null"],
@@ -11162,7 +11037,14 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["user", "org", "connections"],
+                  "required": [
+                    "user",
+                    "org",
+                    "connections",
+                    "agents",
+                    "agents_truncated",
+                    "agents_total"
+                  ],
                   "properties": {
                     "user": {
                       "type": "object",
@@ -11208,9 +11090,55 @@
                           "source": {
                             "type": "string",
                             "enum": ["own", "shared", "both"]
+                          },
+                          "version": {
+                            "type": "string",
+                            "description": "The integration package's own manifest version, when known. Use it to pin a satisfiable dependencies.integrations range."
                           }
                         }
                       }
+                    },
+                    "agents": {
+                      "type": "array",
+                      "description": "Agents the caller can run in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the long tail is reachable via the MCP `search_operations` tool.",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "package_id",
+                          "display_name",
+                          "description",
+                          "takes_input",
+                          "source"
+                        ],
+                        "properties": {
+                          "package_id": {
+                            "type": "string",
+                            "description": "Invokable identifier, e.g. \"@appstrate/triage\"."
+                          },
+                          "display_name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "takes_input": {
+                            "type": "boolean",
+                            "description": "Whether the agent declares an input schema with properties."
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": ["system", "local"]
+                          }
+                        }
+                      }
+                    },
+                    "agents_truncated": {
+                      "type": "boolean",
+                      "description": "True when the agent list was capped (more via search_operations)."
+                    },
+                    "agents_total": {
+                      "type": "integer",
+                      "description": "Total runnable agents before the cap."
                     }
                   }
                 },
@@ -11235,7 +11163,18 @@
                       "name": "ClickUp",
                       "source": "shared"
                     }
-                  ]
+                  ],
+                  "agents": [
+                    {
+                      "package_id": "@appstrate/triage",
+                      "display_name": "Inbox Triage",
+                      "description": "Sorts and labels incoming email.",
+                      "takes_input": false,
+                      "source": "system"
+                    }
+                  ],
+                  "agents_truncated": false,
+                  "agents_total": 1
                 }
               }
             }
@@ -19483,6 +19422,58 @@
       }
     },
     "schemas": {
+      "ResolutionFieldError": {
+        "type": "object",
+        "required": ["field", "code", "message"],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-readable title; preserved from the underlying error factory."
+          },
+          "candidate_connection_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run."
+          },
+          "connection_id": {
+            "type": "string",
+            "description": "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`)."
+          },
+          "missing_scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt."
+          },
+          "owned_by_actor": {
+            "type": "boolean",
+            "description": "Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error)."
+          },
+          "required_auth_key": {
+            "type": "string",
+            "description": "Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1."
+          },
+          "available_auth_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method."
+          }
+        }
+      },
       "ProblemDetail": {
         "type": "object",
         "description": "RFC 9457 Problem Details for HTTP APIs",
@@ -19529,55 +19520,7 @@
             "type": "array",
             "description": "Field-level validation errors",
             "items": {
-              "type": "object",
-              "properties": {
-                "field": {
-                  "type": "string"
-                },
-                "code": {
-                  "type": "string"
-                },
-                "title": {
-                  "type": "string",
-                  "description": "Human-readable title; preserved from the underlying error factory."
-                },
-                "message": {
-                  "type": "string"
-                },
-                "candidate_connection_ids": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "description": "Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run."
-                },
-                "connection_id": {
-                  "type": "string",
-                  "description": "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`)."
-                },
-                "missing_scopes": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "description": "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt."
-                },
-                "owned_by_actor": {
-                  "type": "boolean",
-                  "description": "Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error)."
-                },
-                "required_auth_key": {
-                  "type": "string",
-                  "description": "Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1."
-                },
-                "available_auth_keys": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "description": "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method."
-                }
-              }
+              "$ref": "#/components/schemas/ResolutionFieldError"
             }
           }
         }
@@ -19912,13 +19855,6 @@
                 }
               }
             }
-          },
-          "runtime_tools": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Built-in runtime tools the agent opted into via `manifest.runtime_tools` (output/log/note/pin/report)."
           }
         }
       },
@@ -20970,7 +20906,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Model ids empirically verified against this credential by the discovery probe (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. Null = never probed. Per-credential because availability depends on the account's plan."
+            "description": "Model ids this credential is authorized to seed, persisted by model discovery (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential; for `offline`-validation providers (subscription: codex, claude-code) these are the provider's static candidate set (∩ catalog), persisted with zero upstream calls. Null = discovery never ran. Per-credential because availability depends on the account's plan."
           },
           "created_by": {
             "type": ["string", "null"]
@@ -21204,6 +21140,207 @@
             "type": "object",
             "additionalProperties": {
               "type": ["integer", "null"]
+            }
+          }
+        }
+      },
+      "IntegrationAgentResolution": {
+        "type": "object",
+        "description": "Per-integration connection verdict for an agent: which connection the next run uses (admin pin → run/schedule override → member pin → fallback + scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses.",
+        "required": [
+          "status",
+          "resolved_connection_id",
+          "resolved_missing_scopes",
+          "resolved_owned_by_actor",
+          "admin_pinned_connection_id",
+          "member_pinned_connection_id",
+          "org_default_connection_id",
+          "org_default_enforced",
+          "can_add_connection",
+          "candidates"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "admin_locked",
+              "pinned",
+              "auto",
+              "must_choose",
+              "none",
+              "stale",
+              "needs_reconnection"
+            ]
+          },
+          "resolved_connection_id": {
+            "type": ["string", "null"]
+          },
+          "resolved_missing_scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resolved_owned_by_actor": {
+            "type": "boolean"
+          },
+          "admin_pinned_connection_id": {
+            "type": ["string", "null"]
+          },
+          "member_pinned_connection_id": {
+            "type": ["string", "null"]
+          },
+          "org_default_connection_id": {
+            "type": ["string", "null"]
+          },
+          "org_default_enforced": {
+            "type": "boolean"
+          },
+          "can_add_connection": {
+            "type": "boolean"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "auth_key",
+                "account_id",
+                "label",
+                "owner_user_id",
+                "owner_end_user_id",
+                "owner_name",
+                "scopes_granted",
+                "shared_with_org",
+                "needs_reconnection",
+                "missing_scopes",
+                "is_own"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "auth_key": {
+                  "type": "string"
+                },
+                "account_id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": ["string", "null"]
+                },
+                "owner_user_id": {
+                  "type": ["string", "null"]
+                },
+                "owner_end_user_id": {
+                  "type": ["string", "null"]
+                },
+                "owner_name": {
+                  "type": ["string", "null"]
+                },
+                "scopes_granted": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "shared_with_org": {
+                  "type": "boolean"
+                },
+                "needs_reconnection": {
+                  "type": "boolean"
+                },
+                "missing_scopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "is_own": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      "AgentConnectionReadiness": {
+        "type": "object",
+        "description": "Bulk integration connection readiness for an agent. `blocks_run`/`errors` mirror the run-kickoff 412 (run semantics); `integrations[]` carries every declared integration's management verdict for the Connexions tab.",
+        "required": ["blocks_run", "errors", "integrations"],
+        "properties": {
+          "blocks_run": {
+            "type": "boolean",
+            "description": "True iff POST /api/agents/{scope}/{name}/run would reject with 412."
+          },
+          "errors": {
+            "type": "array",
+            "description": "Integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors).",
+            "items": {
+              "type": "object",
+              "required": ["field", "code", "title", "message"],
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "candidate_connection_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "connection_id": {
+                  "type": "string"
+                },
+                "missing_scopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "owned_by_actor": {
+                  "type": "boolean"
+                },
+                "required_auth_key": {
+                  "type": "string"
+                },
+                "available_auth_keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "integrations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["integration_id", "run_blocking", "resolution"],
+              "properties": {
+                "integration_id": {
+                  "type": "string"
+                },
+                "run_blocking": {
+                  "type": "boolean",
+                  "description": "True iff this integration is one of the run-blocking `errors`."
+                },
+                "resolution": {
+                  "$ref": "#/components/schemas/IntegrationAgentResolution"
+                }
+              }
             }
           }
         }

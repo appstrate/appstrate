@@ -238,6 +238,8 @@ export function apiIntegrationManifest(opts: {
   displayName?: string;
   /** Opt an auth into the `api_call` tool via `_meta["dev.appstrate/api"]`. */
   apiCall?: { authKey: string; uploadProtocols?: string[] };
+  /** AFPS §4.4 — tools an agent inherits when it omits `integrations_configuration.<id>`. */
+  defaultTools?: string[] | "*";
   auths: Record<string, AuthSpec>;
   tools_policy?: Record<string, unknown>;
 }): IntegrationManifest {
@@ -264,6 +266,7 @@ export function apiIntegrationManifest(opts: {
     version,
     display_name: opts.displayName ?? opts.name,
     source: { kind: "none" },
+    ...(opts.defaultTools ? { default_tools: opts.defaultTools } : {}),
     ...meta,
     auths,
     ...(opts.tools_policy ? { tools_policy: opts.tools_policy } : {}),
