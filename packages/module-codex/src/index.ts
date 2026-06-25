@@ -37,8 +37,26 @@ import type {
   ModelProviderHooks,
   ModelProviderIdentity,
 } from "@appstrate/core/module";
-import { decodeJwtPayload } from "@appstrate/core/jwt";
-import { buildCodexAuthJson } from "@appstrate/runner-codex/binary";
+import { buildUnsignedJwt, decodeJwtPayload } from "@appstrate/core/jwt";
+
+/** Far-future placeholder email written into the synthetic id_token. */
+const PLACEHOLDER_EMAIL = "chat@appstrate.local";
+
+/**
+ * Build the local-only, unsigned (`alg:none`) placeholder `id_token` the agent
+ * container's LLM client (pi-ai's `openai-codex-responses`) decodes to read
+ * `chatgpt_account_id`. Carries ONLY the routing claim + a far-future `exp` (so
+ * nothing tries to refresh it) — no real token material. The JWT-encoding is the
+ * shared core helper; this keeps the codex-specific payload shape here without
+ * pulling the runtime runner package into this API-side provider module.
+ */
+function buildCodexPlaceholderIdToken(accountId: string, nowMs: number): string {
+  return buildUnsignedJwt({
+    exp: Math.floor(nowMs / 1000) + 365 * 24 * 3600,
+    "https://api.openai.com/auth": { chatgpt_account_id: accountId },
+    email: PLACEHOLDER_EMAIL,
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Codex JWT decoder
@@ -109,14 +127,10 @@ const codexHooks: ModelProviderHooks = {
    * must be a parseable JWT carrying that claim — anything else either fails
    * to parse or leaks signature material into the container.
    *
-   * The synthetic `alg:none` JWT is built by the CANONICAL Codex auth builder
-   * (`buildCodexAuthJson` in `@appstrate/runner-codex/binary`) — the same one
-   * the runner writes into `auth.json` — so the placeholder shape can never
-   * drift from what the official binary boots against. We surface only its
-   * `tokens.id_token` (the local-only unsigned JWT carrying `chatgpt_account_id`,
-   * `exp`, and a placeholder `email`); the real `access_token` is never spent
-   * here. `accessToken` is unused by the builder — the account id is the sole
-   * routing claim — so we pass an empty token.
+   * The synthetic `alg:none` JWT is built locally by {@link
+   * buildCodexPlaceholderIdToken} — a tiny module-private helper carrying only
+   * the `chatgpt_account_id` routing claim, `exp`, and a placeholder `email`;
+   * the real `access_token` is never spent here.
    *
    * Returns `null` when the access token has no decodable account id so the
    * platform falls back to its generic dash-stripped placeholder.
@@ -125,7 +139,7 @@ const codexHooks: ModelProviderHooks = {
     const claims = decodeCodexJwtPayload(accessToken);
     const accountId = claims?.chatgpt_account_id;
     if (!accountId) return null;
-    return buildCodexAuthJson({ accessToken: "", accountId, nowMs: Date.now() }).tokens.id_token;
+    return buildCodexPlaceholderIdToken(accountId, Date.now());
   },
 
   /**
@@ -256,23 +270,15 @@ const codexProvider: ModelProviderDefinition = {
   requiredIdentityClaims: ["accountId"],
   // Engine binding contributed to the core subscription-engine registry at
   // registration: agent runs execute on the Codex CLI (official binary, no
-  // forging). `vend` — the CLI ignores `chatgpt_base_url` and talks to
-  // chatgpt.com directly, so the sidecar can't reverse-proxy it; the real token
-  // is vended into the container and its egress is locked to OpenAI's hosts
-  // (`chatgpt.com` backend + `openai.com` auth/api, suffix-matched) as the sole
-  // compensating control. Codex is agent-only — no chat surface.
+  // forging). The `codex` engine is the routing signal the launcher reads to
+  // pick vend credential delivery: the CLI ignores `chatgpt_base_url` and talks
+  // to chatgpt.com directly, so the sidecar can't reverse-proxy it; the real
+  // token is vended into the container and its egress is locked to OpenAI's
+  // hosts (`CODEX_EGRESS_ALLOWLIST`, applied in the launcher + enforced at the
+  // sidecar) as the sole compensating control. Codex is agent-only — no chat
+  // surface.
   subscriptionEngine: {
     engine: "codex",
-    sidecarAuthMode: "vend",
-    // Suffix-matched, so this permits the in-container token to egress to ANY
-    // `*.openai.com` / `*.chatgpt.com` host, which is broader than the few hosts
-    // the CLI actually needs (`auth.openai.com` + `chatgpt.com/backend-api`).
-    // Accepted threat-model decision, NOT an exfil path: OpenAI owns every
-    // `*.openai.com` subdomain, the vended token is non-renewable and the
-    // container is ephemeral, and the forward proxy pins allowlisted hosts to
-    // :443 — so the token cannot be tunnelled to an attacker endpoint. Narrow to
-    // exact hosts only if the CLI's host set is ever pinned down and stable.
-    egressAllowlist: ["chatgpt.com", "openai.com"],
   },
 };
 

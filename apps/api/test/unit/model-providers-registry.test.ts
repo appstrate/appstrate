@@ -122,7 +122,7 @@ describe("model-providers runtime registry", () => {
       registerModelProvider(
         fakeDef("claude-code", {
           authMode: "oauth2",
-          subscriptionEngine: { engine: "claude", sidecarAuthMode: "oauth", nativeOutput: true },
+          subscriptionEngine: { engine: "claude", nativeOutput: true },
         }),
       );
       registerModelProvider(
@@ -130,8 +130,6 @@ describe("model-providers runtime registry", () => {
           authMode: "oauth2",
           subscriptionEngine: {
             engine: "codex",
-            sidecarAuthMode: "vend",
-            egressAllowlist: ["chatgpt.com", "openai.com"],
           },
         }),
       );
@@ -157,15 +155,11 @@ describe("model-providers runtime registry", () => {
           providerId: "claude-code",
           label: "claude-code",
           engine: "claude",
-          sidecarAuthMode: "oauth",
         });
-        expect(subscriptionEngineForProvider("codex")?.egressAllowlist).toEqual([
-          "chatgpt.com",
-          "openai.com",
-        ]);
-      });
-      it("claude has no egress allowlist (token swapped server-side)", () => {
-        expect(subscriptionEngineForProvider("claude-code")?.egressAllowlist).toBeUndefined();
+        expect(subscriptionEngineForProvider("codex")).toMatchObject({
+          providerId: "codex",
+          engine: "codex",
+        });
       });
       it("returns undefined for a non-subscription / unknown provider", () => {
         expect(subscriptionEngineForProvider("openai")).toBeUndefined();

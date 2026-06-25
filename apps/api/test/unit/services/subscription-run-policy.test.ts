@@ -43,7 +43,7 @@ beforeAll(() => {
   registerModelProvider(
     fakeProvider("claude-code", {
       authMode: "oauth2",
-      subscriptionEngine: { engine: "claude", sidecarAuthMode: "oauth", nativeOutput: true },
+      subscriptionEngine: { engine: "claude", nativeOutput: true },
     }),
   );
   registerModelProvider(
@@ -51,8 +51,6 @@ beforeAll(() => {
       authMode: "oauth2",
       subscriptionEngine: {
         engine: "codex",
-        sidecarAuthMode: "vend",
-        egressAllowlist: ["chatgpt.com", "openai.com"],
       },
     }),
   );
@@ -193,7 +191,7 @@ describe("resolveCredentialDelivery (single classification axis)", () => {
     registerModelProvider(
       fakeProvider("claude-code", {
         authMode: "oauth2",
-        subscriptionEngine: { engine: "claude", sidecarAuthMode: "oauth", nativeOutput: true },
+        subscriptionEngine: { engine: "claude", nativeOutput: true },
       }),
     );
     registerModelProvider(
@@ -201,8 +199,6 @@ describe("resolveCredentialDelivery (single classification axis)", () => {
         authMode: "oauth2",
         subscriptionEngine: {
           engine: "codex",
-          sidecarAuthMode: "vend",
-          egressAllowlist: ["chatgpt.com", "openai.com"],
         },
       }),
     );
@@ -221,8 +217,9 @@ describe("resolveCredentialDelivery (single classification axis)", () => {
     expect(d.mode).toBe("oauth");
     expect(d.isOauthCredential).toBe(true);
     expect(d.engine).toBe("claude");
-    // authMode comes from the SAME registry entry selectRunEngine reads.
-    expect(d.subscriptionEngine?.sidecarAuthMode).toBe("oauth");
+    // The engine comes from the SAME registry entry selectRunEngine reads; a
+    // non-codex subscription engine takes oauth delivery with no egress lock.
+    expect(d.subscriptionEngine?.engine).toBe("claude");
     expect(d.egressAllowlist).toBeUndefined();
   });
 

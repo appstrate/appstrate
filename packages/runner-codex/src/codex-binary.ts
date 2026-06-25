@@ -39,7 +39,7 @@
 // crucially `writeFile({ mode: 0o600 })` — `Bun.write` cannot set file
 // permissions, and the auth.json/config.toml hold the REAL subscription token,
 // so the 0600 owner-only mode is security-critical and must stay node:fs.
-import { mkdtemp, writeFile, readdir, stat, rm } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 // node:os — Bun has no `tmpdir()` equivalent for the default ephemeral-home base.
 import { tmpdir } from "node:os";
 // node:path — Bun exposes no path-join primitive; kept for portable path joins.
@@ -49,6 +49,7 @@ import {
   makeScopeResolver,
   type BinaryResolver,
 } from "@appstrate/core/subprocess-env";
+import { buildUnsignedJwt } from "@appstrate/core/jwt";
 
 export type { BinaryResolver };
 
@@ -59,11 +60,6 @@ const CODEX_SCOPE = "@openai/codex";
  * verbatim (the CLI sends it as the `chatgpt-account-id` header). This dummy just
  * keeps the CLI booting in ChatGPT mode for credentials that lack the claim. */
 const PLACEHOLDER_ACCOUNT_ID = "00000000-0000-0000-0000-000000000000";
-
-/** Base64url without padding (Bun/Node `base64url` encoding). */
-function b64url(value: object): string {
-  return Buffer.from(JSON.stringify(value)).toString("base64url");
-}
 
 /**
  * Best-effort scrub of credential material from a `codex` subprocess's stderr
@@ -159,15 +155,11 @@ export function buildCodexAuthJson(opts: {
   last_refresh: string;
 } {
   const accountId = opts.accountId || PLACEHOLDER_ACCOUNT_ID;
-  const idToken = [
-    b64url({ alg: "none", typ: "JWT" }),
-    b64url({
-      exp: Math.floor(opts.nowMs / 1000) + 365 * 24 * 3600,
-      "https://api.openai.com/auth": { chatgpt_account_id: accountId },
-      email: "chat@appstrate.local",
-    }),
-    "placeholder",
-  ].join(".");
+  const idToken = buildUnsignedJwt({
+    exp: Math.floor(opts.nowMs / 1000) + 365 * 24 * 3600,
+    "https://api.openai.com/auth": { chatgpt_account_id: accountId },
+    email: "chat@appstrate.local",
+  });
   return {
     auth_mode: "chatgpt",
     tokens: {
@@ -204,9 +196,8 @@ export interface VendedCodexCredential {
  * has ONE audited implementation. The caller owns teardown — `rm(home, …)` in
  * its own `finally` — since only the caller knows the subprocess lifetime.
  *
- * `baseDir` defaults to the OS temp dir. The containerised runner keeps the
- * default — its temp dir is wiped with the ephemeral container, and the
- * auth.json is written with mode 0600 (owner-only).
+ * Materialised under the OS temp dir — wiped with the ephemeral container, and
+ * the auth.json is written with mode 0600 (owner-only).
  *
  * @returns the absolute path of the created `CODEX_HOME` directory.
  */
@@ -215,10 +206,8 @@ export async function writeCodexAuthHome(opts: {
   nowMs: number;
   /** mkdtemp prefix, e.g. `"codex-run-"` (for debuggability). */
   prefix?: string;
-  /** Parent dir for the ephemeral home. Defaults to {@link tmpdir}. */
-  baseDir?: string;
 }): Promise<string> {
-  const home = await mkdtemp(join(opts.baseDir ?? tmpdir(), opts.prefix ?? "codex-"));
+  const home = await mkdtemp(join(tmpdir(), opts.prefix ?? "codex-"));
   await writeFile(
     join(home, "auth.json"),
     JSON.stringify(
@@ -231,43 +220,6 @@ export async function writeCodexAuthHome(opts: {
     { mode: 0o600 },
   );
   return home;
-}
-
-/**
- * Best-effort sweep of stale `codex-*` credential homes left behind by an
- * ungraceful kill (SIGKILL/OOM between {@link writeCodexAuthHome} and the
- * caller's `finally`). A real token can otherwise sit at rest until reboot.
- * Removes every `${prefix}*` dir under `baseDir` older than `maxAgeMs`. Called
- * at host boot. Never throws — a missing dir or a racing teardown is ignored.
- *
- * @returns the number of stale homes removed.
- */
-export async function sweepStaleCodexHomes(opts: {
-  baseDir: string;
-  prefix: string;
-  maxAgeMs: number;
-  nowMs: number;
-}): Promise<number> {
-  let removed = 0;
-  let entries: string[];
-  try {
-    entries = await readdir(opts.baseDir);
-  } catch {
-    return 0; // baseDir absent (e.g. no /dev/shm) — nothing to sweep.
-  }
-  for (const name of entries) {
-    if (!name.startsWith(opts.prefix)) continue;
-    const path = join(opts.baseDir, name);
-    try {
-      const info = await stat(path);
-      if (opts.nowMs - info.mtimeMs < opts.maxAgeMs) continue;
-      await rm(path, { recursive: true, force: true });
-      removed += 1;
-    } catch {
-      // Racing teardown or permission — skip.
-    }
-  }
-  return removed;
 }
 
 /**

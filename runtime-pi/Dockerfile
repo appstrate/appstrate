@@ -133,10 +133,7 @@ LABEL org.opencontainers.image.title="Appstrate Pi" \
       org.opencontainers.image.revision="${BUILD_REVISION}" \
       org.opencontainers.image.created="${BUILD_CREATED}"
 
-# Pin the production environment. Beyond standard tooling hygiene, this is a
-# security backstop: entrypoint.ts refuses the codex binary-path override unless
-# NODE_ENV is explicitly "development"/"test", so a prod image (NODE_ENV=production)
-# can never honour an arbitrary CODEX_BINARY_PATH. A dev run must override this.
+# Pin the production environment (standard tooling hygiene).
 ENV NODE_ENV=production
 
 # Runtime-only packages:
@@ -301,19 +298,6 @@ RUN if [ "$INCLUDE_SUBSCRIPTION_ENGINES" = "true" ]; then \
    && chown -h pi:pi \
           node_modules/@openai \
           node_modules/@openai/codex; \
-    fi
-
-# Expose the official `@openai/codex` musl binary on PATH at /usr/local/bin/codex
-# purely as a CONVENIENCE for manual `docker exec` debugging. It is NOT the
-# runner's resolution path: a subscription (vend) run resolves ONLY through the
-# pinned `@openai/codex` per-arch package (`resolveCodexBinary`) and fails closed
-# if that is absent — there is no bare-`codex`-on-PATH fallback, so this symlink
-# can never be substituted into a real run. The source is pinned to the package's
-# own `vendor/*-linux-musl/bin/codex` (the official binary), never an arbitrary
-# match. Done as root before USER pi.
-RUN if [ "$INCLUDE_SUBSCRIPTION_ENGINES" = "true" ]; then set -e; \
-      CODEX_BIN="$(find /runtime/node_modules /runtime/runtime-pi/node_modules -path '*@openai/codex-*/vendor/*-linux-musl/bin/codex' -type f 2>/dev/null | head -1)"; \
-      if [ -n "$CODEX_BIN" ]; then chmod +x "$CODEX_BIN"; ln -sf "$CODEX_BIN" /usr/local/bin/codex; echo "codex binary on PATH (debug convenience) -> $CODEX_BIN"; else echo "WARN: codex musl binary not found at build time"; fi; \
     fi
 
 # Bootstrap sources. Glob is single-level (no recursion into `sidecar/`

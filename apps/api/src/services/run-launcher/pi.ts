@@ -258,8 +258,8 @@ async function runPlatformContainerImpl(
       // directly and can't be reverse-proxied), so egress MUST be locked to the
       // provider's hosts — the allowlist is the sole compensating control. Fail
       // closed rather than launch an unconstrained container holding a live
-      // credential. (A `"vend"` engine always carries an `egressAllowlist` in the
-      // registry; this guards any vend provider against shipping without its lock.)
+      // credential. (`resolveCredentialDelivery` always supplies the codex egress
+      // allowlist for a vend run; this guards against shipping without its lock.)
       // Carrying it ON the vend config (not a sibling spec field) makes the
       // `vend ⟺ allowlist` invariant structural — the type can't express one
       // without the other.

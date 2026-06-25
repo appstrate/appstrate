@@ -39,6 +39,19 @@ import {
 export type { RunEngine };
 
 /**
+ * Per-run egress allowlist for the Codex (vend) engine — the sole compensating
+ * control for a run that holds the REAL ChatGPT subscription token in-container
+ * (the CLI talks to chatgpt.com directly and can't be reverse-proxied). The
+ * launcher carries it onto the sidecar `/llm` vend config, where the sidecar
+ * forward-proxy ENFORCES it (suffix-matched). Suffix-matched, so it permits the
+ * token to egress to ANY `*.openai.com` / `*.chatgpt.com` host — broader than
+ * the few hosts the CLI needs, but an accepted threat-model decision (OpenAI
+ * owns every such subdomain, the vended token is non-renewable, the container is
+ * ephemeral, and the proxy pins allowlisted hosts to :443).
+ */
+export const CODEX_EGRESS_ALLOWLIST: readonly string[] = ["chatgpt.com", "openai.com"];
+
+/**
  * The sidecar credential-delivery mode for a resolved run, derived from a SINGLE
  * source of truth.
  *
@@ -63,11 +76,12 @@ export type CredentialDeliveryMode = "oauth" | "vend" | "api_key";
  * delivery mode, the oauth-class boolean, the resolved engine, and the egress
  * allowlist all flow from this one value.
  *
- * Precedence: a subscription engine's own `sidecarAuthMode` wins (vend or
- * oauth); otherwise an oauth-class credential (one whose provider declares
- * `authMode: "oauth2"` but has NO subscription engine) is `"oauth"` — it will be
- * hard-refused downstream by {@link assertRunnableOnEngine}; everything else is
- * a static `"api_key"` provider.
+ * Precedence: the `codex` subscription engine routes to `"vend"` (the only
+ * engine that holds the real token in-container); any other subscription engine
+ * (e.g. claude-code) and any oauth-class credential (a provider declaring
+ * `authMode: "oauth2"` with NO subscription engine — hard-refused downstream by
+ * {@link assertRunnableOnEngine}) is `"oauth"`; everything else is a static
+ * `"api_key"` provider.
  */
 export function resolveCredentialDelivery(params: {
   providerId: string;
@@ -90,13 +104,13 @@ export function resolveCredentialDelivery(params: {
   // for an oauth provider with no official engine (the refuse path).
   const isOauthCredential = hasCredentialId && isOAuthModelProvider(providerId);
 
-  if (subscriptionEngine?.sidecarAuthMode === "vend") {
+  if (subscriptionEngine?.engine === "codex") {
     return {
       mode: "vend",
       isOauthCredential,
       engine,
       subscriptionEngine,
-      egressAllowlist: subscriptionEngine.egressAllowlist,
+      egressAllowlist: CODEX_EGRESS_ALLOWLIST,
     };
   }
   if (isOauthCredential) {

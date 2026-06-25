@@ -37,6 +37,22 @@ export function base64UrlDecode(input: string): string {
 }
 
 /**
+ * Build an UNSIGNED (`alg:none`) JWT carrying `payload`. The signature segment
+ * is the literal `"placeholder"` — never verified. Used where a consumer needs a
+ * syntactically-valid JWT only to parse local claims (e.g. the Codex CLI's boot
+ * parse, or pi-ai decoding `chatgpt_account_id` off the placeholder `MODEL_API_KEY`).
+ * It forges no identity: it is local-only and never transmitted to any upstream
+ * that would verify it.
+ */
+export function buildUnsignedJwt(payload: Record<string, unknown>): string {
+  return [
+    base64UrlEncode(JSON.stringify({ alg: "none", typ: "JWT" })),
+    base64UrlEncode(JSON.stringify(payload)),
+    "placeholder",
+  ].join(".");
+}
+
+/**
  * Decode a JWT's payload segment (the middle part). Returns the parsed
  * object, or `null` when the token isn't a well-formed three-segment JWT
  * or the payload isn't a JSON object.

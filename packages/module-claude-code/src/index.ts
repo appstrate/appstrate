@@ -146,9 +146,10 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // Engine binding read off this definition by the platform's model-provider
   // registry helpers (run-launcher + chat + gateways resolve the engine by
   // provider id off this one registration). Runs + chat execute on the Claude
-  // Agent SDK (official binary, no forging). `oauth` — the sidecar `/llm`
-  // gateway swaps the bearer server-side, so the real token never enters the
-  // container. `nativeOutput` — the SDK emits the structured deliverable via
+  // Agent SDK (official binary, no forging). A non-codex subscription engine
+  // takes the launcher's oauth delivery: the sidecar `/llm` gateway swaps the
+  // bearer server-side, so the real token never enters the container.
+  // `nativeOutput` — the SDK emits the structured deliverable via
   // `outputFormat` → `structured_output`, so the run must NOT also be offered
   // the MCP `output`. `chatHandler` — this module owns the chat driver too
   // (Claude Agent SDK + ui-stream mapper live in `./claude-agent/`), declared
@@ -158,7 +159,6 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // shared `ChatEngineInput` type, no vendor binding).
   subscriptionEngine: {
     engine: "claude",
-    sidecarAuthMode: "oauth",
     nativeOutput: true,
     chatHandler: runClaudeAgentChat,
   },

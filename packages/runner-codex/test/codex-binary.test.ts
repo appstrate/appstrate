@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 import { describe, expect, it } from "bun:test";
-import { readFile, stat, rm, mkdtemp, mkdir, writeFile, utimes } from "node:fs/promises";
+import { readFile, stat, rm, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -15,7 +15,6 @@ import {
   redactSecrets,
   resolveCodexBinary,
   safeParseJson,
-  sweepStaleCodexHomes,
   writeCodexAuthHome,
   writeCodexConfig,
 } from "../src/codex-binary.ts";
@@ -128,66 +127,6 @@ describe("writeCodexAuthHome", () => {
     } finally {
       await rm(home, { recursive: true, force: true });
     }
-  });
-});
-
-describe("writeCodexAuthHome baseDir", () => {
-  it("writes under the supplied baseDir (RAM-backed home for the chat path)", async () => {
-    const base = await mkdtemp(join(tmpdir(), "codex-base-"));
-    try {
-      const home = await writeCodexAuthHome({
-        credential: { access_token: "tok" },
-        nowMs: 1_700_000_000_000,
-        prefix: "codex-chat-",
-        baseDir: base,
-      });
-      expect(home.startsWith(base)).toBe(true);
-      expect(await readFile(join(home, "auth.json"), "utf8")).toContain("tok");
-    } finally {
-      await rm(base, { recursive: true, force: true });
-    }
-  });
-});
-
-describe("sweepStaleCodexHomes", () => {
-  it("removes only prefix-matching dirs older than maxAge, keeps fresh + foreign", async () => {
-    const base = await mkdtemp(join(tmpdir(), "codex-sweep-"));
-    const now = 1_700_000_000_000;
-    const stale = join(base, "codex-chat-stale");
-    const fresh = join(base, "codex-chat-fresh");
-    const foreign = join(base, "other-keepme");
-    await mkdir(stale);
-    await mkdir(fresh);
-    await mkdir(foreign);
-    await writeFile(join(stale, "auth.json"), "{}");
-    // Backdate the stale dir 2h; leave fresh + foreign current.
-    const old = new Date(now - 2 * 60 * 60 * 1000);
-    await utimes(stale, old, old);
-    try {
-      const removed = await sweepStaleCodexHomes({
-        baseDir: base,
-        prefix: "codex-chat-",
-        maxAgeMs: 60 * 60 * 1000,
-        nowMs: now,
-      });
-      expect(removed).toBe(1);
-      expect(await dirExists(stale)).toBe(false);
-      expect(await dirExists(fresh)).toBe(true);
-      expect(await dirExists(foreign)).toBe(true);
-    } finally {
-      await rm(base, { recursive: true, force: true });
-    }
-  });
-
-  it("returns 0 when the base dir is absent (no /dev/shm) — never throws", async () => {
-    expect(
-      await sweepStaleCodexHomes({
-        baseDir: join(tmpdir(), "codex-does-not-exist-xyz"),
-        prefix: "codex-chat-",
-        maxAgeMs: 1000,
-        nowMs: Date.now(),
-      }),
-    ).toBe(0);
   });
 });
 

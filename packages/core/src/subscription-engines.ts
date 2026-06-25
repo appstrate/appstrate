@@ -66,31 +66,14 @@ export interface ChatEngineInput {
  * label — those come from the provider definition itself at registration.
  */
 export interface SubscriptionEngineBinding {
-  /** Engine that drives this provider's official binary. */
+  /**
+   * Engine that drives this provider's official binary. This is also the sole
+   * credential-delivery routing signal: the launcher derives the sidecar
+   * delivery mode + egress lock from the engine (`codex` → vend with the codex
+   * egress allowlist; every other subscription engine → oauth bearer-swap). See
+   * `resolveCredentialDelivery` in the run launcher.
+   */
   engine: SubscriptionRunEngine;
-  /**
-   * How the sidecar delivers the subscription credential to the run:
-   *
-   * - `"oauth"` — the official binary points at the sidecar's `/llm` gateway,
-   *   which swaps the placeholder bearer for the real token server-side. The
-   *   real token never enters the agent container, so egress need not be locked.
-   * - `"vend"` — the binary talks to the upstream DIRECTLY (it ignores any
-   *   base-URL override), so the sidecar cannot reverse-proxy it. The runner
-   *   GETs the real token once from `/credential-vend` into the container; the
-   *   real token therefore lives in-container and its egress MUST be locked to
-   *   the vendor's hosts ({@link egressAllowlist}) as the sole compensating
-   *   control.
-   *
-   * Invariant: `sidecarAuthMode === "vend"` iff {@link egressAllowlist} is set.
-   * This invariant is enforced downstream at launch/boot — by the run launcher
-   * (`pi.ts`) and the sidecar (`server.ts`) — not by this contract.
-   */
-  sidecarAuthMode: "oauth" | "vend";
-  /**
-   * Per-run egress allowlist for `"vend"` engines that hold the REAL token
-   * in-container (suffix-matched). Required for vend, absent for oauth.
-   */
-  egressAllowlist?: readonly string[];
   /**
    * True iff this engine materialises the structured deliverable NATIVELY (its
    * binary emits `output` directly — e.g. the Claude SDK's `outputFormat` →
