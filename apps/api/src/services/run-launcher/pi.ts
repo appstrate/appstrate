@@ -29,6 +29,7 @@ import { buildRuntimePiEnv } from "@appstrate/runner-pi";
 import {
   assertRunnableOnEngine,
   assertSubscriptionEngineIsolation,
+  assertVendRunHasNoIntegrations,
   buildOauthSidecarLlm,
   resolveCredentialDelivery,
 } from "./subscription-run-policy.ts";
@@ -140,8 +141,8 @@ async function runPlatformContainerImpl(
   let spawnRecorded = false;
   try {
     // Fail-closed BEFORE provisioning any isolation boundary: a subscription
-    // AGENT run (claude-code → Claude Agent SDK) must execute under the docker
-    // orchestrator. The process orchestrator runs in-host and
+    // AGENT run (claude-code → Claude Agent SDK, codex → Codex CLI) must execute
+    // under the docker orchestrator. The process orchestrator runs in-host and
     // would expose the subscription credential to the API process. API-key
     // providers are unaffected.
     assertSubscriptionEngineIsolation({
@@ -156,8 +157,8 @@ async function runPlatformContainerImpl(
     // Single source of truth for "what kind of credential is this and how is it
     // delivered". Reads the provider→engine registry ONCE (plus the oauth-class
     // flag for the engine-less refuse path); the delivery mode, the oauth-class
-    // boolean, and the resolved engine all flow from here, replacing the former
-    // parallel `isOAuthModelProvider` axis.
+    // boolean, the resolved engine, and the egress allowlist all flow from here,
+    // replacing the former parallel `isOAuthModelProvider` axis.
     const delivery = resolveCredentialDelivery({
       providerId: llmConfig.providerId,
       hasCredentialId: !!llmConfig.credentialId,
@@ -207,8 +208,9 @@ async function runPlatformContainerImpl(
     const engine = delivery.engine;
     // No fingerprint-forging fallback: an OAuth subscription provider can only
     // run on an engine whose driver signs its own fingerprint (claude-code →
-    // the Claude Agent SDK). A provider with no official engine (e.g. an oauth
-    // provider with no official engine) is rejected here.
+    // the Claude Agent SDK). A provider with no official engine (e.g. a future
+    // oauth provider with no official engine) is rejected here. (codex DOES have
+    // an engine — it resolves to engine "codex" / mode "vend" and is accepted.)
     assertRunnableOnEngine({
       engine,
       providerId: llmConfig.providerId,
@@ -216,18 +218,62 @@ async function runPlatformContainerImpl(
     });
 
     let sidecarLlm: LlmProxyConfig | undefined;
-    // M4 — pre-flight: an oauth run dereferences `credentialId` below. Assert it
-    // HERE (before any boundary/container is provisioned) so a missing credential
-    // fails fast with a clear message instead of the non-null `!` shipping
-    // `undefined`, which would otherwise surface as an opaque sidecar boot crash
-    // AFTER both containers were already launched.
-    if (isOauthCredential && !llmConfig.credentialId) {
+    // Credential delivery is driven by the single `resolveCredentialDelivery`
+    // value (which reads the provider→engine registry), not an engine literal: a
+    // `"vend"` subscription engine holds the real token in-container (the binary
+    // talks to the upstream directly; no reverse proxy is possible) and locks
+    // egress to the vendor's hosts; an `"oauth"` engine has its bearer swapped
+    // server-side by the gateway. Adding a new subscription engine is a registry
+    // entry, not a branch here.
+    const egressAllowlist = delivery.egressAllowlist;
+    // M4 — pre-flight: vend AND oauth both dereference `credentialId` below.
+    // Assert it HERE (before any boundary/container is provisioned) so a missing
+    // credential fails fast with a clear message instead of the non-null `!`
+    // shipping `undefined`, which would otherwise surface as an opaque sidecar
+    // boot crash AFTER both containers were already launched.
+    if ((delivery.mode === "vend" || isOauthCredential) && !llmConfig.credentialId) {
       throw new Error(
-        `Run launcher: oauth-mode run for provider ` +
+        `Run launcher: ${delivery.mode === "vend" ? "vend" : "oauth"}-mode run for provider ` +
           `"${llmConfig.providerId}" has no resolved credentialId — cannot deliver the credential.`,
       );
     }
-    if (isOauthCredential) {
+    // H1 — keep all three runners (pi / claude / codex) on ONE trust model (the
+    // per-run network is the boundary; sidecar-internal endpoints are gated by
+    // network membership alone). A vend run is the only one holding a real token
+    // in-container, so it must not place untrusted integration siblings on that
+    // network. Single-source guard in subscription-run-policy (mirrors the runnable /
+    // isolation guards above); fails closed before any boundary is provisioned.
+    assertVendRunHasNoIntegrations({
+      mode: delivery.mode,
+      providerId: llmConfig.providerId,
+      integrationCount: plan.integrations?.length ?? 0,
+    });
+    if (delivery.mode === "vend") {
+      // Vend mode: the sidecar hands the resolved token to the in-container
+      // runner via `/credential-vend` instead of swapping the bearer in flight.
+      // No model alias (subscription models aren't aliased).
+      //
+      // The egress allowlist is REQUIRED on the vend config: a vend run hands the
+      // REAL subscription token into the container (the CLI talks to the upstream
+      // directly and can't be reverse-proxied), so egress MUST be locked to the
+      // provider's hosts — the allowlist is the sole compensating control. Fail
+      // closed rather than launch an unconstrained container holding a live
+      // credential. (A `"vend"` engine always carries an `egressAllowlist` in the
+      // registry; this guards any vend provider against shipping without its lock.)
+      // Carrying it ON the vend config (not a sibling spec field) makes the
+      // `vend ⟺ allowlist` invariant structural — the type can't express one
+      // without the other.
+      if (!egressAllowlist || egressAllowlist.length === 0) {
+        throw new Error(
+          "vend-mode run requires a non-empty egress allowlist (refusing to launch an unlocked container with a vended credential)",
+        );
+      }
+      sidecarLlm = {
+        authMode: "vend",
+        credentialId: llmConfig.credentialId!,
+        egressAllowlist,
+      };
+    } else if (isOauthCredential) {
       // An `"oauth"` subscription engine (e.g. Claude Agent SDK). The official
       // binary signs its own fingerprint, so the sidecar just swaps the bearer
       // + ensures the OAuth beta — no forging.

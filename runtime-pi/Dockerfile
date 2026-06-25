@@ -38,20 +38,29 @@ COPY --parents */package.json */*/package.json ./
 COPY patches/ patches/
 
 # `--filter=appstrate-pi-runtime` restricts the install to runtime-pi's
-# subgraph (Pi + Claude SDKs, @appstrate/afps-runtime, the @appstrate/runner-*
-# packages + their transitive deps), excluding apps/api, apps/web, and the
-# workspace dev toolchain — the runtime image ships only the runtime subgraph,
-# not the full workspace tree. runtime-pi has no devDeps of its own and
-# `--filter` does not pull transitive workspace pkgs' devDeps, so `--production`
-# would be a no-op for what's installed here — we omit it.
+# subgraph (Pi + Claude + Codex SDKs, @appstrate/afps-runtime, the three
+# @appstrate/runner-* packages + their transitive deps), excluding apps/api,
+# apps/web, and the workspace dev toolchain — the runtime image ships only the
+# runtime subgraph, not the full workspace tree. runtime-pi has no devDeps of
+# its own and `--filter` does not pull transitive workspace pkgs' devDeps, so
+# `--production` would be a no-op for what's installed here — we omit it.
 #
-# Kill-switch build arg (ToS): the subscription engine's vendor SDK
-# (@anthropic-ai/claude-agent-sdk) and the runner-claude package are
-# `optionalDependencies`. `--build-arg INCLUDE_SUBSCRIPTION_ENGINES=false` omits
-# them, producing a pi-only image with zero vendor executable surface (the
-# runtime already gates the runners by RUN_ENGINE, so a pi run never loads them).
-# Default `true` keeps the full image. NOTE: the slim (`false`) path is
-# UNVERIFIED here — must be docker-built + booted in CI before relying on it.
+# NOT `--frozen-lockfile`: bun's frozen comparator has a bug with @openai/codex's
+# same-name aliased platform binaries (@openai/codex@0.141.0-<platform>) and
+# false-reports "lockfile had changes" on a byte-stable lockfile — confirmed on
+# bun 1.3.11 and 1.3.14, and on both the full graph and a `--filter` subset.
+# `--production` makes it unfixable here: it implicitly freezes with no override
+# flag in bun 1.3.x. Versions stay pinned because resolution still reads the
+# COPY'd bun.lock; lockfile drift is caught by the `git diff --exit-code bun.lock`
+# guard in CI (.github/workflows/check.yml) on every commit.
+# Kill-switch build arg (ToS): the subscription engines' vendor SDKs + CLIs
+# (@anthropic-ai/claude-agent-sdk, @openai/codex) and the runner-claude/
+# runner-codex packages are `optionalDependencies`. `--build-arg
+# INCLUDE_SUBSCRIPTION_ENGINES=false` omits them, producing a pi-only image with
+# zero vendor executable surface (the runtime already gates the runners by
+# RUN_ENGINE, so a pi run never loads them). Default `true` keeps the full image
+# byte-identical. NOTE: the slim (`false`) path is UNVERIFIED here — must be
+# docker-built + booted in CI before relying on it.
 ARG INCLUDE_SUBSCRIPTION_ENGINES=true
 RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
     bun install \
@@ -83,6 +92,7 @@ COPY packages/core/src            packages/core/src
 COPY packages/mcp-transport/src   packages/mcp-transport/src
 COPY packages/runner-pi/src       packages/runner-pi/src
 COPY packages/runner-claude/src   packages/runner-claude/src
+COPY packages/runner-codex/src    packages/runner-codex/src
 COPY runtime-pi/extensions/       runtime-pi/extensions/
 COPY runtime-pi/mcp/              runtime-pi/mcp/
 COPY runtime-pi/*.ts              runtime-pi/
@@ -123,7 +133,10 @@ LABEL org.opencontainers.image.title="Appstrate Pi" \
       org.opencontainers.image.revision="${BUILD_REVISION}" \
       org.opencontainers.image.created="${BUILD_CREATED}"
 
-# Pin the production environment (standard tooling hygiene).
+# Pin the production environment. Beyond standard tooling hygiene, this is a
+# security backstop: entrypoint.ts refuses the codex binary-path override unless
+# NODE_ENV is explicitly "development"/"test", so a prod image (NODE_ENV=production)
+# can never honour an arbitrary CODEX_BINARY_PATH. A dev run must override this.
 ENV NODE_ENV=production
 
 # Runtime-only packages:
@@ -214,6 +227,11 @@ COPY --chown=pi:pi packages/runner-pi/package.json      ./packages/runner-pi/
 # only its src + manifest + workspace symlink are needed.
 COPY --chown=pi:pi packages/runner-claude/src           ./packages/runner-claude/src
 COPY --chown=pi:pi packages/runner-claude/package.json  ./packages/runner-claude/
+# runner-codex is source-only with no extra runtime deps of its own (workspace
+# packages already present + the external Codex CLI binary), so only its src +
+# manifest + workspace symlink are needed.
+COPY --chown=pi:pi packages/runner-codex/src            ./packages/runner-codex/src
+COPY --chown=pi:pi packages/runner-codex/package.json   ./packages/runner-codex/
 COPY --chown=pi:pi packages/core/src                    ./packages/core/src
 COPY --chown=pi:pi packages/core/package.json           ./packages/core/
 COPY --chown=pi:pi packages/afps-shared/src             ./packages/afps-shared/src
@@ -222,12 +240,13 @@ COPY --chown=pi:pi packages/afps-shared/package.json    ./packages/afps-shared/
 # Restore the `@appstrate/*` workspace symlinks materialised by
 # `bun install` (docker COPY dereferences them into real directories).
 RUN mkdir -p node_modules/@appstrate \
- && rm -rf  node_modules/@appstrate/afps-runtime node_modules/@appstrate/afps-shared node_modules/@appstrate/mcp-transport node_modules/@appstrate/runner-pi node_modules/@appstrate/runner-claude node_modules/@appstrate/core \
+ && rm -rf  node_modules/@appstrate/afps-runtime node_modules/@appstrate/afps-shared node_modules/@appstrate/mcp-transport node_modules/@appstrate/runner-pi node_modules/@appstrate/runner-claude node_modules/@appstrate/runner-codex node_modules/@appstrate/core \
  && ln -s   /runtime/packages/afps-runtime  node_modules/@appstrate/afps-runtime \
  && ln -s   /runtime/packages/afps-shared   node_modules/@appstrate/afps-shared \
  && ln -s   /runtime/packages/mcp-transport node_modules/@appstrate/mcp-transport \
  && ln -s   /runtime/packages/runner-pi     node_modules/@appstrate/runner-pi \
  && ln -s   /runtime/packages/runner-claude node_modules/@appstrate/runner-claude \
+ && ln -s   /runtime/packages/runner-codex  node_modules/@appstrate/runner-codex \
  && ln -s   /runtime/packages/core          node_modules/@appstrate/core \
  && chown -h pi:pi \
         node_modules/@appstrate \
@@ -236,6 +255,7 @@ RUN mkdir -p node_modules/@appstrate \
         node_modules/@appstrate/mcp-transport \
         node_modules/@appstrate/runner-pi \
         node_modules/@appstrate/runner-claude \
+        node_modules/@appstrate/runner-codex \
         node_modules/@appstrate/core
 
 # Pi SDK pair (@mariozechner/pi-ai, @mariozechner/pi-coding-agent) lands
@@ -267,6 +287,34 @@ RUN if [ "$INCLUDE_SUBSCRIPTION_ENGINES" = "true" ]; then \
           node_modules/@anthropic-ai/claude-agent-sdk; \
     fi
 
+# The Codex CLI (`@openai/codex`) is a direct dep of `appstrate-pi-runtime`, so
+# bun symlinks it into runtime-pi/node_modules. The bundled entrypoint resolves
+# from /runtime/node_modules, so surface it there (same pattern as the Claude
+# SDK above). `resolveCodexBinary` hops through the main package's scope to its
+# per-arch `@openai/codex-<plat>-<arch>` optional-dep sibling (a musl-static
+# binary that runs on Alpine), so no separate symlink is needed for that sibling.
+# Skipped on a slim (`INCLUDE_SUBSCRIPTION_ENGINES=false`) build — the CLI is not
+# installed then, so there is nothing to surface.
+RUN if [ "$INCLUDE_SUBSCRIPTION_ENGINES" = "true" ]; then \
+      mkdir -p node_modules/@openai \
+   && ln -s /runtime/runtime-pi/node_modules/@openai/codex node_modules/@openai/codex \
+   && chown -h pi:pi \
+          node_modules/@openai \
+          node_modules/@openai/codex; \
+    fi
+
+# Expose the official `@openai/codex` musl binary on PATH at /usr/local/bin/codex
+# purely as a CONVENIENCE for manual `docker exec` debugging. It is NOT the
+# runner's resolution path: a subscription (vend) run resolves ONLY through the
+# pinned `@openai/codex` per-arch package (`resolveCodexBinary`) and fails closed
+# if that is absent — there is no bare-`codex`-on-PATH fallback, so this symlink
+# can never be substituted into a real run. The source is pinned to the package's
+# own `vendor/*-linux-musl/bin/codex` (the official binary), never an arbitrary
+# match. Done as root before USER pi.
+RUN if [ "$INCLUDE_SUBSCRIPTION_ENGINES" = "true" ]; then set -e; \
+      CODEX_BIN="$(find /runtime/node_modules /runtime/runtime-pi/node_modules -path '*@openai/codex-*/vendor/*-linux-musl/bin/codex' -type f 2>/dev/null | head -1)"; \
+      if [ -n "$CODEX_BIN" ]; then chmod +x "$CODEX_BIN"; ln -sf "$CODEX_BIN" /usr/local/bin/codex; echo "codex binary on PATH (debug convenience) -> $CODEX_BIN"; else echo "WARN: codex musl binary not found at build time"; fi; \
+    fi
 
 # Bootstrap sources. Glob is single-level (no recursion into `sidecar/`
 # or `test/`), so adding a new `.ts` file at `runtime-pi/*.ts` is picked

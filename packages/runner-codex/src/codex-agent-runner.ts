@@ -1,0 +1,464 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Appstrate
+
+/**
+ * CodexAgentRunner — AFPS {@link Runner} backed by the official OpenAI Codex
+ * CLI (`codex exec --json`).
+ *
+ * The official-binary (no-forging) counterpart of the Pi runner for `codex`
+ * (ChatGPT Plus/Pro/Business subscription) runs. Codex is agent-only — it has
+ * no chat surface (its token can't be safely held host-side). It drives the
+ * official `codex` binary as a subprocess — the binary signs its OWN client
+ * fingerprint (`originator: codex_exec`) and sends its own `chatgpt-account-id`,
+ * so NOTHING is forged. Subscription use is an operator opt-in grey-zone (see
+ * docs/architecture/SUBSCRIPTION_COMPLIANCE.md).
+ *
+ * Why a token VEND (not a reverse-proxy gateway like the Claude runner): the
+ * Codex CLI's models-manager calls `chatgpt.com` VERBATIM, ignoring
+ * `chatgpt_base_url` — the sidecar cannot sit in its request path. So at run
+ * start the runner GETs the real subscription token once from the sidecar's
+ * internal-network-gated `/credential-vend`, writes it into `CODEX_HOME/auth.json`,
+ * and the binary egresses straight to the upstream. The compensating controls
+ * for the real token living in-container:
+ *   - the sidecar's per-run egress allowlist locks outbound traffic to the
+ *     provider's hosts (chatgpt.com / auth.openai.com) — the token cannot be
+ *     exfiltrated to an attacker endpoint, and
+ *   - the vended access token is NON-RENEWABLE (no refresh token is handed over)
+ *     and the container is ephemeral.
+ *
+ * Sandbox: `--dangerously-bypass-approvals-and-sandbox` — Codex's own
+ * landlock/seccomp sandbox is redundant (and often unavailable) inside the
+ * already-isolated, credential-free, egress-locked agent container, which IS
+ * the boundary. This is the documented "externally sandboxed" use of that flag
+ * and mirrors the Pi/Claude runners enabling native tools freely in the sandbox.
+ *
+ * Terminal status is runner-authoritative: Codex `exec` ends a turn with
+ * `turn.completed` (carrying usage) and ends the process by closing stdout —
+ * there is no explicit success message, so the status is decided here from the
+ * process exit code + any `turn.failed` recorded by the mapper.
+ */
+
+// node:fs — Bun has no recursive directory removal (`Bun.file().delete()` is
+// single-file only); kept to tear down the ephemeral CODEX_HOME tree.
+import { rm } from "node:fs/promises";
+import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
+import {
+  computeTokenCost,
+  finalizeThrownFailure,
+  reduceEvents,
+  runInputToText,
+  type RunError,
+  type RunResult,
+  type TokenCost,
+} from "@appstrate/afps-runtime/runner";
+import type { Runner, RunOptions } from "@appstrate/afps-runtime/runner";
+import {
+  buildCodexConfigToml,
+  buildCodexEnv,
+  readNdjsonLines,
+  redactSecrets,
+  redactSecretsDeep,
+  safeParseJson,
+  writeCodexAuthHome,
+  writeCodexConfig,
+  type CodexEvent,
+  type CodexHttpMcpServer,
+  type VendedCodexCredential,
+} from "./codex-binary.ts";
+import { drainAndEmitInto, type RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
+import { CodexRunEventMapper } from "./run-event-mapper.ts";
+
+/** Subprocess handle shape (Bun.spawn) — the minimum the runner drives. */
+export interface CodexChild {
+  stdout: ReadableStream<Uint8Array>;
+  stderr: ReadableStream<Uint8Array>;
+  readonly exited: Promise<number>;
+  /** SIGTERM by default; pass `9` (SIGKILL) to force-kill after the grace window. */
+  kill(signal?: number): void;
+}
+
+/** Grace period between SIGTERM and the SIGKILL escalation on abort. */
+const ABORT_KILL_GRACE_MS = 5_000;
+
+/** Injectable spawner — defaults to {@link Bun.spawn} (narrowed). */
+export type CodexSpawnFn = (
+  cmd: string[],
+  opts: { cwd: string; env: Record<string, string> },
+) => CodexChild;
+
+export interface CodexAgentRunnerOptions {
+  /** Absolute path to the prebuilt `codex` binary (`./codex-binary.ts`). */
+  binaryPath: string;
+  /** Real upstream model id (e.g. `gpt-5.5`) — NOT the platform model label. */
+  modelId: string;
+  /** Enriched platform system prompt (the agent persona + host context). */
+  systemPrompt: string;
+  /**
+   * Sidecar credential-vend endpoint (`…/credential-vend`). GET-ed once at run
+   * start to obtain the real subscription token. Internal-network-gated; no
+   * bearer (the agent container holds no run token — zero-knowledge boundary).
+   */
+  credentialUrl: string;
+  /** Working directory for the binary's native file/exec tools (the run workspace). */
+  cwd: string;
+  /**
+   * Platform tool surface — the sidecar's stateless Streamable-HTTP `/mcp`
+   * (integrations + `api_call` + `run_history` + `recall_memory` + the
+   * agent-selected runtime tools). Written into codex's `config.toml` as a
+   * `[mcp_servers.platform]` entry so the CLI's MCP client reaches the same
+   * tools the Claude runner gets through the Agent SDK's `mcpServers`. Omit to
+   * run codex with no platform tools (native sandbox tools only).
+   */
+  sidecarMcp?: CodexHttpMcpServer;
+  /**
+   * Runtime-event drainer (`@appstrate/core/runtime-event-drain`). The sidecar
+   * executes each runtime tool (log/note/pin/report/output) ONCE and journals
+   * its canonical events; this runner drains them at each NDJSON step boundary
+   * (codex's `exec --json` stream never surfaces the MCP result `_meta` the
+   * events would otherwise ride in) and re-emits on the run's single sink.
+   * Omit when the run has no runtime tools (nothing to drain).
+   */
+  drainer?: RuntimeEventDrainer;
+  /** Per-million-token cost rates for equivalent-cost reporting; cost is 0 when absent. */
+  modelCost?: TokenCost | null;
+  /** Extra curated env merged into the spawned binary's environment. */
+  env?: Record<string, string>;
+  /** Injectable spawner. Defaults to the real `Bun.spawn`. */
+  spawn?: CodexSpawnFn;
+  /** Injectable fetch (vend). Defaults to global `fetch`. */
+  fetchFn?: typeof fetch;
+  /** Injectable clock. Defaults to `Date.now`. */
+  now?: () => number;
+}
+
+/** Fold the system persona + run input into a single `codex exec` prompt. */
+export function buildCodexRunPrompt(systemPrompt: string, input: unknown): string {
+  const task = runInputToText(input) || "Begin the task described in your instructions.";
+  return systemPrompt ? `${systemPrompt}\n\n---\n\n${task}` : task;
+}
+
+const defaultSpawn: CodexSpawnFn = (cmd, opts) =>
+  Bun.spawn(cmd, {
+    cwd: opts.cwd,
+    env: opts.env,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  }) as unknown as CodexChild;
+
+/** Max bytes of stderr tail retained for a non-zero-exit diagnostic. */
+const MAX_STDERR_TAIL_BYTES = 128 * 1024;
+
+interface StreamTail {
+  /** Resolves once the stream is fully drained (or errored). */
+  readonly done: Promise<void>;
+  /** The captured tail (last {@link MAX_STDERR_TAIL_BYTES}); await-safe after `done`. */
+  text(): Promise<string>;
+}
+
+/**
+ * Drain a byte stream CONCURRENTLY into a bounded tail buffer, starting
+ * immediately. The codex CLI can emit verbose stderr while we consume stdout;
+ * if stderr is left unread its OS pipe buffer (~64 KB) fills and the child
+ * BLOCKS on write — a deadlock, since it then never closes stdout/exits. Draining
+ * it in parallel keeps the pipe clear; we keep only the tail for diagnostics.
+ */
+function drainStreamTail(stream: ReadableStream<Uint8Array>, maxBytes: number): StreamTail {
+  let buf = "";
+  const decoder = new TextDecoder();
+  const clamp = () => {
+    if (buf.length > maxBytes) buf = buf.slice(buf.length - maxBytes);
+  };
+  const done = (async () => {
+    const reader = stream.getReader();
+    try {
+      for (;;) {
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) break;
+        if (value) {
+          buf += decoder.decode(value, { stream: true });
+          clamp();
+        }
+      }
+      buf += decoder.decode();
+      clamp();
+    } finally {
+      reader.releaseLock();
+    }
+  })();
+  return { done, text: async () => (await done.catch(() => undefined), buf) };
+}
+
+export class CodexAgentRunner implements Runner {
+  readonly name = "codex-agent-runner";
+
+  constructor(private readonly opts: CodexAgentRunnerOptions) {}
+
+  /**
+   * Wire abort → SIGTERM, escalating to SIGKILL after the grace window (a wedged
+   * codex must not outlive an abort). `getChild` is a late-bound accessor because
+   * the child is spawned after this is armed. Returns the handler so the caller
+   * can re-invoke it (post-spawn abort race) and detach it in `finally`.
+   */
+  private armAbort(
+    signal: AbortSignal | undefined,
+    getChild: () => CodexChild | undefined,
+  ): () => void {
+    const onAbort = (): void => {
+      try {
+        getChild()?.kill(); // SIGTERM — let codex flush + exit cleanly first.
+      } catch {
+        // already exited
+      }
+      // Unref'd so this timer never keeps the process alive; a no-op throw if the
+      // child already exited.
+      const killTimer = setTimeout(() => {
+        try {
+          getChild()?.kill(9);
+        } catch {
+          // already exited
+        }
+      }, ABORT_KILL_GRACE_MS);
+      (killTimer as unknown as { unref?: () => void }).unref?.();
+    };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+    return onAbort;
+  }
+
+  /** Vend the real subscription token from the sidecar (internal-network-gated). */
+  private async vendCredential(fetchFn: typeof fetch): Promise<VendedCodexCredential> {
+    const vend = await fetchFn(this.opts.credentialUrl);
+    if (!vend.ok) {
+      throw new Error(
+        vend.status === 410
+          ? "The ChatGPT subscription credential needs reconnection (revoked or expired)."
+          : `Credential vend failed (${vend.status}).`,
+      );
+    }
+    return (await vend.json()) as VendedCodexCredential;
+  }
+
+  /**
+   * Write the ephemeral CODEX_HOME (auth.json 0600 + config.toml pointing the
+   * CLI's MCP client at the sidecar `/mcp`). Same 0600 home for both files — no
+   * new at-rest credential surface. Returns the home dir for teardown.
+   *
+   * CALLER ORDERING (security-critical, H1): the redaction set MUST already be
+   * armed before this runs — the token is about to hit disk. See `run()`.
+   */
+  private async prepareCodexHome(cred: VendedCodexCredential, nowMs: number): Promise<string> {
+    const home = await writeCodexAuthHome({ credential: cred, nowMs, prefix: "codex-run-" });
+    await writeCodexConfig({
+      home,
+      toml: buildCodexConfigToml({
+        ...(this.opts.sidecarMcp ? { platform: this.opts.sidecarMcp } : {}),
+      }),
+    });
+    return home;
+  }
+
+  async run(options: RunOptions): Promise<void> {
+    const { context, eventSink, signal } = options;
+    signal?.throwIfAborted();
+
+    const runId = context.runId;
+    const now = this.opts.now ?? Date.now;
+    const fetchFn = this.opts.fetchFn ?? fetch;
+    const spawn = this.opts.spawn ?? defaultSpawn;
+    const startTime = now();
+
+    // Secret values to scrub from EVERY emitted string. Empty until the token is
+    // vended below; mutated in place so the `emit` closure picks it up. The codex
+    // CLI runs with native tools holding the REAL subscription token at rest in
+    // auth.json, so assistant text / tool output / logs / errors could echo it —
+    // not just the subprocess stderr (which `redactSecrets` already covers). We
+    // scrub by VALUE here (the caller already has the token) on the run's single
+    // sink, so the credential cannot leak on any channel (H1).
+    const knownSecrets: string[] = [];
+
+    const events: RunEvent[] = [];
+    const emit = async (event: RunEvent): Promise<void> => {
+      const scrubbed = redactSecretsDeep(event, knownSecrets);
+      events.push(scrubbed);
+      await eventSink.handle(scrubbed);
+    };
+
+    const mapper = new CodexRunEventMapper(runId, now);
+
+    // Runtime tools (log/note/pin/report/output) are executed ONCE by the
+    // sidecar, which journals their canonical events. Drain the journal at each
+    // NDJSON step boundary and re-emit on the run's single sink — codex never
+    // surfaces the MCP result `_meta`, so the events come exclusively from the
+    // journal. A drain is cheap on localhost and a no-op when the journal is
+    // empty; over-draining never misses a boundary. No-op when no drainer wired.
+    const drainer = this.opts.drainer;
+    // Shared drain+stamp+emit (see `@appstrate/core/runtime-event-drain`): one
+    // cadence + best-effort-at-finalize contract for all three runners, so it
+    // cannot drift between them.
+    const drainAndEmit = (final = false): Promise<void> =>
+      drainAndEmitInto({ drainer, emit: (e) => emit(e as RunEvent), now, runId, final });
+
+    let home: string | undefined;
+    let child: CodexChild | undefined;
+    let stderrTail: StreamTail | undefined;
+    const onAbort = this.armAbort(signal, () => child);
+
+    try {
+      // 1. Vend the real subscription token (internal-network-gated, no bearer).
+      const cred = await this.vendCredential(fetchFn);
+
+      // ORDERING INVARIANT (security-critical, H1): the redaction set MUST be
+      // armed HERE — synchronously, immediately after the vend and BEFORE the
+      // token is written to disk (`prepareCodexHome`) or spawned/used (step 3).
+      // The `emit` closure scrubs by reading `knownSecrets` at emit time; if any
+      // token-bearing event or the terminal result could be produced before this
+      // push, it would leak the credential verbatim. Kept INLINE (not folded into
+      // a helper) so the ordering is visible at the call site. Guarded by the
+      // "scrub is armed before first use" test in test/scrub-armed-before-use.test.ts.
+      // Arm the access token always, plus the account id when it is a non-trivial
+      // value (it rides outbound as the `chatgpt-account-id` header). The `>= 8`
+      // length guard inside the scrubber drops placeholder/short ids.
+      knownSecrets.push(cred.access_token);
+      if (typeof cred.account_id === "string") knownSecrets.push(cred.account_id);
+
+      // 2. Write the ephemeral CODEX_HOME (auth.json 0600 + sidecar-MCP config.toml).
+      home = await this.prepareCodexHome(cred, now());
+
+      // 3. Spawn the official binary. No `chatgpt_base_url` (it talks to the
+      //    upstream directly; egress is locked by the sidecar allowlist). The
+      //    container is the sandbox, so Codex's own sandbox is bypassed.
+      //
+      //    No per-run turn cap is passed (unlike the Claude runner's
+      //    `maxTurns: 100`): the `codex exec` CLI exposes no clean per-run
+      //    turn-limit flag, so per-run bounding is delegated to the container
+      //    timeout / abort (SIGTERM→SIGKILL via `armAbort`). The omission is
+      //    deliberate, not an oversight.
+      child = spawn(
+        [
+          this.opts.binaryPath,
+          "exec",
+          "--json",
+          "--skip-git-repo-check",
+          "--dangerously-bypass-approvals-and-sandbox",
+          "-m",
+          this.opts.modelId,
+          buildCodexRunPrompt(this.opts.systemPrompt, context.input),
+        ],
+        {
+          cwd: this.opts.cwd,
+          env: buildCodexEnv({
+            codexHome: home,
+            ...(this.opts.env ? { extra: this.opts.env } : {}),
+          }),
+        },
+      );
+
+      if (signal?.aborted) onAbort();
+
+      // Drain stderr CONCURRENTLY with stdout from the moment of spawn — leaving
+      // it unread risks a pipe-buffer deadlock (see drainStreamTail). We keep
+      // only the tail, read on a non-zero exit for the failure diagnostic.
+      stderrTail = drainStreamTail(
+        child.stderr as unknown as ReadableStream<Uint8Array>,
+        MAX_STDERR_TAIL_BYTES,
+      );
+
+      // 4. Map the NDJSON event stream → RunEvents, draining journaled runtime
+      //    events at item-completion boundaries (a runtime tool only journals
+      //    once its handler has run, i.e. at `item.completed`). Draining on
+      //    every NDJSON line would fire hundreds of empty round-trips on a
+      //    chatty stream; the final drain below backstops any straggler.
+      for await (const line of readNdjsonLines(child.stdout)) {
+        const ev = safeParseJson<CodexEvent>(line);
+        if (!ev) continue;
+        for (const event of mapper.map(ev)) await emit(event);
+        if (ev.type === "item.completed") await drainAndEmit();
+      }
+
+      const exitCode = await child.exited;
+
+      // Final drain (drain-until-empty + bounded retry): the sidecar is torn
+      // down right after finalize, so the last tool's events must be pulled now.
+      await drainAndEmit(true);
+
+      // 5. Terminal verdict (runner-authoritative): a recorded turn.failed/error
+      //    wins; otherwise the process exit code decides.
+      const failure = mapper.failure();
+      let status: NonNullable<RunResult["status"]>;
+      let error: RunError | undefined;
+      if (failure) {
+        status = "failed";
+        // A turn.failed message can echo the vended token/account id verbatim.
+        // The event stream is scrubbed by the emit() sink, but the terminal
+        // RunResult.error is NOT — scrub it by VALUE (same knownSecrets set
+        // armed after vend) before it folds into reduceEvents / the result.
+        error = redactSecretsDeep(failure, knownSecrets);
+      } else if (exitCode === 0) {
+        status = "success";
+      } else {
+        status = "failed";
+        // Read the concurrently-drained tail (NOT child.stderr directly — it was
+        // already consumed by the drain, and reading it post-exit risked the
+        // deadlock the drain exists to prevent).
+        const stderr = stderrTail ? await stderrTail.text() : "";
+        error = {
+          code: "adapter_error",
+          message: `The Codex CLI exited with code ${exitCode}${stderr ? `: ${redactSecrets(stderr, [cred.access_token]).slice(0, 500)}` : ""}`,
+        };
+        await emit({ type: "appstrate.error", timestamp: now(), runId, message: error.message });
+      }
+
+      const usage = mapper.usage();
+      const cost = computeTokenCost(usage, this.opts.modelCost);
+      const reduced = reduceEvents(events, error ? { error } : {});
+      reduced.status = status;
+      reduced.usage = usage;
+      reduced.cost = cost;
+      reduced.durationMs = now() - startTime;
+
+      // Defense-in-depth: deep-scrub the whole RunResult (error/usage/any string
+      // field reduceEvents may have folded in) before it leaves the runner, so a
+      // secret can't ride the terminal result even though every event was scrubbed.
+      const result = redactSecretsDeep(reduced, knownSecrets);
+      await eventSink.finalize(result);
+    } catch (err) {
+      // Shared thrown-failure epilogue (abort-rethrow → emit appstrate.error →
+      // best-effort final drain → reduceEvents [NOT emptyRunResult, so any
+      // partial canonical output the agent emitted before the throw survives] →
+      // status="failed" → stamp usage/cost/duration → finalize).
+      //
+      // The `transform` keeps codex's redaction posture intact: it deep-scrubs
+      // BOTH the emitted appstrate.error event and the WHOLE terminal result by
+      // VALUE, so a thrown error's text (which can carry the vended token
+      // verbatim) and the terminal RunResult.error (the raw `message`) cannot
+      // leak the credential. `knownSecrets` is armed after vend; empty if the
+      // throw predates it. The `error.code = "adapter_error"` shape is preserved.
+      const usage = mapper.usage();
+      await finalizeThrownFailure({
+        events,
+        err,
+        signal,
+        runId,
+        now,
+        emit,
+        drainAndEmit: () => drainAndEmit(true),
+        eventSink,
+        usage,
+        buildError: (message) => ({ code: "adapter_error", message }),
+        stamp: (failed) => {
+          failed.cost = computeTokenCost(usage, this.opts.modelCost);
+          failed.durationMs = now() - startTime;
+        },
+        transform: (value) => redactSecretsDeep(value, knownSecrets),
+      });
+    } finally {
+      if (signal) signal.removeEventListener("abort", onAbort);
+      // Let the stderr drain settle so its reader unwinds (no dangling lock /
+      // unhandled rejection) regardless of how we exited the try.
+      if (stderrTail) await stderrTail.done.catch(() => undefined);
+      if (home) await rm(home, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+}
+
+export type { ExecutionContext };
