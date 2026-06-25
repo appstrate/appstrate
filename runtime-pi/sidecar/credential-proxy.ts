@@ -56,8 +56,9 @@ import { filterSensitiveHeaders } from "./redact.ts";
 /**
  * Body modes the proxy core accepts. The HTTP handler can produce
  * "none" / "buffered" / "streaming"; the MCP handler produces
- * "buffered" for text + binary uploads, and "formData" for the
- * `{ multipart: [...] }` body shape.
+ * "buffered" for text + binary uploads, "formData" for the
+ * `{ multipart: [...] }` body shape, and "json" for a plain JSON
+ * object/array (serialized here, after leaf substitution).
  *
  * The `formData` variant carries a builder closure rather than a
  * pre-baked `FormData` so the per-attempt body can be regenerated with
@@ -65,7 +66,7 @@ import { filterSensitiveHeaders } from "./redact.ts";
  * part must see the refreshed token after a 401-retry, identical to
  * the buffered text path.
  */
-type ApiCallRequestBody =
+export type ApiCallRequestBody =
   | { kind: "none" }
   | { kind: "buffered"; bytes: ArrayBuffer; text?: string }
   | { kind: "streaming"; stream: ReadableStream }
@@ -79,6 +80,18 @@ type ApiCallRequestBody =
        * text path. Empty/omitted means no substitution will happen.
        */
       fieldTemplates?: string[];
+    }
+  | {
+      /**
+       * A plain JSON object/array body. Serialization is DEFERRED to the
+       * proxy (like `formData`) so that `{{var}}` substitution happens on
+       * the structured leaf values BEFORE `JSON.stringify` — the serializer
+       * then escapes every value, so an injected credential containing `"`
+       * or `\` can never produce malformed JSON on the wire. Re-serialized
+       * per attempt so a 401-retry sees refreshed credentials.
+       */
+      kind: "json";
+      value: unknown;
     };
 
 export interface ApiCallArgs {
@@ -154,6 +167,47 @@ export interface ApiCallDeps {
    * Production callers omit it (system resolver via `node:dns`).
    */
   resolveHost?: HostResolver;
+}
+
+/**
+ * Recursively apply `{{var}}` substitution to the string leaves of a
+ * JSON value, returning a NEW value (input untouched). When `creds` is
+ * undefined the value is returned structurally unchanged (no
+ * substitution requested). Substituting on the structured leaves — then
+ * letting `JSON.stringify` escape — is what makes the `json` body shape
+ * injection-safe: a credential containing `"`/`\`/newline is escaped by
+ * the serializer instead of corrupting the surrounding JSON.
+ */
+function deepSubstituteJson(value: unknown, creds: Record<string, string> | undefined): unknown {
+  if (typeof value === "string") return creds ? substituteVars(value, creds) : value;
+  if (Array.isArray(value)) return value.map((v) => deepSubstituteJson(v, creds));
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = deepSubstituteJson(v, creds);
+    return out;
+  }
+  return value;
+}
+
+/** Collect unresolved `{{placeholders}}` left in a JSON value's string leaves. */
+function findUnresolvedJsonPlaceholders(
+  value: unknown,
+  creds: Record<string, string>,
+  acc: Set<string> = new Set(),
+): Set<string> {
+  if (typeof value === "string") {
+    for (const p of findUnresolvedPlaceholders(substituteVars(value, creds))) acc.add(p);
+  } else if (Array.isArray(value)) {
+    for (const v of value) findUnresolvedJsonPlaceholders(v, creds, acc);
+  } else if (value && typeof value === "object") {
+    for (const v of Object.values(value)) findUnresolvedJsonPlaceholders(v, creds, acc);
+  }
+  return acc;
+}
+
+/** Exhaustiveness guard: a new body kind without a buildBody case fails to compile here. */
+function assertNever(value: never): never {
+  throw new Error(`Unhandled request-body kind: ${JSON.stringify(value)}`);
 }
 
 /**
@@ -274,18 +328,41 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       };
     }
   }
+  if (substituteBody && body.kind === "json") {
+    const unresolved = findUnresolvedJsonPlaceholders(body.value, creds.credentials);
+    if (unresolved.size) {
+      return {
+        ok: false,
+        status: 400,
+        error: `Unresolved placeholders in body: {{${[...unresolved].join()}}}`,
+      };
+    }
+  }
 
   /** Build the request body with credential substitution applied. */
   const buildBody = (
     activeCreds: Record<string, string>,
   ): ArrayBuffer | string | ReadableStream | FormData | undefined => {
-    if (body.kind === "none") return undefined;
-    if (body.kind === "streaming") return body.stream;
-    if (body.kind === "formData") return body.build(activeCreds);
-    if (substituteBody && body.text !== undefined) {
-      return substituteVars(body.text, activeCreds);
+    switch (body.kind) {
+      case "none":
+        return undefined;
+      case "streaming":
+        return body.stream;
+      case "formData":
+        return body.build(activeCreds);
+      case "json":
+        // Substitute on the structured leaves first, THEN serialize so
+        // every value is escaped by `JSON.stringify` (injection-safe).
+        return JSON.stringify(
+          deepSubstituteJson(body.value, substituteBody ? activeCreds : undefined),
+        );
+      case "buffered":
+        return substituteBody && body.text !== undefined
+          ? substituteVars(body.text, activeCreds)
+          : body.bytes;
+      default:
+        return assertNever(body);
     }
-    return body.bytes;
   };
 
   /**

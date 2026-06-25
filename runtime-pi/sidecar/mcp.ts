@@ -93,7 +93,7 @@ function decodeStrictBase64(s: string): Uint8Array | "invalid" {
   }
 }
 import type { BlobStore } from "./blob-store.ts";
-import { executeApiCall, type ApiCallDeps } from "./credential-proxy.ts";
+import { executeApiCall, type ApiCallDeps, type ApiCallRequestBody } from "./credential-proxy.ts";
 import {
   UPSTREAM_META_KEY,
   buildPreflightUpstreamMeta,
@@ -208,6 +208,18 @@ function sanitiseApiCallHeaders(raw: Record<string, string> | undefined): {
     headers[name] = value;
   }
   return { headers, dropped };
+}
+
+/**
+ * Case-insensitive presence check over a sanitised header map. HTTP
+ * header names are case-insensitive, but a plain `Record` lookup is
+ * not — so a caller's `content-type` would not be seen by a literal
+ * `headers["Content-Type"]` read. Used to decide whether the sidecar
+ * may inject a default Content-Type without clobbering an explicit one.
+ */
+function hasHeader(headers: Record<string, string>, name: string): boolean {
+  const lower = name.toLowerCase();
+  return Object.keys(headers).some((k) => k.toLowerCase() === lower);
 }
 
 /**
@@ -335,6 +347,182 @@ function multipartError(
       _meta: API_CALL_PREFLIGHT_META,
     },
   };
+}
+
+/**
+ * Resolved `api_call` request body: either the internal discriminated
+ * {@link ApiCallRequestBody} ready for the proxy (optionally with a
+ * Content-Type the sidecar may default), or a preflight error result.
+ */
+type ResolvedRequestBody =
+  | { ok: true; body: ApiCallRequestBody; defaultContentType?: string }
+  | { ok: false; result: CallToolResult };
+
+/** Build a labelled preflight error result for a body that cannot be sent. */
+function bodyPreflightError(
+  label: string,
+  text: string,
+  structuredContent?: CallToolResult["structuredContent"],
+): ResolvedRequestBody {
+  return {
+    ok: false,
+    result: {
+      content: [{ type: "text", text: `${label}: ${text}` }],
+      ...(structuredContent ? { structuredContent } : {}),
+      isError: true,
+      _meta: API_CALL_PREFLIGHT_META,
+    },
+  };
+}
+
+/**
+ * Resolve the loosely-typed `api_call` body argument (untyped LLM input,
+ * no discriminant tag) into the internal discriminated
+ * {@link ApiCallRequestBody}. All shape narrowing lives here via `in`
+ * checks — the right tool for external, tag-less data — so the handler
+ * stays linear and this logic is unit-testable in isolation.
+ *
+ * Invariant (#765): a body that is PRESENT but cannot be turned into a
+ * sendable shape returns an error result — it is NEVER silently dropped
+ * to `{ kind: "none" }` and shipped as an empty request.
+ *
+ * Serialization of a plain JSON object is deferred to the proxy
+ * (`kind: "json"`) so `{{var}}` substitution runs on the structured leaf
+ * values BEFORE `JSON.stringify` escapes them — an injected credential
+ * can never produce malformed JSON.
+ */
+function resolveRequestBody(
+  rawBody: unknown,
+  opts: { label: string; substituteBody: boolean },
+): ResolvedRequestBody {
+  const { label, substituteBody } = opts;
+
+  // Absent / explicit null → genuinely no body.
+  if (rawBody == null) return { ok: true, body: { kind: "none" } };
+
+  // multipart/form-data: structured parts, serialization deferred to a
+  // FormData build closure so fetch() sets the boundary token itself.
+  if (typeof rawBody === "object" && "multipart" in rawBody) {
+    const validation = validateMultipartParts((rawBody as { multipart: unknown }).multipart);
+    if (!validation.ok) return { ok: false, result: validation.result };
+    const { files, fields } = validation;
+    const wants = substituteBody;
+    return {
+      ok: true,
+      body: {
+        kind: "formData",
+        fieldTemplates: wants ? fields.map((f) => f.value) : [],
+        build: (activeCreds: Record<string, string>): FormData => {
+          const fd = new FormData();
+          // Field parts honour {{var}} substitution when opted in; binary
+          // parts pass through (substituting into bytes would corrupt them).
+          for (const f of fields) {
+            fd.append(f.name, wants ? substituteVars(f.value, activeCreds) : f.value);
+          }
+          for (const file of files) {
+            // Slice into a fresh ArrayBuffer so the Blob owns a copy
+            // independent of the Uint8Array's backing buffer.
+            const ab = file.bytes.buffer.slice(
+              file.bytes.byteOffset,
+              file.bytes.byteOffset + file.bytes.byteLength,
+            ) as ArrayBuffer;
+            fd.append(file.name, new Blob([ab], { type: file.contentType }), file.filename);
+          }
+          return fd;
+        },
+      },
+    };
+  }
+
+  // Pre-serialized string (text/JSON/XML/form/NDJSON). Sent verbatim; no
+  // Content-Type is guessed — the media type is the caller's to declare.
+  if (typeof rawBody === "string") {
+    return {
+      ok: true,
+      body: {
+        kind: "buffered",
+        bytes: new TextEncoder().encode(rawBody).buffer,
+        ...(substituteBody ? { text: rawBody } : {}),
+      },
+    };
+  }
+
+  // Binary upload, base64-encoded agent-side.
+  if (typeof rawBody === "object" && "fromBytes" in rawBody) {
+    if (substituteBody) {
+      return bodyPreflightError(
+        label,
+        "substituteBody requires a text body — pass body as a string, not { fromBytes }.",
+      );
+    }
+    const decoded = decodeStrictBase64((rawBody as { fromBytes: string }).fromBytes);
+    if (decoded === "invalid") {
+      return bodyPreflightError(
+        label,
+        "body.fromBytes is not standard base64 (RFC 4648 §4, alphabet `+/`, no whitespace).",
+      );
+    }
+    if (decoded.byteLength > MAX_REQUEST_BODY_SIZE) {
+      return bodyPreflightError(
+        label,
+        `body.fromBytes is ${decoded.byteLength} bytes, which exceeds the per-request limit of ` +
+          `${MAX_REQUEST_BODY_SIZE} bytes. Operators can raise the cap with ` +
+          `SIDECAR_MAX_REQUEST_BODY_BYTES (and SIDECAR_MAX_MCP_ENVELOPE_BYTES, since base64 ` +
+          `inflation must still fit the JSON-RPC envelope). Files larger than the cap must be ` +
+          `split across multiple api_call invocations.`,
+        {
+          error: {
+            code: "PAYLOAD_TOO_LARGE",
+            scope: "request_body",
+            limit: MAX_REQUEST_BODY_SIZE,
+            actual: decoded.byteLength,
+            envVar: "SIDECAR_MAX_REQUEST_BODY_BYTES",
+          },
+        },
+      );
+    }
+    return {
+      ok: true,
+      body: {
+        kind: "buffered",
+        bytes: decoded.buffer.slice(
+          decoded.byteOffset,
+          decoded.byteOffset + decoded.byteLength,
+        ) as ArrayBuffer,
+      },
+    };
+  }
+
+  // `{ fromFile }` must be resolved into `{ fromBytes }` agent-side before
+  // the call reaches the sidecar (the file bytes never enter model
+  // context). A raw wrapper here means that resolver did not run — error
+  // rather than POST a bogus `{"fromFile":…}` JSON body.
+  if (typeof rawBody === "object" && "fromFile" in rawBody) {
+    return bodyPreflightError(
+      label,
+      "body.fromFile was not resolved before the call — this is a runtime bug. The file should " +
+        "be materialised into { fromBytes, encoding: 'base64' } agent-side before invoking api_call.",
+    );
+  }
+
+  // Plain JSON object/array — the LLM's natural reflex. Serialization is
+  // deferred to the proxy (kind:"json"); default Content-Type to
+  // application/json since we know the wire bytes will be JSON.
+  if (typeof rawBody === "object") {
+    return {
+      ok: true,
+      body: { kind: "json", value: rawBody },
+      defaultContentType: "application/json",
+    };
+  }
+
+  // Present but not a usable shape (number, boolean, …). Per #765 this must
+  // error — never silently fall through to an empty-bodied request.
+  return bodyPreflightError(
+    label,
+    "'body' has an unsupported shape and cannot be sent. Pass a JSON object, a string, " +
+      "{ fromBytes, encoding: 'base64' }, or { multipart: [...] }.",
+  );
 }
 
 /**
@@ -504,7 +692,11 @@ function buildSidecarTools(options: MountMcpOptions): {
       body: {
         description:
           "Request body. Shapes:\n" +
-          "  - string: text/JSON endpoints.\n" +
+          '  - JSON object (e.g. { "url": "https://…" }): serialized to a JSON ' +
+          "string and sent with Content-Type: application/json by default (unless you set " +
+          "the header yourself). Use this for ordinary JSON request bodies.\n" +
+          "  - string: pre-serialized text/JSON/XML/form bodies. No Content-Type is added " +
+          "automatically — set it yourself when the endpoint needs one.\n" +
           "  - { fromFile: <workspace-relative path> }: send a workspace file's bytes as the " +
           "body without base64-encoding it into this argument. Resolved agent-side (read + " +
           "base64) before the call, so the file never enters the model context. Capped at " +
@@ -593,6 +785,20 @@ function buildSidecarTools(options: MountMcpOptions): {
                   ],
                 },
               },
+            },
+          },
+          {
+            // Plain JSON object: serialized to a JSON string and sent with
+            // a default `Content-Type: application/json` (unless the caller
+            // set one). `not` excludes the reserved wrapper shapes above so
+            // this variant stays disjoint from them under strict oneOf.
+            type: "object",
+            not: {
+              anyOf: [
+                { required: ["fromFile"] },
+                { required: ["fromBytes"] },
+                { required: ["multipart"] },
+              ],
             },
           },
         ],
@@ -824,10 +1030,10 @@ function buildSidecarTools(options: MountMcpOptions): {
         target: string;
         method?: string;
         headers?: Record<string, string>;
-        body?:
-          | string
-          | { fromBytes: string; encoding: "base64" }
-          | { multipart: MultipartPartArg[] };
+        // Untyped LLM input — a tag-less union of body shapes. Narrowed
+        // by `resolveRequestBody` (via `in` checks, the right tool for
+        // external data) into the internal discriminated body type.
+        body?: unknown;
         substituteBody?: boolean;
       };
 
@@ -887,118 +1093,22 @@ function buildSidecarTools(options: MountMcpOptions): {
         };
       }
 
-      // Resolve the request body to raw bytes. Three shapes supported:
-      //  - string: TextEncoder → bytes (text/JSON endpoints)
-      //  - { fromBytes, encoding: "base64" }: base64 → bytes (binary
-      //    uploads — runtime resolvers materialise workspace files into
-      //    this shape before MCP because JSON-RPC has no native byte
-      //    type and forwarding bytes as a string corrupts non-UTF-8
-      //    payloads).
-      //  - { multipart: [...] }: structured multipart/form-data. The
-      //    sidecar builds a `FormData` and lets `fetch()` set the
-      //    Content-Type so the boundary token matches the body bytes.
-      let buffered: ArrayBuffer | undefined;
-      let bodyText: string | undefined;
-      let multipartBody:
-        | {
-            build: (activeCreds: Record<string, string>) => FormData;
-            fieldTemplates: string[];
-          }
-        | undefined;
-      if (args.body && typeof args.body === "object" && "multipart" in args.body) {
-        const validation = validateMultipartParts(args.body.multipart);
-        if (!validation.ok) {
-          return validation.result;
-        }
-        const { files, fields } = validation;
-        const wantsSubstitution = !!args.substituteBody;
-        multipartBody = {
-          fieldTemplates: wantsSubstitution ? fields.map((f) => f.value) : [],
-          build: (activeCreds: Record<string, string>): FormData => {
-            const fd = new FormData();
-            // Field parts honour {{var}} substitution when opted in;
-            // binary parts intentionally pass through (substituting into
-            // bytes would corrupt the payload).
-            for (const f of fields) {
-              const value = wantsSubstitution ? substituteVars(f.value, activeCreds) : f.value;
-              fd.append(f.name, value);
-            }
-            for (const file of files) {
-              // Slice into a fresh ArrayBuffer so the Blob owns a copy
-              // independent of the Uint8Array's backing buffer.
-              const ab = file.bytes.buffer.slice(
-                file.bytes.byteOffset,
-                file.bytes.byteOffset + file.bytes.byteLength,
-              ) as ArrayBuffer;
-              fd.append(file.name, new Blob([ab], { type: file.contentType }), file.filename);
-            }
-            return fd;
-          },
-        };
-      } else if (typeof args.body === "string") {
-        buffered = new TextEncoder().encode(args.body).buffer;
-        bodyText = args.body;
-      } else if (args.body && typeof args.body === "object" && "fromBytes" in args.body) {
-        if (args.substituteBody) {
-          return {
-            content: [
-              {
-                type: "text",
-                text:
-                  `${ctx.label}: substituteBody requires a text body — pass body as a string, ` +
-                  "not { fromBytes }.",
-              },
-            ],
-            isError: true,
-            _meta: API_CALL_PREFLIGHT_META,
-          };
-        }
-        const decoded = decodeStrictBase64(args.body.fromBytes);
-        if (decoded === "invalid") {
-          return {
-            content: [
-              {
-                type: "text",
-                text:
-                  `${ctx.label}: body.fromBytes is not standard base64 (RFC 4648 §4, ` +
-                  "alphabet `+/`, no whitespace).",
-              },
-            ],
-            isError: true,
-            _meta: API_CALL_PREFLIGHT_META,
-          };
-        }
-        if (decoded.byteLength > MAX_REQUEST_BODY_SIZE) {
-          return {
-            content: [
-              {
-                type: "text",
-                text:
-                  `${ctx.label}: body.fromBytes is ${decoded.byteLength} bytes, ` +
-                  `which exceeds the per-request limit of ${MAX_REQUEST_BODY_SIZE} bytes. ` +
-                  `Operators can raise the cap with SIDECAR_MAX_REQUEST_BODY_BYTES (and ` +
-                  `SIDECAR_MAX_MCP_ENVELOPE_BYTES, since base64 inflation must still fit ` +
-                  `the JSON-RPC envelope). Files larger than the cap must be split across ` +
-                  `multiple api_call invocations.`,
-              },
-            ],
-            structuredContent: {
-              error: {
-                code: "PAYLOAD_TOO_LARGE",
-                scope: "request_body",
-                limit: MAX_REQUEST_BODY_SIZE,
-                actual: decoded.byteLength,
-                envVar: "SIDECAR_MAX_REQUEST_BODY_BYTES",
-              },
-            },
-            isError: true,
-            _meta: API_CALL_PREFLIGHT_META,
-          };
-        }
-        buffered = decoded.buffer.slice(
-          decoded.byteOffset,
-          decoded.byteOffset + decoded.byteLength,
-        ) as ArrayBuffer;
+      // Resolve the loosely-typed body argument into the internal
+      // discriminated `ApiCallRequestBody`. All shape narrowing + the
+      // silent-drop guard (#765) live in `resolveRequestBody`, keeping
+      // this handler linear and the logic unit-testable in isolation.
+      const resolved = resolveRequestBody(args.body, {
+        label: ctx.label,
+        substituteBody: !!args.substituteBody,
+      });
+      if (!resolved.ok) {
+        return resolved.result;
+      }
+      // Default Content-Type only when the resolver knows the wire bytes
+      // are JSON (object body) AND the caller did not set one — never
+      // override an explicit choice, never guess for a raw string body.
+      if (resolved.defaultContentType && !hasHeader(callerHeaders, "content-type")) {
+        callerHeaders["Content-Type"] = resolved.defaultContentType;
       }
 
       const result = await executeApiCall(
@@ -1007,19 +1117,7 @@ function buildSidecarTools(options: MountMcpOptions): {
           targetUrl: args.target,
           method,
           callerHeaders,
-          body: multipartBody
-            ? {
-                kind: "formData" as const,
-                build: multipartBody.build,
-                fieldTemplates: multipartBody.fieldTemplates,
-              }
-            : buffered
-              ? {
-                  kind: "buffered" as const,
-                  bytes: buffered,
-                  ...(bodyText !== undefined && args.substituteBody ? { text: bodyText } : {}),
-                }
-              : { kind: "none" as const },
+          body: resolved.body,
           substituteBody: !!args.substituteBody,
           proxyUrl: config.proxyUrl,
         },
