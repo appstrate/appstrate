@@ -11,6 +11,7 @@
   "source": {
     "kind": "none"
   },
+  "default_tools": ["api_call"],
   "auths": {
     "primary": {
       "type": "custom",
