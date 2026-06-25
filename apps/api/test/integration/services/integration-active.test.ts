@@ -24,6 +24,7 @@ import { applicationPackages } from "@appstrate/db/schema";
 import {
   isIntegrationActive,
   listActiveIntegrationIds,
+  resolveIntegrationActivations,
 } from "../../../src/services/integration-connections.ts";
 import {
   initSystemIntegrations,
@@ -136,5 +137,30 @@ describe("integration activation precedence", () => {
     );
     expect(flipped.has(SYSTEM_INTEGRATION)).toBe(false);
     expect(flipped.has(PLAIN_INTEGRATION)).toBe(true);
+  });
+
+  it("resolveIntegrationActivations applies the same precedence + carries block flag", async () => {
+    // This is the shared resolver feeding BOTH the settings list endpoint and
+    // the agent-editor detail endpoint. Regression guard: the detail path used
+    // to drop the system fallback, hiding env-backed system integrations in the
+    // agent editor. system (no row) → active; plain (no row) → inactive.
+    const map = await resolveIntegrationActivations(
+      [SYSTEM_INTEGRATION, DCR_INTEGRATION, PLAIN_INTEGRATION],
+      ctx.defaultAppId,
+    );
+    expect(map.get(SYSTEM_INTEGRATION)).toEqual({ active: true, blockUserConnections: false });
+    expect(map.get(DCR_INTEGRATION)).toEqual({ active: true, blockUserConnections: false });
+    expect(map.get(PLAIN_INTEGRATION)).toEqual({ active: false, blockUserConnections: false });
+
+    // Every requested id is present even with no row.
+    expect(map.size).toBe(3);
+
+    // Explicit disable on the system one is sticky and wins over auto-active.
+    await installRow(SYSTEM_INTEGRATION, false);
+    const after = await resolveIntegrationActivations([SYSTEM_INTEGRATION], ctx.defaultAppId);
+    expect(after.get(SYSTEM_INTEGRATION)?.active).toBe(false);
+
+    // Empty input → empty map (no query).
+    expect((await resolveIntegrationActivations([], ctx.defaultAppId)).size).toBe(0);
   });
 });

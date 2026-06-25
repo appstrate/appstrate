@@ -1,11 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { zipSync } from "fflate";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedPackage, seedPackageVersion, seedApplication } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedPackage,
+  seedPackageVersion,
+  seedApplication,
+  seedInstalledPackage,
+} from "../../helpers/seed.ts";
+import {
+  initSystemIntegrations,
+  __resetSystemIntegrationsForTest,
+} from "../../../src/services/integration-client-registry.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
 import { auditEvents, packages, packageDistTags } from "@appstrate/db/schema";
@@ -464,6 +474,74 @@ describe("Packages API", () => {
       expect(res.status).toBe(201);
       const body = (await res.json()) as { id: string };
       expect(body.id).toBe("@otherscope/foreign-agent");
+    });
+  });
+
+  // ═══════════════════════════════════════════════
+  // GET /api/packages/integrations?active=true — agent-editor picker
+  // ═══════════════════════════════════════════════
+
+  describe("GET /api/packages/integrations?active=true (agent-editor picker)", () => {
+    const ENV_SYSTEM = "@pkgorg/gmail"; // env SYSTEM integration, no install row
+    const PLAIN = "@pkgorg/clickup"; // org integration, not installed
+    const INSTALLED = "@pkgorg/notion"; // org integration, installed + enabled
+
+    beforeEach(async () => {
+      // A deployment offering a shared OAuth client for gmail via
+      // SYSTEM_INTEGRATIONS — auto-active without an install row.
+      initSystemIntegrations([
+        {
+          id: ENV_SYSTEM,
+          clients: [
+            {
+              id: "gmail-system",
+              auth_key: "google",
+              client_id: "sys.apps.googleusercontent.com",
+              client_secret: "sys-secret",
+            },
+          ],
+        },
+      ]);
+      // gmail ships as a system-source package (visible in the catalogue with
+      // no install row, like the real one).
+      await seedPackage({ id: ENV_SYSTEM, orgId: null, type: "integration", source: "system" });
+      await seedPackage({ id: PLAIN, orgId: ctx.orgId, type: "integration" });
+      await seedPackage({ id: INSTALLED, orgId: ctx.orgId, type: "integration" });
+      await seedInstalledPackage(ctx.defaultAppId, INSTALLED, { enabled: true });
+    });
+
+    afterEach(() => {
+      __resetSystemIntegrationsForTest();
+    });
+
+    async function activeIds(): Promise<Set<string>> {
+      const res = await app.request("/api/packages/integrations?active=true", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string }[] };
+      return new Set(body.data.map((i) => i.id));
+    }
+
+    it("includes an env-backed SYSTEM integration with no install row (regression)", async () => {
+      const ids = await activeIds();
+      expect(ids.has(ENV_SYSTEM)).toBe(true);
+    });
+
+    it("includes an installed + enabled org integration", async () => {
+      const ids = await activeIds();
+      expect(ids.has(INSTALLED)).toBe(true);
+    });
+
+    it("excludes a non-system org integration with no install row", async () => {
+      const ids = await activeIds();
+      expect(ids.has(PLAIN)).toBe(false);
+    });
+
+    it("excludes a SYSTEM integration with a sticky explicit disable", async () => {
+      await seedInstalledPackage(ctx.defaultAppId, ENV_SYSTEM, { enabled: false });
+      const ids = await activeIds();
+      expect(ids.has(ENV_SYSTEM)).toBe(false);
     });
   });
 
