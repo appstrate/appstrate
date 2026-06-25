@@ -24,7 +24,7 @@
  */
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { buildClaudeSdkEnv } from "@appstrate/runner-claude/binary";
+import { buildClaudeSdkEnv, CLAUDE_SDK_HARDENING } from "@appstrate/runner-claude/binary";
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { createLogger } from "@appstrate/core/logger";
 import type { ChatEngineInput } from "@appstrate/core/subscription-engines";
@@ -109,9 +109,7 @@ export function runClaudeAgentChat(input: ChatEngineInput): Response {
               tools: [], // disable ALL built-ins — chat must not get host execution
               mcpServers: buildMcpServers(input) as never,
               includePartialMessages: true,
-              permissionMode: "bypassPermissions",
-              settingSources: [],
-              persistSession: false,
+              ...CLAUDE_SDK_HARDENING,
               maxTurns: MAX_TURNS,
               abortController: controller,
             },

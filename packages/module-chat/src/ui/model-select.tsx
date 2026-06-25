@@ -17,7 +17,6 @@ const ALIAS_LABEL = "Alias";
 
 const PROVIDERS: Record<string, string> = {
   "anthropic-messages": "Anthropic",
-  "openai-codex-responses": "ChatGPT",
   "openai-completions": "OpenAI",
   "mistral-conversations": "Mistral",
 };
@@ -31,7 +30,6 @@ function providerLabel(model: {
   // provider/protocol (which is null on the browser-facing projection anyway).
   if (model.aliased) return ALIAS_LABEL;
   if (model.providerId === "claude-code") return "Claude Code";
-  if (model.providerId === "codex") return "ChatGPT";
   return (model.apiShape && PROVIDERS[model.apiShape]) || ALIAS_LABEL;
 }
 

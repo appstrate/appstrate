@@ -155,20 +155,6 @@ describe("/llm/* oauth — no forging", () => {
     expect(calls[1]!.headers["anthropic-beta"]).toBe("oauth-2025-04-20");
   });
 
-  it("honours a custom oauthBeta flag", async () => {
-    const { fetchFn, calls } = setupFetchMock(upstreamOk);
-    const deps = makeDeps(fetchFn);
-    deps.config.llm = { ...OAUTH_CFG, oauthBeta: "oauth-2099-01-01" };
-    const app = createApp(deps);
-
-    await app.request("/llm/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "m", messages: [] }),
-    });
-    expect(calls[1]!.headers["anthropic-beta"]).toBe("oauth-2099-01-01");
-  });
-
   it("strips any x-api-key (this path is bearer-only)", async () => {
     const { fetchFn, calls } = setupFetchMock(upstreamOk);
     const deps = makeDeps(fetchFn);

@@ -345,12 +345,7 @@ async function logOauthLlmResponse(
   return upstream;
 }
 
-function llmFetchErrorResponse(
-  // Hono context — typed loosely to avoid coupling to its internal generics.
-  c: { json: (body: unknown, status: number) => Response },
-  targetUrl: string,
-  err: unknown,
-): Response {
+function llmFetchErrorResponse(c: Context, targetUrl: string, err: unknown): Response {
   const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
   let domain: string | undefined;
   try {
@@ -395,13 +390,7 @@ function llmBodyOversizeError(actual: number | null) {
  * `oauth-identity.ts` (which carried the `MAX_REQUEST_BODY_SIZE` →
  * `TransformBodyTooLargeError` → 413 guard) was deleted.
  */
-async function bufferLlmBodyBounded(
-  c: {
-    req: { raw: Request; header: (name: string) => string | undefined };
-    json: (body: unknown, status: number) => Response;
-  },
-  maxBytes: number,
-): Promise<string | Response> {
+async function bufferLlmBodyBounded(c: Context, maxBytes: number): Promise<string | Response> {
   const declared = c.req.header("content-length");
   if (declared !== undefined) {
     const declaredLength = Number(declared);
@@ -681,7 +670,6 @@ export function createApp(deps: AppDeps): Hono {
     const qs = new URL(c.req.url).search;
     const targetUrl = `${baseUrl}${path}${qs}`;
     const method = c.req.method;
-    const oauthBeta = llmConfig.oauthBeta ?? DEFAULT_OAUTH_BETA;
 
     // Forward the driver's headers verbatim except: drop any x-api-key (this
     // path is bearer-only), force the real bearer, and merge the OAuth beta.
@@ -698,7 +686,7 @@ export function createApp(deps: AppDeps): Hono {
       }
       headers["anthropic-beta"] = mergeAnthropicBeta(
         betaKey ? headers[betaKey] : undefined,
-        oauthBeta,
+        DEFAULT_OAUTH_BETA,
       );
       if (betaKey && betaKey !== "anthropic-beta") delete headers[betaKey];
       headers["authorization"] = `Bearer ${accessToken}`;

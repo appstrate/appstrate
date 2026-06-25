@@ -43,7 +43,7 @@ import {
   type Runner,
   type RunResult,
 } from "@appstrate/afps-runtime/runner";
-import { buildClaudeSdkEnv } from "./claude-binary.ts";
+import { buildClaudeSdkEnv, CLAUDE_SDK_HARDENING } from "./claude-binary.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { drainAndEmitInto, type RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { SdkRunEventMapper, type SdkRunMessage } from "./sdk-event-mapper.ts";
@@ -200,9 +200,7 @@ export class ClaudeAgentRunner implements Runner {
       ...(this.opts.outputSchema
         ? { outputFormat: { type: "json_schema", schema: this.opts.outputSchema } }
         : {}),
-      permissionMode: "bypassPermissions",
-      settingSources: [],
-      persistSession: false,
+      ...CLAUDE_SDK_HARDENING,
       maxTurns: this.opts.maxTurns ?? DEFAULT_MAX_TURNS,
       abortController: controller,
     };

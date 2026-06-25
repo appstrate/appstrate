@@ -41,6 +41,27 @@ export type { BinaryResolver };
 const SDK_SCOPE = "@anthropic-ai/claude-agent-sdk";
 
 /**
+ * The security-posture flags every host that drives the Claude Agent SDK must
+ * set on its `query()` options, byte-identical between the chat engine and the
+ * agent runner — centralized here (beside {@link buildClaudeSdkEnv}) so the
+ * posture cannot drift between the two call sites:
+ *
+ * - `permissionMode: "bypassPermissions"` — the sandbox/gateway is the boundary,
+ *   the SDK must not prompt.
+ * - `settingSources: []` — no filesystem config bleed (`~/.claude`, project
+ *   `.claude`, …).
+ * - `persistSession: false` — no transcript written to disk.
+ *
+ * Spread into each call site's `query()` options; the per-host keys (`tools`,
+ * `cwd`, `maxTurns`, `includePartialMessages`, `outputFormat`, …) stay inline.
+ */
+export const CLAUDE_SDK_HARDENING = {
+  permissionMode: "bypassPermissions" as const,
+  settingSources: [],
+  persistSession: false,
+};
+
+/**
  * Curated environment for a spawned `claude` Agent SDK binary. Shared by every
  * host that drives the SDK as a subprocess (the chat engine + the agent
  * runner).

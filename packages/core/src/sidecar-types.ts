@@ -540,13 +540,12 @@ export interface LlmProxyApiKeyConfig {
  * provider fingerprint (the official Claude Agent SDK binary).
  *
  * The sidecar forges nothing. It only resolves a fresh access token from the
- * platform, swaps the request bearer for it, and ensures the OAuth beta flag
- * ({@link oauthBeta}) is present — leaving the driver's own user-agent / `x-app`
- * / `anthropic-beta` fingerprint, request headers, and body untouched. This is
- * the runner-side counterpart
- * of the chat's `claude-code-sdk-gateway`. There is no forging fallback: a
- * subscription provider whose driver can't sign its own fingerprint has no
- * execution path.
+ * platform, swaps the request bearer for it, and ensures the documented OAuth
+ * beta flag (`oauth-2025-04-20`) is present — leaving the driver's own
+ * user-agent / `x-app` / `anthropic-beta` fingerprint, request headers, and body
+ * untouched. This is the runner-side counterpart of the chat's
+ * `claude-code-sdk-gateway`. There is no forging fallback: a subscription
+ * provider whose driver can't sign its own fingerprint has no execution path.
  */
 export interface LlmProxyOauthConfig {
   authMode: "oauth";
@@ -554,11 +553,6 @@ export interface LlmProxyOauthConfig {
   baseUrl: string;
   /** ID of the `model_provider_credentials` row backing this OAuth connection. */
   credentialId: string;
-  /**
-   * OAuth beta flag ensured on the outbound `anthropic-beta` header (merged,
-   * never replacing the driver's own betas). Defaults to `oauth-2025-04-20`.
-   */
-  oauthBeta?: string;
   /** Set for model aliases — rewrite `model` alias↔real in req/resp. See {@link ModelSwap}. */
   modelSwap?: ModelSwap;
 }
