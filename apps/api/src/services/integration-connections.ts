@@ -1522,6 +1522,12 @@ export interface StoreConnectionInput {
    */
   connectionId?: string;
   /**
+   * Optional display-name seed used ONLY on INSERT when no upstream identity
+   * was extracted (e.g. a masked API-key fingerprint from FieldsStrategy).
+   * Identity still wins; ignored on reconnect (label is never re-derived).
+   */
+  labelHint?: string;
+  /**
    * Which registered client minted this connection — a flat client id (system
    * env id or custom `integration_oauth_clients.id`). Pinned on the row so token
    * refresh resolves the same credentials. Set by OAuth2Strategy on every oauth2
@@ -1589,6 +1595,11 @@ export interface PersistCredentialInput {
   accountId?: string;
   identityClaims?: Record<string, unknown>;
   scopesGranted?: string[];
+  /**
+   * INSERT-only label seed (masked secret fingerprint). Used after identity
+   * but before the "Connexion N" counter. Never applied on UPDATE paths.
+   */
+  labelHint?: string;
   /** INSERT only — the `(packageId, authKey)` the new row belongs to. */
   packageId?: string;
   authKey?: string;
@@ -1660,6 +1671,7 @@ export async function persistCredentialBundle(
     const ownerFilter = userId ? sql`user_id = ${userId}` : sql`end_user_id = ${endUserId}`;
     const labelValue: string | SQL =
       identityLabel ??
+      input.labelHint ??
       sql<string>`'Connexion ' || ((SELECT COUNT(*) FROM integration_connections WHERE application_id = ${target.scope.applicationId} AND integration_package_id = ${input.packageId} AND ${ownerFilter}) + 1)`;
     const inserted = await db
       .insert(integrationConnections)
@@ -1860,6 +1872,7 @@ export async function saveIntegrationConnection(
     scopesGranted: input.scopesGranted ?? [],
     needsReconnection: false,
     expiresAt: input.expiresAt ?? null,
+    ...(input.labelHint ? { labelHint: input.labelHint } : {}),
     ...(input.clientRef !== undefined ? { clientRef: input.clientRef } : {}),
   };
   const summary = input.connectionId

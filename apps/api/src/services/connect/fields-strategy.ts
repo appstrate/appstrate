@@ -18,6 +18,7 @@ import {
   type IntegrationConnectionSummary,
 } from "../integration-connections.ts";
 import { validateConnectionCredentials } from "../schema.ts";
+import { maskCredentialLabel } from "./mask-label.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import type {
   ConnectContext,
@@ -54,6 +55,11 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
     }
 
     const { accountId, identityClaims } = extractIdentity(manifest, ctx.authKey, credentials);
+    // No upstream identity → derive a recognisable label from the secret itself
+    // (masked fingerprint, e.g. `fc****f10b`) rather than fall back to
+    // "Connexion N". Only honoured on INSERT — the persist layer never touches
+    // `label` on reconnect, so this stays stable.
+    const labelHint = maskCredentialLabel(auth.credentials?.schema, credentials);
     return saveIntegrationConnection(ctx.scope, {
       packageId: ctx.integrationId,
       authKey: ctx.authKey,
@@ -61,6 +67,7 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
       credentials,
       identityClaims,
       actor: ctx.actor,
+      ...(labelHint ? { labelHint } : {}),
       ...(ctx.connectionId ? { connectionId: ctx.connectionId } : {}),
     });
   }
