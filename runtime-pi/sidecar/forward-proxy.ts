@@ -139,54 +139,12 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     return platformHost !== null && hostname.toLowerCase() === platformHost;
   }
 
-  // Per-run egress allowlist (vend-mode runs, e.g. the Codex CLI). The allowlist
-  // lives ON the vend LLM config — it exists if and only if this is a vend run —
-  // so the vend-egress lock and its host list derive from one source. When set,
-  // outbound traffic is locked to these hosts only — the real upstream token
-  // lives in-container, so a wide-open egress would let it be exfiltrated.
-  // Normalised once; a target matches by exact name or parent-domain suffix.
-  const egressAllowlist = (config.llm?.authMode === "vend" ? config.llm.egressAllowlist : [])
-    .map((h) => h.toLowerCase())
-    .filter(Boolean);
-
-  function isOnAllowlist(hostname: string): boolean {
-    return egressAllowlist.some(
-      (allowed) => hostname === allowed || hostname.endsWith(`.${allowed}`),
-    );
-  }
-
   function isAllowedHost(hostname: string): boolean {
     const h = hostname.toLowerCase();
-    // The platform host is always reachable (HMAC-scoped internal traffic),
-    // even under an allowlist — the agent's sink/finalize POSTs must get out.
+    // The platform host is always reachable (HMAC-scoped internal traffic).
     if (isPlatformHost(h)) return true;
-    if (isBlockedHostFn(h)) return false;
-    // Allowlist mode (vend runs): everything not on the list is refused.
-    if (egressAllowlist.length > 0) return isOnAllowlist(h);
-    // Default posture: SSRF-block-only (every public host allowed).
-    return true;
-  }
-
-  // Vend-egress port pin. A vend run holds the REAL subscription token
-  // in-container, so its DIRECT egress must be locked tight: the host-only
-  // allowlist (`isAllowedHost`) would still let the agent CONNECT to
-  // `chatgpt.com:<any-port>` and tunnel arbitrary protocols out. When an
-  // allowlist is present (the vend-run signal — the allowlist lives on the vend
-  // config, so a non-empty list iff `authMode === "vend"`), refuse any non-443 port on
-  // allowlisted hosts. The platform host is exempt — it is internal HMAC-scoped
-  // traffic on its own port, governed by `isPlatformHost`, not the allowlist.
-  const vendEgressActive = egressAllowlist.length > 0;
-
-  function isAllowedPort(hostname: string, port: number): boolean {
-    if (!vendEgressActive) return true;
-    if (isPlatformHost(hostname)) return true;
-    // Loopback is a dev/test-only target (local echo servers on ephemeral
-    // ports); a real vend-egress provider host is never loopback. Exempting it
-    // keeps the port pin from breaking local fixtures while still locking every
-    // real allowlisted host to :443.
-    const h = hostname.toLowerCase();
-    if (h === "127.0.0.1" || h === "::1" || h === "localhost") return true;
-    return port === 443;
+    // Always-on SSRF blocklist (private ranges, link-local, metadata, …).
+    return !isBlockedHostFn(h);
   }
 
   /**
@@ -234,15 +192,6 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     if (!isAllowedHost(parsed.hostname)) {
       res.writeHead(403);
       res.end("Blocked: internal network");
-      return;
-    }
-
-    // Vend-egress port pin (see isAllowedPort) — a vend run may only egress to
-    // :443 on allowlisted hosts, so an in-container token can't be tunnelled
-    // out over an arbitrary port.
-    if (!isAllowedPort(parsed.hostname, parseInt(parsed.port) || 80)) {
-      res.writeHead(403);
-      res.end("Blocked: port not allowed for this run");
       return;
     }
 
@@ -331,15 +280,6 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     // SSRF protection — block CONNECT tunnels to internal/private networks,
     // except the trusted platform API (handles local-dev host.docker.internal).
     if (!isAllowedHost(host)) {
-      clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-      clientSocket.destroy();
-      return;
-    }
-
-    // Vend-egress port pin (see isAllowedPort) — refuse a CONNECT tunnel to any
-    // non-443 port on an allowlisted host so the in-container token cannot be
-    // exfiltrated over an arbitrary tunnelled port.
-    if (!isAllowedPort(host, port)) {
       clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       clientSocket.destroy();
       return;

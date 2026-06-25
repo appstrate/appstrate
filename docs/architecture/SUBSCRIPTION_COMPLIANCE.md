@@ -12,6 +12,17 @@ credentials (Claude Pro/Max via `claude-code`, ChatGPT Plus/Pro/Business via
 `codex`), what we can guarantee at the code level, and what we deliberately do
 **not** claim.
 
+> **Scope of the current release.** Only the **Claude** subscription path
+> (`claude-code` — chat + sandboxed agent runs via the official Claude Agent SDK)
+> is shipped and live. The **Codex** subscription is currently an
+> **inference/model provider only**: it can be connected and its models listed,
+> but running an autonomous agent on a codex credential is **not executable** in
+> this release — it is hard-refused (`UnrunnableOauthProviderError`), never
+> forged. The Codex **agent** path described below (the vended-token + per-run
+> egress-lock mechanism) is **deferred to a follow-up PR**; the sections that
+> describe it record the intended design for when it lands, not code that ships
+> today.
+
 ---
 
 ## 1. What is guaranteed in code
@@ -28,19 +39,20 @@ the platform issues **zero** subscription API calls of its own (see §1.5). Ever
 request a subscription token authenticates is made by the official binary at run
 time; the platform never sends one to test a credential or to enumerate models.
 
-| Provider      | Chat                                                    | Agents (sandboxed run)                               |
-| ------------- | ------------------------------------------------------- | ---------------------------------------------------- |
-| `claude-code` | `@anthropic-ai/claude-agent-sdk` `query()` (in-process) | `ClaudeAgentRunner` → official `claude` binary       |
-| `codex`       | _none_ — agent-only (no chat surface)                   | `CodexAgentRunner` → official `@openai/codex` binary |
+| Provider      | Chat                                                    | Agents (sandboxed run)                                  |
+| ------------- | ------------------------------------------------------- | ------------------------------------------------------- |
+| `claude-code` | `@anthropic-ai/claude-agent-sdk` `query()` (in-process) | `ClaudeAgentRunner` → official `claude` binary          |
+| `codex`       | _none_ — no chat surface                                | _deferred_ — inference/model provider only this release |
 
 Codex has **no chat surface**: its subscription token can't be safely held
 host-side (the CLI talks to chatgpt.com directly, so the chat host would hold the
-real token), so it runs only as a docker-isolated agent. The Claude subscription
-is chat-usable because its gateway swaps the bearer server-side.
+real token). Codex agent runs (the docker-isolated official-CLI path described
+below) are **deferred to a follow-up PR** — in this release a codex credential is
+inference-only and an agent run on it is refused. The Claude subscription is
+chat-usable because its gateway swaps the bearer server-side.
 
 Anchors: `packages/module-claude-code/src/claude-agent/engine.ts`,
-`packages/runner-claude/`, `packages/runner-codex/`, `runtime-pi/entrypoint.ts`
-(`buildClaudeAgentRunner` / `buildCodexAgentRunner`).
+`packages/runner-claude/`, `runtime-pi/entrypoint.ts` (`buildClaudeAgentRunner`).
 
 ### 1.2 No fingerprint forging — and no forging fallback
 

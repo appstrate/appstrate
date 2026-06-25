@@ -7,14 +7,13 @@
  * API-key provider, and the default for anything unregistered), or a
  * subscription engine that drives a vendor's OFFICIAL binary so it signs its
  * own client fingerprint (no forging). What core owns here is the engine
- * VOCABULARY + the binding SHAPE — the `"claude"|"codex"` engines, the binding
- * fields (credential-delivery mode, egress allowlist, native-output capability,
- * chat handler) + the shared {@link ChatEngineInput} chat contract — and the
- * pure {@link isSubscriptionEngine} predicate. It ships ZERO bindings:
- * the `claude` (Claude Agent SDK) and `codex` (Codex CLI) bindings are
- * contributed at boot by their opt-in provider modules (`@appstrate/module-
- * claude-code`, `@appstrate/module-codex`) via the `subscriptionEngine` field on
- * their {@link ModelProviderDefinition}.
+ * VOCABULARY + the binding SHAPE — the `"claude"` engine, the binding
+ * fields (credential-delivery mode, native-output capability, chat handler) +
+ * the shared {@link ChatEngineInput} chat contract — and the pure
+ * {@link isSubscriptionEngine} predicate. It ships ZERO bindings: the `claude`
+ * (Claude Agent SDK) binding is contributed at boot by its opt-in provider
+ * module (`@appstrate/module-claude-code`) via the `subscriptionEngine` field on
+ * its {@link ModelProviderDefinition}.
  *
  * There is NO registry here anymore. The provider definition is the SINGLE
  * source of truth for a provider's engine; the platform's model-provider
@@ -26,7 +25,7 @@
  */
 
 /** The execution engine for a resolved model. */
-export type RunEngine = "pi" | "claude" | "codex";
+export type RunEngine = "pi" | "claude";
 
 /** A subscription engine — one that drives a vendor's official binary. */
 export type SubscriptionRunEngine = Exclude<RunEngine, "pi">;
@@ -74,23 +73,11 @@ export interface SubscriptionEngineBinding {
    * - `"oauth"` — the official binary points at the sidecar's `/llm` gateway,
    *   which swaps the placeholder bearer for the real token server-side. The
    *   real token never enters the agent container, so egress need not be locked.
-   * - `"vend"` — the binary talks to the upstream DIRECTLY (it ignores any
-   *   base-URL override), so the sidecar cannot reverse-proxy it. The runner
-   *   GETs the real token once from `/credential-vend` into the container; the
-   *   real token therefore lives in-container and its egress MUST be locked to
-   *   the vendor's hosts ({@link egressAllowlist}) as the sole compensating
-   *   control.
    *
-   * Invariant: `sidecarAuthMode === "vend"` iff {@link egressAllowlist} is set.
-   * This invariant is enforced downstream at launch/boot — by the run launcher
-   * (`pi.ts`) and the sidecar (`server.ts`) — not by this contract.
+   * Only the no-forging `"oauth"` delivery is supported: the binary points at
+   * the sidecar gateway and never holds the real token in-container.
    */
-  sidecarAuthMode: "oauth" | "vend";
-  /**
-   * Per-run egress allowlist for `"vend"` engines that hold the REAL token
-   * in-container (suffix-matched). Required for vend, absent for oauth.
-   */
-  egressAllowlist?: readonly string[];
+  sidecarAuthMode: "oauth";
   /**
    * True iff this engine materialises the structured deliverable NATIVELY (its
    * binary emits `output` directly — e.g. the Claude SDK's `outputFormat` →
@@ -98,7 +85,7 @@ export interface SubscriptionEngineBinding {
    * tool. When set, the launcher MUST NOT serve the MCP `output` tool to the
    * run (two output mechanisms would be ambiguous and could double-emit); the
    * output JSON Schema still reaches the runner for the native path. Engines
-   * without this capability (codex, pi) take `output` through the MCP tool.
+   * without this capability (pi) take `output` through the MCP tool.
    */
   nativeOutput?: boolean;
   /**
@@ -107,15 +94,15 @@ export interface SubscriptionEngineBinding {
    * the chat driver too. The platform resolves this off the provider definition
    * and injects it into the chat module (which reads it through its
    * platform-deps, never importing this registry directly). Engines with no chat
-   * surface (codex — agent-only) omit it, and the generic ai-sdk/pi chat path is
-   * used for everything unregistered.
+   * surface omit it, and the generic ai-sdk/pi chat path is used for everything
+   * unregistered.
    */
   chatHandler?: (input: ChatEngineInput) => Response;
 }
 
 /** A binding plus the identity (provider id + label) it was registered under. */
 export interface SubscriptionEngineDef extends SubscriptionEngineBinding {
-  /** Credential provider id (e.g. `"claude-code"`, `"codex"`). */
+  /** Credential provider id (e.g. `"claude-code"`). */
   providerId: string;
   /** Human-readable provider name for user-facing messages. */
   label: string;

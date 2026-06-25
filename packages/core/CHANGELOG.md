@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`authMode: "oauth"`) is now the single, **non-forging** OAuth `/llm` mode: the
   sidecar swaps the bearer + ensures the OAuth beta only, leaving the driver's own
   fingerprint untouched (the official Claude Agent SDK binary signs its own). The
-  `LlmProxyConfig` union is `LlmProxyApiKeyConfig | LlmProxyOauthConfig | LlmProxyVendConfig`.
+  `LlmProxyConfig` union is `LlmProxyApiKeyConfig | LlmProxyOauthConfig`.
 
 ### Removed — OAuth subscription fingerprint forging (BREAKING)
 

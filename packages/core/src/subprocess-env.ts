@@ -3,13 +3,12 @@
 
 /**
  * Shared building blocks for spawning a vendor CLI/SDK binary (the Claude Agent
- * SDK and the Codex CLI) under Bun with the platform's credential-isolation
- * posture. Both engine binaries need the same two things — a curated,
- * secret-free environment that still egresses through the sidecar proxy, and a
- * scope-anchored resolver for their per-arch optional-dependency binary — so the
- * mechanics live here once. The engine-specific bits (which credential keys to
- * re-assert, which telemetry flags to silence, the per-arch package matrix)
- * stay in `claude-binary.ts` / `codex-binary.ts`.
+ * SDK) under Bun with the platform's credential-isolation posture. The binary
+ * needs two things — a curated, secret-free environment that still egresses
+ * through the sidecar proxy, and a scope-anchored resolver for its per-arch
+ * optional-dependency binary — so the mechanics live here once. The
+ * engine-specific bits (which credential keys to re-assert, which telemetry
+ * flags to silence, the per-arch package matrix) stay in `claude-binary.ts`.
  *
  * This module imports nothing from either SDK — it only manipulates env strings
  * and resolves package-specifier strings through an injected resolver — so

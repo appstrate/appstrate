@@ -34,7 +34,6 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { tmpdir } from "node:os";
 import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
 import {
   PiRunner,
@@ -48,12 +47,11 @@ import {
   type AppstrateCtxProvider,
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
-// The subscription runners (claude/codex) are DYNAMICALLY imported inside their
-// build functions, gated by RUN_ENGINE — a `pi` run never loads them, and a
-// slim OSS image built without these packages (ISO6) still boots for pi. Only
-// the types are statically referenced (erased at runtime).
+// The subscription runner (claude) is DYNAMICALLY imported inside its build
+// function, gated by RUN_ENGINE — a `pi` run never loads it, and a slim OSS
+// image built without the package (ISO6) still boots for pi. Only the type is
+// statically referenced (erased at runtime).
 import type { ClaudeAgentRunner } from "@appstrate/runner-claude";
-import type { CodexAgentRunner } from "@appstrate/runner-codex";
 import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import {
   BUNDLE_FORMAT_VERSION,
@@ -433,7 +431,7 @@ const sidecarUrl = env.sidecarUrl;
 // Shared runtime-event drainer (one per run, in-memory cursor). The sidecar
 // executes each runtime tool ONCE and journals its canonical events; every
 // runner drains this on its single sink (pi after each forwarded tool call,
-// claude/codex after each stream step + a final drain). One instance so the
+// claude after each stream step + a final drain). One instance so the
 // cursor stays consistent across intermediate + final drains. Undefined when no
 // sidecar is attached (no journal to drain — the in-process Pi extension path
 // emits its own events).
@@ -461,12 +459,7 @@ const runtimeDrainer: RuntimeEventDrainer | undefined = sidecarUrl
 // runtime tools + the sidecar `/mcp` over HTTP), so the Pi-specific MCP client
 // + extension factories below are skipped for it — but the integration boot
 // gate stays (engine-agnostic).
-const runEngine: "pi" | "claude" | "codex" =
-  process.env.RUN_ENGINE === "claude"
-    ? "claude"
-    : process.env.RUN_ENGINE === "codex"
-      ? "codex"
-      : "pi";
+const runEngine: "pi" | "claude" = process.env.RUN_ENGINE === "claude" ? "claude" : "pi";
 
 // When no sidecar is attached (no integrations + static API
 // key), the agent runs without MCP-backed tools. The platform wires
@@ -530,13 +523,13 @@ if (sidecarUrl) {
       // integration tool (including the generic `{ns}__api_call`). Runtime
       // tools (log/note/pin/report/output) are executed once by the sidecar and
       // journaled; the drainer pulls them on the run sink after each forwarded
-      // call — uniform with the Claude + Codex runners, no `_meta` trust.
+      // call — uniform with the Claude runner, no `_meta` trust.
       //
       // Pi drains each tool call inline in `execute()` right after `callTool`
       // resolves — the sidecar appends the events synchronously inside the
       // wrapped handler BEFORE responding, so the per-call drain always captures
       // them in time (no "events land after the stream ends" gap that
-      // claude/codex must backstop). What the per-call drain CANNOT cover is a
+      // claude must backstop). What the per-call drain CANNOT cover is a
       // transient localhost failure of the LAST call's single best-effort drain
       // (no subsequent call retries it). The retrying final drain for that case
       // is injected via `piEventSink` (below): PiRunner owns its finalize, so a
@@ -771,7 +764,7 @@ async function buildClaudeAgentRunner(): Promise<ClaudeAgentRunner> {
     // rather than calling the upstream unauthenticated.
     throw new Error("Claude engine selected but no sidecar is attached (no /llm gateway).");
   }
-  // Dynamic import: loaded ONLY for a claude run, so a pi/codex run (or a slim
+  // Dynamic import: loaded ONLY for a claude run, so a pi run (or a slim
   // image without @appstrate/runner-claude) never resolves the Agent SDK.
   const { ClaudeAgentRunner } = await import("@appstrate/runner-claude");
   const { resolveClaudeCodeBinary, makeSdkScopeResolver } =
@@ -798,110 +791,15 @@ async function buildClaudeAgentRunner(): Promise<ClaudeAgentRunner> {
   });
 }
 
-/**
- * Construct the Codex CLI runner (a `codex` run). It drives the official
- * `codex` binary as a subprocess. Unlike the Claude runner, the binary talks to
- * the upstream (`chatgpt.com`) DIRECTLY — its models-manager ignores any base-URL
- * override — so the sidecar cannot reverse-proxy it. Instead the runner VENDS
- * the real subscription token from the sidecar's `/credential-vend` at run start
- * and the binary egresses straight out, locked to the provider's hosts by the
- * sidecar's per-run egress allowlist. Nothing is forged (the binary signs its
- * own fingerprint).
- */
-async function buildCodexAgentRunner(): Promise<CodexAgentRunner> {
-  if (!sidecarUrl) {
-    // A codex run is always OAuth → always sidecar-backed (the vend endpoint
-    // that hands over the real token). No sidecar means a launcher bug.
-    throw new Error("Codex engine selected but no sidecar is attached (no /credential-vend).");
-  }
-  // Dynamic import: loaded ONLY for a codex run, so a pi/claude run (or a slim
-  // image without @appstrate/runner-codex) never resolves the Codex package.
-  const { CodexAgentRunner } = await import("@appstrate/runner-codex");
-  const { resolveCodexBinary, makeCodexScopeResolver, sweepStaleCodexHomes } =
-    await import("@appstrate/runner-codex/binary");
-  const base = sidecarUrl.replace(/\/$/, "");
-
-  // Real-token-at-rest hygiene (Q1, backs H1): reap any orphaned `codex-run-*`
-  // CODEX_HOME dirs a prior ungraceful kill (SIGKILL/OOM between writing
-  // auth.json and the runner's `finally` cleanup) left behind — each still holds
-  // a real subscription token on disk. Done at codex runner init, before this
-  // run writes its own home. Best-effort and never throws (a missing dir is a
-  // no-op); 1 h staleness threshold so an in-flight sibling run is never touched.
-  const sweptHomes = await sweepStaleCodexHomes({
-    baseDir: tmpdir(),
-    prefix: "codex-run-",
-    maxAgeMs: 60 * 60 * 1000,
-    nowMs: Date.now(),
-  });
-  if (sweptHomes > 0) {
-    await progress(`Reaped ${sweptHomes} stale codex credential home(s)`, {
-      sweptCodexHomes: sweptHomes,
-    });
-  }
-  // OFFICIAL-BINARY-ONLY for a subscription (vend) run. The vend run holds the
-  // REAL ChatGPT subscription token in-container, so the binary it drives MUST
-  // be the pinned, official `@openai/codex` vendor binary — a substituted binary
-  // could exfiltrate the token or forge a different client identity. So we
-  // resolve ONLY through the per-arch package resolver and FAIL CLOSED if it is
-  // absent: NO bare-`codex`-on-PATH fallback (anyone could drop a `codex` onto
-  // PATH). An explicit, non-default operator opt-in (`CODEX_ALLOW_BINARY_OVERRIDE
-  // = "1"`) is required to honour `CODEX_BINARY_PATH` for local dev/test — a real
-  // production vend run never silently trusts an arbitrary path.
-  //
-  // PRODUCTION HARDENING: the override is additionally gated on an explicit
-  // dev/test signal that FAILS CLOSED when absent. `runOrigin` (platform vs
-  // remote) is NOT in the agent container's env contract here (it lives on the
-  // platform run record, never forwarded to runtime-pi), so we cannot key off
-  // it directly. Instead we require `NODE_ENV` to be explicitly "development"
-  // or "test": the runtime-pi prod image pins `NODE_ENV=production` (Dockerfile
-  // `runtime` stage) AND an UNSET `NODE_ENV` ALSO fails closed — so a
-  // production container refuses the override even if both
-  // `CODEX_ALLOW_BINARY_OVERRIDE` and `CODEX_BINARY_PATH` were somehow injected.
-  // Honouring an arbitrary path is a deliberate triple opt-in only a local
-  // dev/test run can make; otherwise the pinned official resolver wins.
-  const isDevOrTestEnv = process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
-  const binaryOverrideAllowed =
-    isDevOrTestEnv &&
-    process.env.CODEX_ALLOW_BINARY_OVERRIDE === "1" &&
-    !!process.env.CODEX_BINARY_PATH;
-  let codexBinary: string;
-  if (binaryOverrideAllowed) {
-    codexBinary = process.env.CODEX_BINARY_PATH!;
-  } else {
-    // Throws a descriptive error when the pinned package is not installed —
-    // intentionally fatal: launching a vend run on an unverifiable binary is a
-    // worse outcome than failing the run.
-    codexBinary = resolveCodexBinary({ resolve: makeCodexScopeResolver(import.meta.url) });
-  }
-
-  return new CodexAgentRunner({
-    binaryPath: codexBinary,
-    modelId: env.modelId,
-    systemPrompt,
-    credentialUrl: `${base}/credential-vend`,
-    cwd: WORKSPACE,
-    modelCost: env.modelCost,
-    // Runtime tools (incl. `output`) are journaled by the sidecar and drained
-    // here — codex's `--json` stream never surfaces the MCP result `_meta`.
-    ...(runtimeDrainer ? { drainer: runtimeDrainer } : {}),
-    // Same platform tool surface the Claude runner gets: integrations +
-    // api_call + run_history + recall_memory + the agent-selected runtime tools,
-    // over the sidecar's stateless Streamable-HTTP `/mcp`. `Host: sidecar`
-    // satisfies the sidecar's host-header gate. (Codex's egress lock governs its
-    // DIRECT chatgpt.com traffic; internal sidecar traffic is separate.)
-    sidecarMcp: { url: `${base}/mcp`, headers: { Host: "sidecar" } },
-  });
-}
-
 // Pi-path final drain. Pi drains each tool call inline (see the note in the
 // factories block above), but the LAST call's single best-effort drain has no
-// subsequent call to retry a transient localhost failure — unlike claude/codex,
-// which own a retrying final drain inside `run()`. PiRunner owns its finalize,
+// subsequent call to retry a transient localhost failure — unlike claude,
+// which owns a retrying final drain inside `run()`. PiRunner owns its finalize,
 // so we inject the final drain by wrapping the sink: drain-until-empty +
 // bounded retry through the SAME bridged sink the per-call drains use, so the
 // stdout-bridge folds any straggler into its aggregate BEFORE merging it into
 // the finalize POST. Best-effort (`final: true`) — never flips an
-// already-decided run. Pi only: claude/codex already drain finally in `run()`.
+// already-decided run. Pi only: claude already drains finally in `run()`.
 const piEventSink: typeof bridgedSink = runtimeDrainer
   ? {
       handle: (event) => bridgedSink.handle(event),
@@ -922,21 +820,15 @@ const startTime = Date.now();
 
 // Graceful shutdown: a container stop sends SIGTERM (then SIGKILL after a grace
 // period). Convert it to an AbortSignal threaded into runner.run so the runner
-// can unwind its cleanup (codex `rm(CODEX_HOME)`, claude aborting the SDK query,
-// pi cancelling tool calls) BEFORE the hard kill lands — instead of being torn
-// down mid-write with a leaked token home.
+// can unwind its cleanup (claude aborting the SDK query, pi cancelling tool
+// calls) BEFORE the hard kill lands — instead of being torn down mid-write.
 const runAbort = new AbortController();
 const onTerminate = () => runAbort.abort();
 process.once("SIGTERM", onTerminate);
 process.once("SIGINT", onTerminate);
 
 try {
-  const runner =
-    runEngine === "claude"
-      ? await buildClaudeAgentRunner()
-      : runEngine === "codex"
-        ? await buildCodexAgentRunner()
-        : buildPiRunner();
+  const runner = runEngine === "claude" ? await buildClaudeAgentRunner() : buildPiRunner();
 
   await runner.run({
     bundle: runnerBundle,

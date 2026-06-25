@@ -485,7 +485,7 @@ export interface IntegrationSpawnSpec {
  *     mode: a subscription provider whose driver can't sign its own fingerprint
  *     cannot execute.
  */
-export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig | LlmProxyVendConfig;
+export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
 
 /**
  * Canonical wire-format identifier for every LLM model provider Appstrate
@@ -564,41 +564,6 @@ export interface LlmProxyOauthConfig {
 }
 
 /**
- * Vend mode — the in-container-driver path for a subscription whose official
- * binary talks to the upstream DIRECTLY and cannot be pointed at a reverse
- * proxy (the OpenAI Codex CLI: its models-manager calls `chatgpt.com` verbatim,
- * ignoring `chatgpt_base_url`). The sidecar can't sit in the request path, so
- * instead it VENDS the resolved access token to the in-container runner once,
- * over the internal-network-gated `GET /credential-vend`. The runner writes it
- * into the binary's `auth.json` and the binary egresses straight to the upstream
- * — locked to the provider's hosts by the per-run egress allowlist carried on
- * this config ({@link egressAllowlist}). The real token therefore DOES enter
- * the container (unlike {@link LlmProxyOauthConfig}); the compensating controls
- * are the locked egress + the no-refresh-token vend (the access token is
- * non-renewable and the container is ephemeral).
- */
-export interface LlmProxyVendConfig {
-  authMode: "vend";
-  /** ID of the `model_provider_credentials` row whose token is vended in-container. */
-  credentialId: string;
-  /**
-   * Per-run egress allowlist for the forward proxy — REQUIRED and non-empty for
-   * a vend run. The agent's outbound traffic is restricted to ONLY these hosts
-   * (plus the trusted platform host); every other destination is refused, on top
-   * of the always-on SSRF blocklist. A host matches by exact name or as a parent
-   * domain suffix (`chatgpt.com` allows `chatgpt.com` and `x.chatgpt.com`).
-   *
-   * Living on the vend config (rather than a sibling top-level field) makes the
-   * `vend ⟺ egress-lock` invariant STRUCTURAL: only a vend run can carry an
-   * allowlist, and a vend run cannot exist without one. Locking egress to the
-   * provider's hosts is what keeps the in-container token from being exfiltrated
-   * to an attacker-controlled endpoint — the sole compensating control for the
-   * real token living at rest in the container.
-   */
-  egressAllowlist: readonly string[];
-}
-
-/**
  * Wire-format response from the platform's `GET /internal/oauth-token/:credentialId`
  * (and `POST .../refresh`) endpoint. Carries only the fields that change per
  * refresh — provider invariants (baseUrl, providerId) live in
@@ -612,9 +577,7 @@ export interface OAuthTokenResponse {
    * Abstract account/tenant identifier surfaced by the integration's
    * `extractTokenIdentity` hook (used at connect time for required-claim
    * validation). This generic OAuth `accountId` metadata is NOT forwarded as an
-   * upstream header by the platform. (Distinct, provider-specific mechanism: the
-   * codex vend path writes the real `chatgpt_account_id` into the CLI's local
-   * auth state, consumed by the official binary — not this field.)
+   * upstream header by the platform.
    */
   accountId?: string;
 }

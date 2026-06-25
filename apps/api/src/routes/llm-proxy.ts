@@ -24,10 +24,10 @@
  *     forging any client identity — the chat's official Claude Agent SDK signs
  *     the legit Claude Code fingerprint itself. See
  *     services/llm-proxy/claude-code-sdk-gateway.ts.
- *   - The Codex (ChatGPT) subscription (`codex`) is NOT served here: it has no
- *     chat surface (its token can't be safely held host-side) and runs only as
- *     a docker-isolated agent, which vends its credential through the sidecar's
- *     `/credential-vend` endpoint. See docs/architecture/SUBSCRIPTION_COMPLIANCE.md.
+ *   - The Codex (ChatGPT) subscription (`codex`) is NOT served here: it remains
+ *     an inference/model provider only — its agent-run engine is deferred to a
+ *     follow-up, so it has no chat surface and no agent gateway. See
+ *     docs/architecture/SUBSCRIPTION_COMPLIANCE.md.
  *   - The generic gateway (`proxyLlmCall`) forges nothing, so an
  *     OAuth-subscription model with no dedicated CLI gateway is refused with
  *     `LlmProxyUnsupportedSubscriptionError`. Connect an API-key provider.

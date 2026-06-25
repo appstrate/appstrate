@@ -5,13 +5,12 @@
  * Shared normalisation of an {@link ExecutionContext.input} (`z.unknown()`)
  * into prompt text.
  *
- * Every runner that folds the run input into a start message / prompt
- * (`runner-claude`, `runner-codex`) independently spelled out the same
- * three-case normalisation: a `string` is trimmed, `null`/`undefined`
- * collapses to the empty string, and any other value is `JSON.stringify`d
- * (returning `""` when the value is not serialisable — e.g. a circular
- * reference). Centralising it here means the shape cannot drift between
- * runners.
+ * A runner that folds the run input into a start message / prompt
+ * (`runner-claude`) needs the same three-case normalisation: a `string` is
+ * trimmed, `null`/`undefined` collapses to the empty string, and any other
+ * value is `JSON.stringify`d (returning `""` when the value is not
+ * serialisable — e.g. a circular reference). Centralising it here keeps the
+ * shape stable as more runners adopt it.
  *
  * This helper deliberately returns `""` for the empty case — it does NOT
  * append a fallback sentence. Each runner keeps its own fallback string

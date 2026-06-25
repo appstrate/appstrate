@@ -215,61 +215,6 @@ describe("HTTP forwarding", () => {
     expect(res.status).toBe(403);
   });
 
-  it("egress allowlist: forwards to an allowlisted host", async () => {
-    const echo = await startEchoServer();
-    const proxy = makeProxy({
-      config: {
-        platformApiUrl: "http://mock:3000",
-        runToken: "tok",
-        proxyUrl: "",
-        llm: { authMode: "vend", credentialId: "cred_test", egressAllowlist: ["127.0.0.1"] },
-      },
-    });
-    await proxy.ready;
-    const { port } = proxy.address();
-
-    const res = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/ok`);
-    expect(res.status).toBe(200);
-  });
-
-  it("egress allowlist: refuses a host that is not on the list", async () => {
-    const proxy = makeProxy({
-      config: {
-        platformApiUrl: "http://mock:3000",
-        runToken: "tok",
-        proxyUrl: "",
-        llm: { authMode: "vend", credentialId: "cred_test", egressAllowlist: ["chatgpt.com"] },
-      },
-    });
-    await proxy.ready;
-    const { port } = proxy.address();
-
-    // 127.0.0.1 is NOT on the allowlist → refused even though isBlockedHostFn() is false.
-    const res = await httpViaProxy(port, "http://127.0.0.1:9999/nope");
-    expect(res.status).toBe(403);
-    expect(res.body).toContain("Blocked");
-  });
-
-  it("vend egress: HTTP refuses a non-443 port on an allowlisted host", async () => {
-    // A vend run (egress allowlist active) holds the real subscription token
-    // in-container; only :443 may leave to an allowlisted host so the token
-    // can't be tunnelled out over an arbitrary port.
-    const proxy = makeProxy({
-      config: {
-        platformApiUrl: "http://mock:3000",
-        runToken: "tok",
-        proxyUrl: "",
-        llm: { authMode: "vend", credentialId: "cred_test", egressAllowlist: ["chatgpt.com"] },
-      },
-    });
-    await proxy.ready;
-    const { port } = proxy.address();
-
-    const res = await httpViaProxy(port, "http://chatgpt.com:8080/v1/responses");
-    expect(res.status).toBe(403);
-    expect(res.body).toContain("port");
-  });
-
   it("returns 400 for invalid URL", async () => {
     const proxy = makeProxy();
     await proxy.ready;
@@ -452,50 +397,6 @@ describe("DNS rebind guard", () => {
     const res = await connectViaProxy(port, `pinned.example:${echo.port}`);
     expect(res.statusCode).toBe(200);
     expect(res.statusLine).toContain("Connection Established");
-  });
-
-  it("vend egress: CONNECT allows :443 but refuses :8080 on an allowlisted host", async () => {
-    const echo = await startEchoServer();
-    // Allowlist the target and pin it to the local echo server. The :8080
-    // refusal must fire on the PORT guard BEFORE any connect; the :443 case
-    // passes the guard and tunnels through to the pinned target.
-    //
-    // The echo server listens on an ephemeral port, so the :443 connect cannot
-    // literally reach it — but it CAN only be refused by the host/port guard
-    // (403). We therefore prove the :443 case is past the guard by asserting it
-    // is NOT a 403 (it surfaces a connection error instead), while :8080 is a
-    // clean 403 from the port pin.
-    const proxy = makeProxy({
-      config: {
-        platformApiUrl: "http://mock:3000",
-        runToken: "tok",
-        proxyUrl: "",
-        llm: { authMode: "vend", credentialId: "cred_test", egressAllowlist: ["chatgpt.com"] },
-      },
-      resolveHostFn: async () => ["127.0.0.1"],
-    });
-    await proxy.ready;
-    const { port } = proxy.address();
-
-    // Refused: non-443 port on an allowlisted host → 403 from the port pin.
-    const refused = await connectViaProxy(port, "chatgpt.com:8080");
-    expect(refused.statusCode).toBe(403);
-
-    // Allowed: :443 passes the host + port guard. It does not reach the echo
-    // server (different port), so it ends in a connection error rather than a
-    // 403 — proving the guard let it through.
-    let allowedStatus: number;
-    try {
-      const allowed = await connectViaProxy(port, "chatgpt.com:443");
-      allowedStatus = allowed.statusCode;
-    } catch {
-      // Connection-level failure (port 443 not listening) — NOT a 403 refusal.
-      allowedStatus = 0;
-    }
-    expect(allowedStatus).not.toBe(403);
-
-    // Keep the echo server referenced for cleanup symmetry with other tests.
-    void echo;
   });
 
   it("HTTP: refuses a DNS name that RESOLVES to a blocked address (real isBlockedHost)", async () => {

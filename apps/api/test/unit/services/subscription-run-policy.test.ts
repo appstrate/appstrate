@@ -4,10 +4,8 @@ import { afterAll, beforeAll, describe, it, expect } from "bun:test";
 import {
   assertRunnableOnEngine,
   assertSubscriptionEngineIsolation,
-  assertVendRunHasNoIntegrations,
   resolveCredentialDelivery,
   SubscriptionRequiresDockerError,
-  VendRunIntegrationsError,
   buildOauthSidecarLlm,
   UnrunnableOauthProviderError,
 } from "../../../src/services/run-launcher/subscription-run-policy.ts";
@@ -46,16 +44,6 @@ beforeAll(() => {
       subscriptionEngine: { engine: "claude", sidecarAuthMode: "oauth", nativeOutput: true },
     }),
   );
-  registerModelProvider(
-    fakeProvider("codex", {
-      authMode: "oauth2",
-      subscriptionEngine: {
-        engine: "codex",
-        sidecarAuthMode: "vend",
-        egressAllowlist: ["chatgpt.com", "openai.com"],
-      },
-    }),
-  );
 });
 afterAll(() => seedTestModelProviders());
 
@@ -73,12 +61,6 @@ describe("assertRunnableOnEngine", () => {
   it("allows any api-key credential on the pi engine", () => {
     expect(() =>
       assertRunnableOnEngine({ engine: "pi", providerId: "anthropic", isOauthCredential: false }),
-    ).not.toThrow();
-  });
-
-  it("allows a codex oauth credential on the codex engine", () => {
-    expect(() =>
-      assertRunnableOnEngine({ engine: "codex", providerId: "codex", isOauthCredential: true }),
     ).not.toThrow();
   });
 
@@ -127,12 +109,6 @@ describe("assertSubscriptionEngineIsolation", () => {
     ).toThrow(SubscriptionRequiresDockerError);
   });
 
-  it("rejects a codex subscription run under the process orchestrator", () => {
-    expect(() =>
-      assertSubscriptionEngineIsolation({ providerId: "codex", orchestratorMode: "process" }),
-    ).toThrow(SubscriptionRequiresDockerError);
-  });
-
   it("allows a claude-code subscription run under docker", () => {
     expect(() =>
       assertSubscriptionEngineIsolation({
@@ -152,37 +128,6 @@ describe("assertSubscriptionEngineIsolation", () => {
   });
 });
 
-describe("assertVendRunHasNoIntegrations", () => {
-  it("rejects a vend run that declares integrations (token-on-shared-network)", () => {
-    expect(() =>
-      assertVendRunHasNoIntegrations({ mode: "vend", providerId: "codex", integrationCount: 1 }),
-    ).toThrow(VendRunIntegrationsError);
-  });
-
-  it("allows a vend run with no integrations", () => {
-    expect(() =>
-      assertVendRunHasNoIntegrations({ mode: "vend", providerId: "codex", integrationCount: 0 }),
-    ).not.toThrow();
-  });
-
-  it("allows oauth / api_key runs with integrations (no real token in container)", () => {
-    expect(() =>
-      assertVendRunHasNoIntegrations({
-        mode: "oauth",
-        providerId: "claude-code",
-        integrationCount: 3,
-      }),
-    ).not.toThrow();
-    expect(() =>
-      assertVendRunHasNoIntegrations({
-        mode: "api_key",
-        providerId: "openai",
-        integrationCount: 3,
-      }),
-    ).not.toThrow();
-  });
-});
-
 describe("resolveCredentialDelivery (single classification axis)", () => {
   // Seed the model-provider registry so the oauth-class flag (authMode:
   // "oauth2") resolves. registerModelProvider also contributes the
@@ -194,16 +139,6 @@ describe("resolveCredentialDelivery (single classification axis)", () => {
       fakeProvider("claude-code", {
         authMode: "oauth2",
         subscriptionEngine: { engine: "claude", sidecarAuthMode: "oauth", nativeOutput: true },
-      }),
-    );
-    registerModelProvider(
-      fakeProvider("codex", {
-        authMode: "oauth2",
-        subscriptionEngine: {
-          engine: "codex",
-          sidecarAuthMode: "vend",
-          egressAllowlist: ["chatgpt.com", "openai.com"],
-        },
       }),
     );
     // An oauth-class provider with NO official engine — the hard-refuse path.
@@ -223,15 +158,6 @@ describe("resolveCredentialDelivery (single classification axis)", () => {
     expect(d.engine).toBe("claude");
     // authMode comes from the SAME registry entry selectRunEngine reads.
     expect(d.subscriptionEngine?.sidecarAuthMode).toBe("oauth");
-    expect(d.egressAllowlist).toBeUndefined();
-  });
-
-  it("derives vend mode + egress allowlist from the registry for codex", () => {
-    const d = resolveCredentialDelivery({ providerId: "codex", hasCredentialId: true });
-    expect(d.mode).toBe("vend");
-    expect(d.isOauthCredential).toBe(true);
-    expect(d.engine).toBe("codex");
-    expect(d.egressAllowlist).toEqual(["chatgpt.com", "openai.com"]);
   });
 
   it("classifies an oauth-class credential with no official engine as oauth on pi — then hard-refuses", () => {
@@ -256,7 +182,6 @@ describe("resolveCredentialDelivery (single classification axis)", () => {
     expect(d.mode).toBe("api_key");
     expect(d.isOauthCredential).toBe(false);
     expect(d.engine).toBe("pi");
-    expect(d.egressAllowlist).toBeUndefined();
   });
 
   it("is not oauth-class when no credential id is present (e.g. unconfigured)", () => {

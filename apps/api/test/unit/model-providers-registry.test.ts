@@ -125,25 +125,19 @@ describe("model-providers runtime registry", () => {
           subscriptionEngine: { engine: "claude", sidecarAuthMode: "oauth", nativeOutput: true },
         }),
       );
-      registerModelProvider(
-        fakeDef("codex", {
-          authMode: "oauth2",
-          subscriptionEngine: {
-            engine: "codex",
-            sidecarAuthMode: "vend",
-            egressAllowlist: ["chatgpt.com", "openai.com"],
-          },
-        }),
-      );
+      // codex is registered as a model provider (inference / model-listing) but
+      // contributes NO subscription engine — agent runs on a ChatGPT/Codex
+      // subscription are deferred to a follow-up PR.
+      registerModelProvider(fakeDef("codex", { authMode: "oauth2" }));
       registerModelProvider(fakeDef("openai", { authMode: "api_key" }));
     });
 
     describe("engineForProvider", () => {
       it("maps a provider to its contributed engine", () => {
         expect(engineForProvider("claude-code")).toBe("claude");
-        expect(engineForProvider("codex")).toBe("codex");
       });
-      it("falls back to pi for any api-key / unknown provider", () => {
+      it("falls back to pi for any api-key / non-engine / unknown provider", () => {
+        expect(engineForProvider("codex")).toBe("pi");
         expect(engineForProvider("openai")).toBe("pi");
         expect(engineForProvider("not-here")).toBe("pi");
         expect(engineForProvider("")).toBe("pi");
@@ -159,15 +153,9 @@ describe("model-providers runtime registry", () => {
           engine: "claude",
           sidecarAuthMode: "oauth",
         });
-        expect(subscriptionEngineForProvider("codex")?.egressAllowlist).toEqual([
-          "chatgpt.com",
-          "openai.com",
-        ]);
-      });
-      it("claude has no egress allowlist (token swapped server-side)", () => {
-        expect(subscriptionEngineForProvider("claude-code")?.egressAllowlist).toBeUndefined();
       });
       it("returns undefined for a non-subscription / unknown provider", () => {
+        expect(subscriptionEngineForProvider("codex")).toBeUndefined();
         expect(subscriptionEngineForProvider("openai")).toBeUndefined();
         expect(subscriptionEngineForProvider("not-here")).toBeUndefined();
       });
