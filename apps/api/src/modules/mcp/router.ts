@@ -144,6 +144,7 @@ This MCP server is scoped to ONE organization — the one this endpoint serves �
 - Runs are asynchronous: triggering one returns the created run resource (use its \`id\`), then it moves pending→running→success|failed|timeout|cancelled. To wait for completion, call the run get operation with \`query: { wait: true }\` — the server long-polls up to ~55 s and returns the run when it goes terminal; a still-non-terminal response just means call it again (no sleep needed).
 - Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
 - Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.
+- Integration tool selection — an agent's \`integrations_configuration[id].tools\` resolves as: omitted/undefined → inherits the integration's \`default_tools\`; \`[]\` → no tools (overrides the default, the integration is inert); \`["a","b"]\` → exactly those tools; \`"*"\` → all upstream tools (requires \`allow_undeclared_tools\`). An integration's \`default_tools\` and full \`tool_catalog\` are on its detail operation (\`GET /api/integrations/{packageId}\`); read it before selecting tools so you pick real tool names and know what the default already covers.
 
 ${OPERATION_INDEX_HEADING}
 ${buildOperationIndex(permissions)}`;

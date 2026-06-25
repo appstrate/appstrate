@@ -21,7 +21,21 @@ export interface ChatIntegrationsService {
     orgId: string;
     applicationId: string;
     actor: { type: "user" | "end_user"; id: string };
-  }): Promise<Array<{ integration_id: string; name: string; source: string }>>;
+  }): Promise<
+    Array<{
+      integration_id: string;
+      name: string;
+      source: string;
+      version?: string;
+      /**
+       * AFPS §4.4 `default_tools` — the tool(s) an agent inherits when it
+       * declares the integration without an `integrations_configuration`
+       * entry. Surfaced in the chat's caller context so the model knows
+       * what it gets for free vs what it must select explicitly.
+       */
+      default_tools?: readonly string[] | "*";
+    }>
+  >;
 }
 
 export interface ChatRunnableAgent {

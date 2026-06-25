@@ -9737,6 +9737,7 @@ export interface operations {
                                 };
                             };
                         }[];
+                        default_tools?: string[] | "*";
                         allow_undeclared_tools: boolean;
                         active: boolean;
                         block_user_connections: boolean;
@@ -9840,6 +9841,7 @@ export interface operations {
                                 };
                             };
                         }[];
+                        default_tools?: string[] | "*";
                         allow_undeclared_tools: boolean;
                         active: boolean;
                         block_user_connections: boolean;
@@ -10780,6 +10782,7 @@ export interface operations {
                                 };
                             };
                         }[];
+                        default_tools?: string[] | "*";
                         allow_undeclared_tools: boolean;
                         active: boolean;
                         block_user_connections: boolean;
@@ -11315,6 +11318,8 @@ export interface operations {
                             source: "own" | "shared" | "both";
                             /** @description The integration package's own manifest version, when known. Use it to pin a satisfiable dependencies.integrations range. */
                             version?: string;
+                            /** @description AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent when none declared; `[]` means the integration is inert. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}. */
+                            default_tools?: string[] | "*";
                         }[];
                         /** @description Agents the caller can run in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the long tail is reachable via the MCP `search_operations` tool. */
                         agents: {

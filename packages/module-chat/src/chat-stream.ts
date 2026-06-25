@@ -70,7 +70,7 @@ Choosing what to do:
 - If the request is a pure Appstrate operation (list or inspect runs, schedule, manage agents, search documents), call that operation directly with \`invoke_operation\`. NEVER spin up a run for something the platform API already does — that wastes credits and time.
 - If the request needs an integration, an MCP, or any external action, run an agent:
   1. Prefer an existing agent the user can run (listed in your context below) when one matches the intent — trigger it with the run-agent operation.
-  2. Otherwise invoke the \`runInline\` operation (\`POST /api/runs/inline\`): pass a full AFPS agent \`manifest\` plus a \`prompt\`. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version from your context), grant the needed tools under \`integrations_configuration\` (\`api_call\` covers most third-party calls), set \`runtime_tools: ["output"]\`, and define an \`output.schema\` for the data you want back. In the \`prompt\`, tell the agent it is a sub-agent: do the work, then return the result by calling the \`output\` tool with a payload that satisfies the schema. Without that output schema and instruction you will receive nothing back.
+  2. Otherwise invoke the \`runInline\` operation (\`POST /api/runs/inline\`): pass a full AFPS agent \`manifest\` plus a \`prompt\`. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version from your context), then select that integration's tools under \`integrations_configuration.<id>.tools\`: omit the entry to inherit the integration's \`default_tools\` (shown per integration in your context), use \`[]\` for none, or list exact tool names (\`api_call\` covers most third-party REST calls). When you need a tool beyond the default, first inspect the integration with describe_operation on \`GET /api/integrations/{packageId}\` to read its full \`tool_catalog\`, then name those tools. Set \`runtime_tools: ["output"]\`, and define an \`output.schema\` for the data you want back. In the \`prompt\`, tell the agent it is a sub-agent: do the work, then return the result by calling the \`output\` tool with a payload that satisfies the schema. Without that output schema and instruction you will receive nothing back.
 
 Runs are asynchronous. The trigger returns the created run resource — take its \`id\`. Then call the run-get operation (path param \`id\`, not \`runId\`) with \`query: { wait: true }\` to long-poll until the run is terminal (it returns after ~55s; if still running, call it again); never busy-poll in a tight loop yourself. Then read the run's \`result\` field — that is the sub-agent's deliverable. Answer the user from \`result\`; never fabricate it. If the run fails, read its error and report it plainly.
 
@@ -125,7 +125,15 @@ const SUBSCRIPTION_TOOLS_NOTE = `If your tool calls fail because the platform to
 interface CallerContext {
   user?: { name?: string | null; email?: string | null } | null;
   org?: { role?: string | null } | null;
-  connections?: { integration_id: string; name: string; source: string; version?: string }[] | null;
+  connections?:
+    | {
+        integration_id: string;
+        name: string;
+        source: string;
+        version?: string;
+        default_tools?: readonly string[] | "*" | null;
+      }[]
+    | null;
   agents?:
     | {
         package_id: string;
@@ -135,6 +143,18 @@ interface CallerContext {
       }[]
     | null;
   agents_truncated?: boolean | null;
+}
+
+/**
+ * Render an integration's AFPS §4.4 `default_tools` for the caller-context
+ * line. `"*"` → all tools; a non-empty array → the names; anything else
+ * (absent, empty, null) → an explicit "no default" so the model knows it
+ * must select tools itself rather than relying on inheritance.
+ */
+function formatConnectionDefaultTools(d: readonly string[] | "*" | null | undefined): string {
+  if (d === "*") return "default: all tools";
+  if (Array.isArray(d) && d.length > 0) return `default: ${d.join(", ")}`;
+  return "no default — you must select tools explicitly";
 }
 
 /**
@@ -160,11 +180,17 @@ export function formatCallerContext(raw: unknown): string {
     const list = ctx.connections
       .map((c) => {
         const ver = c.version ? `@${c.version}` : "";
-        return `${c.name} — \`${c.integration_id}\`${ver} (${c.source})`;
+        return `${c.name} — \`${c.integration_id}\`${ver} (${c.source}; ${formatConnectionDefaultTools(c.default_tools)})`;
       })
       .join(", ");
     lines.push(
       `Integrations the user has connected and could attach to an agent: ${list}. Prefer these when building or configuring an agent; use the \`@scope/name\` id verbatim.`,
+      // The "default" shown per integration is what an agent inherits when it
+      // declares the integration without an `integrations_configuration` entry
+      // (AFPS §4.4). Teach the model to look past the default when it needs a
+      // native tool, and that the catalog is one describe_operation away —
+      // its own caller context only carries the default, not the full list.
+      "The `default` shown for each integration is the tool(s) an agent inherits when it declares the integration without an `integrations_configuration` entry. To use any tool beyond the default, first inspect the integration with describe_operation on `GET /api/integrations/{packageId}` to read its full `tool_catalog`, then set `integrations_configuration[<id>].tools` to the exact tool names you need. `[]` means no tools (the integration is inert).",
     );
   } else {
     lines.push("The user has no connected integrations yet.");

@@ -12,21 +12,46 @@ import { describe, expect, it } from "bun:test";
 import { formatCallerContext } from "../src/chat-stream.ts";
 
 describe("formatCallerContext", () => {
-  it("renders identity, role, and connected integrations with their source", () => {
+  it("renders identity, role, and connected integrations with their default tools", () => {
     const out = formatCallerContext({
       user: { name: "Ada Lovelace", email: "ada@acme.com" },
       org: { role: "member" },
       connections: [
-        { integration_id: "@appstrate/gmail", name: "Gmail", source: "own" },
+        {
+          integration_id: "@appstrate/gmail",
+          name: "Gmail",
+          source: "own",
+          default_tools: ["api_call"],
+        },
         { integration_id: "@appstrate/clickup", name: "ClickUp", source: "shared" },
       ],
     });
     expect(out).toContain("## Your context");
     expect(out).toContain("Ada Lovelace (ada@acme.com)");
     expect(out).toContain('role in this organization is "member"');
-    expect(out).toContain("Gmail (own)");
-    expect(out).toContain("ClickUp (shared)");
+    expect(out).toContain("`@appstrate/gmail`");
+    // Declared default is rendered inline so the model knows what it inherits.
+    expect(out).toContain("(own; default: api_call)");
+    // No declared default → an explicit "select tools yourself" signal.
+    expect(out).toContain("(shared; no default — you must select tools explicitly)");
     expect(out).toContain("Prefer these");
+  });
+
+  it("renders the wildcard default and the on-demand inspect instruction", () => {
+    const out = formatCallerContext({
+      user: { name: "Ada" },
+      org: { role: "member" },
+      connections: [
+        { integration_id: "@acme/all", name: "AllTools", source: "own", default_tools: "*" },
+        // An explicit empty default also reads as "no default" (must select).
+        { integration_id: "@acme/none", name: "NoneTools", source: "own", default_tools: [] },
+      ],
+    });
+    expect(out).toContain("(own; default: all tools)");
+    expect(out).toContain("no default — you must select tools explicitly");
+    // The catalog is one describe_operation away — teach the model to fetch it.
+    expect(out).toContain("describe_operation on `GET /api/integrations/{packageId}`");
+    expect(out).toContain("`[]` means no tools");
   });
 
   it("states explicitly when the user has no connected integrations", () => {

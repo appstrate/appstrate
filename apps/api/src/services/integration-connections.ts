@@ -57,6 +57,7 @@ import { getPackageDisplayName } from "../lib/package-helpers.ts";
 import type { Actor } from "@appstrate/connect";
 import {
   resolveIntegrationToolCatalog,
+  readDefaultTools,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
@@ -1955,6 +1956,15 @@ export interface UsableIntegration {
    * `dependencies.integrations` range without guessing.
    */
   version?: string;
+  /**
+   * The integration's declared `default_tools` (AFPS §4.4) — the tool(s) an
+   * agent inherits when it declares the integration without an
+   * `integrations_configuration.<id>.tools` selection. Read straight off the
+   * manifest (no mcp-server resolution). Lets an agent-builder see what it
+   * gets for free and whether it must select tools explicitly for anything
+   * else. `undefined` when the integration declares no default.
+   */
+  default_tools?: readonly string[] | "*";
 }
 
 /**
@@ -2016,6 +2026,13 @@ export async function listUsableIntegrationsForActor(
       return [p.id, typeof m?.version === "string" ? m.version : undefined] as const;
     }),
   );
+  // The integration's declared `default_tools` (AFPS §4.4), read straight off
+  // the same already-selected draft manifest — no extra query, no mcp-server
+  // resolution. Surfaced so an agent-builder sees what tools it inherits for
+  // free and whether it must select tools explicitly for anything else.
+  const defaultToolsMap = new Map(
+    pkgRows.map((p) => [p.id, readDefaultTools(p.draftManifest as IntegrationManifest)] as const),
+  );
 
   return ids.map((integrationId) => {
     const { own, shared } = acc.get(integrationId)!;
@@ -2025,6 +2042,7 @@ export async function listUsableIntegrationsForActor(
       name: nameMap.get(integrationId) ?? integrationId,
       source,
       version: versionMap.get(integrationId),
+      default_tools: defaultToolsMap.get(integrationId),
     };
   });
 }
@@ -2119,6 +2137,15 @@ export async function getIntegrationAuthStatuses(
    * fetch for the referenced mcp-server's MCPB tool advertisement.
    */
   tool_catalog: IntegrationToolCatalogEntry[];
+  /**
+   * AFPS §4.4 — the tool(s) an agent inherits when it declares the
+   * integration without an `integrations_configuration.<id>.tools`
+   * selection. Read straight off the manifest (no mcp-server resolution).
+   * Pairs with `tool_catalog`: it tells an agent-builder which catalog
+   * entries are on by default vs which must be selected explicitly.
+   * `undefined` when the integration declares no default.
+   */
+  default_tools: readonly string[] | "*" | undefined;
   /**
    * AFPS §7.8 — surfaced verbatim from the manifest so the agent editor
    * can gate its "Include all upstream tools" advanced toggle. `false`
@@ -2220,6 +2247,7 @@ export async function getIntegrationAuthStatuses(
     manifest,
     auths,
     tool_catalog: toolCatalog,
+    default_tools: readDefaultTools(manifest),
     allow_undeclared_tools:
       (manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools === true,
     active: activation.active,

@@ -45,6 +45,9 @@ function gmailManifest(name = "@official/gmail"): IntegrationManifest {
     description: "Gmail integration",
     // AFPS: local server → mcp-server reference (separate package).
     source: { kind: "local", server: { name, version: "^0.1.0" } },
+    // AFPS §4.4 — the tool an agent inherits without an explicit selection.
+    // Surfaced by the detail endpoint so an agent-builder sees the default.
+    default_tools: ["api_call"],
     auths: {
       api: {
         type: "api_key",
@@ -278,6 +281,7 @@ describe("GET /api/integrations/:packageId", () => {
         client_auto_provisioned: boolean;
       }>;
       tool_catalog: Array<{ name: string; description?: string; policy?: unknown }>;
+      default_tools?: string[] | "*";
     };
     expect(body.manifest.name).toBe("@myorg/gmail");
     expect(body.auths).toHaveLength(2);
@@ -295,6 +299,9 @@ describe("GET /api/integrations/:packageId", () => {
     // falls back to the integration's `tools` keys. Shape assertion keeps
     // the contract present without coupling to fixture catalog edits.
     expect(Array.isArray(body.tool_catalog)).toBe(true);
+    // AFPS §4.4 — the manifest's declared default_tools is surfaced verbatim
+    // so an agent-builder sees what tools it inherits without selecting any.
+    expect(body.default_tools).toEqual(["api_call"]);
   });
 
   it("flags has_system_client when a shared platform client serves the oauth2 auth", async () => {

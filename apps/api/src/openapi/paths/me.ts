@@ -458,6 +458,14 @@ export const mePaths = {
                           description:
                             "The integration package's own manifest version, when known. Use it to pin a satisfiable dependencies.integrations range.",
                         },
+                        default_tools: {
+                          description:
+                            "AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent when none declared; `[]` means the integration is inert. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}.",
+                          oneOf: [
+                            { type: "array", items: { type: "string" } },
+                            { type: "string", enum: ["*"] },
+                          ],
+                        },
                       },
                     },
                   },

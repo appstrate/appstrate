@@ -271,6 +271,18 @@ const integrationDetailSchema = {
     // `hidden_tools` and auto-hidden connect.tool primitives. Falls back
     // to `manifest.tools_policy` keys when the mcp-server is absent.
     tool_catalog: { type: "array", items: toolCatalogEntrySchema },
+    // AFPS §4.4 — the tool(s) an agent inherits when it declares this
+    // integration without an `integrations_configuration.<id>.tools`
+    // selection. Pairs with `tool_catalog` so a builder sees what is on by
+    // default vs what must be selected explicitly. Absent when the
+    // integration declares no default. Resolution: omitted → inherits this;
+    // `[]` → none; `[..]` → exactly those; `"*"` → all upstream tools.
+    default_tools: {
+      oneOf: [
+        { type: "array", items: { type: "string" } },
+        { type: "string", enum: ["*"] },
+      ],
+    },
     // AFPS §7.8 — opt-in surfaced verbatim from the manifest. When `true`,
     // the agent editor MAY offer the "all upstream tools" toggle that sets
     // `integrations_configuration.<id>.tools = "*"`. Default `false`.
