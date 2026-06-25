@@ -83,14 +83,6 @@ export interface ClaudeAgentRunnerOptions {
   outputSchema?: Record<string, unknown> | null;
   /** Sidecar `/mcp` (integrations, api_call, run_history, recall_memory). */
   sidecarMcp?: { url: string; headers?: Record<string, string> };
-  /** Upper bound on agent turns. Defaults to {@link DEFAULT_MAX_TURNS}. */
-  maxTurns?: number;
-  /** Enable the SDK's native Bash/Edit/Read/Write tools. Defaults to `true`. */
-  enableNativeTools?: boolean;
-  /** Kickoff user message. Defaults to the run input, else a generic trigger. */
-  startMessage?: string;
-  /** Extra curated env merged into the spawned binary's environment. */
-  env?: Record<string, string>;
   /** Injectable Agent SDK driver. Defaults to the real `query()` (lazy-loaded). */
   query?: ClaudeQueryFn;
   /** Injectable clock for deterministic tests. */
@@ -100,8 +92,7 @@ export interface ClaudeAgentRunnerOptions {
 /** Upper bound on agent turns per run (autonomous loop). */
 const DEFAULT_MAX_TURNS = 100;
 
-function resolveStartMessage(context: ExecutionContext, explicit: string | undefined): string {
-  if (typeof explicit === "string" && explicit.length > 0) return explicit;
+function resolveStartMessage(context: ExecutionContext): string {
   // Shared string|null|JSON.stringify normalisation; the fallback sentence
   // stays owned here (the helper returns "" for empty input).
   return runInputToText(context.input) || "Begin the task according to your instructions.";
@@ -188,20 +179,17 @@ export class ClaudeAgentRunner implements Runner {
       env: buildClaudeSdkEnv({
         baseUrl: this.opts.baseUrl,
         placeholderToken: this.opts.placeholderToken,
-        ...(this.opts.env ? { extra: this.opts.env } : {}),
       }),
       model: this.opts.modelId,
       systemPrompt: this.opts.systemPrompt,
       cwd: this.opts.cwd,
-      // Native Bash/Edit/Read/Write on by default (full agent fidelity in the
-      // sandbox); `tools: []` only when a caller explicitly opts out.
-      ...(this.opts.enableNativeTools === false ? { tools: [] } : {}),
+      // Native Bash/Edit/Read/Write always on (full agent fidelity in the sandbox).
       mcpServers,
       ...(this.opts.outputSchema
         ? { outputFormat: { type: "json_schema", schema: this.opts.outputSchema } }
         : {}),
       ...CLAUDE_SDK_HARDENING,
-      maxTurns: this.opts.maxTurns ?? DEFAULT_MAX_TURNS,
+      maxTurns: DEFAULT_MAX_TURNS,
       abortController: controller,
     };
 
@@ -209,7 +197,7 @@ export class ClaudeAgentRunner implements Runner {
 
     try {
       const stream = query({
-        prompt: resolveStartMessage(context, this.opts.startMessage),
+        prompt: resolveStartMessage(context),
         options: queryOptions,
       });
       for await (const msg of stream) {

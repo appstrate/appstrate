@@ -73,7 +73,7 @@ export function runClaudeAgentChat(input: ChatEngineInput): Response {
 
   // Bound the number of concurrent `claude` subprocesses per instance.
   const slot = acquireClaudeSlot();
-  if (!slot) return chatCapacityResponse("Claude");
+  if (!slot) return chatCapacityResponse();
 
   const controller = new AbortController();
   if (input.abortSignal.aborted) controller.abort();

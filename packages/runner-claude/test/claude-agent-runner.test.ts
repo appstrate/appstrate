@@ -98,7 +98,6 @@ describe("ClaudeAgentRunner — happy path", () => {
         query: fn,
         outputSchema: { type: "object", properties: { x: { type: "number" } } },
         sidecarMcp: { url: "http://sidecar:8088/mcp", headers: { Host: "sidecar" } },
-        maxTurns: 42,
       }),
     ).run({ context: ctx, eventSink: memorySink().sink, bundle: undefined as never });
 
@@ -117,24 +116,12 @@ describe("ClaudeAgentRunner — happy path", () => {
     expect(Object.keys(opts.mcpServers)).toEqual(["appstrate"]);
     // Native tools enabled by default → no `tools: []` opt-out key.
     expect(opts.tools).toBeUndefined();
-    expect(opts.maxTurns).toBe(42);
+    expect(opts.maxTurns).toBe(100);
     expect(opts.permissionMode).toBe("bypassPermissions");
     // Curated env: gateway pointers, no ambient API key, kickoff from input.
     expect(opts.env.ANTHROPIC_BASE_URL).toBe("http://sidecar:8088/llm");
     expect(opts.env.ANTHROPIC_API_KEY).toBe("");
     expect(calls[0]!.prompt).toBe("do the thing");
-  });
-
-  it("opts out of native tools when enableNativeTools is false", async () => {
-    const { fn, calls } = fakeQuery([
-      { type: "result", subtype: "success", is_error: false, usage: {} },
-    ]);
-    await new ClaudeAgentRunner(baseOpts({ query: fn, enableNativeTools: false })).run({
-      context: ctx,
-      eventSink: memorySink().sink,
-      bundle: undefined as never,
-    });
-    expect((calls[0]!.options as Record<string, unknown>).tools).toEqual([]);
   });
 });
 
