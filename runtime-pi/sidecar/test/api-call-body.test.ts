@@ -26,8 +26,8 @@ import { createApp, buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
-const integrationCreds = (): CredentialsResponse => ({
-  credentials: { access_token: "tok-abc" },
+const integrationCreds = (token = "tok-abc"): CredentialsResponse => ({
+  credentials: { access_token: token },
   authorizedUris: ["https://api.example.com/**"],
   allowAllUris: false,
   credentialHeaderName: "Authorization",
@@ -52,7 +52,7 @@ function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   };
 }
 
-async function makeApp(overrides?: Partial<AppDeps>) {
+async function makeApp(overrides?: Partial<AppDeps>, token = "tok-abc") {
   const appDeps = makeDeps(overrides);
   const runtimeDeps = buildSidecarRuntimeDeps(appDeps);
   const host = await buildApiCallHost(
@@ -60,8 +60,8 @@ async function makeApp(overrides?: Partial<AppDeps>) {
       {
         namespace: "test",
         integrationId: "@appstrate/test",
-        fetchCredentials: async () => integrationCreds(),
-        refreshCredentials: async () => integrationCreds(),
+        fetchCredentials: async () => integrationCreds(token),
+        refreshCredentials: async () => integrationCreds(token),
       },
     ],
     runtimeDeps,
@@ -209,6 +209,34 @@ describe("POST /mcp — api_call JSON-object body (issue #765)", () => {
     });
 
     expect(JSON.parse(captured.body!)).toEqual({ authorization: "Bearer tok-abc" });
+  });
+
+  it("produces VALID JSON when a substituted credential contains quotes/backslashes", async () => {
+    // The escaping-safety guarantee: substitution happens on the structured
+    // leaf BEFORE JSON.stringify, so a credential with `"` / `\` / newline is
+    // escaped by the serializer instead of corrupting the surrounding JSON.
+    // Quote + backslash are the JSON-structural chars; a newline is omitted
+    // only because it is independently invalid in the injected auth header.
+    const nasty = 'a"b\\c';
+    const { captured, fetchFn } = captureApp();
+    const app = await makeApp({ fetchFn }, nasty);
+
+    await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "test__api_call",
+        arguments: {
+          target: "https://api.example.com/auth",
+          method: "POST",
+          substituteBody: true,
+          body: { secret: "{{access_token}}" },
+        },
+      },
+    });
+
+    // Must parse without throwing, and round-trip the raw credential value.
+    expect(() => JSON.parse(captured.body!)).not.toThrow();
+    expect(JSON.parse(captured.body!)).toEqual({ secret: nasty });
   });
 });
 
