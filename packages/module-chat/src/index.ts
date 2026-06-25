@@ -31,7 +31,11 @@ import {
 } from "./routes.ts";
 import { chatPaths, chatComponentSchemas } from "./openapi.ts";
 import { chatLoopbackStrategy } from "./loopback-auth.ts";
-import { setIntegrationsService, setInProcessService } from "./platform-services.ts";
+import {
+  setIntegrationsService,
+  setAgentsService,
+  setInProcessService,
+} from "./platform-services.ts";
 import { z } from "zod";
 
 declare module "@appstrate/core/permissions" {
@@ -52,6 +56,7 @@ const chatModule: AppstrateModule = {
     // the models/applications socket round-trips. Optional: absent under the
     // OSS/test wiring, where the chat falls back to loopback fetch.
     setIntegrationsService(ctx.services.integrations ?? null);
+    setAgentsService(ctx.services.agents ?? null);
     setInProcessService(ctx.services.inProcess ?? null);
   },
 

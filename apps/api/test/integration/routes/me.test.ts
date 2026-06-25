@@ -21,7 +21,12 @@ import {
   orgOnlyHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey, seedPackage, seedApplication } from "../../helpers/seed.ts";
+import {
+  seedApiKey,
+  seedPackage,
+  seedApplication,
+  seedInstalledPackage,
+} from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -193,6 +198,47 @@ describe("Me API (/api/me)", () => {
       expect(byId.get("@ctx/gmail")?.source).toBe("own");
       expect(byId.get("@ctx/clickup")?.source).toBe("shared");
       expect(byId.has("@ctx/other-app")).toBe(false);
+    });
+
+    it("lists runnable agents (enabled only) with invokable id and input flag", async () => {
+      // Enabled installed agent → appears, takes_input from its input schema.
+      await seedPackage({
+        id: "@ctx/triage",
+        orgId: ctx.orgId,
+        draftManifest: {
+          name: "@ctx/triage",
+          version: "0.1.0",
+          type: "agent",
+          display_name: "Triage",
+          description: "Sorts email.",
+          input: { schema: { type: "object", properties: { folder: { type: "string" } } } },
+        },
+      });
+      await seedInstalledPackage(ctx.defaultAppId, "@ctx/triage");
+
+      // Installed but disabled in the app → must NOT appear.
+      await seedPackage({ id: "@ctx/disabled", orgId: ctx.orgId });
+      await seedInstalledPackage(ctx.defaultAppId, "@ctx/disabled", { enabled: false });
+
+      // Owned by the org but NOT installed in this app → must NOT appear.
+      await seedPackage({ id: "@ctx/uninstalled", orgId: ctx.orgId });
+
+      const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        agents: { package_id: string; display_name: string; takes_input: boolean }[];
+        agents_truncated: boolean;
+        agents_total: number;
+      };
+
+      const ids = new Set(body.agents.map((a) => a.package_id));
+      expect(ids.has("@ctx/triage")).toBe(true);
+      expect(ids.has("@ctx/disabled")).toBe(false);
+      expect(ids.has("@ctx/uninstalled")).toBe(false);
+      const triage = body.agents.find((a) => a.package_id === "@ctx/triage");
+      expect(triage?.display_name).toBe("Triage");
+      expect(triage?.takes_input).toBe(true);
+      expect(body.agents_truncated).toBe(false);
     });
 
     it("returns 401 without authentication", async () => {

@@ -414,7 +414,14 @@ export const mePaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["user", "org", "connections"],
+                required: [
+                  "user",
+                  "org",
+                  "connections",
+                  "agents",
+                  "agents_truncated",
+                  "agents_total",
+                ],
                 properties: {
                   user: {
                     type: "object",
@@ -449,6 +456,47 @@ export const mePaths = {
                       },
                     },
                   },
+                  agents: {
+                    type: "array",
+                    description:
+                      "Agents the caller can run in the current application (capped). Only " +
+                      "present when the caller holds the `agents:run` permission; empty otherwise. " +
+                      "When `agents_truncated` is true, the long tail is reachable via the MCP " +
+                      "`search_operations` tool.",
+                    items: {
+                      type: "object",
+                      required: [
+                        "package_id",
+                        "display_name",
+                        "description",
+                        "takes_input",
+                        "source",
+                      ],
+                      properties: {
+                        package_id: {
+                          type: "string",
+                          description: 'Invokable identifier, e.g. "@appstrate/triage".',
+                        },
+                        display_name: { type: "string" },
+                        description: { type: "string" },
+                        takes_input: {
+                          type: "boolean",
+                          description:
+                            "Whether the agent declares an input schema with properties.",
+                        },
+                        source: { type: "string", enum: ["system", "local"] },
+                      },
+                    },
+                  },
+                  agents_truncated: {
+                    type: "boolean",
+                    description:
+                      "True when the agent list was capped (more via search_operations).",
+                  },
+                  agents_total: {
+                    type: "integer",
+                    description: "Total runnable agents before the cap.",
+                  },
                 },
               },
               example: {
@@ -458,6 +506,17 @@ export const mePaths = {
                   { integration_id: "@appstrate/gmail", name: "Gmail", source: "own" },
                   { integration_id: "@appstrate/clickup", name: "ClickUp", source: "shared" },
                 ],
+                agents: [
+                  {
+                    package_id: "@appstrate/triage",
+                    display_name: "Inbox Triage",
+                    description: "Sorts and labels incoming email.",
+                    takes_input: false,
+                    source: "system",
+                  },
+                ],
+                agents_truncated: false,
+                agents_total: 1,
               },
             },
           },

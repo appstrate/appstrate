@@ -36,6 +36,10 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.integrations.listUsableForActor).toBe("function");
   });
 
+  it("wires the agent read (agents.listRunnable — chat caller-context hint)", () => {
+    expect(typeof services.agents.listRunnable).toBe("function");
+  });
+
   it("wires in-process dispatch (inProcess.dispatch — chat loopback-free reads)", () => {
     expect(typeof services.inProcess.dispatch).toBe("function");
   });

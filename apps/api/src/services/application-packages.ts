@@ -194,6 +194,71 @@ export async function listAccessiblePackages(scope: AppScope, type: PackageType)
     .orderBy(sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`);
 }
 
+// ---------------------------------------------------------------------------
+// Runnable agents — caller-context hint for the chat / get_me payload
+// ---------------------------------------------------------------------------
+
+/** One entry in the runnable-agent hint exposed via get_me / the chat prompt. */
+export interface RunnableAgent {
+  /** Invokable identifier, e.g. "@appstrate/triage" — pass to the run route. */
+  package_id: string;
+  display_name: string;
+  description: string;
+  /** Whether the agent declares an input schema with at least one property. */
+  takes_input: boolean;
+  source: string;
+}
+
+export interface RunnableAgentsResult {
+  agents: RunnableAgent[];
+  /** True when the catalog was capped by `limit` (more reachable via search). */
+  truncated: boolean;
+  /** Total runnable agents before the cap. */
+  total: number;
+}
+
+const DEFAULT_RUNNABLE_AGENTS_LIMIT = 15;
+
+/**
+ * List the agents an actor in this application could run, as a bounded hint for
+ * the get_me / chat-prompt caller context. "Runnable" = visible in the app
+ * (`listAccessiblePackages`) AND not disabled per-app. System packages are
+ * always enabled. The list is capped (`limit`) so a large catalog doesn't bloat
+ * the system prompt — the long tail stays reachable via `search_operations`.
+ *
+ * Run authorization itself is NOT enforced here (the caller gates on the
+ * `agents:run` permission); the actual run route re-checks RBAC at invoke time,
+ * so this list is only a hint.
+ */
+export async function listRunnableAgents(
+  scope: AppScope,
+  opts?: { limit?: number },
+): Promise<RunnableAgentsResult> {
+  const limit = opts?.limit ?? DEFAULT_RUNNABLE_AGENTS_LIMIT;
+  const rows = await listAccessiblePackages(scope, "agent");
+
+  // `enabled` is null for system packages (no application_packages row) — treat
+  // null as enabled; only an explicit `false` disables a local install.
+  const enabled = rows.filter((r) => r.appEnabled !== false);
+  const total = enabled.length;
+
+  const agents = enabled.slice(0, limit).map((row) => {
+    const manifest = asRecord(row.draftManifest) as Record<string, unknown>;
+    const input = asRecord(manifest.input);
+    const inputSchema = asRecord(input.schema);
+    const properties = asRecord(inputSchema.properties);
+    return {
+      package_id: typeof manifest.name === "string" ? manifest.name : row.id,
+      display_name: typeof manifest.display_name === "string" ? manifest.display_name : "",
+      description: typeof manifest.description === "string" ? manifest.description : "",
+      takes_input: Object.keys(properties).length > 0,
+      source: row.source ?? "local",
+    };
+  });
+
+  return { agents, truncated: total > agents.length, total };
+}
+
 /**
  * Check if an application has access to a specific package.
  * System packages are always accessible; local packages require installation.

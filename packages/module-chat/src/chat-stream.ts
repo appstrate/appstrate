@@ -25,7 +25,7 @@ import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
 import { subscriptionEngineDef } from "@appstrate/core/subscription-engines";
 import { buildTranscriptPrompt } from "./transcript.ts";
-import { getIntegrationsService } from "./platform-services.ts";
+import { getIntegrationsService, getAgentsService } from "./platform-services.ts";
 
 const MAX_STEPS = 16;
 
@@ -60,9 +60,46 @@ export function applyOperationIndexPolicy(system: string, apiShape: string): str
  */
 const ENGINE_LOOPBACK_TTL_MS = 30 * 60_000;
 
-const SYSTEM_PROMPT = `You are Appstrate's assistant. You help the user operate their Appstrate instance — discovering and running agents, inspecting runs, scheduling, searching their documents — through the available tools.
+const SYSTEM_PROMPT = `You are Appstrate's assistant. You help the user operate their Appstrate instance through the available tools.
 
-Use the tools to ground every action: search for the right operation, read its schema, then invoke it. Never invent an operationId or argument shape. Runs are asynchronous — after triggering one, call the run-get operation with \`query: { wait: true }\` to long-poll the platform until the run is terminal (it returns after ~55s; if still running, call it again); never busy-poll in a tight loop yourself. Cite what the tools return; do not fabricate results.
+**You have no ability of your own to act on the outside world.** You cannot browse the web, read email, call third-party APIs, or use any integration or MCP directly. Your only power is invoking Appstrate operations. You are the brain/orchestrator; your hands are Appstrate agents. Any request that needs an integration, an MCP, or any action external to Appstrate MUST be carried out by running an agent and reading its result back — never by you claiming to have done it yourself.
+
+Use the tools to ground every action: search for the right operation, read its schema, then invoke it. Never invent an operationId or argument shape.
+
+Choosing what to do:
+- If the request is a pure Appstrate operation (list or inspect runs, schedule, manage agents, search documents), call that operation directly with \`invoke_operation\`. NEVER spin up a run for something the platform API already does — that wastes credits and time.
+- If the request needs an integration, an MCP, or any external action, run an agent:
+  1. Prefer an existing agent the user can run (listed in your context below) when one matches the intent — trigger it with the run-agent operation.
+  2. Otherwise build a one-shot inline run (\`POST /api/runs/inline\`): pass a full AFPS agent \`manifest\` plus a \`prompt\`. In the manifest, declare the integration(s) under \`dependencies.integrations\`, grant the needed tools under \`integrations_configuration\`, set \`runtime_tools: ["output"]\`, and define an \`output.schema\` for the data you want back. In the \`prompt\`, tell the agent it is a sub-agent: do the work, then return the result by calling the \`output\` tool with a payload that satisfies the schema. Without that output schema and instruction you will receive nothing back.
+
+Runs are asynchronous. After triggering one (inline or existing), call the run-get operation with \`query: { wait: true }\` to long-poll until the run is terminal (it returns after ~55s; if still running, call it again); never busy-poll in a tight loop yourself. Then read the run's \`result\` field — that is the sub-agent's deliverable. Answer the user from \`result\`; never fabricate it. If the run fails, read its error and report it plainly.
+
+Example — summarising the user's latest emails (adapt the integration, tools, and schema to the actual request; the integration id below is a placeholder):
+\`\`\`json
+{
+  "manifest": {
+    "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
+    "schema_version": "0.2",
+    "name": "@inline/one-shot",
+    "type": "agent",
+    "version": "1.0.0",
+    "timeout": 300,
+    "dependencies": { "integrations": { "@appstrate/<integration>": "^1.0.0" } },
+    "integrations_configuration": { "@appstrate/<integration>": { "tools": ["api_call"] } },
+    "runtime_tools": ["output"],
+    "output": {
+      "schema": {
+        "type": "object",
+        "required": ["summary"],
+        "properties": { "summary": { "type": "string" } }
+      },
+      "property_order": ["summary"]
+    }
+  },
+  "prompt": "You are a sub-agent. Fetch the user's 3 most recent emails, summarise them, and return the summary by calling the output tool."
+}
+\`\`\`
+Then call run-get with \`query: { wait: true }\`, read \`result.summary\`, and reply to the user from it.
 
 When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.
 
@@ -87,6 +124,15 @@ interface CallerContext {
   user?: { name?: string | null; email?: string | null } | null;
   org?: { role?: string | null } | null;
   connections?: { integration_id: string; name: string; source: string }[] | null;
+  agents?:
+    | {
+        package_id: string;
+        display_name?: string | null;
+        description?: string | null;
+        takes_input?: boolean | null;
+      }[]
+    | null;
+  agents_truncated?: boolean | null;
 }
 
 /**
@@ -98,7 +144,7 @@ export function formatCallerContext(raw: unknown): string {
   const name = ctx.user?.name?.trim();
   const email = ctx.user?.email?.trim();
   const role = ctx.org?.role?.trim();
-  if (!name && !email && !role && !ctx.connections?.length) return "";
+  if (!name && !email && !role && !ctx.connections?.length && !ctx.agents?.length) return "";
 
   const who = name && email ? `${name} (${email})` : (name ?? email ?? "the user");
   const lines = [
@@ -112,6 +158,24 @@ export function formatCallerContext(raw: unknown): string {
     );
   } else {
     lines.push("The user has no connected integrations yet.");
+  }
+  if (ctx.agents?.length) {
+    lines.push("", "## Existing agents you can run");
+    for (const a of ctx.agents) {
+      const desc = a.description?.trim();
+      const label = a.display_name?.trim() || a.package_id;
+      lines.push(
+        `- \`${a.package_id}\` — ${label}${desc ? `: ${desc}` : ""}` +
+          ` (takes input: ${a.takes_input ? "yes" : "no"})`,
+      );
+    }
+    if (ctx.agents_truncated) {
+      lines.push("More agents are available — use the search_operations tool to find them.");
+    }
+    lines.push(
+      "Prefer running an existing agent over doing the work inline when one fits the task. " +
+        "Trigger it through invoke_operation (the agent run route), then track it with wait_for_run.",
+    );
   }
   return lines.join("\n");
 }
@@ -172,21 +236,32 @@ async function buildCallerContextBlock(
     const svc = getIntegrationsService();
     if (svc) {
       // In-process: identity/role come from the request context. The connection
-      // list is app-scoped — fetch it only when an application id is known;
-      // without one we still emit the identity/role block (empty connections)
-      // rather than fall back to a loopback that would itself 400 without app
-      // context.
-      const connections = applicationId
-        ? await svc.listUsableForActor({
-            orgId,
-            applicationId,
-            actor: { type: "user", id: user.id },
-          })
-        : [];
+      // and agent lists are app-scoped — fetch them only when an application id
+      // is known; without one we still emit the identity/role block (empty
+      // lists) rather than fall back to a loopback that would itself 400 without
+      // app context.
+      const agentsSvc = getAgentsService();
+      // Runnable agents are a hint — only when the caller holds `agents:run`
+      // (mirrors the REST /api/me/context gate, so the two never drift).
+      const canRun = (c.get("permissions") as Set<string> | undefined)?.has("agents:run") ?? false;
+      const [connections, runnable] = await Promise.all([
+        applicationId
+          ? svc.listUsableForActor({
+              orgId,
+              applicationId,
+              actor: { type: "user", id: user.id },
+            })
+          : Promise.resolve([]),
+        applicationId && agentsSvc && canRun
+          ? agentsSvc.listRunnable({ orgId, applicationId })
+          : Promise.resolve({ agents: [], truncated: false, total: 0 }),
+      ]);
       return formatCallerContext({
         user: { name: user.name ?? null, email: user.email ?? null },
         org: { role: role ?? null },
         connections,
+        agents: runnable.agents,
+        agents_truncated: runnable.truncated,
       });
     }
     // Fallback: the original loopback hop (kept for OSS/test wiring).

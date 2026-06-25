@@ -51,6 +51,65 @@ describe("formatCallerContext", () => {
     expect(out).not.toContain("role in this organization");
   });
 
+  it("renders the runnable-agent block with invokable id and input flag", () => {
+    const out = formatCallerContext({
+      user: { name: "Ada", email: "ada@acme.com" },
+      org: { role: "member" },
+      connections: [],
+      agents: [
+        {
+          package_id: "@appstrate/triage",
+          display_name: "Inbox Triage",
+          description: "Sorts incoming email.",
+          takes_input: false,
+        },
+        {
+          package_id: "@acme/report",
+          display_name: "Report",
+          description: "Builds a report.",
+          takes_input: true,
+        },
+      ],
+    });
+    expect(out).toContain("## Existing agents you can run");
+    expect(out).toContain("`@appstrate/triage`");
+    expect(out).toContain("Inbox Triage: Sorts incoming email.");
+    expect(out).toContain("(takes input: no)");
+    expect(out).toContain("`@acme/report`");
+    expect(out).toContain("(takes input: yes)");
+    expect(out).toContain("Prefer running an existing agent");
+    expect(out).not.toContain("use the search_operations tool");
+  });
+
+  it("adds the search_operations note only when the agent list is truncated", () => {
+    const out = formatCallerContext({
+      user: { name: "Ada" },
+      org: { role: "member" },
+      connections: [],
+      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+      agents_truncated: true,
+    });
+    expect(out).toContain("use the search_operations tool");
+  });
+
+  it("renders a context block from agents alone (no identity/connections)", () => {
+    const out = formatCallerContext({
+      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+    });
+    expect(out).toContain("## Existing agents you can run");
+    expect(out).toContain("`@appstrate/triage`");
+  });
+
+  it("omits the agent block when there are no runnable agents", () => {
+    const out = formatCallerContext({
+      user: { name: "Ada" },
+      org: { role: "member" },
+      connections: [],
+      agents: [],
+    });
+    expect(out).not.toContain("Existing agents you can run");
+  });
+
   it("returns an empty string for an unusable payload (so injection is skipped)", () => {
     expect(formatCallerContext({})).toBe("");
     expect(formatCallerContext(null)).toBe("");

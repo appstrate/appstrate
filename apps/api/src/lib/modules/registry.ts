@@ -21,6 +21,7 @@ import { logger } from "../logger.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { listLlmUsageForRun } from "../../services/state/runs.ts";
 import { listUsableIntegrationsForActor } from "../../services/integration-connections.ts";
+import { listRunnableAgents } from "../../services/application-packages.ts";
 import { getPlatformApp } from "../platform-app.ts";
 
 // ---------------------------------------------------------------------------
@@ -104,6 +105,12 @@ function buildPlatformServices(): PlatformServices {
       // context, only the integration list needs this single DB read.
       listUsableForActor: ({ orgId, applicationId, actor }) =>
         listUsableIntegrationsForActor({ orgId, applicationId }, actor),
+    },
+    agents: {
+      // In-process runnable-agent hint for the chat's caller-context block —
+      // app-scoped (same for every actor), capped for prompt size.
+      listRunnable: ({ orgId, applicationId, limit }) =>
+        listRunnableAgents({ orgId, applicationId }, { limit }),
     },
     inProcess: {
       // Re-enter the fully-wired platform app in-process (no socket hop). The

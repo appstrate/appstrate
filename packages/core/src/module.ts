@@ -1008,6 +1008,27 @@ export interface PlatformServices {
     }): Promise<Array<{ integration_id: string; name: string; source: string }>>;
   };
   /**
+   * Agent read surface. `listRunnable` returns the agents an actor could run in
+   * the given application as a bounded hint for the `get_me` / chat-prompt
+   * caller context (capped — the long tail stays reachable via the MCP
+   * `search_operations` tool). Run authorization is NOT enforced here; the
+   * caller gates on the `agents:run` permission and the run route re-checks RBAC
+   * at invoke time, so the list is only a hint.
+   */
+  agents: {
+    listRunnable(args: { orgId: string; applicationId: string; limit?: number }): Promise<{
+      agents: Array<{
+        package_id: string;
+        display_name: string;
+        description: string;
+        takes_input: boolean;
+        source: string;
+      }>;
+      truncated: boolean;
+      total: number;
+    }>;
+  };
+  /**
    * In-process dispatch into the fully-wired platform Hono app — the same
    * request the loopback `fetch("http://127.0.0.1:<port>/api/…")` would make,
    * but without the socket round-trip and HTTP (de)serialization. The auth

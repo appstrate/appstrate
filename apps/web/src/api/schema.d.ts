@@ -11254,7 +11254,18 @@ export interface operations {
                      *           "name": "ClickUp",
                      *           "source": "shared"
                      *         }
-                     *       ]
+                     *       ],
+                     *       "agents": [
+                     *         {
+                     *           "package_id": "@appstrate/triage",
+                     *           "display_name": "Inbox Triage",
+                     *           "description": "Sorts and labels incoming email.",
+                     *           "takes_input": false,
+                     *           "source": "system"
+                     *         }
+                     *       ],
+                     *       "agents_truncated": false,
+                     *       "agents_total": 1
                      *     }
                      */
                     "application/json": {
@@ -11275,6 +11286,21 @@ export interface operations {
                             /** @enum {string} */
                             source: "own" | "shared" | "both";
                         }[];
+                        /** @description Agents the caller can run in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the long tail is reachable via the MCP `search_operations` tool. */
+                        agents: {
+                            /** @description Invokable identifier, e.g. "@appstrate/triage". */
+                            package_id: string;
+                            display_name: string;
+                            description: string;
+                            /** @description Whether the agent declares an input schema with properties. */
+                            takes_input: boolean;
+                            /** @enum {string} */
+                            source: "system" | "local";
+                        }[];
+                        /** @description True when the agent list was capped (more via search_operations). */
+                        agents_truncated: boolean;
+                        /** @description Total runnable agents before the cap. */
+                        agents_total: number;
                     };
                 };
             };

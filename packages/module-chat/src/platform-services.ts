@@ -24,11 +24,28 @@ export interface ChatIntegrationsService {
   }): Promise<Array<{ integration_id: string; name: string; source: string }>>;
 }
 
+export interface ChatRunnableAgent {
+  package_id: string;
+  display_name: string;
+  description: string;
+  takes_input: boolean;
+  source: string;
+}
+
+export interface ChatAgentsService {
+  listRunnable(args: { orgId: string; applicationId: string; limit?: number }): Promise<{
+    agents: ChatRunnableAgent[];
+    truncated: boolean;
+    total: number;
+  }>;
+}
+
 export interface ChatInProcessService {
   dispatch(request: Request): Promise<Response>;
 }
 
 let integrationsService: ChatIntegrationsService | null = null;
+let agentsService: ChatAgentsService | null = null;
 let inProcessService: ChatInProcessService | null = null;
 
 export function setIntegrationsService(svc: ChatIntegrationsService | null): void {
@@ -37,6 +54,14 @@ export function setIntegrationsService(svc: ChatIntegrationsService | null): voi
 
 export function getIntegrationsService(): ChatIntegrationsService | null {
   return integrationsService;
+}
+
+export function setAgentsService(svc: ChatAgentsService | null): void {
+  agentsService = svc;
+}
+
+export function getAgentsService(): ChatAgentsService | null {
+  return agentsService;
 }
 
 export function setInProcessService(svc: ChatInProcessService | null): void {
