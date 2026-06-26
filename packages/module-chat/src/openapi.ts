@@ -15,18 +15,23 @@ const stdHeaders = {
 export const chatComponentSchemas = {
   ChatSession: {
     type: "object",
-    required: ["object", "id", "createdAt", "updatedAt"],
+    required: ["object", "id", "generating", "createdAt", "updatedAt"],
     properties: {
       object: { type: "string", enum: ["chat_session"] },
       id: { type: "string", description: "Session ID (chs_ prefix)" },
       title: { type: ["string", "null"] },
+      generating: {
+        type: "boolean",
+        description: "Whether a turn is currently generating in this conversation.",
+      },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  // One conversation-tree node, written by the client's assistant-ui
-  // history adapter. `content` is the format-encoded message — opaque to
-  // the server (it only peeks for a best-effort title).
+  // One stored conversation node returned by `GET /sessions/{id}` so the
+  // client can seed `useChat({ messages })` on load. Written server-side
+  // (user turn before inference, assistant turn on finalize); `content` is the
+  // ai-sdk/v6 format-encoded message (UIMessage minus its id).
   ChatMessageEntry: {
     type: "object",
     required: ["id", "parent_id", "format", "content"],
@@ -187,26 +192,24 @@ export const chatPaths = {
       },
     },
   },
-  "/api/chat/sessions/{id}/messages": {
-    post: {
-      operationId: "appendChatMessage",
+  "/api/chat/sessions/{id}/stream": {
+    get: {
+      operationId: "resumeChatStream",
       tags: ["Chat"],
-      summary: "Append/upsert a history entry",
+      summary: "Resume an in-flight chat turn",
       description:
-        "Persistence write from the client's assistant-ui history adapter: one opaque conversation-tree node, upserted on its client id. The live conversation flows through `POST /api/chat` (streaming).",
+        "Reconnect to the session's in-flight generation (the client's native AI-SDK `useChat({ resume: true })` calls this on mount). Returns the live UIMessage stream when a turn is generating, otherwise `204`. Lets a mid-inference page reload continue tokens exactly where they were.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": { schema: { $ref: "#/components/schemas/ChatMessageEntry" } },
-        },
-      },
       responses: {
-        "204": { description: "Entry persisted" },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "200": {
+          description: "AI SDK UIMessage stream (text/event-stream)",
+          headers: stdHeaders,
+          content: { "text/event-stream": { schema: { type: "string" } } },
+        },
+        "204": { description: "No active stream to resume" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -218,7 +221,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "Run a conversational turn (streaming)",
       description:
-        "Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference goes through the org's configured models via the llm-proxy; tool calls dispatch through `/api/mcp` with the caller's own permissions. History persistence is client-owned (see the session entry endpoints). Rate limited (20/min per caller). Not invocable over MCP (streaming).",
+        "Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference goes through the org's configured models via the llm-proxy; tool calls dispatch through `/api/mcp` with the caller's own permissions. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -258,6 +261,24 @@ export const chatPaths = {
         "400": { description: "No enabled model configured, or invalid body" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "429": { description: "Rate limited (20/min per caller)" },
+      },
+    },
+  },
+  "/api/chat/sessions/{id}/stop": {
+    post: {
+      operationId: "stopChatStream",
+      tags: ["Chat"],
+      summary: "Stop an in-progress chat generation",
+      description:
+        "Explicitly aborts the session's in-flight generation (distinct from a client disconnect, which never cancels generation). The live stream id is resolved server-side from the session. No-op if no turn is generating.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "204": { description: "Stop signal accepted" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },

@@ -22,8 +22,11 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { requireModulePermission } from "@appstrate/core/permissions";
-import { notFound, parseBody, invalidRequest } from "@appstrate/core/api-errors";
+import { notFound, parseBody } from "@appstrate/core/api-errors";
+import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream } from "./chat-stream.ts";
+import { stopStream } from "./stop-registry.ts";
+import { getResumableContext } from "./resumable.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
 /** Minimal Hono Env mirroring what the platform auth pipeline sets. */
@@ -42,14 +45,6 @@ export const renameSessionSchema = z.object({
   title: z.string().min(1).max(200),
 });
 
-/** One tree node from the history adapter — `content` is opaque to us. */
-export const messageEntrySchema = z.object({
-  id: z.string().min(1).max(200),
-  parent_id: z.string().max(200).nullable(),
-  format: z.string().min(1).max(100),
-  content: z.unknown(),
-});
-
 function newSessionId(): string {
   return `chs_${crypto.randomUUID().replaceAll("-", "")}`;
 }
@@ -62,6 +57,10 @@ function toSessionDto(row: SessionRow) {
     object: "chat_session" as const,
     id: row.id,
     title: row.title,
+    // True while a turn is generating — lets the UI badge an "unread" reply on a
+    // conversation the user has left, and detect when it finishes. Never leaks
+    // the raw stream id.
+    generating: row.activeStreamId != null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -76,7 +75,11 @@ function toEntryDto(row: MessageRow) {
   };
 }
 
-async function getOwnedSession(id: string, orgId: string, userId: string): Promise<SessionRow> {
+async function findOwnedSession(
+  id: string,
+  orgId: string,
+  userId: string,
+): Promise<SessionRow | undefined> {
   const [session] = await db
     .select()
     .from(chatSessions)
@@ -84,6 +87,11 @@ async function getOwnedSession(id: string, orgId: string, userId: string): Promi
       and(eq(chatSessions.id, id), eq(chatSessions.orgId, orgId), eq(chatSessions.userId, userId)),
     )
     .limit(1);
+  return session;
+}
+
+async function getOwnedSession(id: string, orgId: string, userId: string): Promise<SessionRow> {
+  const session = await findOwnedSession(id, orgId, userId);
   if (!session) throw notFound("Chat session not found");
   return session;
 }
@@ -94,24 +102,6 @@ async function loadEntries(sessionId: string): Promise<MessageRow[]> {
     .from(chatMessages)
     .where(eq(chatMessages.sessionId, sessionId))
     .orderBy(asc(chatMessages.seq));
-}
-
-/** First user entry's text, trimmed — best-effort over the opaque content. */
-function deriveTitle(entries: MessageRow[]): string | null {
-  for (const entry of entries) {
-    const content = entry.content as { role?: string; parts?: unknown[] };
-    if (content?.role !== "user" || !Array.isArray(content.parts)) continue;
-    const text = content.parts
-      .map((p) =>
-        p && typeof p === "object" && (p as { type?: string }).type === "text"
-          ? ((p as { text?: string }).text ?? "")
-          : "",
-      )
-      .join("")
-      .trim();
-    if (text) return text.length > 60 ? `${text.slice(0, 57)}…` : text;
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -182,53 +172,45 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     return c.body(null, 204);
   });
 
-  // POST /api/chat/sessions/:id/messages — append/upsert one tree node
-  // (assistant-ui history adapter `append`/`update`).
-  router.post(
-    "/api/chat/sessions/:id/messages",
+  // POST /api/chat — the conversational loop (AI SDK UIMessage stream).
+  // 20/min: every call fans out into metered LLM traffic. The server is the
+  // single writer of messages (user before inference, assistant on finalize) —
+  // there is no client message-write endpoint.
+  router.post("/api/chat", rateLimited(20), requireModulePermission("chat", "write"), (c) =>
+    handleChatStream(c, deps),
+  );
+
+  // GET /api/chat/sessions/:id/stream — reconnect to the in-flight turn (resume).
+  // The client's native AI-SDK reconnect (`useChat({ resume: true })`) calls this
+  // on mount: when a turn is generating we replay its recorded bytes + live tail
+  // (so a mid-inference reload continues exactly where it was); otherwise 204.
+  router.get(
+    "/api/chat/sessions/:id/stream",
     rateLimited(120),
-    requireModulePermission("chat", "write"),
+    requireModulePermission("chat", "read"),
     async (c) => {
-      const session = await getOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
-      const entry = parseBody(messageEntrySchema, await c.req.json().catch(() => null));
-      // `content` is a notNull jsonb column; z.unknown() permits a missing/null
-      // value which would hit the DB as NULL → 500. Reject it as a 400 instead.
-      if (entry.content == null) {
-        throw invalidRequest("content is required", "content");
-      }
-      const content = entry.content as typeof chatMessages.$inferInsert.content;
-
-      await db
-        .insert(chatMessages)
-        .values({
-          sessionId: session.id,
-          messageId: entry.id,
-          parentId: entry.parent_id,
-          format: entry.format,
-          content,
-        })
-        .onConflictDoUpdate({
-          target: [chatMessages.sessionId, chatMessages.messageId],
-          set: {
-            parentId: entry.parent_id,
-            content,
-            format: entry.format,
-          },
-        });
-
-      const title = session.title ?? deriveTitle(await loadEntries(session.id));
-      await db
-        .update(chatSessions)
-        .set({ updatedAt: new Date(), ...(title !== session.title ? { title } : {}) })
-        .where(eq(chatSessions.id, session.id));
-      return c.body(null, 204);
+      // A brand-new, not-yet-sent conversation has no row — nothing to resume.
+      const session = await findOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
+      if (!session?.activeStreamId) return c.body(null, 204);
+      const stream = await getResumableContext().resume(session.activeStreamId);
+      // Stale id (producer gone, e.g. after a crash) → nothing to resume.
+      if (!stream) return c.body(null, 204);
+      return new Response(stream, { headers: UI_MESSAGE_STREAM_HEADERS });
     },
   );
 
-  // POST /api/chat — the conversational loop (AI SDK UIMessage stream).
-  // 20/min: every call fans out into metered LLM traffic.
-  router.post("/api/chat", rateLimited(20), requireModulePermission("chat", "write"), (c) =>
-    handleChatStream(c, deps),
+  // POST /api/chat/sessions/:id/stop — explicit stop (≠ disconnect): abort the
+  // session's in-flight generation. Keyed by session id (the conversation the
+  // client knows); the live stream id is resolved server-side.
+  router.post(
+    "/api/chat/sessions/:id/stop",
+    rateLimited(60),
+    requireModulePermission("chat", "write"),
+    async (c) => {
+      const session = await getOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
+      if (session.activeStreamId) stopStream(session.activeStreamId);
+      return c.body(null, 204);
+    },
   );
 
   return router;

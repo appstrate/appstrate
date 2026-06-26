@@ -1,31 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** Conversation list — native assistant-ui thread-list primitives. */
+/**
+ * Conversation list + active-conversation title. Plain React Query over the
+ * session REST API (no assistant-ui thread-list runtime): the URL is the single
+ * source of truth, selection just navigates. Mutations (rename/delete) invalidate
+ * the list; the active conversation's first message invalidates it too (see
+ * index.tsx) so a new conversation appears here with its server-derived title.
+ */
 
 import { useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { PlusIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import { useChatHeaders, useSelectConversation } from "./runtime-context.ts";
 import {
-  ThreadListPrimitive,
-  ThreadListItemPrimitive,
-  ThreadListItemMorePrimitive,
-  ThreadListItemRuntimeProvider,
-  useAssistantRuntime,
-  useThreadList,
-  useThreadListItem,
-  useThreadListItemRuntime,
-} from "@assistant-ui/react";
-import {
-  PlusIcon,
-  PencilIcon,
-  Trash2Icon,
-  EllipsisVerticalIcon,
-  ChevronDownIcon,
-} from "lucide-react";
-import { useSelectConversation } from "./runtime-context.ts";
+  renameSession,
+  deleteSession,
+  SESSIONS_QUERY_KEY,
+  type SessionSummary,
+} from "./sessions.ts";
+import { useSessions } from "./use-sessions.ts";
 
 /**
  * ISO timestamp → compact relative time ("5 min", "2 h", "3 j"), as of render.
- * `Intl.RelativeTimeFormat` always prefixes "il y a", so we format by hand for
- * a tighter sidebar label.
+ * `Intl.RelativeTimeFormat` always prefixes "il y a", so we format by hand.
  */
 function relativeTime(iso: string): string {
   const sec = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
@@ -43,21 +40,17 @@ function relativeTime(iso: string): string {
   return `${year} an${year > 1 ? "s" : ""}`;
 }
 
-/** Last-activity time, read from the thread item's native `custom` metadata. */
-function Timestamp({ className = "" }: { className?: string }) {
-  const updatedAt = useThreadListItem((s) => s.custom?.updatedAt as string | undefined);
-  const label = updatedAt ? relativeTime(updatedAt) : "";
-  return label ? <span className={className}>{label}</span> : null;
-}
-
-export function ThreadList() {
-  // "New conversation" = navigate to `/chat` (no id); `ChatUrlSync` resets the
-  // runtime to a fresh thread. URL stays the single source of truth.
+export function ThreadList({
+  activeId,
+  unreadIds,
+}: {
+  activeId: string | null;
+  unreadIds?: ReadonlySet<string>;
+}) {
   const select = useSelectConversation();
+  const { data: sessions, isLoading } = useSessions();
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Header — same height (h-12) + bottom border as the chat and agent
-          panels, so the three columns share one aligned header band. */}
       <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
         <span className="flex-1 text-sm font-medium">Conversations</span>
         <button
@@ -71,154 +64,163 @@ export function ThreadList() {
         </button>
       </div>
       <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2">
-        <ThreadListPrimitive.Items components={{ ThreadListItem }} />
-        <EmptyConversations />
+        {(sessions ?? []).map((s) => (
+          <ConversationRow
+            key={s.id}
+            session={s}
+            active={s.id === activeId}
+            unread={unreadIds?.has(s.id) ?? false}
+          />
+        ))}
+        {!isLoading && (sessions ?? []).length === 0 && (
+          <p className="text-muted-foreground px-2 py-6 text-center text-xs">
+            Envoie un message ! Ton historique de conversations apparaîtra ici.
+          </p>
+        )}
       </div>
     </div>
   );
 }
 
 /**
- * Empty-state for the conversation list. assistant-ui exposes no native
- * `ThreadListPrimitive.Empty`, so we read the runtime state (`useThreadList`)
- * and render our own copy — only once loading settled and no saved
- * conversation exists, so it never flashes during the initial load.
+ * Inline-rename state + commit, shared by the list row and the header title.
+ * Holds the editing toggle and the rename→invalidate mutation in one place so
+ * both call sites stay byte-identical.
  */
-function EmptyConversations() {
-  const showEmpty = useThreadList((s) => s.threadIds.length === 0 && !s.isLoading);
-  if (!showEmpty) return null;
-  return (
-    <p className="text-muted-foreground px-2 py-6 text-center text-xs">
-      Envoie un message ! Ton historique de conversations apparaîtra ici.
-    </p>
-  );
+function useInlineRename(sessionId: string) {
+  const getHeaders = useChatHeaders();
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const save = async (title: string) => {
+    await renameSession(getHeaders, sessionId, title);
+    await queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
+  };
+  return { editing, setEditing, save };
 }
 
-function ThreadListItem() {
-  const [editing, setEditing] = useState(false);
-  // Clicking a conversation only changes the URL (single source of truth);
-  // `ChatUrlSync` switches the runtime in response. The `data-[active]` highlight
-  // still reflects the runtime, which follows the URL.
+function ConversationRow({
+  session,
+  active,
+  unread,
+}: {
+  session: SessionSummary;
+  active: boolean;
+  unread: boolean;
+}) {
+  const getHeaders = useChatHeaders();
   const select = useSelectConversation();
-  const remoteId = useThreadListItem((s) => s.remoteId);
+  const queryClient = useQueryClient();
+  const { editing, setEditing, save } = useInlineRename(session.id);
+
+  const onDelete = async () => {
+    await deleteSession(getHeaders, session.id);
+    await queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
+    if (active) select?.(null);
+  };
+
+  if (editing) {
+    return (
+      <div className="px-2 py-0">
+        <RenameInput current={session.title ?? ""} onDone={() => setEditing(false)} onSave={save} />
+      </div>
+    );
+  }
+
   return (
-    <ThreadListItemPrimitive.Root className="group hover:bg-accent/50 data-[active]:bg-accent data-[active]:text-accent-foreground flex items-center gap-1 rounded-md px-2 py-0 text-sm">
-      {editing ? (
-        <RenameInput onDone={() => setEditing(false)} />
-      ) : (
-        <>
+    <div
+      data-active={active || undefined}
+      className="group hover:bg-accent/50 data-[active]:bg-accent data-[active]:text-accent-foreground flex items-center gap-1 rounded-md px-2 py-0 text-sm"
+    >
+      <button
+        type="button"
+        onClick={() => select?.(session.id)}
+        className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
+      >
+        {unread && (
+          <span
+            className="bg-primary size-2 shrink-0 rounded-full"
+            aria-label="Réponse non lue"
+            title="Réponse non lue"
+          />
+        )}
+        <span className={`block w-full truncate text-left ${unread ? "font-semibold" : ""}`}>
+          {session.title ?? "Nouvelle conversation"}
+        </span>
+      </button>
+      <div className="relative flex shrink-0 items-center">
+        <span className="text-muted-foreground text-xs transition-opacity group-hover:opacity-0">
+          {relativeTime(session.updatedAt)}
+        </span>
+        <div className="absolute right-0 flex items-center opacity-0 transition-opacity group-hover:opacity-100">
           <button
             type="button"
-            onClick={() => remoteId && select?.(remoteId)}
-            className="min-w-0 flex-1 py-1 text-left"
+            aria-label="Renommer"
+            title="Renommer"
+            onClick={() => setEditing(true)}
+            className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-md p-1"
           >
-            <span className="block w-full truncate text-left">
-              <ThreadListItemPrimitive.Title fallback="Nouvelle conversation" />
-            </span>
+            <PencilIcon className="size-4" />
           </button>
-          {/* Trailing slot: relative time at rest, kebab over it on hover
-              (and kept visible while the menu is open) — Claude/ChatGPT style. */}
-          <div className="relative flex shrink-0 items-center">
-            <Timestamp className="text-muted-foreground text-xs transition-opacity group-hover:opacity-0" />
-            <ConversationMenu
-              onRename={() => setEditing(true)}
-              triggerClass="absolute right-0 opacity-0 transition-opacity group-hover:opacity-100 data-[state=open]:opacity-100"
-            />
-          </div>
-        </>
-      )}
-    </ThreadListItemPrimitive.Root>
-  );
-}
-
-/**
- * Active-conversation title + actions for the chat header (Claude/Codex style).
- * Binds to the thread list's `mainItem` runtime so the same primitives (Title,
- * rename, delete, kebab) work for the open conversation.
- */
-export function ActiveConversationTitle() {
-  const runtime = useAssistantRuntime();
-  return (
-    <ThreadListItemRuntimeProvider runtime={runtime.threads.mainItem}>
-      <ActiveTitleInner />
-    </ThreadListItemRuntimeProvider>
-  );
-}
-
-function ActiveTitleInner() {
-  const [editing, setEditing] = useState(false);
-  if (editing) return <RenameInput onDone={() => setEditing(false)} />;
-  return (
-    <div className="flex min-w-0 items-center gap-1">
-      <span className="truncate text-sm font-medium">
-        <ThreadListItemPrimitive.Title fallback="Nouvelle conversation" />
-      </span>
-      <ConversationMenu onRename={() => setEditing(true)} chevron />
+          <button
+            type="button"
+            aria-label="Supprimer"
+            title="Supprimer"
+            onClick={() => void onDelete()}
+            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md p-1"
+          >
+            <Trash2Icon className="size-4" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
-// ─── Shared kebab menu (list + header) ───────────────────────────────────────
+/** Active-conversation title + rename for the chat header. */
+export function ActiveConversationTitle({ activeId }: { activeId: string | null }) {
+  const { editing, setEditing, save } = useInlineRename(activeId ?? "");
+  const { data: sessions } = useSessions();
+  if (!activeId) return null;
+  const session = sessions?.find((s) => s.id === activeId);
+  if (!session) return null;
 
-/** Native dropdown (radix, via assistant-ui) with Rename + Delete. */
-function ConversationMenu({
-  onRename,
-  triggerClass = "",
-  chevron = false,
-}: {
-  onRename: () => void;
-  triggerClass?: string;
-  chevron?: boolean;
-}) {
+  if (editing) {
+    return (
+      <RenameInput current={session.title ?? ""} onDone={() => setEditing(false)} onSave={save} />
+    );
+  }
   return (
-    <ThreadListItemMorePrimitive.Root>
-      <ThreadListItemMorePrimitive.Trigger asChild>
-        <button
-          type="button"
-          aria-label="Actions"
-          className={`text-muted-foreground hover:text-foreground hover:bg-accent shrink-0 rounded-md p-1 ${triggerClass}`}
-        >
-          {chevron ? (
-            <ChevronDownIcon className="size-4" />
-          ) : (
-            <EllipsisVerticalIcon className="size-4" />
-          )}
-        </button>
-      </ThreadListItemMorePrimitive.Trigger>
-      <ThreadListItemMorePrimitive.Content
-        align="start"
-        sideOffset={4}
-        className="bg-popover text-popover-foreground z-50 min-w-40 rounded-md border p-1 shadow-md"
-      >
-        <ThreadListItemMorePrimitive.Item
-          onSelect={onRename}
-          className="hover:bg-accent flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none"
-        >
-          <PencilIcon className="size-4" /> Renommer
-        </ThreadListItemMorePrimitive.Item>
-        <ThreadListItemMorePrimitive.Separator className="bg-border my-1 h-px" />
-        <ThreadListItemPrimitive.Delete asChild>
-          <ThreadListItemMorePrimitive.Item className="text-destructive hover:bg-destructive/10 flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none">
-            <Trash2Icon className="size-4" /> Supprimer
-          </ThreadListItemMorePrimitive.Item>
-        </ThreadListItemPrimitive.Delete>
-      </ThreadListItemMorePrimitive.Content>
-    </ThreadListItemMorePrimitive.Root>
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      className="hover:bg-accent flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5"
+      title="Renommer"
+    >
+      <span className="truncate text-sm font-medium">
+        {session.title ?? "Nouvelle conversation"}
+      </span>
+      <PencilIcon className="text-muted-foreground size-3.5 shrink-0" />
+    </button>
   );
 }
 
 /** Inline title editor — commits on Enter/blur, cancels on Escape. */
-function RenameInput({ onDone }: { onDone: () => void }) {
-  const runtime = useThreadListItemRuntime();
-  const current = useThreadListItem((s) => s.title) ?? "";
+function RenameInput({
+  current,
+  onDone,
+  onSave,
+}: {
+  current: string;
+  onDone: () => void;
+  onSave: (title: string) => Promise<void>;
+}) {
   const [value, setValue] = useState(current);
-  // Enter and blur both fire — guard so we commit (and unmount) only once.
   const done = useRef(false);
   const finish = (save: boolean) => {
     if (done.current) return;
     done.current = true;
     const next = value.trim();
-    if (save && next && next !== current) void runtime.rename(next);
+    if (save && next && next !== current) void onSave(next);
     onDone();
   };
   return (

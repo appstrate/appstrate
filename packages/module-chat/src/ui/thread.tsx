@@ -4,8 +4,8 @@
  * Styled chat thread built on assistant-ui primitives — ported from the
  * appstrate-chat satellite. Assistant text renders as markdown; MCP tool
  * calls render as collapsible cards (consecutive calls coalesce into one
- * group card). User messages can be edited and assistant messages
- * regenerated — both branch natively (navigate with the branch picker).
+ * group card). Single-path: no edit/regenerate/branch — the server is the
+ * sole writer and chains turns linearly. Only copy (assistant) is offered.
  */
 
 import * as React from "react";
@@ -14,23 +14,12 @@ import {
   MessagePrimitive,
   ComposerPrimitive,
   ActionBarPrimitive,
-  BranchPickerPrimitive,
   ErrorPrimitive,
   AuiIf,
   useMessage,
   groupPartByType,
 } from "@assistant-ui/react";
-import {
-  ArrowDownIcon,
-  CheckIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  CopyIcon,
-  PencilIcon,
-  RefreshCwIcon,
-  SendHorizontalIcon,
-  SquareIcon,
-} from "lucide-react";
+import { ArrowDownIcon, CheckIcon, CopyIcon, SendHorizontalIcon, SquareIcon } from "lucide-react";
 import { Button } from "./button.tsx";
 import { CollapsibleToolCard } from "./collapsible-tool-card.tsx";
 import { MarkdownText } from "./markdown-text.tsx";
@@ -56,7 +45,7 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
 
       <AuiIf condition={(s) => !s.thread.isEmpty}>
         <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto scroll-smooth px-4">
-          <ThreadPrimitive.Messages components={{ UserMessage, EditComposer, AssistantMessage }} />
+          <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
 
           <div className="min-h-6 flex-grow" />
 
@@ -170,7 +159,7 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
   );
 }
 
-// ─── User message (with edit + branch navigation) ────────────────────────────
+// ─── User message (bubble only — no edit/branch on a single-path thread) ─────
 
 function UserMessage() {
   // The OAuth auto-resume turn (oauth-connect-card) is a real user message — it
@@ -212,47 +201,15 @@ function UserMessage() {
       <div className="bg-muted text-foreground max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">
         <MessagePrimitive.Parts />
       </div>
-      <div className="mt-1 flex items-center gap-1">
-        <BranchPicker />
-        {/* Always mounted (space reserved), revealed by opacity — `autohide`
-            would unmount it and shift the layout on hover. */}
-        <ActionBarPrimitive.Root
-          hideWhenRunning
-          className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
-        >
-          <ActionBarPrimitive.Edit asChild>
-            <IconButton label="Modifier">
-              <PencilIcon />
-            </IconButton>
-          </ActionBarPrimitive.Edit>
-        </ActionBarPrimitive.Root>
-      </div>
     </MessagePrimitive.Root>
   );
 }
 
-function EditComposer() {
-  return (
-    <ComposerPrimitive.Root className="bg-card flex w-full max-w-(--thread-max-width) flex-col rounded-2xl border px-3 py-2">
-      <ComposerPrimitive.Input
-        className="min-h-10 resize-none border-0 bg-transparent p-1 text-sm shadow-none outline-none focus-visible:border-0 focus-visible:ring-0 focus-visible:outline-none"
-        autoFocus
-      />
-      <div className="mt-2 flex justify-end gap-2">
-        <ComposerPrimitive.Cancel asChild>
-          <Button variant="ghost" size="sm">
-            Annuler
-          </Button>
-        </ComposerPrimitive.Cancel>
-        <ComposerPrimitive.Send asChild>
-          <Button size="sm">Envoyer</Button>
-        </ComposerPrimitive.Send>
-      </div>
-    </ComposerPrimitive.Root>
-  );
-}
-
-// ─── Assistant message (markdown + tools, with copy/regenerate + branches) ────
+// ─── Assistant message (markdown + tools, copy only) ─────────────────────────
+// No edit/regenerate/branch actions: the server is the single writer and chains
+// turns linearly (flat list, no branches). Client-side edit/reload would create
+// branches that aren't persisted — corrupting history on reload — so they're
+// intentionally absent.
 
 /** Shown while the model hasn't produced anything visible yet. */
 function ThinkingIndicator() {
@@ -326,8 +283,8 @@ function AssistantMessage() {
       </div>
       <MessageError />
       <div className="mt-1 flex items-center gap-1">
-        <BranchPicker />
-        {/* Same opacity-reveal pattern as the user bar — no layout shift. */}
+        {/* Always mounted (space reserved), revealed by opacity — `autohide`
+            would unmount it and shift the layout on hover. */}
         <ActionBarPrimitive.Root
           hideWhenRunning
           className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
@@ -342,11 +299,6 @@ function AssistantMessage() {
               </MessagePrimitive.If>
             </IconButton>
           </ActionBarPrimitive.Copy>
-          <ActionBarPrimitive.Reload asChild>
-            <IconButton label="Régénérer">
-              <RefreshCwIcon />
-            </IconButton>
-          </ActionBarPrimitive.Reload>
         </ActionBarPrimitive.Root>
       </div>
     </MessagePrimitive.Root>
@@ -364,29 +316,6 @@ function MessageError() {
     <ErrorPrimitive.Root className="border-destructive/40 bg-destructive/10 text-destructive mt-2 rounded-md border px-3 py-2 text-sm">
       <ErrorPrimitive.Message />
     </ErrorPrimitive.Root>
-  );
-}
-
-function BranchPicker() {
-  return (
-    <BranchPickerPrimitive.Root
-      hideWhenSingleBranch
-      className="text-muted-foreground inline-flex items-center text-xs"
-    >
-      <BranchPickerPrimitive.Previous asChild>
-        <IconButton label="Précédent">
-          <ChevronLeftIcon />
-        </IconButton>
-      </BranchPickerPrimitive.Previous>
-      <span className="tabular-nums">
-        <BranchPickerPrimitive.Number /> / <BranchPickerPrimitive.Count />
-      </span>
-      <BranchPickerPrimitive.Next asChild>
-        <IconButton label="Suivant">
-          <ChevronRightIcon />
-        </IconButton>
-      </BranchPickerPrimitive.Next>
-    </BranchPickerPrimitive.Root>
   );
 }
 

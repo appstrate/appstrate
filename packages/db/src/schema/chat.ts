@@ -21,6 +21,12 @@ export const chatSessions = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     title: text("title"),
+    // Id of the in-flight resumable stream for this session, or null when no
+    // turn is generating. Set when a `POST /api/chat` turn starts, cleared when
+    // it finalizes. The resume endpoint (`GET /sessions/:id/stream`) reconnects
+    // a reloaded client to the live stream by this id; a stale/orphaned id (no
+    // live producer in the store) is treated as "no active stream" (204).
+    activeStreamId: text("active_stream_id"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

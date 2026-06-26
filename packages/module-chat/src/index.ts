@@ -20,15 +20,12 @@
  */
 
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
-import {
-  createChatRouter,
-  createSessionSchema,
-  renameSessionSchema,
-  messageEntrySchema,
-} from "./routes.ts";
+import { createChatRouter, createSessionSchema, renameSessionSchema } from "./routes.ts";
 import { chatPaths, chatComponentSchemas } from "./openapi.ts";
 import { chatLoopbackStrategy } from "./loopback-auth.ts";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "./platform-services.ts";
+import { drainTurns } from "./inflight.ts";
+import { logger } from "./logger.ts";
 import { z } from "zod";
 
 // Platform deps captured at init from `ctx.services` (immutable; no module-level
@@ -95,12 +92,6 @@ const chatModule: AppstrateModule = {
         description: "Create chat session",
       },
       {
-        method: "POST",
-        path: "/api/chat/sessions/{id}/messages",
-        jsonSchema: z.toJSONSchema(messageEntrySchema) as Record<string, unknown>,
-        description: "Append chat history entry",
-      },
-      {
         method: "PATCH",
         path: "/api/chat/sessions/{id}",
         jsonSchema: z.toJSONSchema(renameSessionSchema) as Record<string, unknown>,
@@ -123,6 +114,13 @@ const chatModule: AppstrateModule = {
       grantTo: ["owner", "admin", "member"],
     },
   ],
+
+  // Graceful shutdown: await in-flight turns so a deploy/restart does not drop a
+  // reply that was mid-generation (bounded — a wedged turn cannot block exit).
+  async shutdown() {
+    const drained = await drainTurns();
+    if (drained > 0) logger.info("chat: drained in-flight turns on shutdown", { count: drained });
+  },
 };
 
 export default chatModule;

@@ -120,6 +120,13 @@
       "when": 1781948378166,
       "tag": "0016_burly_hawkeye",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1782476003458,
+      "tag": "0017_panoramic_lockjaw",
+      "breakpoints": true
     }
   ]
 }

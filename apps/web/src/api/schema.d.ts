@@ -1042,7 +1042,7 @@ export interface paths {
         put?: never;
         /**
          * Run a conversational turn (streaming)
-         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference goes through the org's configured models via the llm-proxy; tool calls dispatch through `/api/mcp` with the caller's own permissions. History persistence is client-owned (see the session entry endpoints). Rate limited (20/min per caller). Not invocable over MCP (streaming).
+         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference goes through the org's configured models via the llm-proxy; tool calls dispatch through `/api/mcp` with the caller's own permissions. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
          */
         post: operations["streamChat"];
         delete?: never;
@@ -1091,7 +1091,7 @@ export interface paths {
         patch: operations["renameChatSession"];
         trace?: never;
     };
-    "/api/chat/sessions/{id}/messages": {
+    "/api/chat/sessions/{id}/stop": {
         parameters: {
             query?: never;
             header?: never;
@@ -1101,10 +1101,30 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Append/upsert a history entry
-         * @description Persistence write from the client's assistant-ui history adapter: one opaque conversation-tree node, upserted on its client id. The live conversation flows through `POST /api/chat` (streaming).
+         * Stop an in-progress chat generation
+         * @description Explicitly aborts the session's in-flight generation (distinct from a client disconnect, which never cancels generation). The live stream id is resolved server-side from the session. No-op if no turn is generating.
          */
-        post: operations["appendChatMessage"];
+        post: operations["stopChatStream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chat/sessions/{id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resume an in-flight chat turn
+         * @description Reconnect to the session's in-flight generation (the client's native AI-SDK `useChat({ resume: true })` calls this on mount). Returns the live UIMessage stream when a turn is generating, otherwise `204`. Lets a mid-inference page reload continue tokens exactly where they were.
+         */
+        get: operations["resumeChatStream"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4551,6 +4571,8 @@ export interface components {
             /** @description Session ID (chs_ prefix) */
             id: string;
             title?: string | null;
+            /** @description Whether a turn is currently generating in this conversation. */
+            generating: boolean;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -8771,7 +8793,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    appendChatMessage: {
+    stopChatStream: {
         parameters: {
             query?: never;
             header?: {
@@ -8783,20 +8805,51 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ChatMessageEntry"];
-            };
-        };
+        requestBody?: never;
         responses: {
-            /** @description Entry persisted */
+            /** @description Stop signal accepted */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    resumeChatStream: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AI SDK UIMessage stream (text/event-stream) */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description No active stream to resume */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };

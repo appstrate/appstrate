@@ -29,7 +29,8 @@ export interface OrgModel {
   providerId?: string;
   label?: string;
   enabled?: boolean;
-  isDefault?: boolean;
+  /** snake_case to match the `/api/models` wire field — camelCase silently never matches. */
+  is_default?: boolean;
 }
 
 export async function listModels(
@@ -69,7 +70,7 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
   }
   const chosen = modelId
     ? pool.find((m) => m.id === modelId || m.modelId === modelId)
-    : (pool.find((m) => m.isDefault) ?? pool[0]);
+    : (pool.find((m) => m.is_default) ?? pool[0]);
   if (!chosen) {
     throw invalidRequest(
       modelId

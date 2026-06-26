@@ -22,18 +22,12 @@
  */
 
 import type { UIMessage } from "ai";
+import { uiMessageText } from "./message-text.ts";
 
 export function buildTranscriptPrompt(messages: UIMessage[]): string {
-  const textOf = (m: UIMessage): string =>
-    (m.parts ?? [])
-      .filter((p): p is { type: "text"; text: string } => p.type === "text")
-      .map((p) => p.text)
-      .join("")
-      .trim();
-
   const turns = messages
     .filter((m) => m.role === "user" || m.role === "assistant")
-    .map((m) => ({ role: m.role, text: textOf(m) }))
+    .map((m) => ({ role: m.role, text: uiMessageText(m.parts) }))
     .filter((t) => t.text.length > 0);
 
   const transcript =

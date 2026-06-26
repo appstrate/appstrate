@@ -336,6 +336,7 @@
         "@ai-sdk/anthropic": "^2",
         "@ai-sdk/mcp": "^1.0.46",
         "@ai-sdk/openai-compatible": "^1",
+        "@ai-sdk/react": "^3",
         "@appstrate/core": "workspace:*",
         "@appstrate/db": "workspace:*",
         "@assistant-ui/react": "^0.14.16",
@@ -353,9 +354,11 @@
         "lucide-react": "^1.14.0",
       },
       "peerDependencies": {
+        "@tanstack/react-query": "*",
         "hono": "*",
         "lucide-react": "*",
         "react": "*",
+        "sonner": "*",
       },
     },
     "packages/module-claude-code": {

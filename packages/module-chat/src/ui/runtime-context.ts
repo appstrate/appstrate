@@ -25,8 +25,8 @@ export function useChatHeaders(): GetHeaders | null {
 /**
  * Selecting a conversation = changing the host URL (the single source of truth).
  * The list (`thread-list.tsx`) calls this on click; the host navigates and the
- * runtime follows via `ChatUrlSync`. `null` means "new conversation" (`/chat`).
- * Carried through context so module-chat never imports a router.
+ * keyed `<Conversation>` remounts on the new id. `null` means "new conversation"
+ * (`/chat`). Carried through context so module-chat never imports a router.
  */
 export type SelectConversation = (id: string | null) => void;
 

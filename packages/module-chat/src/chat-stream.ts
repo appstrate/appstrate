@@ -6,9 +6,12 @@
  *
  *   1. Identity: the satellite carried two audience-bound OAuth tokens; the
  *      module forwards the caller's own headers on loopback calls (self.ts).
- *   2. Persistence: owned by assistant-ui's NATIVE history adapter on the
- *      client (it POSTs each tree node to /api/chat/sessions/:id/messages)
- *      — this route only streams, exactly like the satellite.
+ *   2. Persistence: server-authoritative. This route writes the user turn
+ *      before inference and the assistant turn when the stream finalizes
+ *      (see persistence.ts). Generation runs through a resumable producer
+ *      (resumable.ts) that drains to completion independently of the client
+ *      connection, so leaving the conversation mid-inference no longer drops
+ *      messages. The client history adapter is now load-only.
  *
  * Inference goes through the llm-proxy (no key here); tool calls dispatch
  * through `/api/mcp` (auth + RBAC re-applied in-process).
@@ -24,6 +27,10 @@ import { openPlatformMcp, platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
 import { buildTranscriptPrompt } from "./transcript.ts";
+import { finalizeChatStream } from "./finalize-stream.ts";
+import { ensureSession, persistUserMessage, persistAssistantMessage } from "./persistence.ts";
+import { registerStopController, unregisterStopController } from "./stop-registry.ts";
+import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
 const MAX_STEPS = 16;
@@ -544,6 +551,63 @@ export async function handleChatStream(
     hasTools: isSubscription || Boolean(mcp),
   });
 
+  // ── Server-authoritative persistence + resumable streaming ───────────────
+  // Persist the user turn BEFORE inference; the assistant turn is persisted when
+  // the stream finalizes (in `finalize` below). Generation runs through a
+  // resumable producer that drains to completion independently of the client, so
+  // leaving the conversation mid-inference can no longer drop messages.
+  // Per-turn resumable stream id. It is the key for both the resumable producer
+  // (live reconnect) and the stop registry, and is stored on the session as
+  // `active_stream_id` so a reloaded client's resume GET can find the live turn.
+  const streamId = crypto.randomUUID();
+
+  const sessionId = body.id;
+  const lastMessage = messages[messages.length - 1] as UIMessage | undefined;
+  let userMessageId: string | undefined;
+  if (sessionId && lastMessage?.id) {
+    await ensureSession(sessionId, orgId, user.id);
+    userMessageId = await persistUserMessage(sessionId, lastMessage);
+    // Mark the in-flight stream so a mid-inference reload can reconnect to it.
+    await setActiveStream(sessionId, streamId);
+  }
+
+  // Generation abort is DECOUPLED from the request connection: a client
+  // disconnect must NOT cancel generation (that was the data-loss bug). Only an
+  // explicit stop (POST /api/chat/sessions/:id/stop) aborts this controller.
+  const generation = new AbortController();
+  registerStopController(streamId, generation);
+
+  // Tee the engine stream into a resumable producer (decoupled from the client)
+  // and persist the assistant turn when it finalizes — both run to completion
+  // regardless of the client; the persist task is tracked for graceful shutdown.
+  // See finalize-stream.ts for the disconnect-survival guarantee + its test.
+  const finalize = (engineResponse: Response): Promise<Response> =>
+    finalizeChatStream({
+      engineResponse,
+      streamId,
+      onAssistant:
+        sessionId && userMessageId
+          ? (assistant) => persistAssistantMessage(sessionId, assistant, userMessageId)
+          : undefined,
+      onSettled: () => {
+        unregisterStopController(streamId);
+        // Fire-and-forget teardown — swallow rejections so a failed DB update or
+        // MCP close can't surface as an unhandled rejection.
+        if (sessionId) void clearActiveStream(sessionId).catch(() => {});
+        void closeMcp();
+      },
+    });
+
+  // Teardown for the failure paths below: if generation throws BEFORE `finalize`
+  // takes over (which owns teardown via `onSettled`), we must still release the
+  // stop controller, clear the in-flight marker (else the session is stuck
+  // "generating" with a dead stream id), and close MCP.
+  const failCleanup = async () => {
+    unregisterStopController(streamId);
+    if (sessionId) await clearActiveStream(sessionId).catch(() => {});
+    await closeMcp();
+  };
+
   // The credential-injection gateway swaps the placeholder bearer server-side;
   // the real subscription token never enters this process or the spawned
   // binary's env. The gateway slug derives from the provider id — no vendor
@@ -553,22 +617,30 @@ export async function handleChatStream(
       { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
       { ttlMs: ENGINE_LOOPBACK_TTL_MS },
     );
-    return chatEngine.handler({
-      prompt: buildTranscriptPrompt(messages),
-      system,
-      modelId: chosen.modelId,
-      gatewayBaseUrl: `${origin}/api/llm-proxy/${chatEngine.providerId}-sdk/${encodeURIComponent(chosen.id)}`,
-      placeholderToken: loopbackToken,
-      platformMcp: { url: platformMcpUrl(origin, orgId), headers: mcpHeaders },
-      abortSignal: c.req.raw.signal,
-      onError: clientErrorMessage,
-    });
+    try {
+      return await finalize(
+        chatEngine.handler({
+          prompt: buildTranscriptPrompt(messages),
+          system,
+          modelId: chosen.modelId,
+          gatewayBaseUrl: `${origin}/api/llm-proxy/${chatEngine.providerId}-sdk/${encodeURIComponent(chosen.id)}`,
+          placeholderToken: loopbackToken,
+          platformMcp: { url: platformMcpUrl(origin, orgId), headers: mcpHeaders },
+          // Decoupled from the request connection (see `generation` above).
+          abortSignal: generation.signal,
+          onError: clientErrorMessage,
+        }),
+      );
+    } catch (err) {
+      await failCleanup();
+      throw err;
+    }
   }
 
   // ai-sdk path — API-key providers only, bound to the llm-proxy.
   const model = modelFromFamily(chosen, origin, inferenceHeaders, mintInferenceAuth, platformFetch);
   if (!model) {
-    await closeMcp();
+    await failCleanup();
     throw invalidRequest(`Model family "${chosen.apiShape}" is not supported by the chat.`);
   }
 
@@ -592,7 +664,9 @@ export async function handleChatStream(
       ],
       tools: mcp ? mcp.tools : undefined,
       stopWhen: stepCountIs(MAX_STEPS),
-      abortSignal: c.req.raw.signal,
+      // Decoupled from the request connection (see `generation` above): a client
+      // disconnect must not cancel generation; only an explicit stop does.
+      abortSignal: generation.signal,
       onChunk: ({ chunk }) => {
         // TTFT marker: log once on the first model output (text or tool call),
         // measured from turn start. The dominant lever this work optimizes.
@@ -622,10 +696,9 @@ export async function handleChatStream(
         stepStart = now;
       },
       onError: ({ error }) => {
+        // MCP teardown is owned by `finalize` (its persist `finally`), which runs
+        // to completion regardless of the client — so it is not closed here.
         logger.error("chat stream error", { err: String(error) });
-        // AI-SDK fires onError (not onFinish) on a stream failure, so the MCP
-        // session must be closed here too or it leaks on every failed turn.
-        void closeMcp();
       },
       onFinish: ({ totalUsage, finishReason }) => {
         logger.info("chat turn done", {
@@ -634,17 +707,23 @@ export async function handleChatStream(
           usage: totalUsage as unknown as Record<string, unknown>,
           finishReason,
         });
-        void closeMcp();
       },
     });
 
-    // Close the MCP session if the client disconnects mid-stream.
-    c.req.raw.signal.addEventListener("abort", () => void closeMcp(), { once: true });
-
+    // NOTE: no client-disconnect → closeMcp listener. Generation now outlives the
+    // connection (resumable producer), so MCP must stay open until the stream
+    // finalizes; `finalize` closes it once persistence completes.
     // Surface the real failure to the client (AI SDK masks errors otherwise).
-    return result.toUIMessageStreamResponse({ onError: clientErrorMessage });
+    return await finalize(
+      result.toUIMessageStreamResponse({
+        onError: clientErrorMessage,
+        // Emit a real assistant message id in the stream so the client and the
+        // server-side persist agree on it (and never collide on an empty id).
+        generateMessageId: () => crypto.randomUUID(),
+      }),
+    );
   } catch (err) {
-    await closeMcp();
+    await failCleanup();
     throw err;
   }
 }
