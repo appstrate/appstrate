@@ -71,7 +71,7 @@ Use the tools to ground every action: search for the right operation, read its s
 Choosing what to do:
 - If the request is a pure Appstrate operation (list or inspect runs, schedule, manage agents, search documents), call that operation directly with \`invoke_operation\`. NEVER spin up a run for something the platform API already does — that wastes credits and time.
 - If the request needs an integration, an MCP, or any external action, run an agent:
-  1. Prefer an existing agent the user can run (listed in your context below) when one matches the intent — trigger it with the run-agent operation.
+  1. Prefer an existing agent the user can run (listed in your context below) when one matches the intent — trigger it with the \`runAgent\` operation (\`POST /api/agents/{scope}/{name}/run\`): path params \`scope\` (KEEP the leading \`@\`, e.g. \`@acme\`) and \`name\`. Pass an \`input\` object ONLY when the agent's context entry says it takes input (it is validated against the agent's schema); omit it otherwise. Query \`version\`: omit it to run the latest PUBLISHED version — but an agent marked "draft only" in your context has no published version (omitting would 404 \`no_published_version\`), so for those pass \`version=draft\` to run the working copy. The trigger returns the created run — take its \`id\` and long-poll it exactly like an inline run (below).
   2. Otherwise invoke the \`runInline\` operation (\`POST /api/runs/inline\`): pass a full AFPS agent \`manifest\` plus a \`prompt\`. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version from your context), then select that integration's tools under \`integrations_configuration.<id>.tools\`: omit the entry to inherit the integration's \`default_tools\` (shown per integration in your context), use \`[]\` for none, or list exact tool names (\`api_call\` covers most third-party REST calls). When you need a tool beyond the default, first inspect the integration with describe_operation on \`GET /api/integrations/{packageId}\` to read its full \`tool_catalog\`, then name those tools. When one of the skills listed in your context fits the task, attach it under \`dependencies.skills\` keyed by its \`@scope/name\` id with a satisfiable range (use the version shown in your context, e.g. \`"^1.2.0"\`, or \`"*"\` if none); the agent then has that skill's instructions available. Set \`runtime_tools: ["output"]\`, and define an \`output.schema\` for the data you want back. In the \`prompt\`, tell the agent it is a sub-agent: do the work, then return the result by calling the \`output\` tool with a payload that satisfies the schema. Without that output schema and instruction you will receive nothing back.
 
 Runs are asynchronous. The trigger returns the created run resource — take its \`id\`. Then call the run-get operation (path param \`id\`, not \`runId\`) with \`query: { wait: true }\` to long-poll until the run is terminal (it returns after ~55s; if still running, call it again); never busy-poll in a tight loop yourself. Then read the run's \`result\` field — that is the sub-agent's deliverable. Answer the user from \`result\`; never fabricate it. If the run fails, read its error and report it plainly.
@@ -106,7 +106,7 @@ Example — summarising the user's latest emails (adapt the integration id, vers
 \`\`\`
 Then call run-get with \`query: { wait: true }\`, read \`result.summary\`, and reply to the user from it.
 
-You already have the exact shapes for these two operations: the inline-run trigger body is \`{ manifest, prompt }\` exactly as shown above, and run-get takes path param \`id\` + \`query: { wait: true }\`. Do NOT call \`describe_operation\` for the inline-run trigger or run-get — invoke them directly. (You still discover any OTHER operation's schema via search/describe as usual.)
+You already have the exact shapes for these three operations: \`runAgent\` takes path params \`scope\`/\`name\` + optional query \`version\` (omit = published, \`draft\` = working copy) and an optional \`input\` body; the inline-run trigger body is \`{ manifest, prompt }\` exactly as shown above; run-get takes path param \`id\` + \`query: { wait: true }\`. Do NOT call \`describe_operation\` for \`runAgent\`, the inline-run trigger, or run-get — invoke them directly. (You still discover any OTHER operation's schema via search/describe as usual.)
 
 When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.
 
@@ -158,6 +158,8 @@ interface CallerContext {
         display_name?: string | null;
         description?: string | null;
         takes_input?: boolean | null;
+        /** False = draft-only agent; the model must run it with `version=draft`. */
+        published?: boolean | null;
       }[]
     | null;
   agents_truncated?: boolean | null;
@@ -253,7 +255,8 @@ export function formatCallerContext(raw: unknown): string {
       const label = a.display_name?.trim() || a.package_id;
       lines.push(
         `- \`${a.package_id}\` — ${label}${desc ? `: ${desc}` : ""}` +
-          ` (takes input: ${a.takes_input ? "yes" : "no"})`,
+          ` (takes input: ${a.takes_input ? "yes" : "no"}` +
+          `${a.published === false ? "; draft only — run with version=draft" : ""})`,
       );
     }
     if (ctx.agents_truncated) {
@@ -261,7 +264,8 @@ export function formatCallerContext(raw: unknown): string {
     }
     lines.push(
       "Prefer running an existing agent over doing the work inline when one fits the task. " +
-        "Trigger it through invoke_operation (the agent run route), then track it with wait_for_run.",
+        "Trigger it with the runAgent operation (see the system instructions for its exact shape), " +
+        "then long-poll the run with run-get and `wait: true`.",
     );
   }
   if (ctx.skills?.length) {

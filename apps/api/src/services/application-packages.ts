@@ -7,7 +7,13 @@
 
 import { eq, and, or, sql, isNotNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { applicationPackages, packages, applications, packageVersions } from "@appstrate/db/schema";
+import {
+  applicationPackages,
+  packages,
+  applications,
+  packageVersions,
+  packageDistTags,
+} from "@appstrate/db/schema";
 import { notFound, conflict } from "../lib/errors.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
@@ -173,6 +179,10 @@ export async function listAccessiblePackages(scope: AppScope, type: PackageType)
       appProxyId: applicationPackages.proxyId,
       appVersionId: applicationPackages.versionId,
       appEnabled: applicationPackages.enabled,
+      // `latest` dist-tag version id — non-null iff the package has a published
+      // version. Lets callers tell published agents from draft-only ones without
+      // an N+1 (a draft-only agent must be run with `version=draft`).
+      latestVersionId: packageDistTags.versionId,
     })
     .from(packages)
     .leftJoin(
@@ -181,6 +191,10 @@ export async function listAccessiblePackages(scope: AppScope, type: PackageType)
         eq(applicationPackages.packageId, packages.id),
         eq(applicationPackages.applicationId, scope.applicationId),
       ),
+    )
+    .leftJoin(
+      packageDistTags,
+      and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
     )
     .where(
       and(
@@ -209,6 +223,12 @@ export interface PackageHint {
   display_name: string;
   description: string;
   source: string;
+  /**
+   * True when the package has a published version (a `latest` dist-tag) or is a
+   * system package. A draft-only package is `false` — callers must run it with
+   * `version=draft` (omitting `version` would 404 `no_published_version`).
+   */
+  published: boolean;
 }
 
 const DEFAULT_PACKAGE_HINT_LIMIT = 15;
@@ -247,6 +267,7 @@ async function listInstalledPackageHints<T extends PackageHint>(
       display_name: typeof manifest.display_name === "string" ? manifest.display_name : "",
       description: typeof manifest.description === "string" ? manifest.description : "",
       source: row.source ?? "local",
+      published: row.source === "system" || row.latestVersionId != null,
     };
     return project(base, manifest);
   });

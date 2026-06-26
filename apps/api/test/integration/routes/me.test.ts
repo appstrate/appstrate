@@ -226,7 +226,12 @@ describe("Me API (/api/me)", () => {
       const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        agents: { package_id: string; display_name: string; takes_input: boolean }[];
+        agents: {
+          package_id: string;
+          display_name: string;
+          takes_input: boolean;
+          published: boolean;
+        }[];
         agents_truncated: boolean;
         agents_total: number;
       };
@@ -238,6 +243,8 @@ describe("Me API (/api/me)", () => {
       const triage = body.agents.find((a) => a.package_id === "@ctx/triage");
       expect(triage?.display_name).toBe("Triage");
       expect(triage?.takes_input).toBe(true);
+      // No `latest` dist-tag was seeded → draft-only agent → must run with version=draft.
+      expect(triage?.published).toBe(false);
       expect(body.agents_truncated).toBe(false);
     });
 

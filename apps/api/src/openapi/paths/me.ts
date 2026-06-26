@@ -512,6 +512,7 @@ export const mePaths = {
                         "display_name",
                         "description",
                         "takes_input",
+                        "published",
                         "source",
                       ],
                       properties: {
@@ -525,6 +526,14 @@ export const mePaths = {
                           type: "boolean",
                           description:
                             "Whether the agent declares an input schema with properties.",
+                        },
+                        published: {
+                          type: "boolean",
+                          description:
+                            "True when the agent has a published version (or is a system agent). " +
+                            "Run it via `runAgent` with `version` omitted. When false the agent is " +
+                            "draft-only — run it with `version=draft` (omitting `version` would 404 " +
+                            "`no_published_version`).",
                         },
                         source: { type: "string", enum: ["system", "local"] },
                       },
@@ -549,7 +558,14 @@ export const mePaths = {
                       "tail is reachable via the MCP `search_operations` tool.",
                     items: {
                       type: "object",
-                      required: ["package_id", "display_name", "description", "version", "source"],
+                      required: [
+                        "package_id",
+                        "display_name",
+                        "description",
+                        "version",
+                        "published",
+                        "source",
+                      ],
                       properties: {
                         package_id: {
                           type: "string",
@@ -562,6 +578,13 @@ export const mePaths = {
                           type: ["string", "null"],
                           description:
                             "The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range.",
+                        },
+                        published: {
+                          type: "boolean",
+                          description:
+                            "True when the skill has a published version (or is a system skill). " +
+                            "When false the skill is draft-only — pin it for a run via " +
+                            "`dependency_overrides` with `draft`.",
                         },
                         source: { type: "string", enum: ["system", "local"] },
                       },
@@ -600,6 +623,7 @@ export const mePaths = {
                     display_name: "Inbox Triage",
                     description: "Sorts and labels incoming email.",
                     takes_input: false,
+                    published: true,
                     source: "system",
                   },
                 ],
@@ -611,6 +635,7 @@ export const mePaths = {
                     display_name: "Web Research",
                     description: "Multi-source web search and synthesis.",
                     version: "1.2.0",
+                    published: true,
                     source: "system",
                   },
                 ],
