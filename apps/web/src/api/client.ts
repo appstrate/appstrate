@@ -19,8 +19,7 @@ import createFetchClient, { type Middleware } from "openapi-fetch";
 import createReactQueryClient from "openapi-react-query";
 import type { components, paths } from "./schema";
 import { ApiError } from "./errors";
-import { getCurrentOrgId } from "../stores/org-store";
-import { getCurrentApplicationId } from "../stores/app-store";
+import { buildScopingHeaders } from "../lib/scoping-headers";
 
 type ProblemDetail = components["schemas"]["ProblemDetail"];
 
@@ -74,13 +73,8 @@ function encodeSegment(segment: string): string {
 
 const orgContext: Middleware = {
   onRequest({ request }) {
-    const orgId = getCurrentOrgId();
-    if (orgId && !request.headers.has("X-Org-Id")) {
-      request.headers.set("X-Org-Id", orgId);
-    }
-    const applicationId = getCurrentApplicationId();
-    if (applicationId && !request.headers.has("X-Application-Id")) {
-      request.headers.set("X-Application-Id", applicationId);
+    for (const [k, v] of Object.entries(buildScopingHeaders())) {
+      if (!request.headers.has(k)) request.headers.set(k, v);
     }
     return request;
   },

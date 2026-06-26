@@ -8,11 +8,18 @@
 import { getCurrentOrgId } from "../stores/org-store";
 import { getCurrentApplicationId } from "../stores/app-store";
 
-export function getAuthHeaders(): Record<string, string> {
+// Single source of truth for the org/app scoping-header wire contract.
+// The typed API client middleware (`api/client.ts`) and the hand-rolled
+// fetches both consume this so the header names can never drift apart.
+export function buildScopingHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   const orgId = getCurrentOrgId();
   if (orgId) headers["X-Org-Id"] = orgId;
   const applicationId = getCurrentApplicationId();
   if (applicationId) headers["X-Application-Id"] = applicationId;
   return headers;
+}
+
+export function getAuthHeaders(): Record<string, string> {
+  return buildScopingHeaders();
 }
