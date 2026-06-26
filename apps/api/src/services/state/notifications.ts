@@ -2,7 +2,7 @@
 
 import { and, eq, or, inArray, isNull, count, desc, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, notifications, organizationMembers } from "@appstrate/db/schema";
+import { runs, notifications, organizationMembers, packages } from "@appstrate/db/schema";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { actorFilter, actorMatch, type Actor } from "../../lib/actor.ts";
 import { listRunsWithFilter } from "./runs.ts";
@@ -67,8 +67,10 @@ export async function createRunNotifications(scope: AppScope, runId: string): Pr
       endUserId: runs.endUserId,
       packageId: runs.packageId,
       status: runs.status,
+      packageEphemeral: packages.ephemeral,
     })
     .from(runs)
+    .leftJoin(packages, eq(packages.id, runs.packageId))
     .where(
       scopedWhere(runs, {
         orgId: scope.orgId,
@@ -78,6 +80,16 @@ export async function createRunNotifications(scope: AppScope, runId: string): Pr
     )
     .limit(1);
   if (!run) return 0;
+
+  // Ephemeral runs are foreground and relayed straight to their trigger (chat,
+  // editor playground, direct inline API) — the result is already in front of
+  // the caller, so a persistent bell notification would only duplicate it. Key
+  // on the semantic `packages.ephemeral` flag rather than the `@inline/` scope
+  // string: any ephemeral shadow package, whatever its scope, is foreground. A
+  // null join (shadow package already compacted/deleted) defaults to notifying.
+  // The run row + result still persist (recoverable in run history); only the
+  // bell entry is suppressed.
+  if (run.packageEphemeral === true) return 0;
 
   const payload = { agent_id: run.packageId, status: run.status };
   const base = {
