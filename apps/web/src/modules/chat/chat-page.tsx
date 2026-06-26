@@ -5,7 +5,7 @@
 // the shell's org/app scoping headers. Lazy-loaded behind `features.chat`.
 
 import { ChatPage } from "@appstrate/module-chat/ui";
-import { getAuthHeaders } from "../../lib/scoping-headers";
+import { buildScopingHeaders } from "../../lib/scoping-headers";
 
 export function ChatModulePage() {
   // The chat's tools (run agents, inspect runs, search…) are served by the
@@ -17,7 +17,7 @@ export function ChatModulePage() {
   // list and the composer scrolls off-screen.
   return (
     <div className="h-[calc(100dvh-4rem)] min-h-0">
-      <ChatPage getHeaders={getAuthHeaders} />
+      <ChatPage getHeaders={buildScopingHeaders} />
     </div>
   );
 }

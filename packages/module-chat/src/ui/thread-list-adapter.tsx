@@ -31,16 +31,18 @@ function messageText(m: ThreadMessage): string {
 }
 
 /**
- * Local title from the first user message (or the first non-empty message),
- * trimmed. Mirrors the server's deriveTitle() truncation (60/57) so the
- * live-emitted title matches the value the server persists — no re-render when
- * list()/fetch() read it back. Returns "" when there is no text to title.
+ * Optimistic live title from the first user message (or the first non-empty
+ * message), trimmed. We do NOT truncate here: the server's deriveTitle() owns
+ * the authoritative 60/57 truncation and persists it, and list()/fetch() read
+ * that back. Emitting the full text avoids a second copy of the truncation rule
+ * (which used to drift); if the text exceeds 60 chars the only cost is a
+ * one-frame sidebar flash when the persisted (truncated) value wins. Returns ""
+ * when there is no text to title.
  */
 function fallbackTitle(messages: readonly ThreadMessage[]): string {
   const texts = messages.map(messageText).filter((t) => t.length > 0);
   const first = messages.find((m) => m.role === "user" && messageText(m).length > 0);
-  const text = (first ? messageText(first) : texts[0]) ?? "";
-  return text.length > 60 ? `${text.slice(0, 57)}…` : text;
+  return (first ? messageText(first) : texts[0]) ?? "";
 }
 
 export function makeThreadListAdapter(getHeaders: GetHeaders): RemoteThreadListAdapter {

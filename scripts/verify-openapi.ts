@@ -36,7 +36,7 @@ import {
   KNOWN_DRIFT,
   EXEMPT_SCHEMAS,
 } from "../apps/api/src/openapi/response-type-registry.ts";
-import { collectModuleOpenApi } from "./lib/module-openapi.ts";
+import { collectModuleOpenApi, discoverWorkspaceModuleDirs } from "./lib/module-openapi.ts";
 import { getTypeShape, type TypeShape } from "./lib/ts-interface-required-keys.ts";
 
 // ---------------------------------------------------------------------------
@@ -1394,21 +1394,16 @@ if (existsSync(modulesDir)) {
 //     are now collected into the validated spec (see lib/module-openapi.ts), so
 //     their code routes must be scanned here to keep Code ⊆ Spec balanced.
 const workspaceModulesDir = join(REPO_ROOT, "packages");
-if (existsSync(workspaceModulesDir)) {
-  for (const name of readdirSync(workspaceModulesDir, { withFileTypes: true })) {
-    if (!name.isDirectory() || !name.name.startsWith("module-")) continue;
-    const srcDir = join(workspaceModulesDir, name.name, "src");
-    if (!existsSync(srcDir)) continue;
-    for (const filePath of collectModuleRouteFiles(srcDir)) {
-      const src = readFileSync(filePath, "utf8");
-      if (!src.includes("new Hono")) continue; // only files that define a router
-      const rel = name.name + "/src/" + filePath.slice(srcDir.length + 1);
-      for (const reg of extractRouterRegistrations(src, src, rel)) {
-        const fullPath = normaliseHonoPath(reg.path);
-        for (const ep of expandRegistration(reg.verb, fullPath)) {
-          codeEndpoints.add(ep);
-          recordRouteStatuses(ep, reg.statuses);
-        }
+for (const { name, srcDir } of discoverWorkspaceModuleDirs(workspaceModulesDir)) {
+  for (const filePath of collectModuleRouteFiles(srcDir)) {
+    const src = readFileSync(filePath, "utf8");
+    if (!src.includes("new Hono")) continue; // only files that define a router
+    const rel = name + "/src/" + filePath.slice(srcDir.length + 1);
+    for (const reg of extractRouterRegistrations(src, src, rel)) {
+      const fullPath = normaliseHonoPath(reg.path);
+      for (const ep of expandRegistration(reg.verb, fullPath)) {
+        codeEndpoints.add(ep);
+        recordRouteStatuses(ep, reg.statuses);
       }
     }
   }

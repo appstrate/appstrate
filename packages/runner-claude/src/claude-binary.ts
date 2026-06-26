@@ -132,16 +132,14 @@ export function candidateBinaryPackages(platform: NodeJS.Platform, arch: string)
       return [`${SDK_SCOPE}-linux-${arch}-musl`, `${SDK_SCOPE}-linux-${arch}`];
     case "darwin":
       return [`${SDK_SCOPE}-darwin-${arch}`];
-    case "win32":
-      return [`${SDK_SCOPE}-win32-${arch}`];
     default:
       return [];
   }
 }
 
-/** Binary file name inside a per-arch package (`claude.exe` on Windows). */
-export function binaryFileName(platform: NodeJS.Platform): string {
-  return platform === "win32" ? "claude.exe" : "claude";
+/** Binary file name inside a per-arch package. */
+export function binaryFileName(_platform: NodeJS.Platform): string {
+  return "claude";
 }
 
 /**

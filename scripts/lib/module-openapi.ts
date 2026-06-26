@@ -34,6 +34,43 @@ export interface CollectedModuleOpenApi {
   ownedTagNames: Set<string>;
 }
 
+/** A discovered workspace-package module under `packages/module-*`. */
+export interface WorkspaceModuleDir {
+  /** Package directory name, e.g. "module-chat". */
+  name: string;
+  /** Absolute path to the package's `src` directory. */
+  srcDir: string;
+  /** Absolute path to the package's `src/index.ts` module entry. */
+  entryFile: string;
+}
+
+/**
+ * Discover workspace-package modules — `packages/module-*` dirs that expose a
+ * `src/index.ts` entry. SINGLE SOURCE OF TRUTH shared by `collectModuleOpenApi`
+ * (below) and the Code ⊆ Spec route scan in `scripts/verify-openapi.ts`, so the
+ * two scripts can never drift on which modules they consider. Sorted by name
+ * for deterministic ordering (readdir order is filesystem-dependent and shapes
+ * the merged spec's key order, which generate-api-types.ts byte-compares).
+ */
+export function discoverWorkspaceModuleDirs(packagesDir: string): WorkspaceModuleDir[] {
+  if (!existsSync(packagesDir)) return [];
+  return readdirSync(packagesDir)
+    .filter((name) => {
+      if (!name.startsWith("module-")) return false;
+      try {
+        return existsSync(join(packagesDir, name, "src/index.ts"));
+      } catch {
+        return false;
+      }
+    })
+    .sort()
+    .map((name) => ({
+      name,
+      srcDir: join(packagesDir, name, "src"),
+      entryFile: join(packagesDir, name, "src/index.ts"),
+    }));
+}
+
 /**
  * Scan `apps/api/src/modules/*​/index.ts` and return the merged OpenAPI
  * contributions of every discovered module.
@@ -66,19 +103,9 @@ export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
         .map((name) => ({ name, entry: join(modulesDir, name, "index.ts") }))
     : [];
 
-  const workspace: Array<{ name: string; entry: string }> = existsSync(workspaceModulesDir)
-    ? readdirSync(workspaceModulesDir)
-        .filter((name) => {
-          if (!name.startsWith("module-")) return false;
-          try {
-            return existsSync(join(workspaceModulesDir, name, "src/index.ts"));
-          } catch {
-            return false;
-          }
-        })
-        .sort()
-        .map((name) => ({ name, entry: join(workspaceModulesDir, name, "src/index.ts") }))
-    : [];
+  const workspace: Array<{ name: string; entry: string }> = discoverWorkspaceModuleDirs(
+    workspaceModulesDir,
+  ).map(({ name, entryFile }) => ({ name, entry: entryFile }));
 
   // Built-ins first, then workspace modules — both groups internally sorted, so
   // the merged key order is stable across machines.

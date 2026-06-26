@@ -160,18 +160,8 @@ export function modelFromFamily(
 // Only RESOLVED ids are cached — never a miss. A miss (transient failure OR an
 // empty 200) is left uncached so the next turn retries: an empty
 // `/api/applications` is anomalous (every org normally has a default app), so
-// caching it would strip app-scoped MCP tools org-wide until eviction.
+// caching it would strip app-scoped MCP tools org-wide.
 const appCache = new Map<string, string>();
-const APP_CACHE_MAX = 500;
-
-/** Bounded insert: evict the oldest entry once the per-org cache is full. */
-function cacheApp(orgId: string, id: string): void {
-  if (appCache.size >= APP_CACHE_MAX && !appCache.has(orgId)) {
-    const oldest = appCache.keys().next().value;
-    if (oldest !== undefined) appCache.delete(oldest);
-  }
-  appCache.set(orgId, id);
-}
 
 export async function resolveDefaultApplicationId(
   origin: string,
@@ -203,7 +193,7 @@ export async function resolveDefaultApplicationId(
     const apps = Array.isArray(body) ? body : (body.data ?? []);
     const id = (apps.find((a) => a.isDefault) ?? apps[0])?.id;
     if (id) {
-      cacheApp(orgId, id);
+      appCache.set(orgId, id);
       return id;
     }
     return undefined; // empty 200 — anomalous, don't cache

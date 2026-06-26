@@ -21,12 +21,9 @@ describe("candidateBinaryPackages", () => {
     ]);
   });
 
-  it("darwin / win32 have a single per-arch candidate", () => {
+  it("darwin has a single per-arch candidate", () => {
     expect(candidateBinaryPackages("darwin", "arm64")).toEqual([
       "@anthropic-ai/claude-agent-sdk-darwin-arm64",
-    ]);
-    expect(candidateBinaryPackages("win32", "x64")).toEqual([
-      "@anthropic-ai/claude-agent-sdk-win32-x64",
     ]);
   });
 
@@ -36,8 +33,7 @@ describe("candidateBinaryPackages", () => {
 });
 
 describe("binaryFileName", () => {
-  it("claude.exe on Windows, claude elsewhere", () => {
-    expect(binaryFileName("win32")).toBe("claude.exe");
+  it("always claude", () => {
     expect(binaryFileName("linux")).toBe("claude");
     expect(binaryFileName("darwin")).toBe("claude");
   });

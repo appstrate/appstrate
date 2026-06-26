@@ -19,7 +19,3 @@ export function buildScopingHeaders(): Record<string, string> {
   if (applicationId) headers["X-Application-Id"] = applicationId;
   return headers;
 }
-
-export function getAuthHeaders(): Record<string, string> {
-  return buildScopingHeaders();
-}

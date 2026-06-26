@@ -48,8 +48,5 @@ export const chatMessages = pgTable(
     content: jsonb("content").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
-  (table) => [
-    unique("uq_chat_messages_session_message").on(table.sessionId, table.messageId),
-    index("idx_chat_messages_session").on(table.sessionId),
-  ],
+  (table) => [unique("uq_chat_messages_session_message").on(table.sessionId, table.messageId)],
 );
