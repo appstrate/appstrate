@@ -402,22 +402,27 @@ describe("buildOperationIndex", () => {
     const { operations } = getCatalog();
     // A tag section header is present.
     expect(index).toMatch(/^## /m);
-    // Every operationId appears as a bullet line.
+    // Every operationId appears in a tag's comma-separated id line.
     for (const op of operations.values()) {
-      expect(index).toContain(`- ${op.operationId}`);
+      expect(index).toContain(op.operationId);
     }
   });
 
   it("carries no structured method+path columns (those come from describe / best_match)", () => {
     const index = buildOperationIndex();
-    // Each entry is a compact `- operationId — summary` bullet; the index must
-    // not reproduce the describe/list row shape (a METHOD followed by a path).
-    // Method words can still appear inside free-text summaries (e.g. the
-    // credential-proxy ops), so we match the structured `METHOD /path` form.
+    const { operations } = getCatalog();
+    const knownIds = new Set([...operations.values()].map((op) => op.operationId));
+    // Each tag section is `## Tag` followed by ONE comma-separated line of
+    // operationIds; the index must not reproduce the describe/list row shape
+    // (a METHOD followed by a path). Method words can still appear inside
+    // free-text summaries, so we match the structured `METHOD /path` form.
     expect(index).not.toMatch(/(GET|POST|PUT|PATCH|DELETE) \//);
     for (const line of index.split("\n")) {
       if (line === "" || line.startsWith("## ")) continue;
-      expect(line.startsWith("- ")).toBe(true);
+      // A non-header line is purely a list of known operationIds — no paths.
+      for (const id of line.split(", ")) {
+        expect(knownIds.has(id)).toBe(true);
+      }
     }
   });
 

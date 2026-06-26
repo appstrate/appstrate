@@ -130,12 +130,16 @@ describe("module-loader", () => {
       );
     });
 
-    it("ignores dependencies not in the module set", async () => {
+    it("throws when a declared dependency is not in the module set", async () => {
+      // A declared dependency is a hard peer requirement: a dependent whose dep
+      // isn't loaded cannot work (e.g. `chat` without `mcp`), so boot fails with
+      // a clear config error rather than silently degrading.
       const a = mockModule("a", {
         manifest: { id: "a", name: "A", version: "1.0.0", dependencies: ["missing"] },
       });
-      await loadModulesFromInstances([a], mockCtx());
-      expect(getModule("a")).toBe(a);
+      await expect(loadModulesFromInstances([a], mockCtx())).rejects.toThrow(
+        'requires module "missing"',
+      );
     });
   });
 
