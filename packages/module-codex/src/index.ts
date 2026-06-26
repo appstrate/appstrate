@@ -22,10 +22,11 @@
  *     each request.
  *
  * The platform issues ZERO Codex API calls to validate a credential or
- * discover models: validation is the local JWT decode below, and model
- * discovery persists the static `modelDiscoveryCandidates` (declared via
- * `credentialValidation: "offline"`). The user's subscription token is
- * only ever spent through the official Codex CLI at run time. See
+ * discover models: validation is the local JWT decode below (inferred from the
+ * presence of the `validateCredential` hook), and model discovery persists the
+ * static `modelDiscoveryCandidates` (declared via `modelDiscovery: { mode:
+ * "static" }`). The user's subscription token is only ever spent through the
+ * official Codex CLI at run time. See
  * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`.
  */
 
@@ -217,14 +218,19 @@ const codexProvider: ModelProviderDefinition = {
   // can't be listed here (boot check). gpt-5.2 / gpt-5.3-codex are
   // deprecated on ChatGPT sign-in.
   featuredModels: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
-  // Probed against the live credential after import (and on manual
-  // refresh) — what THIS account's plan serves lands on the credential's
-  // `available_model_ids`. Superset of `featuredModels`: includes
-  // Pro-only previews and recently-deprecated ids so plans that still
-  // serve them keep them selectable. Source: featured ∪ LiteLLM's
+  // OFFLINE validation: the platform issues ZERO Codex API calls to test
+  // a credential or discover models. The connection test runs the
+  // `validateCredential` hook below (local JWT decode) — its mere presence is
+  // what tells the platform to validate offline. Static discovery persists the
+  // candidates below (∩ catalog) without per-model probing. Real availability
+  // is checked at first official-binary run.
+  // Persisted as-is (∩ catalog) — what THIS account's plan serves lands on
+  // the credential's `available_model_ids`. Superset of `featuredModels`:
+  // includes Pro-only previews and recently-deprecated ids so plans that
+  // still serve them keep them selectable. Source: featured ∪ LiteLLM's
   // `chatgpt` provider snapshot
-  // (apps/api/src/data/subscription-watch/chatgpt.json) — review when
-  // the weekly drift PR flags that snapshot.
+  // (apps/api/src/data/subscription-watch/chatgpt.json) — review when the
+  // weekly drift PR flags that snapshot.
   modelDiscoveryCandidates: [
     "gpt-5.5",
     "gpt-5.4",
@@ -239,12 +245,8 @@ const codexProvider: ModelProviderDefinition = {
     "gpt-5.1-codex-max",
     "gpt-5.1-codex-mini",
   ],
-  // OFFLINE validation: the platform issues ZERO Codex API calls to test
-  // a credential or discover models. The connection test runs
-  // `validateCredential` (local JWT decode); discovery persists the
-  // candidates above (∩ catalog) without per-model probing. Real
-  // availability is checked at first official-binary run.
-  credentialValidation: "offline",
+  // Static discovery: persist the candidates above (∩ catalog) without probing.
+  modelDiscovery: { mode: "static" },
   hooks: codexHooks,
   // The chatgpt.com Codex backend rejects requests without a
   // `chatgpt-account-id` header. The platform refuses to persist a

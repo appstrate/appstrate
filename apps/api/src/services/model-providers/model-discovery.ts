@@ -4,10 +4,9 @@
  * Model discovery — determine which models a credential serves and persist
  * them on the credential row (`available_model_ids`).
  *
- * Two strategies, chosen by the provider definition's
- * `credentialValidation` flag:
+ * Two strategies, chosen by the provider definition's `modelDiscovery` field:
  *
- *   - `"offline"` (subscription providers: codex, claude-code) — the
+ *   - `{ mode: "static" }` (subscription providers: codex, claude-code) — the
  *     platform issues ZERO API calls. It persists the provider's static
  *     `modelDiscoveryCandidates` (∩ catalog) directly. Spending a user's
  *     subscription quota to enumerate models would contradict the
@@ -16,14 +15,14 @@
  *     platform-side request. Real per-model availability is validated at
  *     first run.
  *
- *   - `"probe"` (default, API-key providers) — empirical: a 1-token
- *     inference request per candidate, persisting the ids that answered
- *     2xx. Candidates come from `modelDiscoveryCandidates` (falling back to
- *     `featuredModels`); the platform stays provider-agnostic and just
- *     sends whatever `testModelConfig` builds (generic `/models` wire
+ *   - probe (default, when `modelDiscovery` is omitted — API-key providers) —
+ *     empirical: a 1-token inference request per candidate, persisting the ids
+ *     that answered 2xx. Candidates come from `modelDiscoveryCandidates`
+ *     (falling back to `featuredModels`); the platform stays provider-agnostic
+ *     and just sends whatever `testModelConfig` builds (generic `/models` wire
  *     format).
  *
- * The classification below applies only to the `"probe"` path:
+ * The classification below applies only to the probe path:
  *
  * Classification per probe:
  *   - 2xx                → served, goes into `availableModelIds`
@@ -93,8 +92,8 @@ const defaultDeps: ModelDiscoveryDeps = {
 };
 
 /**
- * Persist the static `modelDiscoveryCandidates` (∩ resolved catalog) for an
- * `"offline"` provider, with NO network call. Used for subscription
+ * Persist the static `modelDiscoveryCandidates` (∩ resolved catalog) for a
+ * `{ mode: "static" }` provider, with NO network call. Used for subscription
  * providers whose tokens must never be spent on a platform-side probe. The
  * catalog intersection mirrors the `/seed` route's gate (catalog membership),
  * so the persisted list is exactly the set a user can actually seed. An empty
@@ -173,7 +172,7 @@ export async function discoverAvailableModels(
   }
   const def = getModelProvider(creds.providerId);
 
-  // Offline providers (subscription: codex, claude-code) — persist the
+  // Static-discovery providers (subscription: codex, claude-code) — persist the
   // static candidate list (∩ catalog) WITHOUT any network probe. The
   // platform never spends a subscription request to enumerate models; real
   // per-model availability is validated at first official-binary run. The
@@ -181,7 +180,7 @@ export async function discoverAvailableModels(
   // `/seed` route can actually accept (it gates seeding on catalog
   // membership), so a candidate absent from the catalog isn't persisted as
   // "available" only to be rejected at seed time.
-  if (def?.credentialValidation === "offline") {
+  if (def?.modelDiscovery?.mode === "static") {
     return persistStaticCandidates(orgId, credentialId, creds.providerId, def);
   }
 

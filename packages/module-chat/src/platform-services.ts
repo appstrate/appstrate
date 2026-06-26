@@ -14,22 +14,24 @@
  *     INSIDE this object, so callers never branch on it.
  *   - `rateLimit` is the platform's authenticated per-route limiter.
  *   - `chatEngine` looks up a subscription chat engine (e.g. Claude) by provider
- *     id — platform-injected (`ctx.services.chatHandlerForProvider` reads the
- *     model-provider registry, an apps/api concern, and returns only the
- *     module-contributed `chatHandler`). This module never imports
- *     that registry or any vendor SDK; only the shared `ChatEngineInput` type
- *     crosses the boundary.
+ *     id — resolved through the platform contract
+ *     (`ctx.services.chatHandlerForProvider`), which a provider module populates
+ *     at boot via `ctx.services.registerChatHandler`. This module never imports
+ *     the provider module, the model-provider registry, or any vendor SDK; the
+ *     `ChatEngineInput` contract is a first-party core type
+ *     (`@appstrate/core/chat-engine-contract`), so the handler crosses through
+ *     `ctx.services`, never a module-to-module import.
  */
 
 import type { MiddlewareHandler } from "hono";
 import type { ModuleInitContext } from "@appstrate/core/module";
-import type { ChatEngineInput } from "@appstrate/core/subscription-engines";
+import type { ChatEngineInput } from "@appstrate/core/chat-engine-contract";
 
 /**
  * A subscription chat engine surfaced to the chat: the provider it serves + its
- * turn handler. Assembled from the provider id + the `chatHandler` the platform
- * resolves — only providers that carry a `chatHandler` (Claude) become a
- * `ChatEngine`; codex (no chat surface) resolves to `undefined`.
+ * turn handler. Assembled from the provider id + the handler resolved through
+ * the platform contract — only providers that registered a chat handler (Claude)
+ * become a `ChatEngine`; codex (no chat surface) resolves to `undefined`.
  */
 export interface ChatEngine {
   providerId: string;
@@ -69,10 +71,14 @@ export function buildChatPlatformDeps(ctx?: ModuleInitContext): ChatPlatformDeps
     rateLimit: (maxPerMinute) =>
       ctx ? ctx.services.http.rateLimit(maxPerMinute) : passThroughRateLimit,
     chatEngine: (providerId) => {
+      // Resolved through the platform contract, populated by provider modules at
+      // boot via `ctx.services.registerChatHandler`. Only a provider that
+      // registered a chat handler (Claude) is usable by the chat; codex (no chat
+      // surface) and unknown providers resolve to `undefined` → ai-sdk path /
+      // disabled. Without an init context (test harness / OSS standalone) there
+      // is no platform registry, so no subscription chat engine — the same safe
+      // baseline as before.
       const handler = ctx?.services.chatHandlerForProvider(providerId);
-      // Only an engine with a chat surface (a contributed chatHandler) is usable
-      // by the chat — codex resolves with no chatHandler → undefined → ai-sdk
-      // path / disabled.
       return handler ? { providerId, handler } : undefined;
     },
   };

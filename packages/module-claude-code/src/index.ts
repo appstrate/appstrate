@@ -27,10 +27,11 @@
  * fingerprint, and the sidecar / chat gateways only swap the bearer + ensure the
  * `oauth-2025-04-20` beta. The provider declares no `oauthWireFormat`; the
  * module's only `hooks` entry is `validateCredential`, an OFFLINE check (no
- * network) that confirms the bearer is well-formed and unexpired. Model
- * discovery persists the static `modelDiscoveryCandidates` (declared via
- * `credentialValidation: "offline"`) without probing — real per-model
- * availability is validated at first official-binary run. See
+ * network) that confirms the bearer is well-formed and unexpired — its
+ * presence is what makes credential validation offline. Model discovery
+ * persists the static `modelDiscoveryCandidates` (declared via `modelDiscovery:
+ * { mode: "static" }`) without probing — real per-model availability is
+ * validated at first official-binary run. See
  * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`.
  */
 
@@ -116,12 +117,17 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // the Anthropic catalog — metadata flows through anthropic.json.
   catalogProviderId: "anthropic",
   featuredModels: ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"],
-  // Probed against the live credential after import (and on manual
-  // refresh) — what THIS account's plan actually serves (Pro vs Max vs
-  // Team differ, e.g. Opus/Fable access) lands on the credential's
-  // `available_model_ids`. No machine-readable source describes the
-  // Claude subscription tiers, so this superset is curated from
-  // anthropic.json's current generation; the probe sorts out the rest.
+  // OFFLINE validation: the platform issues ZERO Anthropic API calls to test a
+  // credential or discover models. The connection test runs the
+  // `validateCredential` hook below (a non-empty/unexpired bearer check) — its
+  // mere presence is what tells the platform to validate offline. Static
+  // discovery persists the candidates below (∩ catalog) without per-model
+  // probing. Real availability is checked at first official-binary run.
+  // Persisted as-is (∩ catalog) — what THIS account's plan actually serves
+  // (Pro vs Max vs Team differ, e.g. Opus/Fable access) lands on the
+  // credential's `available_model_ids`. No machine-readable source describes
+  // the Claude subscription tiers, so this superset is curated from
+  // anthropic.json's current generation.
   modelDiscoveryCandidates: [
     "claude-fable-5",
     "claude-opus-4-8",
@@ -131,34 +137,27 @@ const claudeCodeProvider: ModelProviderDefinition = {
     "claude-sonnet-4-5",
     "claude-haiku-4-5",
   ],
-  // OFFLINE validation: the platform issues ZERO Anthropic API calls to test a
-  // credential or discover models. The connection test runs `validateCredential`
-  // (a non-empty/unexpired bearer check); discovery persists the candidates above
-  // (∩ catalog) without per-model probing. Real availability is checked at first
-  // official-binary run.
-  credentialValidation: "offline",
+  // Static discovery: persist the candidates above (∩ catalog) without probing.
+  modelDiscovery: { mode: "static" },
   // Anthropic OAuth tokens are not JWTs — no JWT identity decoding. There is no
   // sidecar fingerprint forging: a `claude-code` run executes on the official
   // Claude Agent SDK (the `claude` runner engine), whose binary signs its own
   // client fingerprint. The sidecar's OAuth mode only swaps the bearer + ensures
   // the OAuth beta — see `runtime-pi/sidecar/app.ts` and `subscription-run-policy.ts`.
   //
-  // Engine binding read off this definition by the platform's model-provider
-  // registry helpers (run-launcher + chat + gateways resolve the engine by
-  // provider id off this one registration). Runs + chat execute on the Claude
-  // Agent SDK (official binary, no forging) — the sidecar `/llm` gateway swaps
-  // the bearer server-side, so the real token never enters the container.
-  // The `claude` engine emits the structured deliverable natively via
-  // `outputFormat` → `structured_output`, so the launcher does NOT offer it the
-  // MCP `output` tool. `chatHandler` — this module owns the chat driver too
-  // (Claude Agent SDK + ui-stream mapper live in `./claude-agent/`), declared
-  // here so dropping the module sheds the chat surface as well; the platform
-  // resolves it off this definition and injects it into module-chat, which
-  // dispatches to it without importing the vendor SDK (and core carries only the
-  // shared `ChatEngineInput` type, no vendor binding).
+  // RUN-ONLY engine binding, read off this definition by the platform's
+  // model-provider registry helpers (run-launcher + gateways resolve the engine
+  // by provider id off this one registration). Runs execute on the Claude Agent
+  // SDK (official binary, no forging) — the sidecar `/llm` gateway swaps the
+  // bearer server-side, so the real token never enters the container. The
+  // `claude` engine emits the structured deliverable natively via `outputFormat`
+  // → `structured_output`, so the launcher does NOT offer it the MCP `output`
+  // tool. The interactive chat driver is registered separately, through the
+  // platform contract (`ctx.services.registerChatHandler` in `init()` below) —
+  // NOT on this binding — so the run-engine binding never carries a chat surface
+  // and no module imports another.
   subscriptionEngine: {
     engine: "claude",
-    chatHandler: runClaudeAgentChat,
   },
   hooks: claudeCodeHooks,
 };
@@ -174,8 +173,14 @@ const claudeCodeModule: AppstrateModule = {
     version: "1.0.0",
   },
 
-  async init() {
-    // Declarative — registry pulls from modelProviders() at boot.
+  async init(ctx) {
+    // The provider definition (engine routing) is declarative — the registry
+    // pulls it from modelProviders() at boot. The interactive chat driver is
+    // contributed here through the PLATFORM CONTRACT (`ctx.services`), keyed by
+    // provider id, so it lives entirely off the published-core run-engine
+    // binding, requires no import of the chat module (module isolation), and
+    // vanishes with this module when it is not loaded.
+    ctx.services.registerChatHandler("claude-code", runClaudeAgentChat);
   },
 
   modelProviders() {

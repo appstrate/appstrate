@@ -10,8 +10,9 @@
  * test a credential. `validateCredential` is a pure local JWT decode — no
  * network. These tests pin: (a) it accepts a structurally valid, unexpired
  * Codex JWT; (b) it rejects a token missing `chatgpt_account_id`; (c) it
- * rejects an expired token; and (d) the provider declares
- * `credentialValidation: "offline"` so the platform skips the network probe.
+ * rejects an expired token; and (d) the provider validates offline via the
+ * `validateCredential` hook and declares `modelDiscovery: { mode: "static" }`,
+ * so the platform skips the network probe.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -37,8 +38,8 @@ function validate(args: {
 }
 
 describe("codex offline credential validation", () => {
-  it("declares credentialValidation: 'offline' and NO buildInferenceProbe", () => {
-    expect(codex?.credentialValidation).toBe("offline");
+  it("validates offline via validateCredential and declares NO buildInferenceProbe", () => {
+    expect(codex?.modelDiscovery?.mode).toBe("static");
     expect(codex?.hooks?.validateCredential).toBeFunction();
     // The forging probe machinery is deleted.
     expect((codex?.hooks as Record<string, unknown>).buildInferenceProbe).toBeUndefined();

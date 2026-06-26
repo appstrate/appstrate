@@ -16,7 +16,8 @@ import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
-import type { ChatEngineInput, SubscriptionEngineBinding } from "./subscription-engines.ts";
+import type { ChatEngineHandler } from "./chat-engine-contract.ts";
+import type { SubscriptionEngineBinding } from "./subscription-engines.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -654,35 +655,35 @@ export interface ModelProviderDefinition {
   featuredModels: readonly string[];
 
   /**
-   * Candidate model ids for **empirical discovery** — the platform
-   * probes each one against the connected credential (1-token inference
-   * request) and persists the ids that respond 2xx as the credential's
-   * `availableModelIds`. Lets subscription-backed OAuth providers
-   * (codex, claude-code) surface the models a *specific account/plan*
-   * actually serves, which no static catalog can know.
-   *
-   * Unlike {@link featuredModels}, ids here do NOT have to exist in the
-   * resolved catalog — the probe is the validation. When omitted, the
-   * platform probes `featuredModels` only. Irrelevant for api_key
-   * providers whose full catalog is exposed.
+   * Candidate model ids for discovery — the source list for whichever
+   * {@link modelDiscovery} strategy applies. For the default (probe) strategy
+   * the platform probes each one against the connected credential (1-token
+   * inference request) and persists the ids that respond 2xx; for the static
+   * strategy it persists these directly (∩ catalog). Unlike
+   * {@link featuredModels}, ids here do NOT have to exist in the resolved
+   * catalog. When omitted, the platform uses `featuredModels`. Irrelevant for
+   * api_key providers whose full catalog is exposed.
    */
   modelDiscoveryCandidates?: readonly string[];
 
   /**
-   * Credential-validation strategy. Defaults to `"probe"` — the platform
-   * verifies a credential by hitting the provider's backend (generic
-   * `/models` discovery probe, or a provider-specific request).
+   * Model-discovery strategy. When omitted, discovery is **empirical** (probe):
+   * the platform issues a 1-token inference request per candidate and persists
+   * the ids that respond 2xx as the credential's `availableModelIds`.
    *
-   * `"offline"` declares that the platform must issue ZERO API calls to
-   * validate or discover models for this provider: the connection test
-   * runs the module's {@link ModelProviderHooks.validateCredential} hook
-   * (local token decode) and model discovery persists the static
-   * {@link modelDiscoveryCandidates} (∩ catalog) WITHOUT per-model live
-   * probing. Set by subscription providers (`claude-code`, `codex`) so a
-   * user's subscription token is never spent on a platform-side test —
-   * real per-model availability is validated at first official-binary run.
+   * `{ mode: "static" }` declares that the platform must issue ZERO API calls to
+   * discover models: it persists the static {@link modelDiscoveryCandidates}
+   * (∩ catalog) WITHOUT per-model live probing. Set by subscription providers
+   * (`claude-code`, `codex`) so a user's subscription token is never spent
+   * enumerating models — real per-model availability is validated at first
+   * official-binary run.
+   *
+   * Offline credential VALIDATION (no upstream probe to test a token) is a
+   * separate, orthogonal concern inferred from the PRESENCE of
+   * {@link ModelProviderHooks.validateCredential} — it is NOT keyed off this
+   * field.
    */
-  credentialValidation?: "probe" | "offline";
+  modelDiscovery?: { mode: "static" };
 
   // — Behavior —
   /** Provider-scoped hooks (header injection, identity extraction). */
@@ -1005,13 +1006,21 @@ export interface PlatformServices {
     dispatch(request: Request): Promise<Response>;
   };
   /**
-   * Resolve the chat-turn handler a provider module contributed (e.g. Claude),
-   * off the platform's model-provider registry, or `undefined` for an API-key /
-   * unknown provider OR a subscription engine with no chat surface (codex). The
-   * `chat` module reads this to dispatch a vendor chat turn by provider id
-   * WITHOUT importing the model-provider registry (an apps/api concern) or any
-   * vendor SDK; only the shared {@link ChatEngineInput} type is cross-cutting.
-   * Just the handler crosses the boundary — never the full engine definition.
+   * Register a provider module's interactive chat-turn handler, keyed by
+   * provider id. Called from the provider module's `init(ctx)` (e.g.
+   * `@appstrate/module-claude-code`). This is the platform-contract channel that
+   * keeps the chat handler OFF the run-engine binding and lets a provider module
+   * contribute chat without any other module importing it — module isolation is
+   * preserved because the handler crosses through `ctx.services`, not a
+   * module-to-module import. Re-registering replaces the handler.
    */
-  chatHandlerForProvider(providerId: string): ((input: ChatEngineInput) => Response) | undefined;
+  registerChatHandler(providerId: string, handler: ChatEngineHandler): void;
+  /**
+   * Resolve a provider's registered chat-turn handler, or `undefined` for an
+   * API-key / unknown provider OR a subscription engine with no chat surface
+   * (codex). The `chat` module reads this to dispatch a vendor chat turn by
+   * provider id WITHOUT importing the provider module or any vendor SDK; only
+   * the `ChatEngineInput` contract (defined in core) is cross-cutting.
+   */
+  chatHandlerForProvider(providerId: string): ChatEngineHandler | undefined;
 }

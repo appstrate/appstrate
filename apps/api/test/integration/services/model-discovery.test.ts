@@ -28,7 +28,7 @@ const PROVIDER_ID = "test-oauth-discovery";
 const OFFLINE_PROVIDER_ID = "test-offline-discovery";
 
 /**
- * Synthetic provider declaring `credentialValidation: "offline"` — exercises
+ * Synthetic provider declaring `modelDiscovery: { mode: "static" }` — exercises
  * the no-network discovery path (subscription providers codex/claude-code).
  * Reuses the same catalog as the probe provider. Candidate "m-uncatalogued"
  * is intentionally absent from the catalog to pin the ∩-catalog filter.
@@ -54,7 +54,7 @@ function registerOfflineDiscoveryProvider(): void {
     catalogProviderId: "test-discovery-catalog",
     featuredModels: ["m-featured"],
     modelDiscoveryCandidates: ["m-featured", "m-extra", "m-uncatalogued"],
-    credentialValidation: "offline",
+    modelDiscovery: { mode: "static" },
   });
 }
 

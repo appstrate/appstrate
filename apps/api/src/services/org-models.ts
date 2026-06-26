@@ -810,14 +810,15 @@ export async function testModelConfig(config: {
   /** OAuth only — token expiry (epoch ms). Used by the offline credential check. */
   expiresAt?: number | null;
 }): Promise<TestResult> {
-  // Provider-agnostic OFFLINE credential validation — subscription
-  // providers (codex, claude-code) declare `credentialValidation:
-  // "offline"` and implement `validateCredential`, so the platform NEVER
-  // issues an API call to test their tokens. The module decodes the token
-  // locally; we map its pure-data result to a TestResult (latency 0 — no
-  // request was made). Returns BEFORE the SSRF/network branch.
+  // Provider-agnostic OFFLINE credential validation — a provider that ships a
+  // `validateCredential` hook (subscription providers: codex, claude-code) is
+  // validated locally, so the platform NEVER issues an API call to test its
+  // tokens. The mere PRESENCE of the hook is the signal — there is no separate
+  // flag to keep in sync. The module decodes the token locally; we map its
+  // pure-data result to a TestResult (latency 0 — no request was made). Returns
+  // BEFORE the SSRF/network branch.
   const provider = config.providerId ? getModelProvider(config.providerId) : null;
-  if (provider?.credentialValidation === "offline" && provider.hooks?.validateCredential) {
+  if (provider?.hooks?.validateCredential) {
     const result = provider.hooks.validateCredential({
       apiKey: config.apiKey,
       accountId: config.accountId,

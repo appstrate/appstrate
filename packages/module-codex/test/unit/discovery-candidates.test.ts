@@ -6,7 +6,8 @@ import codexModule from "../../src/index.ts";
 const def = (codexModule.modelProviders?.() ?? [])[0]!;
 
 describe("codex discovery candidates", () => {
-  it("declares modelDiscoveryCandidates ⊇ featuredModels", () => {
+  it("declares static modelDiscovery with candidates ⊇ featuredModels", () => {
+    expect(def.modelDiscovery?.mode).toBe("static");
     expect(def.modelDiscoveryCandidates).toBeDefined();
     for (const id of def.featuredModels) {
       expect(def.modelDiscoveryCandidates!).toContain(id);
@@ -14,7 +15,7 @@ describe("codex discovery candidates", () => {
   });
 
   it("includes deprecated and preview ids beyond the featured floor", () => {
-    // The probe — not the static list — decides what a given plan
+    // The run — not the static list — decides what a given plan
     // serves, so candidates deliberately cover Pro-only previews and
     // recently-deprecated ids.
     expect(def.modelDiscoveryCandidates!.length).toBeGreaterThan(def.featuredModels.length);

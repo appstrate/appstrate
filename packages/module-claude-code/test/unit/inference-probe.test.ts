@@ -15,7 +15,8 @@ function validate(args: {
 }
 
 describe("claude-code discovery candidates", () => {
-  it("declares modelDiscoveryCandidates ⊇ featuredModels", () => {
+  it("declares static modelDiscovery with candidates ⊇ featuredModels", () => {
+    expect(def.modelDiscovery?.mode).toBe("static");
     expect(def.modelDiscoveryCandidates).toBeDefined();
     for (const id of def.featuredModels) {
       expect(def.modelDiscoveryCandidates!).toContain(id);
@@ -24,11 +25,12 @@ describe("claude-code discovery candidates", () => {
 });
 
 describe("claude-code offline credential validation", () => {
-  it("declares credentialValidation: 'offline' and NO buildInferenceProbe (forging removed)", () => {
+  it("validates offline via validateCredential and declares NO buildInferenceProbe (forging removed)", () => {
     // Real inference runs on the official Claude Agent SDK (which signs its own
     // fingerprint); the platform issues ZERO Anthropic API calls to test a
-    // credential. There is no wire-format probe to declare.
-    expect(def.credentialValidation).toBe("offline");
+    // credential. Offline validation is inferred from the presence of the
+    // validateCredential hook; static discovery comes from modelDiscovery.mode.
+    expect(def.modelDiscovery?.mode).toBe("static");
     expect(def.hooks?.validateCredential).toBeFunction();
     expect((def.hooks as Record<string, unknown>).buildInferenceProbe).toBeUndefined();
     expect((def as Record<string, unknown>).oauthWireFormat).toBeUndefined();

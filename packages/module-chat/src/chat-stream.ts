@@ -458,9 +458,10 @@ export async function handleChatStream(
   });
 
   // Subscription chat engine — the chat driver is contributed by the provider
-  // module (only `@appstrate/module-claude-code` today) into the chat-engine
-  // registry, surfaced here through `deps.chatEngine`. The chat dispatches by
-  // provider id WITHOUT importing any vendor SDK. With no provider module loaded
+  // module (only `@appstrate/module-claude-code` today) through the platform
+  // contract (`ctx.services.registerChatHandler`), surfaced here through
+  // `deps.chatEngine`. The chat dispatches by provider id WITHOUT importing the
+  // provider module or any vendor SDK. With no provider module loaded
   // the lookup is undefined and every provider falls through to the generic
   // ai-sdk path below. Codex is agent-only (filtered from the chat model list by
   // CHAT_USABLE_FAMILIES) and registers no chat engine, so today only the Claude

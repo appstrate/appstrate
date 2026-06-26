@@ -14,14 +14,21 @@ import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import type { ModuleInitContext, PlatformServices } from "@appstrate/core/module";
+import type { ChatEngineHandler } from "@appstrate/core/chat-engine-contract";
 import { getEnv } from "@appstrate/env";
 
 // ---- Platform service imports (for buildPlatformServices) -----------------
 import { logger } from "../logger.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { listLlmUsageForRun } from "../../services/state/runs.ts";
-import { subscriptionEngineForProvider } from "../../services/model-providers/registry.ts";
 import { getPlatformApp } from "../platform-app.ts";
+
+// Process-global chat-handler registry, populated by provider modules through
+// the platform contract (`ctx.services.registerChatHandler`) at init and read
+// by the chat module (`ctx.services.chatHandlerForProvider`). apps/api owns this
+// registry; the two modules never import each other — the handler crosses only
+// through `ctx.services`, preserving module isolation.
+const _chatHandlers = new Map<string, ChatEngineHandler>();
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
@@ -86,9 +93,12 @@ export function getModuleRegistry(): string[] {
  * Wire concrete platform services into the structural `PlatformServices`
  * contract declared in `@appstrate/core/module`. The surface is intentionally
  * minimal — `runs.listLlmUsage` (the cloud billing module's per-run ledger
- * read), `inProcess.dispatch`, and `chatHandlerForProvider` (the chat module's
- * subscription chat-handler lookup). See the `PlatformServices` doc in core for
- * the razor and the history of the previous (chat-era) broad surface.
+ * read), `inProcess.dispatch`, and the chat-handler channel
+ * (`registerChatHandler` + `chatHandlerForProvider`), the platform-contract seam
+ * by which a provider module contributes an interactive chat handler and the
+ * chat module resolves it by provider id — without either module importing the
+ * other. See the `PlatformServices` doc in core for the razor and the history of
+ * the previous (chat-era) broad surface.
  */
 function buildPlatformServices(): PlatformServices {
   return {
@@ -109,11 +119,13 @@ function buildPlatformServices(): PlatformServices {
       // normalizes it to the `Promise<Response>` the service contract declares.
       dispatch: async (request) => getPlatformApp().fetch(request),
     },
-    // Resolve a provider's module-contributed chat handler off the model-provider
-    // registry. apps/api owns that registry; the chat module reads only the
-    // handler through this injected lookup rather than importing the registry or
-    // any vendor SDK — the full engine def never crosses the boundary.
-    chatHandlerForProvider: (providerId) => subscriptionEngineForProvider(providerId)?.chatHandler,
+    // Platform-contract chat-handler channel — a provider module registers its
+    // handler at init, the chat module resolves it by provider id. Neither
+    // module imports the other; both go through this shared registry.
+    registerChatHandler: (providerId, handler) => {
+      _chatHandlers.set(providerId, handler);
+    },
+    chatHandlerForProvider: (providerId) => _chatHandlers.get(providerId),
   };
 }
 
