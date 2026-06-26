@@ -7,8 +7,8 @@
  * (`@appstrate/core/subscription-engines`); this module is the launcher-side
  * policy that consumes them — it resolves credential-delivery mode from that
  * registry (`resolveCredentialDelivery`) and enforces the fail-closed guards a
- * subscription run must pass before launch. It does NOT select the engine;
- * `engineForProvider` does, in core.
+ * subscription run must pass before launch. The engine itself is read off the
+ * provider's `subscriptionEngine` binding (claude) with `pi` as the default.
  *
  * Which in-container agent engine a run executes on. Pi (the
  * `@mariozechner/pi-coding-agent` loop) runs every API-key provider; a
@@ -25,13 +25,8 @@
  */
 
 import type { LlmProxyOauthConfig, ModelSwap } from "@appstrate/core/sidecar-types";
+import { isSubscriptionEngine, type RunEngine } from "@appstrate/core/subscription-engines";
 import {
-  isSubscriptionEngine,
-  type RunEngine,
-  type SubscriptionEngineDef,
-} from "@appstrate/core/subscription-engines";
-import {
-  engineForProvider,
   isOAuthModelProvider,
   subscriptionEngineForProvider,
 } from "../model-providers/registry.ts";
@@ -60,18 +55,19 @@ export function resolveCredentialDelivery(params: {
   /** True for any oauth-class credential — subscription OR engine-less. */
   isOauthCredential: boolean;
   engine: RunEngine;
-  subscriptionEngine: SubscriptionEngineDef | undefined;
 } {
   const { providerId, hasCredentialId } = params;
-  const subscriptionEngine = subscriptionEngineForProvider(providerId);
-  const engine = engineForProvider(providerId);
+  // One registry read: the resolved engine is the provider's subscription
+  // engine (claude) or `pi` for every API-key / unregistered provider.
+  const sub = subscriptionEngineForProvider(providerId);
+  const engine = sub?.engine ?? "pi";
 
   // A credential is oauth-class when it has a stored credential id AND its
   // provider authenticates via OAuth — true both for a subscription engine and
   // for an oauth provider with no official engine (the refuse path).
   const isOauthCredential = hasCredentialId && isOAuthModelProvider(providerId);
 
-  return { isOauthCredential, engine, subscriptionEngine };
+  return { isOauthCredential, engine };
 }
 
 /**

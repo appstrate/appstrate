@@ -33,7 +33,6 @@ import {
   resolveCredentialDelivery,
 } from "./subscription-run-policy.ts";
 import { getExecutionMode } from "../../infra/mode.ts";
-import { providerHasNativeOutput } from "../model-providers/registry.ts";
 import {
   getOrchestrator,
   type ContainerOrchestrator,
@@ -250,14 +249,12 @@ async function runPlatformContainerImpl(
       };
     }
 
-    // Native-output providers (e.g. claude-code) materialise `output` themselves
-    // → strip it from the tools the sidecar serves so the model sees a single
-    // output path. Driven by the PROVIDER's declared capability (not the engine),
-    // so a second provider on the same engine that lacks native output keeps its
-    // MCP `output` path, and a future native-output provider needs no launcher edit.
-    const sidecarRuntimeTools = providerHasNativeOutput(llmConfig.providerId)
-      ? plan.runtimeTools?.filter((t) => t !== "output")
-      : plan.runtimeTools;
+    // The Claude engine materialises `output` natively (the SDK's
+    // `outputFormat` → `structured_output`) → strip the MCP `output` tool from
+    // what the sidecar serves so the model sees a single output path. Every Pi
+    // engine takes `output` through the MCP tool.
+    const sidecarRuntimeTools =
+      engine === "claude" ? plan.runtimeTools?.filter((t) => t !== "output") : plan.runtimeTools;
 
     const sidecarSpec: SidecarLaunchSpec = {
       runToken: plan.runToken ?? "",

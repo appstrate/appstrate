@@ -14,9 +14,9 @@
  *     INSIDE this object, so callers never branch on it.
  *   - `rateLimit` is the platform's authenticated per-route limiter.
  *   - `chatEngine` looks up a subscription chat engine (e.g. Claude) by provider
- *     id — platform-injected (`ctx.services.chatEngineForProvider` reads the
- *     model-provider registry, an apps/api concern, and returns the core engine
- *     def incl. its module-contributed `chatHandler`). This module never imports
+ *     id — platform-injected (`ctx.services.chatHandlerForProvider` reads the
+ *     model-provider registry, an apps/api concern, and returns only the
+ *     module-contributed `chatHandler`). This module never imports
  *     that registry or any vendor SDK; only the shared `ChatEngineInput` type
  *     crosses the boundary.
  */
@@ -27,7 +27,7 @@ import type { ChatEngineInput } from "@appstrate/core/subscription-engines";
 
 /**
  * A subscription chat engine surfaced to the chat: the provider it serves + its
- * turn handler. Normalised from the core `SubscriptionEngineDef` the platform
+ * turn handler. Assembled from the provider id + the `chatHandler` the platform
  * resolves — only providers that carry a `chatHandler` (Claude) become a
  * `ChatEngine`; codex (no chat surface) resolves to `undefined`.
  */
@@ -69,13 +69,11 @@ export function buildChatPlatformDeps(ctx?: ModuleInitContext): ChatPlatformDeps
     rateLimit: (maxPerMinute) =>
       ctx ? ctx.services.http.rateLimit(maxPerMinute) : passThroughRateLimit,
     chatEngine: (providerId) => {
-      const def = ctx?.services.chatEngineForProvider(providerId);
+      const handler = ctx?.services.chatHandlerForProvider(providerId);
       // Only an engine with a chat surface (a contributed chatHandler) is usable
       // by the chat — codex resolves with no chatHandler → undefined → ai-sdk
       // path / disabled.
-      return def?.chatHandler
-        ? { providerId: def.providerId, handler: def.chatHandler }
-        : undefined;
+      return handler ? { providerId, handler } : undefined;
     },
   };
 }

@@ -148,9 +148,9 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // provider id off this one registration). Runs + chat execute on the Claude
   // Agent SDK (official binary, no forging) — the sidecar `/llm` gateway swaps
   // the bearer server-side, so the real token never enters the container.
-  // `nativeOutput` — the SDK emits the structured deliverable via
-  // `outputFormat` → `structured_output`, so the run must NOT also be offered
-  // the MCP `output`. `chatHandler` — this module owns the chat driver too
+  // The `claude` engine emits the structured deliverable natively via
+  // `outputFormat` → `structured_output`, so the launcher does NOT offer it the
+  // MCP `output` tool. `chatHandler` — this module owns the chat driver too
   // (Claude Agent SDK + ui-stream mapper live in `./claude-agent/`), declared
   // here so dropping the module sheds the chat surface as well; the platform
   // resolves it off this definition and injects it into module-chat, which
@@ -158,7 +158,6 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // shared `ChatEngineInput` type, no vendor binding).
   subscriptionEngine: {
     engine: "claude",
-    nativeOutput: true,
     chatHandler: runClaudeAgentChat,
   },
   hooks: claudeCodeHooks,

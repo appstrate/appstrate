@@ -8,7 +8,7 @@
  * subscription engine that drives a vendor's OFFICIAL binary so it signs its
  * own client fingerprint (no forging). What core owns here is the engine
  * VOCABULARY + the binding SHAPE — the `"claude"` engine, the binding
- * fields (credential-delivery mode, native-output capability, chat handler) +
+ * fields (engine + chat handler) +
  * the shared {@link ChatEngineInput} chat contract — and the pure
  * {@link isSubscriptionEngine} predicate. It ships ZERO bindings: the `claude`
  * (Claude Agent SDK) binding is contributed at boot by its opt-in provider
@@ -17,8 +17,8 @@
  *
  * There is NO registry here anymore. The provider definition is the SINGLE
  * source of truth for a provider's engine; the platform's model-provider
- * registry (apps/api) exposes pure read helpers (`engineForProvider`,
- * `subscriptionEngineForProvider`, `providerHasNativeOutput`) that read those
+ * registry (apps/api) exposes a pure read helper (`subscriptionEngineForProvider`)
+ * that reads those
  * definitions directly, so the run, chat, and llm-proxy surfaces agree without
  * a second copied map. (This is engine-routing vocabulary, NOT billing
  * vocabulary — no billing concept lives here.)
@@ -67,16 +67,6 @@ export interface ChatEngineInput {
 export interface SubscriptionEngineBinding {
   /** Engine that drives this provider's official binary. */
   engine: SubscriptionRunEngine;
-  /**
-   * True iff this engine materialises the structured deliverable NATIVELY (its
-   * binary emits `output` directly — e.g. the Claude SDK's `outputFormat` →
-   * `structured_output`) rather than via the platform's MCP `output` runtime
-   * tool. When set, the launcher MUST NOT serve the MCP `output` tool to the
-   * run (two output mechanisms would be ambiguous and could double-emit); the
-   * output JSON Schema still reaches the runner for the native path. Engines
-   * without this capability (pi) take `output` through the MCP tool.
-   */
-  nativeOutput?: boolean;
   /**
    * Chat-turn handler for an engine that has a chat surface. Contributed by the
    * provider module — which owns the vendor SDK — so dropping the module removes
