@@ -1228,6 +1228,12 @@ describe("GET /api/integrations/callback (public — no session required)", () =
     // Sanity foil: a token-exchange success would have shown a clean
     // close with no error text.
     expect(body).not.toContain("access_denied");
+    // The page also signals waiting surfaces (chat auth card) so a full-tab
+    // failure doesn't leave them spinning: postMessage + BroadcastChannel with
+    // the shared message type. (Layer 1 of in-chat OAuth continuation.)
+    expect(body).toContain("BroadcastChannel");
+    expect(body).toContain("appstrate:integration_connection");
+    expect(body).toContain("window.opener");
   });
 
   it("rejects an empty state value (cannot bypass CSRF by omitting state)", async () => {

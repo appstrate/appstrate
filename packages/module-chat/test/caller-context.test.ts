@@ -13,7 +13,7 @@ import { formatCallerContext, buildCallerContextBlock } from "../src/chat-stream
 import type { ChatPlatformDeps } from "../src/platform-services.ts";
 
 /** Minimal Hono-context stub exposing the `c.get(key)` reads the builder makes. */
- 
+
 function fakeContext(vars: Record<string, unknown>): any {
   return { get: (k: string) => vars[k] };
 }
@@ -60,10 +60,13 @@ describe("formatCallerContext", () => {
     expect(out).toContain("(own; default: api_call)");
     // No declared default → an explicit "select tools yourself" signal.
     expect(out).toContain("(shared; no default — you must select tools explicitly)");
-    expect(out).toContain("Prefer these");
+    // Connected integrations are rendered as data + the verbatim-id hint. The
+    // preference order and tool-catalog rule live in the platform MCP server
+    // instructions now, not restated here.
+    expect(out).toContain("Use the `@scope/name` id verbatim");
   });
 
-  it("renders the wildcard default and the on-demand inspect instruction", () => {
+  it("renders the wildcard and empty default-tools markers", () => {
     const out = formatCallerContext({
       user: { name: "Ada" },
       org: { role: "member" },
@@ -75,9 +78,6 @@ describe("formatCallerContext", () => {
     });
     expect(out).toContain("(own; default: all tools)");
     expect(out).toContain("no default — you must select tools explicitly");
-    // The catalog is one describe_operation away — teach the model to fetch it.
-    expect(out).toContain("describe_operation on `GET /api/integrations/{packageId}`");
-    expect(out).toContain("`[]` means no tools");
   });
 
   it("states explicitly when the user has no connected integrations", () => {

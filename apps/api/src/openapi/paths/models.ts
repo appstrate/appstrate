@@ -46,6 +46,7 @@ export const modelsPaths = {
                   {
                     id: "gpt-4o",
                     label: "GPT-4o",
+                    providerId: "openai",
                     apiShape: "openai-responses",
                     baseUrl: "https://api.openai.com/v1",
                     modelId: "gpt-4o",

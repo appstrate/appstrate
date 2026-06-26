@@ -11298,6 +11298,7 @@ export interface operations {
                      *           "display_name": "Inbox Triage",
                      *           "description": "Sorts and labels incoming email.",
                      *           "takes_input": false,
+                     *           "published": true,
                      *           "source": "system"
                      *         }
                      *       ],
@@ -11309,6 +11310,7 @@ export interface operations {
                      *           "display_name": "Web Research",
                      *           "description": "Multi-source web search and synthesis.",
                      *           "version": "1.2.0",
+                     *           "published": true,
                      *           "source": "system"
                      *         }
                      *       ],
@@ -11360,6 +11362,8 @@ export interface operations {
                             description: string;
                             /** @description Whether the agent declares an input schema with properties. */
                             takes_input: boolean;
+                            /** @description True when the agent has a published version (or is a system agent). Run it via `runAgent` with `version` omitted. When false the agent is draft-only — run it with `version=draft` (omitting `version` would 404 `no_published_version`). */
+                            published: boolean;
                             /** @enum {string} */
                             source: "system" | "local";
                         }[];
@@ -11375,6 +11379,8 @@ export interface operations {
                             description: string;
                             /** @description The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range. */
                             version: string | null;
+                            /** @description True when the skill has a published version (or is a system skill). When false the skill is draft-only — pin it for a run via `dependency_overrides` with `draft`. */
+                            published: boolean;
                             /** @enum {string} */
                             source: "system" | "local";
                         }[];
@@ -12195,6 +12201,7 @@ export interface operations {
                      *         {
                      *           "id": "gpt-4o",
                      *           "label": "GPT-4o",
+                     *           "providerId": "openai",
                      *           "apiShape": "openai-responses",
                      *           "baseUrl": "https://api.openai.com/v1",
                      *           "modelId": "gpt-4o",

@@ -222,14 +222,14 @@ export function formatCallerContext(raw: unknown): string {
         return `${c.name} — \`${c.integration_id}\`${ver} (${c.source}; ${formatConnectionDefaultTools(c.default_tools)})`;
       })
       .join(", ");
+    // Render the connected integrations as data only — the `@scope/name` id (+
+    // version) the model uses verbatim. The preference order (connected >
+    // activated > inactive) and the default-vs-tool_catalog selection rule live
+    // once in the platform MCP server instructions (apps/api/src/modules/mcp/
+    // router.ts), which both chat engines already receive; don't restate them
+    // here or the two drift.
     lines.push(
-      `Integrations the user has connected and could attach to an agent: ${list}. Prefer these when building or configuring an agent; use the \`@scope/name\` id verbatim.`,
-      // The "default" shown per integration is what an agent inherits when it
-      // declares the integration without an `integrations_configuration` entry
-      // (AFPS §4.4). Teach the model to look past the default when it needs a
-      // native tool, and that the catalog is one describe_operation away —
-      // its own caller context only carries the default, not the full list.
-      "The `default` shown for each integration is the tool(s) an agent inherits when it declares the integration without an `integrations_configuration` entry. To use any tool beyond the default, first inspect the integration with describe_operation on `GET /api/integrations/{packageId}` to read its full `tool_catalog`, then set `integrations_configuration[<id>].tools` to the exact tool names you need. `[]` means no tools (the integration is inert).",
+      `Integrations the user has connected and could attach to an agent: ${list}. Use the \`@scope/name\` id verbatim.`,
     );
   } else {
     lines.push("The user has no connected integrations yet.");

@@ -379,6 +379,10 @@ describe("mcp tool round-trip", () => {
     expect(typeof instructions).toBe("string");
     expect(instructions).toContain("Appstrate");
     expect(instructions).toContain("@appstrate");
+    // The integration preference order (connected > activated > inactive) is the
+    // single source of truth here — both chat engines and external MCP clients
+    // read it from these instructions, so the chat prompt no longer restates it.
+    expect(instructions).toContain("Integration preference");
     // The generated operation index is appended under this exact heading; the
     // chat splits on the same literal to strip it for uncached/no-tool
     // providers (see applyOperationIndexPolicy in module-chat). Keep in sync.

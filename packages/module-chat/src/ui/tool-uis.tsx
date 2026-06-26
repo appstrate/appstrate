@@ -22,6 +22,15 @@ import {
   ZapIcon,
   type LucideIcon,
 } from "lucide-react";
+import { OAuthConnectCard } from "./oauth-connect-card.tsx";
+import { extractAuthOffer } from "./auth-offer.ts";
+
+/**
+ * `invoke_operation` operationId for starting an integration OAuth flow. When
+ * the model calls it, the result carries an `auth_url`; we surface a connect
+ * button that resumes the conversation on completion (see oauth-connect-card).
+ */
+const INITIATE_OAUTH_OP = "initiateIntegrationOAuth";
 
 type Tone = "muted" | "success" | "error";
 
@@ -65,10 +74,30 @@ const OP_RULES: { re: RegExp; label: string; tone: Tone; Icon: LucideIcon }[] = 
   { re: /^(list|get|search|find|read)/i, label: "Lecture", tone: "muted", Icon: SearchIcon },
 ];
 
-export const InvokeOperationToolUI = makeAssistantToolUI<{ operation_id?: string }, unknown>({
+export const InvokeOperationToolUI = makeAssistantToolUI<
+  { operation_id?: string; path_params?: { packageId?: string } },
+  unknown
+>({
   toolName: "invoke_operation",
-  render: ({ args, status }) => {
+  render: ({ args, status, result }) => {
     const opId = args?.operation_id ?? "";
+
+    // OAuth kickoff → render an interactive connect card (button + auto-resume)
+    // once the result carries the auth_url. Until then, fall through to the
+    // generic running line.
+    if (opId === INITIATE_OAUTH_OP) {
+      const offer = extractAuthOffer(result);
+      if (offer) {
+        return (
+          <OAuthConnectCard
+            authUrl={offer.authUrl}
+            state={offer.state}
+            packageId={args?.path_params?.packageId}
+          />
+        );
+      }
+    }
+
     const rule = OP_RULES.find((r) => r.re.test(opId)) ?? {
       Icon: ZapIcon,
       label: "Opération",
