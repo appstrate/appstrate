@@ -36,6 +36,8 @@ import { CollapsibleToolCard } from "./collapsible-tool-card.tsx";
 import { MarkdownText } from "./markdown-text.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import { InvokeOperationToolUI } from "./tool-uis.tsx";
+import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
+import { IntegrationIcon } from "./integration-icon.tsx";
 
 export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
   return (
@@ -171,6 +173,40 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
 // ─── User message (with edit + branch navigation) ────────────────────────────
 
 function UserMessage() {
+  // The OAuth auto-resume turn (oauth-connect-card) is a real user message — it
+  // drives the model to continue — but showing its raw text as a bubble is
+  // noise. Detect the marker prefix and render a discreet "connected" notice
+  // instead. Reads the message's first text part (survives reload, since the
+  // marker is persisted with the message).
+  // Return a stable string from the selector (not a fresh object) and parse in
+  // render, so useMessage's reference-equality check doesn't churn re-renders.
+  const resumeText = useMessage((m) => {
+    const parts = (m.content ?? (m as { parts?: unknown[] }).parts ?? []) as unknown as Array<{
+      text?: unknown;
+    }>;
+    for (const p of parts) {
+      if (typeof p?.text === "string" && p.text.startsWith(INTEGRATION_RESUME_MARKER))
+        return p.text;
+    }
+    return null;
+  });
+  const resume = resumeText ? parseResume(resumeText) : null;
+
+  if (resume) {
+    return (
+      <MessagePrimitive.Root className="flex w-full max-w-(--thread-max-width) justify-center py-1.5">
+        <span className="bg-muted/50 text-muted-foreground inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs">
+          <IntegrationIcon src={resume.icon} className="size-3.5" />
+          <span className="font-medium">
+            {resume.name || resume.packageId.split("/").pop() || "Intégration"}
+          </span>
+          <span>connectée</span>
+          <CheckIcon className="text-primary size-3.5" />
+        </span>
+      </MessagePrimitive.Root>
+    );
+  }
+
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col items-end py-2">
       <div className="bg-muted text-foreground max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">

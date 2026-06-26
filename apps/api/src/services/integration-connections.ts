@@ -2223,6 +2223,7 @@ export async function getIntegrationAuthStatuses(
       | { required?: boolean }
       | undefined;
     const resource = auth.resource ?? null;
+    const keyConnections = allConnections.filter((c) => c.auth_key === key);
     return {
       auth_key: key,
       type: auth.type,
@@ -2230,7 +2231,14 @@ export async function getIntegrationAuthStatuses(
       scopes: auth.default_scopes ?? [],
       // AFPS §7.3 (RFC 8707) names this field `resource`.
       resource,
-      connections: allConnections.filter((c) => c.auth_key === key),
+      connections: keyConnections,
+      // Server-authoritative usability for this auth: at least one connection
+      // that isn't flagged for reconnection. The single per-connection validity
+      // signal (`needs_reconnection`, set by the resolver/refresh path) — so
+      // consumers (chat connect card, …) never re-derive connection state and
+      // stay correct as that logic evolves. Agent-agnostic (no scope/pin gate);
+      // a run's authoritative readiness still comes from `validateInlineRun`.
+      ready: keyConnections.some((c) => !c.needs_reconnection),
       has_oauth_client: oauthClientKeys.has(key),
       // Shared platform client (SYSTEM_INTEGRATIONS): when one serves this
       // (integration, auth), connect falls back to it, so the UI is connectable

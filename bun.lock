@@ -341,6 +341,7 @@
         "@assistant-ui/react": "^0.14.16",
         "@assistant-ui/react-ai-sdk": "^1",
         "@assistant-ui/react-markdown": "^0.14.2",
+        "@iconify/react": "^6.0.2",
         "ai": "^6",
         "assistant-stream": "^0.3.21",
         "drizzle-orm": "^0.45.2",

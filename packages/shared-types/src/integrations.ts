@@ -81,6 +81,13 @@ export interface IntegrationAuthStatus {
   resource: string | null;
   /** Connections the calling actor has for this auth (multi-account = >1). */
   connections: IntegrationConnection[];
+  /**
+   * Server-authoritative usability: true when ≥1 connection here is not flagged
+   * for reconnection. Single source so UIs (chat connect card, …) never
+   * re-derive connection state. Agent-agnostic — a run's authoritative
+   * readiness still comes from the resolver via `validateInlineRun`.
+   */
+  ready: boolean;
   /** True when this auth has an admin-registered OAuth2 client (oauth2 only). */
   has_oauth_client: boolean;
   /**

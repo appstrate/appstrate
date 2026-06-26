@@ -277,6 +277,7 @@ describe("GET /api/integrations/:packageId", () => {
         auth_key: string;
         type: string;
         connections: unknown[];
+        ready: boolean;
         has_oauth_client: boolean;
         client_auto_provisioned: boolean;
       }>;
@@ -289,6 +290,9 @@ describe("GET /api/integrations/:packageId", () => {
     const google = body.auths.find((a) => a.auth_key === "google");
     expect(api?.type).toBe("api_key");
     expect(api?.connections).toHaveLength(0);
+    // No connection → not ready (server-authoritative usability flag).
+    expect(api?.ready).toBe(false);
+    expect(google?.ready).toBe(false);
     expect(api?.has_oauth_client).toBe(false);
     expect(google?.type).toBe("oauth2");
     expect(google?.has_oauth_client).toBe(false);

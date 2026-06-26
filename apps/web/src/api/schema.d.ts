@@ -9717,6 +9717,8 @@ export interface operations {
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
+                            /** @description Server-authoritative usability: true when ≥1 connection here is not flagged for reconnection. Single source so clients never re-derive connection state. Agent-agnostic — a run's authoritative readiness still comes from validateInlineRun. */
+                            ready: boolean;
                             has_oauth_client: boolean;
                             /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
                             has_system_client: boolean;
@@ -9821,6 +9823,8 @@ export interface operations {
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
+                            /** @description Server-authoritative usability: true when ≥1 connection here is not flagged for reconnection. Single source so clients never re-derive connection state. Agent-agnostic — a run's authoritative readiness still comes from validateInlineRun. */
+                            ready: boolean;
                             has_oauth_client: boolean;
                             /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
                             has_system_client: boolean;
@@ -10762,6 +10766,8 @@ export interface operations {
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
+                            /** @description Server-authoritative usability: true when ≥1 connection here is not flagged for reconnection. Single source so clients never re-derive connection state. Agent-agnostic — a run's authoritative readiness still comes from validateInlineRun. */
+                            ready: boolean;
                             has_oauth_client: boolean;
                             /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
                             has_system_client: boolean;

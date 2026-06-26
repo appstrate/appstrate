@@ -201,6 +201,7 @@ const authStatusSchema = {
     "scopes",
     "resource",
     "connections",
+    "ready",
     "has_oauth_client",
     "has_system_client",
     "client_auto_provisioned",
@@ -221,6 +222,11 @@ const authStatusSchema = {
         "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC.",
     },
     connections: { type: "array", items: integrationConnectionSchema },
+    ready: {
+      type: "boolean",
+      description:
+        "Server-authoritative usability: true when ≥1 connection here is not flagged for reconnection. Single source so clients never re-derive connection state. Agent-agnostic — a run's authoritative readiness still comes from validateInlineRun.",
+    },
     has_oauth_client: { type: "boolean" },
     has_system_client: {
       type: "boolean",

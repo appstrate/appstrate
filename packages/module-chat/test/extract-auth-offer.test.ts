@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { extractAuthOffer } from "../src/ui/auth-offer.ts";
+import {
+  extractAuthOffer,
+  encodeResume,
+  parseResume,
+  INTEGRATION_RESUME_MARKER,
+} from "../src/ui/auth-offer.ts";
 
 const BODY = { auth_url: "https://accounts.google.com/o/oauth2/v2/auth?x=1", state: "abc-123" };
 
@@ -35,11 +40,41 @@ describe("extractAuthOffer", () => {
     });
   });
 
+  it("reads a bare content array", () => {
+    expect(extractAuthOffer([{ type: "text", text: JSON.stringify(BODY) }])).toEqual({
+      authUrl: BODY.auth_url,
+      state: "abc-123",
+    });
+  });
+
+  it("reads a deeply nested envelope ({output:{type:'content',value:[{text}]}})", () => {
+    const result = {
+      output: { type: "content", value: [{ type: "text", text: JSON.stringify(BODY) }] },
+    };
+    expect(extractAuthOffer(result)).toEqual({ authUrl: BODY.auth_url, state: "abc-123" });
+  });
+
   it("parses a flattened JSON string result", () => {
     expect(extractAuthOffer(JSON.stringify(BODY))).toEqual({
       authUrl: BODY.auth_url,
       state: "abc-123",
     });
+  });
+
+  it("encodes/parses a resume message round-trip (meta + human text)", () => {
+    const meta = { packageId: "@appstrate/gmail", name: "Gmail", icon: "logos:google-gmail" };
+    const text = encodeResume(meta, "L'intégration Gmail est connectée. Continue.");
+    expect(text.startsWith(INTEGRATION_RESUME_MARKER)).toBe(true);
+    expect(text).toContain("Continue.");
+    expect(parseResume(text)).toEqual(meta);
+  });
+
+  it("parseResume returns null for a normal user message", () => {
+    expect(parseResume("récupère mes 3 derniers mails")).toBeNull();
+  });
+
+  it("parseResume tolerates a marker without a meta payload", () => {
+    expect(parseResume(`${INTEGRATION_RESUME_MARKER}bare notice`)).toEqual({ packageId: "" });
   });
 
   it("returns null when there is no auth_url (error result, plain text, nullish)", () => {
