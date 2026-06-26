@@ -220,7 +220,7 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   // chat UI consumes via the generated spec type — not a Drizzle shared-type.
   ChatSession:
     "module-chat wire DTO; ISO timestamps, no shared-type (UI uses the generated spec type)",
-  ChatMessageEntry: "module-chat opaque history-node wire DTO; no shared-type",
+  ChatMessage: "module-chat opaque history-node wire DTO; no shared-type",
 };
 
 /**

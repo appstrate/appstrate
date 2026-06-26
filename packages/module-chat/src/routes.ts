@@ -27,6 +27,7 @@ import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream } from "./chat-stream.ts";
 import { stopStream } from "./stop-registry.ts";
 import { getResumableContext } from "./resumable.ts";
+import { mintSessionId } from "./session-id.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
 /** Minimal Hono Env mirroring what the platform auth pipeline sets. */
@@ -45,10 +46,6 @@ export const renameSessionSchema = z.object({
   title: z.string().min(1).max(200),
 });
 
-function newSessionId(): string {
-  return `chs_${crypto.randomUUID().replaceAll("-", "")}`;
-}
-
 type SessionRow = typeof chatSessions.$inferSelect;
 type MessageRow = typeof chatMessages.$inferSelect;
 
@@ -66,7 +63,7 @@ function toSessionDto(row: SessionRow) {
   };
 }
 
-function toEntryDto(row: MessageRow) {
+function toMessageDto(row: MessageRow) {
   return {
     id: row.messageId,
     parent_id: row.parentId,
@@ -96,7 +93,7 @@ async function getOwnedSession(id: string, orgId: string, userId: string): Promi
   return session;
 }
 
-async function loadEntries(sessionId: string): Promise<MessageRow[]> {
+async function loadMessages(sessionId: string): Promise<MessageRow[]> {
   return db
     .select()
     .from(chatMessages)
@@ -137,7 +134,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       const [row] = await db
         .insert(chatSessions)
         .values({
-          id: newSessionId(),
+          id: mintSessionId(),
           orgId: c.get("orgId"),
           userId: c.get("user").id,
           title: data.title ?? null,
@@ -150,8 +147,8 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   // GET /api/chat/sessions/:id — the conversation's tree nodes (history load)
   router.get("/api/chat/sessions/:id", requireModulePermission("chat", "read"), async (c) => {
     const session = await getOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
-    const entries = await loadEntries(session.id);
-    return c.json({ ...toSessionDto(session), messages: entries.map(toEntryDto) });
+    const messages = await loadMessages(session.id);
+    return c.json({ ...toSessionDto(session), messages: messages.map(toMessageDto) });
   });
 
   // PATCH /api/chat/sessions/:id — rename

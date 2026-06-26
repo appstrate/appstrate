@@ -32,7 +32,7 @@ export const chatComponentSchemas = {
   // client can seed `useChat({ messages })` on load. Written server-side
   // (user turn before inference, assistant turn on finalize); `content` is the
   // ai-sdk/v6 format-encoded message (UIMessage minus its id).
-  ChatMessageEntry: {
+  ChatMessage: {
     type: "object",
     required: ["id", "parent_id", "format", "content"],
     properties: {
@@ -137,7 +137,7 @@ export const chatPaths = {
                     properties: {
                       messages: {
                         type: "array",
-                        items: { $ref: "#/components/schemas/ChatMessageEntry" },
+                        items: { $ref: "#/components/schemas/ChatMessage" },
                       },
                     },
                   },

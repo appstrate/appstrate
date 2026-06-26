@@ -4556,7 +4556,7 @@ export interface components {
             /** @description Raw draft manifest JSONB for the installed package. */
             draft_manifest: Record<string, never> | null;
         };
-        ChatMessageEntry: {
+        ChatMessage: {
             /** @description Client-generated message id */
             id: string;
             parent_id: string | null;
@@ -8728,7 +8728,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChatSession"] & {
-                        messages: components["schemas"]["ChatMessageEntry"][];
+                        messages: components["schemas"]["ChatMessage"][];
                     };
                 };
             };

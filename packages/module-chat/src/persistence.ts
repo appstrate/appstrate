@@ -25,7 +25,7 @@ import { uiMessageText } from "./message-text.ts";
 import type { UIMessage } from "ai";
 
 /** assistant-ui ai-sdk MessageFormatAdapter id — keep in sync with the client. */
-export const CHAT_MESSAGE_FORMAT = "ai-sdk/v6";
+const CHAT_MESSAGE_FORMAT = "ai-sdk/v6";
 
 /** Storage content = UIMessage minus its id (the id rides in `message_id`). */
 function toContent(message: UIMessage): Record<string, unknown> {

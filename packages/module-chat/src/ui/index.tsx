@@ -26,6 +26,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PanelLeftIcon } from "lucide-react";
 import { Thread } from "./thread.tsx";
 import { ChatHeadersProvider, SelectConversationProvider } from "./runtime-context.ts";
+import type { GetHeaders, SelectConversation } from "./runtime-context.ts";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
@@ -36,7 +37,7 @@ import { subscribeSeen, getSeen, markSeen, isUnread } from "./unread-store.ts";
 const MODEL_STORAGE_KEY = "appstrate.chat.model";
 
 export interface ChatPageProps {
-  getHeaders?: () => Record<string, string>;
+  getHeaders?: GetHeaders;
   /**
    * Active conversation id (`chs_…`) from the host URL, or `null`/`undefined`
    * for the "new conversation" state (bare `/chat`). The host wires this to a
@@ -57,7 +58,7 @@ export interface ChatPageProps {
    * a brand-new conversation is created lazily on its first message). The host
    * navigates its URL.
    */
-  onConversationChange?: (id: string | null) => void;
+  onConversationChange?: SelectConversation;
 }
 
 export function ChatPage({
@@ -186,10 +187,10 @@ export function ChatPage({
 
 interface ConversationProps {
   id: string;
-  getHeaders?: () => Record<string, string>;
+  getHeaders?: GetHeaders;
   selectedModel: string | null;
   isPersisted: boolean;
-  onConversationChange?: (id: string | null) => void;
+  onConversationChange?: SelectConversation;
   composerSlot?: React.ReactNode;
 }
 

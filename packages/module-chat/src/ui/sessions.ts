@@ -9,6 +9,9 @@
 import type { UIMessage } from "ai";
 import type { GetHeaders } from "./runtime-context.ts";
 
+/** Fresh conversation id, minted client-side (`chs_` shape) — re-exported from the shared module. */
+export { mintSessionId } from "../session-id.ts";
+
 export interface SessionSummary {
   id: string;
   title: string | null;
@@ -23,11 +26,6 @@ export const SESSIONS_QUERY_KEY = ["chat", "sessions"] as const;
 
 function headers(getHeaders: GetHeaders | null | undefined, json = false): Record<string, string> {
   return { ...(json ? { "Content-Type": "application/json" } : {}), ...getHeaders?.() };
-}
-
-/** A fresh conversation id, minted client-side (matches the server's `chs_` shape). */
-export function mintSessionId(): string {
-  return `chs_${crypto.randomUUID().replace(/-/g, "")}`;
 }
 
 export async function fetchSessions(
@@ -68,7 +66,7 @@ export async function deleteSession(
 }
 
 /** A stored message node as returned by `GET /sessions/:id`. */
-interface StoredEntry {
+interface StoredMessage {
   id: string;
   content: Record<string, unknown>;
 }
@@ -89,6 +87,6 @@ export async function loadHistory(
   });
   if (res.status === 404) return [];
   if (!res.ok) throw new Error(`Failed to load conversation (HTTP ${res.status})`);
-  const body = (await res.json()) as { messages?: StoredEntry[] };
+  const body = (await res.json()) as { messages?: StoredMessage[] };
   return (body.messages ?? []).map((e) => ({ id: e.id, ...e.content }) as UIMessage);
 }
