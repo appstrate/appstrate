@@ -166,7 +166,6 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   const upstreamHeaders = inputs.adapter.buildUpstreamHeaders(
     inputs.incomingHeaders,
     resolved.apiKey,
-    resolved.accountId,
   );
 
   const started = Date.now();
