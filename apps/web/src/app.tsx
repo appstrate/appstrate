@@ -792,14 +792,24 @@ export function App() {
               </>
             )}
             {features.chat && (
-              <Route
-                path="/chat"
-                element={
-                  <Suspense fallback={<LoadingState />}>
-                    <ChatModulePage />
-                  </Suspense>
-                }
-              />
+              <>
+                <Route
+                  path="/chat"
+                  element={
+                    <Suspense fallback={<LoadingState />}>
+                      <ChatModulePage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/chat/:conversationId"
+                  element={
+                    <Suspense fallback={<LoadingState />}>
+                      <ChatModulePage />
+                    </Suspense>
+                  }
+                />
+              </>
             )}
             {/* App-scoped routes (read applicationId from store, like orgId) */}
             <Route

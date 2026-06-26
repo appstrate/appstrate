@@ -20,6 +20,7 @@ import {
   EllipsisVerticalIcon,
   ChevronDownIcon,
 } from "lucide-react";
+import { useSelectConversation } from "./runtime-context.ts";
 
 /**
  * ISO timestamp → compact relative time ("5 min", "2 h", "3 j"), as of render.
@@ -50,22 +51,24 @@ function Timestamp({ className = "" }: { className?: string }) {
 }
 
 export function ThreadList() {
+  // "New conversation" = navigate to `/chat` (no id); `ChatUrlSync` resets the
+  // runtime to a fresh thread. URL stays the single source of truth.
+  const select = useSelectConversation();
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Header — same height (h-12) + bottom border as the chat and agent
           panels, so the three columns share one aligned header band. */}
       <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
         <span className="flex-1 text-sm font-medium">Conversations</span>
-        <ThreadListPrimitive.New asChild>
-          <button
-            type="button"
-            aria-label="Nouvelle conversation"
-            title="Nouvelle conversation"
-            className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-md p-1.5"
-          >
-            <PlusIcon className="size-4" />
-          </button>
-        </ThreadListPrimitive.New>
+        <button
+          type="button"
+          aria-label="Nouvelle conversation"
+          title="Nouvelle conversation"
+          onClick={() => select?.(null)}
+          className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-md p-1.5"
+        >
+          <PlusIcon className="size-4" />
+        </button>
       </div>
       <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2">
         <ThreadListPrimitive.Items components={{ ThreadListItem }} />
@@ -93,17 +96,26 @@ function EmptyConversations() {
 
 function ThreadListItem() {
   const [editing, setEditing] = useState(false);
+  // Clicking a conversation only changes the URL (single source of truth);
+  // `ChatUrlSync` switches the runtime in response. The `data-[active]` highlight
+  // still reflects the runtime, which follows the URL.
+  const select = useSelectConversation();
+  const remoteId = useThreadListItem((s) => s.remoteId);
   return (
     <ThreadListItemPrimitive.Root className="group hover:bg-accent/50 data-[active]:bg-accent data-[active]:text-accent-foreground flex items-center gap-1 rounded-md px-2 py-0 text-sm">
       {editing ? (
         <RenameInput onDone={() => setEditing(false)} />
       ) : (
         <>
-          <ThreadListItemPrimitive.Trigger className="min-w-0 flex-1 py-1">
+          <button
+            type="button"
+            onClick={() => remoteId && select?.(remoteId)}
+            className="min-w-0 flex-1 py-1 text-left"
+          >
             <span className="block w-full truncate text-left">
               <ThreadListItemPrimitive.Title fallback="Nouvelle conversation" />
             </span>
-          </ThreadListItemPrimitive.Trigger>
+          </button>
           {/* Trailing slot: relative time at rest, kebab over it on hover
               (and kept visible while the menu is open) — Claude/ChatGPT style. */}
           <div className="relative flex shrink-0 items-center">

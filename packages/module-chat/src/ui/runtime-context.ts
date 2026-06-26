@@ -21,3 +21,19 @@ export const ChatHeadersProvider = ChatHeadersContext.Provider;
 export function useChatHeaders(): GetHeaders | null {
   return useContext(ChatHeadersContext);
 }
+
+/**
+ * Selecting a conversation = changing the host URL (the single source of truth).
+ * The list (`thread-list.tsx`) calls this on click; the host navigates and the
+ * runtime follows via `ChatUrlSync`. `null` means "new conversation" (`/chat`).
+ * Carried through context so module-chat never imports a router.
+ */
+export type SelectConversation = (id: string | null) => void;
+
+const SelectConversationContext = createContext<SelectConversation | null>(null);
+
+export const SelectConversationProvider = SelectConversationContext.Provider;
+
+export function useSelectConversation(): SelectConversation | null {
+  return useContext(SelectConversationContext);
+}
