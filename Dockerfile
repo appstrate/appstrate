@@ -27,11 +27,7 @@ COPY package.json bun.lock turbo.json ./
 COPY --parents */package.json */*/package.json ./
 COPY patches/ patches/
 
-# NOT `--frozen-lockfile`: its comparator has a bug with @openai/codex's
-# same-name aliased platform binaries (@openai/codex@0.141.0-<platform>) and
-# false-reports "lockfile had changes" on a byte-stable lockfile. Versions stay
-# pinned by the COPY'd bun.lock (resolution reads it); lockfile drift is caught
-# by the `git diff --exit-code bun.lock` guard in CI (.github/workflows/check.yml).
+# rationale: see .github/actions/bun-setup/action.yml
 RUN bun install
 
 # ── Stage 2: Build ────────────────────────────────────────────────
