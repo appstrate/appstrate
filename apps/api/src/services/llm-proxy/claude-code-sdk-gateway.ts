@@ -42,13 +42,21 @@ import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
+import {
+  anthropicAuthErrorResponse,
+  applyClaudeOauthGatewayHeaders,
+} from "@appstrate/core/claude-oauth-gateway";
 import type { AppEnv } from "../../types/index.ts";
 
 /** Provider id of the Claude Pro/Max/Team subscription credential. */
 export const CLAUDE_CODE_PROVIDER_ID = "claude-code";
 
-/** The beta token that authorizes an OAuth subscription token on /v1/messages. */
-const OAUTH_BETA = "oauth-2025-04-20";
+// The shared, no-forge Anthropic OAuth-gateway policy (OAuth-beta merge, bearer
+// swap, x-api-key drop, auth-error envelope) lives in
+// `@appstrate/core/claude-oauth-gateway` so this chat gateway and the sidecar
+// run gateway cannot drift. Re-exported so existing callers/tests keep the
+// `anthropicAuthErrorResponse` symbol on this module.
+export { anthropicAuthErrorResponse };
 
 /** URL prefix this gateway is mounted under (within the llm-proxy router). */
 const ROUTE_PREFIX = "/api/llm-proxy/claude-code-sdk";
@@ -78,40 +86,16 @@ export function deriveUpstreamSubpath(fullPath: string, presetId: string): strin
  */
 export function buildSubscriptionHeaders(incoming: Headers, accessToken: string): Headers {
   const headers = new Headers(incoming);
-  headers.set("authorization", `Bearer ${accessToken}`);
-  headers.delete("x-api-key");
   headers.delete("host");
   headers.delete("content-length");
   // Ask the upstream for identity encoding — Bun's fetch auto-decompresses,
   // and forwarding a gzip body the client won't re-decompress trips ZlibError.
   headers.delete("accept-encoding");
-
-  const betas = new Set(
-    (headers.get("anthropic-beta")?.split(",") ?? []).map((s) => s.trim()).filter(Boolean),
-  );
-  betas.add(OAUTH_BETA);
-  headers.set("anthropic-beta", [...betas].join(","));
+  // Shared no-forge gateway policy: drop x-api-key, force the real bearer, and
+  // merge the OAuth beta while preserving the caller's own betas.
+  applyClaudeOauthGatewayHeaders(headers, accessToken);
   if (!headers.has("anthropic-version")) headers.set("anthropic-version", "2023-06-01");
   return headers;
-}
-
-/**
- * Anthropic-native `authentication_error` envelope (HTTP 401) the official
- * `claude` binary understands, so the chat surfaces an actionable "reconnect
- * your subscription" message instead of an opaque transport error or a
- * misleading "model not enabled". Returned for both reconnection paths below.
- */
-export function anthropicAuthErrorResponse(): Response {
-  return new Response(
-    JSON.stringify({
-      type: "error",
-      error: {
-        type: "authentication_error",
-        message: "Reconnectez votre abonnement Claude — la connexion a expiré ou été révoquée.",
-      },
-    }),
-    { status: 401, headers: { "content-type": "application/json" } },
-  );
 }
 
 /**

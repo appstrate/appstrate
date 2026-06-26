@@ -100,9 +100,13 @@ describe("buildOauthSidecarLlm", () => {
 });
 
 describe("assertSubscriptionEngineIsolation", () => {
+  // The guard now consumes the engine resolved by resolveCredentialDelivery
+  // (claude → subscription engine, pi → API-key) rather than re-reading the
+  // registry; the docker-isolation contract is unchanged.
   it("rejects a claude-code subscription run under the process orchestrator", () => {
     expect(() =>
       assertSubscriptionEngineIsolation({
+        engine: "claude",
         providerId: "claude-code",
         orchestratorMode: "process",
       }),
@@ -112,6 +116,7 @@ describe("assertSubscriptionEngineIsolation", () => {
   it("allows a claude-code subscription run under docker", () => {
     expect(() =>
       assertSubscriptionEngineIsolation({
+        engine: "claude",
         providerId: "claude-code",
         orchestratorMode: "docker",
       }),
@@ -120,10 +125,18 @@ describe("assertSubscriptionEngineIsolation", () => {
 
   it("allows an API-key provider under either orchestrator mode", () => {
     expect(() =>
-      assertSubscriptionEngineIsolation({ providerId: "openai", orchestratorMode: "process" }),
+      assertSubscriptionEngineIsolation({
+        engine: "pi",
+        providerId: "openai",
+        orchestratorMode: "process",
+      }),
     ).not.toThrow();
     expect(() =>
-      assertSubscriptionEngineIsolation({ providerId: "openai", orchestratorMode: "docker" }),
+      assertSubscriptionEngineIsolation({
+        engine: "pi",
+        providerId: "openai",
+        orchestratorMode: "docker",
+      }),
     ).not.toThrow();
   });
 });

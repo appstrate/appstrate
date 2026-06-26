@@ -138,12 +138,25 @@ async function runPlatformContainerImpl(
   // is NOT a spawn failure) must not also emit a spawn data point.
   let spawnRecorded = false;
   try {
+    // Single source of truth for "what kind of credential is this and how is it
+    // delivered". Reads the provider→engine registry ONCE (plus the oauth-class
+    // flag for the engine-less refuse path); the delivery mode, the oauth-class
+    // boolean, and the resolved engine all flow from here, replacing the former
+    // parallel `isOAuthModelProvider` axis. Resolved up front so the fail-closed
+    // isolation guard below consumes the same struct instead of re-reading the
+    // registry.
+    const delivery = resolveCredentialDelivery({
+      providerId: llmConfig.providerId,
+      hasCredentialId: !!llmConfig.credentialId,
+    });
+
     // Fail-closed BEFORE provisioning any isolation boundary: a subscription
     // AGENT run (claude-code → Claude Agent SDK) must execute under the docker
-    // orchestrator. The process orchestrator runs in-host and
-    // would expose the subscription credential to the API process. API-key
-    // providers are unaffected.
+    // orchestrator. The process orchestrator runs in-host and would expose the
+    // subscription credential to the API process. API-key providers are
+    // unaffected. Consumes the engine already resolved above.
     assertSubscriptionEngineIsolation({
+      engine: delivery.engine,
       providerId: llmConfig.providerId,
       orchestratorMode: getExecutionMode(),
     });
@@ -152,15 +165,6 @@ async function runPlatformContainerImpl(
 
     const llmApiKey = llmConfig.apiKey;
 
-    // Single source of truth for "what kind of credential is this and how is it
-    // delivered". Reads the provider→engine registry ONCE (plus the oauth-class
-    // flag for the engine-less refuse path); the delivery mode, the oauth-class
-    // boolean, and the resolved engine all flow from here, replacing the former
-    // parallel `isOAuthModelProvider` axis.
-    const delivery = resolveCredentialDelivery({
-      providerId: llmConfig.providerId,
-      hasCredentialId: !!llmConfig.credentialId,
-    });
     // OAuth credentials must take the sidecar's OAuth branch — the API-key
     // path can't refresh tokens or inject the provider's identity routing
     // headers at request time.

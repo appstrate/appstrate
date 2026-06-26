@@ -27,6 +27,7 @@ import {
   createSseModelSwapStream,
   scrubModelText,
 } from "./model-swap.ts";
+import { applyClaudeOauthGatewayHeaders } from "@appstrate/core/claude-oauth-gateway";
 import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
   DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
@@ -169,23 +170,6 @@ interface LlmStreamObservation {
   targetUrl?: string;
   credentialId?: string;
   authMode?: "oauth" | "api_key";
-}
-
-/** Default OAuth beta flag merged onto outbound `anthropic-beta` in OAuth mode. */
-const DEFAULT_OAUTH_BETA = "oauth-2025-04-20";
-
-/**
- * Merge an OAuth beta flag into a comma-separated `anthropic-beta` header
- * without dropping the driver's own betas (e.g. the Agent SDK's context/feature
- * flags). Order-preserving; idempotent.
- */
-export function mergeAnthropicBeta(existing: string | undefined, beta: string): string {
-  const parts = (existing ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (!parts.includes(beta)) parts.push(beta);
-  return parts.join(",");
 }
 
 async function passUpstream(
@@ -406,6 +390,40 @@ async function bufferLlmBodyBounded(c: Context, maxBytes: number): Promise<strin
 }
 
 /**
+ * Derive the upstream `/llm/*` target from the inbound request: strip the
+ * `/llm` mount prefix, re-append the query string onto the configured base URL,
+ * and surface the method. Shared by both `/llm` branches (api_key + oauth);
+ * each keeps its own `isBlockedUrl` SSRF check and credential handling.
+ */
+function deriveLlmTarget(
+  c: Context,
+  baseUrl: string,
+): { path: string; qs: string; targetUrl: string; method: string } {
+  const path = c.req.path.slice("/llm".length) || "/";
+  const qs = new URL(c.req.url).search;
+  return { path, qs, targetUrl: `${baseUrl}${path}${qs}`, method: c.req.method };
+}
+
+/**
+ * Buffer an inbound `/llm` request body under the hard byte cap and apply the
+ * model-alias swap when one is configured; otherwise return the buffered text
+ * verbatim. Returns a 413 `Response` (the caller returns it verbatim) when the
+ * body exceeds the cap, or `undefined` for an empty body. Used by both branches
+ * that must materialise the body: oauth always (so a 401 can be replayed),
+ * api_key only when an alias requires the rewrite (the no-swap api_key path
+ * keeps its zero-copy stream).
+ */
+async function bufferAndSwapRequestBody(
+  c: Context,
+  modelSwap: ModelSwap | undefined,
+): Promise<string | undefined | Response> {
+  const buffered = await bufferLlmBodyBounded(c, MAX_REQUEST_BODY_SIZE);
+  if (buffered instanceof Response) return buffered;
+  const text = buffered;
+  return text && modelSwap ? swapRequestModel(text, modelSwap) : text || undefined;
+}
+
+/**
  * Build the sidecar's HTTP surface.
  *
  *   - `GET  /health`     — readiness probe.
@@ -567,11 +585,7 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     const apiKeyConfig = config.llm; // discriminated narrowing
-    const baseUrl = apiKeyConfig.baseUrl;
-
-    const path = c.req.path.slice("/llm".length) || "/";
-    const qs = new URL(c.req.url).search;
-    const targetUrl = `${baseUrl}${path}${qs}`;
+    const { targetUrl, method } = deriveLlmTarget(c, apiKeyConfig.baseUrl);
 
     const filtered = filterHeaders(c.req.header());
     const forwardedHeaders: Record<string, string> = {};
@@ -581,7 +595,6 @@ export function createApp(deps: AppDeps): Hono {
         : value;
     }
 
-    const method = c.req.method;
     // Model-alias swap (request alias→real). The body is normally forwarded as
     // a zero-copy ReadableStream; for an alias we must buffer it to rewrite the
     // `model` field. Only aliases pay that cost — every other model stays
@@ -592,10 +605,9 @@ export function createApp(deps: AppDeps): Hono {
         // Buffer under a hard byte cap (Content-Length precheck + bounded
         // streaming read → 413) before the model-alias rewrite. A bare
         // `.text()` here would buffer an unbounded body into memory.
-        const buffered = await bufferLlmBodyBounded(c, MAX_REQUEST_BODY_SIZE);
-        if (buffered instanceof Response) return buffered;
-        const text = buffered;
-        body = text ? swapRequestModel(text, apiKeyConfig.modelSwap) : undefined;
+        const swapped = await bufferAndSwapRequestBody(c, apiKeyConfig.modelSwap);
+        if (swapped instanceof Response) return swapped;
+        body = swapped;
       } else {
         body = c.req.raw.body ?? undefined;
       }
@@ -666,32 +678,17 @@ export function createApp(deps: AppDeps): Hono {
       return c.json({ error: "Resolved OAuth base URL targets a blocked network range" }, 403);
     }
 
-    const path = c.req.path.slice("/llm".length) || "/";
-    const qs = new URL(c.req.url).search;
-    const targetUrl = `${baseUrl}${path}${qs}`;
-    const method = c.req.method;
+    const { targetUrl, method } = deriveLlmTarget(c, baseUrl);
 
-    // Forward the driver's headers verbatim except: drop any x-api-key (this
-    // path is bearer-only), force the real bearer, and merge the OAuth beta.
-    // The driver's own fingerprint (user-agent, x-app, anthropic-beta) is
-    // preserved — the whole point of pass-through.
-    const buildHeaders = (accessToken: string): Record<string, string> => {
-      const filtered = filterHeaders(c.req.header(), new Set(["x-api-key"]));
-      const headers: Record<string, string> = { ...filtered };
-      // filterHeaders preserves original casing — find any anthropic-beta variant.
-      let betaKey: string | undefined;
-      for (const key of Object.keys(headers)) {
-        if (key.toLowerCase() === "anthropic-beta") betaKey = key;
-        if (key.toLowerCase() === "authorization") delete headers[key];
-      }
-      headers["anthropic-beta"] = mergeAnthropicBeta(
-        betaKey ? headers[betaKey] : undefined,
-        DEFAULT_OAUTH_BETA,
-      );
-      if (betaKey && betaKey !== "anthropic-beta") delete headers[betaKey];
-      headers["authorization"] = `Bearer ${accessToken}`;
-      return headers;
-    };
+    // Forward the driver's headers verbatim except for the shared no-forge
+    // gateway policy: drop any x-api-key (bearer-only), force the real bearer,
+    // and merge the OAuth beta. The driver's own fingerprint (user-agent,
+    // x-app, anthropic-beta) is preserved — the whole point of pass-through.
+    // `filterHeaders` first drops host/content-length/hop-by-hop; wrapping the
+    // result in a Headers normalises casing so the policy needs no manual
+    // anthropic-beta/authorization variant hunt.
+    const buildHeaders = (accessToken: string): Headers =>
+      applyClaudeOauthGatewayHeaders(new Headers(filterHeaders(c.req.header())), accessToken);
 
     // Buffer the request body (inference JSON, bounded by
     // SIDECAR_MAX_REQUEST_BODY_BYTES via the Content-Length precheck +
@@ -700,16 +697,12 @@ export function createApp(deps: AppDeps): Hono {
     // when configured; otherwise forward the body verbatim.
     let body: string | undefined;
     if (method !== "GET" && method !== "HEAD") {
-      const buffered = await bufferLlmBodyBounded(c, MAX_REQUEST_BODY_SIZE);
-      if (buffered instanceof Response) return buffered;
-      const text = buffered;
-      body =
-        text && llmConfig.modelSwap
-          ? swapRequestModel(text, llmConfig.modelSwap)
-          : text || undefined;
+      const swapped = await bufferAndSwapRequestBody(c, llmConfig.modelSwap);
+      if (swapped instanceof Response) return swapped;
+      body = swapped;
     }
 
-    const doFetch = (headers: Record<string, string>): Promise<Response> =>
+    const doFetch = (headers: Headers): Promise<Response> =>
       fetchFn(targetUrl, {
         method,
         headers,

@@ -133,13 +133,20 @@ export class SubscriptionRequiresDockerError extends Error {
  * process, so it is refused. API-key providers (no subscription engine def) are
  * unaffected. Claude *chat* never reaches this path (host-side, token swapped
  * gateway-side). Throws {@link SubscriptionRequiresDockerError}.
+ *
+ * Consumes the engine already resolved by {@link resolveCredentialDelivery} so
+ * the launcher reads the provider→engine registry once rather than re-deriving
+ * it here. `isSubscriptionEngine(engine)` is true for exactly the providers
+ * `subscriptionEngineForProvider` would have matched (engine is `"pi"` for
+ * everything else), so the guard's outcome is unchanged.
  */
 export function assertSubscriptionEngineIsolation(params: {
+  engine: RunEngine;
   providerId: string;
   orchestratorMode: "docker" | "process";
 }): void {
-  const { providerId, orchestratorMode } = params;
-  if (subscriptionEngineForProvider(providerId) && orchestratorMode !== "docker") {
+  const { engine, providerId, orchestratorMode } = params;
+  if (isSubscriptionEngine(engine) && orchestratorMode !== "docker") {
     throw new SubscriptionRequiresDockerError(providerId);
   }
 }
