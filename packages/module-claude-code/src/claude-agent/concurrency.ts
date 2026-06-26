@@ -50,24 +50,19 @@ export const acquireClaudeSlot = (): ClaudeSlot | null => {
   };
 };
 
-/** Active reserved-slot count — for tests and observability. */
-export const activeClaudeSlots = (): number => active;
-
 /**
- * RFC 9457 `429` returned (instead of a stream) when a chat engine is at its
- * subprocess cap, so the client backs off rather than the instance forking
- * unbounded binaries. Engine-agnostic — the service label in the detail is the
- * only per-engine variation (today only the Claude subscription engine spawns a
- * capped subprocess; the ai-sdk path is in-process).
+ * RFC 9457 `429` returned (instead of a stream) when the Claude chat engine is
+ * at its subprocess cap, so the client backs off rather than the instance
+ * forking unbounded binaries.
  */
-export function chatCapacityResponse(serviceLabel: string): Response {
+export function chatCapacityResponse(): Response {
   const retryAfterSeconds = 5;
   return new Response(
     JSON.stringify({
       type: "https://docs.appstrate.dev/errors/chat-capacity",
       title: "Too Many Requests",
       status: 429,
-      detail: `Le service de chat ${serviceLabel} est temporairement saturé. Réessayez dans quelques instants.`,
+      detail: `Le service de chat Claude est temporairement saturé. Réessayez dans quelques instants.`,
       code: "chat_capacity",
       retry_after: retryAfterSeconds,
     }),
