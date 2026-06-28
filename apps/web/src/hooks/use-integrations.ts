@@ -333,6 +333,35 @@ export function useInitiateIntegrationOAuth() {
   });
 }
 
+/**
+ * Mint a hosted-connect-portal session (issue #769). Auth-type-agnostic: the
+ * returned `connect_url` dispatches server-side to the provider OAuth screen or
+ * the hosted credential form, so the caller never branches on the auth type.
+ * Same body as the OAuth initiate (scopes / force_account_select / connection_id)
+ * — scope-union + reconnect semantics are identical.
+ */
+export function useInitiateIntegrationConnect() {
+  const { t } = useTranslation("settings");
+  return useMutation({
+    mutationFn: async (vars: {
+      params: { path: { packageId: string; authKey: string } };
+      body: {
+        scopes?: string[];
+        force_account_select?: boolean;
+        connection_id?: string;
+      };
+    }) => {
+      const { data } = await client.POST(
+        "/api/integrations/{packageId}/auths/{authKey}/connect/session",
+        vars,
+      );
+      if (!data) throw new Error("empty response");
+      return data;
+    },
+    onError: () => toast.error(t("integration.connect.error")),
+  });
+}
+
 /** Invalidate the clients list + detail after a client mutation. */
 function useInvalidateIntegrationClients() {
   const qc = useQueryClient();

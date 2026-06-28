@@ -678,6 +678,7 @@ export function createIntegrationsRouter() {
         auth_key: authKey,
         ...(body.connection_id ? { connection_id: body.connection_id } : {}),
         ...(body.scopes ? { scopes: body.scopes } : {}),
+        ...(body.force_account_select ? { force_account_select: true } : {}),
       });
       return c.json({ connect_url: connectUrl, expires_at: expiresAt });
     },
@@ -731,7 +732,7 @@ export function createIntegrationsRouter() {
           authKey: claims.auth_key,
           ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
         },
-        { scopes, forceAccountSelect: false },
+        { scopes, forceAccountSelect: claims.force_account_select ?? false },
       );
       return c.redirect(result.redirectUrl);
     }

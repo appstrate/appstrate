@@ -47,6 +47,8 @@ export interface ConnectSessionClaims {
   connection_id?: string;
   /** OAuth scopes the caller forwards (agent-inferred required scopes). */
   scopes?: string[];
+  /** Force the provider's account picker on the OAuth screen (oauth2 only). */
+  force_account_select?: boolean;
   /** Single-use replay-guard id (consumed server-side, e.g. via Redis). */
   jti: string;
   /**

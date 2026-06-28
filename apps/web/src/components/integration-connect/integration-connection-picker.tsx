@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
@@ -37,8 +36,7 @@ import {
   useUpsertMemberIntegrationPin,
   useDeleteMemberIntegrationPin,
 } from "../../hooks/use-member-integration-pins";
-import { FieldsConnectModal } from "./fields-connect-modal";
-import { useIntegrationOAuthPopup } from "./use-integration-oauth-popup";
+import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { connectionDisplayLabel } from "./connection-label";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import { requiredScopesForAgent } from "@appstrate/core/integration";
@@ -91,7 +89,6 @@ export function IntegrationConnectionPicker({
   agentPackageId,
   manifest,
   authStatuses,
-  displayName,
   agentTools,
   agentScopes,
   persistence = DEFAULT_PERSISTENCE,
@@ -101,7 +98,8 @@ export function IntegrationConnectionPicker({
   agentPackageId: string;
   manifest: IntegrationManifestView;
   authStatuses: IntegrationAuthStatus[];
-  displayName: string;
+  /** Kept for call-site compatibility; the hosted portal renders its own header. */
+  displayName?: string;
   agentTools: string[] | "*" | undefined;
   agentScopes: string[] | undefined;
   persistence?: ConnectionPickerPersistence;
@@ -123,10 +121,9 @@ export function IntegrationConnectionPicker({
   const { data: runBlocking } = useIntegrationRunBlocking(integrationId, agentPackageId, version);
   const upsertPin = useUpsertMemberIntegrationPin();
   const deletePin = useDeleteMemberIntegrationPin();
-  const { openPopup, isPending: oauthPending } = useIntegrationOAuthPopup();
+  const { openPopup, isPending: oauthPending } = useHostedConnectPopup();
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [fieldsAuthKey, setFieldsAuthKey] = useState<string | null>(null);
 
   const overrideMode = persistence.mode === "override";
   const auths = manifest.auths ?? {};
@@ -139,7 +136,6 @@ export function IntegrationConnectionPicker({
     const type = auths[authKey]?.type;
     return type ? t(`settings:integration.auth.type.${type}`) : null;
   };
-  const fieldsAuth = fieldsAuthKey ? auths[fieldsAuthKey] : null;
   // The whole verdict (cascade + scope diff) is computed server-side; a pin
   // write or scope upgrade invalidates it so the dropdown re-resolves.
   const refresh = () => invalidateIntegrationQueries(qc);
@@ -237,53 +233,47 @@ export function IntegrationConnectionPicker({
   };
 
   const triggerConnect = async (authKey: string, opts?: { connectionId?: string }) => {
-    const auth = auths[authKey];
-    if (!auth) return;
-    if (auth.type === "oauth2") {
-      // Snapshot the accessible set so we can identify the just-created
-      // connection afterwards — the OAuth popup can't return its id, and a
-      // cancelled popup adds nothing, leaving the prior resolution intact.
-      // On a renew (connectionId supplied) the callback UPDATEs in place
-      // and the snapshot diff is empty — we skip the post-popup select step.
-      const before = new Set(candidates.map((c) => c.id));
-      const hadExplicit = !!explicitId;
-      const isRenew = !!opts?.connectionId;
-      // Forward the agent's per-tool inferred scopes so consent asks for what
-      // THIS agent needs — not just the integration's manifest defaults (the
-      // integration detail page is the surface that connects at defaults).
-      const scopes = requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
-      await openPopup({
-        packageId: integrationId,
-        authKey,
-        ...(scopes.length ? { scopes } : {}),
-        // Account picker is noise on a renew — the user is re-authorising the
-        // existing identity, not picking a new one. Force-pick stays on fresh
-        // connects so "Add another" actually offers a different account.
-        ...(isRenew ? {} : { forceAccountSelect: true }),
-        ...(opts?.connectionId ? { connectionId: opts.connectionId } : {}),
-      });
-      if (isRenew || hadExplicit) {
-        await refresh();
-        return;
-      }
-      const { data: fresh } = await client.GET("/api/agents/{scope}/{name}/connection-readiness", {
-        params: {
-          path: splitPackageRef(agentPackageId),
-          ...(isVersioned(version) ? { query: { version } } : {}),
-        },
-      });
-      const freshCandidates = fresh?.integrations.find((i) => i.integration_id === integrationId)
-        ?.resolution.candidates;
-      const added = freshCandidates?.find((c) => !before.has(c.id));
-      if (added) await applyPick(added.id);
-      else await refresh();
-    } else {
-      // api_key / basic / custom — no row-update path via the credentials
-      // modal yet; we surface the connect modal. The modal's `connectionId`
-      // wiring is OAuth-only for now (matches the single-writer convergence
-      // in integration-connections.ts for non-OAuth auths).
-      setFieldsAuthKey(authKey);
+    if (!auths[authKey]) return;
+    // Every auth type goes through the hosted connect portal (issue #769) — the
+    // popup opens the connect_url, which dispatches to the OAuth screen or the
+    // hosted credential form server-side. We snapshot the accessible set first
+    // so we can identify the just-created connection afterwards (the popup
+    // can't return its id, and a cancelled popup adds nothing, leaving the
+    // prior resolution intact). On a renew (connectionId supplied) the backend
+    // UPDATEs in place and the snapshot diff is empty — we skip the select step.
+    const before = new Set(candidates.map((c) => c.id));
+    const hadExplicit = !!explicitId;
+    const isRenew = !!opts?.connectionId;
+    // Forward the agent's per-tool inferred scopes so consent asks for what THIS
+    // agent needs — not just the integration's manifest defaults (the
+    // integration detail page is the surface that connects at defaults).
+    // Non-OAuth auths resolve to an empty set and connect at their fixed creds.
+    const scopes = requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
+    await openPopup({
+      packageId: integrationId,
+      authKey,
+      ...(scopes.length ? { scopes } : {}),
+      // Account picker is noise on a renew — the user is re-authorising the
+      // existing identity, not picking a new one. Force-pick stays on fresh
+      // connects so "Add another" actually offers a different account.
+      ...(isRenew ? {} : { forceAccountSelect: true }),
+      ...(opts?.connectionId ? { connectionId: opts.connectionId } : {}),
+    });
+    if (isRenew || hadExplicit) {
+      await refresh();
+      return;
     }
+    const { data: fresh } = await client.GET("/api/agents/{scope}/{name}/connection-readiness", {
+      params: {
+        path: splitPackageRef(agentPackageId),
+        ...(isVersioned(version) ? { query: { version } } : {}),
+      },
+    });
+    const freshCandidates = fresh?.integrations.find((i) => i.integration_id === integrationId)
+      ?.resolution.candidates;
+    const added = freshCandidates?.find((c) => !before.has(c.id));
+    if (added) await applyPick(added.id);
+    else await refresh();
   };
 
   const triggerLabel = displayConn
@@ -528,22 +518,6 @@ export function IntegrationConnectionPicker({
             </div>
           )}
         </div>
-      )}
-      {fieldsAuth && fieldsAuthKey && (
-        <FieldsConnectModal
-          open={true}
-          onClose={() => setFieldsAuthKey(null)}
-          packageId={integrationId}
-          authKey={fieldsAuthKey}
-          auth={fieldsAuth}
-          displayName={displayName}
-          // The fields connect returns the created connection, so select it
-          // directly — same "add = select it" rule as the OAuth path, and only
-          // when the actor hasn't already made an explicit pick.
-          onConnected={(conn) => {
-            if (!explicitId) void applyPick(conn.id);
-          }}
-        />
       )}
     </div>
   );
