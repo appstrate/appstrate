@@ -78,6 +78,13 @@ export type { RefreshContext } from "./token-refresh.ts";
 export { planMitmAction } from "./integration-mitm-planner.ts";
 export type { MitmRequestContext } from "./integration-mitm-planner.ts";
 
+// Connect-session tokens — short-lived HMAC capability tokens that gate the
+// unified hosted-connect-portal flow (issue #769). Stateless mint/verify;
+// the secret (`CONNECT_SESSION_SECRET`) and single-use `jti` enforcement are
+// the caller's responsibility.
+export { mintConnectSession, verifyConnectSession } from "./connect-session-token.ts";
+export type { ConnectSessionClaims } from "./connect-session-token.ts";
+
 // AFPS `delivery.http` resolver (snake_case, `{$credential.<field>}`
 // value templates).
 export { resolveAfpsHttpDelivery } from "./afps-delivery.ts";
