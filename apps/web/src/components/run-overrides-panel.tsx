@@ -17,8 +17,7 @@ import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { useModels } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
 import { useProvidersRegistry } from "../hooks/use-model-provider-credentials";
-import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpers";
-import { getProviderIcon } from "./icons";
+import { getModelIcon } from "./icons";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
@@ -177,8 +176,7 @@ export function RunOverridesPanel({
                   : t("run.overrides.modelInherit", { ns: "agents" })}
               </SelectItem>
               {orgModels.map((m) => {
-                const mp = findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl, registry ?? []);
-                const MIcon = getProviderIcon(mp);
+                const MIcon = getModelIcon(m, registry ?? []);
                 return (
                   <SelectItem key={m.id} value={m.id}>
                     <span className="inline-flex items-center gap-1.5">

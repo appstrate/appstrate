@@ -15,8 +15,7 @@ import { ModelFormModal } from "../../components/model-form-modal";
 import { OnboardingQuickConnect } from "../../components/onboarding-quick-connect";
 import { useModels, useModelFormHandler } from "../../hooks/use-models";
 import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
-import { findProviderByApiShapeAndBaseUrl } from "../../lib/provider-registry-helpers";
-import { getProviderIcon } from "../../components/icons";
+import { getModelIcon } from "../../components/icons";
 
 export function OnboardingModelStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -59,9 +58,7 @@ export function OnboardingModelStep() {
             </div>
             <div className="flex flex-col gap-1.5">
               {models.map((m) => {
-                const ProviderIcon = getProviderIcon(
-                  findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl, registry ?? []),
-                );
+                const ProviderIcon = getModelIcon(m, registry ?? []);
                 return (
                   <div
                     key={m.id}

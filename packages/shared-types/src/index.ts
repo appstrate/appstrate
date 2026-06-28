@@ -632,6 +632,15 @@ export interface OrgModelInfo extends ModelMetadata {
    * an alias badge and never learn the backing model.
    */
   aliased: boolean;
+  /**
+   * Display icon key for the UI. A {@link PROVIDER_ICONS} key (e.g. `anthropic`,
+   * `openai`) the client renders directly — decoupled from the backing
+   * provider. Set deliberately on an alias (`SYSTEM_PROVIDER_KEYS` model entry)
+   * so an aliased model can show an icon without exposing its hidden binding;
+   * `null` means the client falls back to resolving the icon from the real
+   * `apiShape`/`baseUrl` (non-aliased models) or shows a generic alias icon.
+   */
+  iconUrl: string | null;
   source: "built-in" | "custom";
   /** `null` for model aliases — see {@link apiShape}. */
   credentialId: string | null;

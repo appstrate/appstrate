@@ -38,7 +38,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
-import { getProviderIcon } from "../../components/icons";
+import { getModelIcon, getProviderIcon } from "../../components/icons";
 import { findProviderByApiShapeAndBaseUrl } from "../../lib/provider-registry-helpers";
 import { formatDateField } from "../../lib/markdown";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -94,12 +94,7 @@ function ModelsList({
             <TableBody>
               {models.map((m) => {
                 const isBuiltIn = m.source === "built-in";
-                const provider = findProviderByApiShapeAndBaseUrl(
-                  m.apiShape,
-                  m.baseUrl,
-                  registry ?? [],
-                );
-                const ProviderIcon = getProviderIcon(provider);
+                const ProviderIcon = getModelIcon(m, registry ?? []);
                 return (
                   <TableRow key={m.id} data-testid={`model-row-${m.id}`}>
                     <TableCell>

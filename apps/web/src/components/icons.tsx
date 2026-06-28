@@ -2,6 +2,9 @@
 
 import type { ComponentType, SVGProps } from "react";
 
+import type { ProviderRegistryEntry } from "../hooks/use-model-provider-credentials";
+import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpers";
+
 export function GoogleIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
@@ -162,4 +165,51 @@ export function getProviderIcon(
 ): ComponentType<SVGProps<SVGSVGElement>> | undefined {
   if (!p) return undefined;
   return PROVIDER_ICONS[p.iconUrl];
+}
+
+/** Generic icon for a model alias with no declared `iconUrl` (sparkles). */
+export function AliasIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+    </svg>
+  );
+}
+
+/**
+ * Unified model-icon resolver used by every model row/picker. Precedence:
+ *  1. The model's own `iconUrl` (a deliberate public key — set on aliases so
+ *     they show an icon without exposing the backing model).
+ *  2. The provider resolved from the visible `apiShape`/`baseUrl` (normal
+ *     non-aliased models — unchanged behaviour).
+ *  3. A generic {@link AliasIcon} for aliases that declare no icon, so an
+ *     aliased model is never icon-less.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function getModelIcon(
+  m: {
+    iconUrl: string | null;
+    apiShape: string | null;
+    baseUrl: string | null;
+    aliased: boolean;
+  },
+  registry: readonly ProviderRegistryEntry[],
+): ComponentType<SVGProps<SVGSVGElement>> | undefined {
+  if (m.iconUrl) {
+    const icon = PROVIDER_ICONS[m.iconUrl];
+    if (icon) return icon;
+  }
+  const provider = findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl, registry);
+  const providerIcon = getProviderIcon(provider);
+  if (providerIcon) return providerIcon;
+  return m.aliased ? AliasIcon : undefined;
 }

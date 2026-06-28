@@ -114,6 +114,9 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
     enabled: model.enabled,
     is_default: model.is_default,
     aliased: model.aliased,
+    // Deliberate public display icon — chosen on the alias, decoupled from the
+    // backing provider, so it carries no fingerprint. Safe to surface.
+    iconUrl: model.iconUrl,
     source: model.source,
     created_by: model.created_by,
     createdAt: model.createdAt,
@@ -189,6 +192,7 @@ export async function listOrgModels(
       enabled: def.enabled !== false,
       is_default: pointer !== null ? id === pointer : def.isDefault === true,
       aliased: def.aliased === true,
+      iconUrl: def.iconUrl ?? null,
       source: "built-in",
       credentialId: def.credentialId,
       created_by: null,
@@ -211,6 +215,9 @@ export async function listOrgModels(
         enabled: row.enabled,
         is_default: pointer !== null && row.id === pointer,
         aliased: row.aliased,
+        // DB custom models declare no icon — the client resolves it from the
+        // (visible) apiShape/baseUrl. Aliases live in env, never this table.
+        iconUrl: null,
         source: row.source as "custom" | "built-in",
         credentialId: row.credentialId,
         created_by: row.createdBy,

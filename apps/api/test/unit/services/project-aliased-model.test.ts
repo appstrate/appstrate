@@ -28,6 +28,7 @@ const base: OrgModelInfo = {
   enabled: true,
   is_default: false,
   aliased: false,
+  iconUrl: null,
   source: "built-in",
   credentialId: "deepseek-prod",
   created_by: null,
@@ -51,6 +52,8 @@ describe("projectAliasedModel", () => {
     expect(out.source).toBe("built-in");
 
     // Binding + catalog-derived metadata are all nulled.
+    // (iconUrl is a deliberate public choice, decoupled from the backing — see
+    // the dedicated case below; it must survive the projection.)
     expect(out.apiShape).toBeNull();
     expect(out.baseUrl).toBeNull();
     expect(out.modelId).toBeNull();
@@ -66,5 +69,13 @@ describe("projectAliasedModel", () => {
     expect(json).not.toContain("deepseek");
     expect(json).not.toContain("deepseek-chat");
     expect(json).not.toContain("api.deepseek.com");
+  });
+
+  it("preserves a declared iconUrl on an aliased model", () => {
+    // iconUrl is chosen on the alias, not derived from the backing — it carries
+    // no fingerprint, so the projection keeps it for the UI to render an icon.
+    const out = projectAliasedModel({ ...base, aliased: true, iconUrl: "anthropic" });
+    expect(out.iconUrl).toBe("anthropic");
+    expect(out.apiShape).toBeNull(); // backing still hidden
   });
 });

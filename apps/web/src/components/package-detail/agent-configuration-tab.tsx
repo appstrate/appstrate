@@ -13,8 +13,7 @@ import {
 import { LazySchemaForm as SchemaForm } from "../lazy-schema-form";
 import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
 import { uploadClient } from "../../api/uploads";
-import { getProviderIcon } from "../icons";
-import { findProviderByApiShapeAndBaseUrl } from "@/lib/provider-registry-helpers";
+import { getModelIcon } from "../icons";
 import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
 import { useModels, useAgentModel, useSetAgentModel } from "../../hooks/use-models";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
@@ -99,8 +98,7 @@ function ModelSection({ packageId }: { packageId: string }) {
               : t("models.agent.inheritNoDefault", { ns: "settings" })}
           </SelectItem>
           {orgModels.map((m) => {
-            const mp = findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl, registry ?? []);
-            const MIcon = getProviderIcon(mp);
+            const MIcon = getModelIcon(m, registry ?? []);
             return (
               <SelectItem key={m.id} value={m.id}>
                 <span className="inline-flex items-center gap-1.5">

@@ -1063,6 +1063,7 @@ export const schemas = {
       "enabled",
       "is_default",
       "aliased",
+      "iconUrl",
       "source",
       "credentialId",
       "created_by",
@@ -1100,6 +1101,11 @@ export const schemas = {
         type: "boolean",
         description:
           "Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a public alias and the real binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is stripped from this projection — render an alias badge; the backing model is hidden.",
+      },
+      iconUrl: {
+        type: ["string", "null"],
+        description:
+          "Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the backing provider, so an aliased model can show an icon without exposing its hidden binding. `null` means resolve the icon from the (visible) `apiShape`/`baseUrl`, or fall back to a generic alias icon.",
       },
       source: { type: "string", enum: ["built-in", "custom"] },
       credentialId: {

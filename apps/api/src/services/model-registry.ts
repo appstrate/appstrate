@@ -55,6 +55,12 @@ export interface ModelDefinition extends ModelMetadata {
    * user-facing surfaces — resolved server-side only. See {@link rawModelSchema}.
    */
   aliased?: boolean;
+  /**
+   * Optional display-icon key (a client `PROVIDER_ICONS` key). Deliberate public
+   * choice, decoupled from the backing provider — lets an aliased model show an
+   * icon without leaking its hidden binding. See {@link rawModelSchema}.
+   */
+  iconUrl?: string;
 }
 
 // --- State ---
@@ -86,6 +92,13 @@ const rawModelSchema = z.object({
    * stays server-side (resolution + private `llm_usage` ledger).
    */
   aliased: z.boolean().optional(),
+  /**
+   * Optional display-icon key (a client `PROVIDER_ICONS` key, e.g. `anthropic`,
+   * `openai`). Deliberate public choice — decoupled from the backing provider,
+   * so an aliased model can show an icon without leaking its hidden binding.
+   * Unset → client falls back to a generic alias icon.
+   */
+  iconUrl: z.string().min(1).optional(),
 });
 
 const rawModelProviderCredentialSchema = z.object({
@@ -242,6 +255,7 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
             isDefault: validM.isDefault,
             enabled: validM.enabled,
             aliased: validM.aliased === true,
+            ...(validM.iconUrl ? { iconUrl: validM.iconUrl } : {}),
           });
         }
       }
