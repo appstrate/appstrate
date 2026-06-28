@@ -9,6 +9,7 @@ import { stripScope } from "@appstrate/core/naming";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
+import { VERSION_DRAFT, isVersioned } from "../lib/version-selector";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { packageKeys, agentsKeys } from "../lib/query-keys";
@@ -106,15 +107,20 @@ function normalizePackageItemDetail(
 function fetchPackageDetail<T extends PackageType>(
   type: T,
   packageId: string,
+  version?: string,
 ): Promise<PackageDetailMap[T]>;
 async function fetchPackageDetail(
   type: PackageType,
   packageId: string,
+  version?: string,
 ): Promise<AgentDetail | OrgPackageItemDetail> {
   const path = splitPackageRef(packageId);
   if (type === "agent") {
+    // `version` is only meaningful for agents (issue #770): a non-`draft`
+    // selector projects that published manifest's config/input/integrations/
+    // skills, matching what the run will execute. Omitted/`draft` → draft.
     const { data } = await client.GET("/api/packages/agents/{scope}/{name}", {
-      params: { path },
+      params: { path, ...(isVersioned(version) ? { query: { version } } : {}) },
     });
     return normalizeAgentDetail(data!);
   }
@@ -158,15 +164,19 @@ function usePackageList(type: PackageType, opts?: { activeOnly?: boolean }) {
 function usePackageDetail<T extends PackageType>(
   type: T,
   id: string | undefined,
-  opts?: { enabled?: boolean },
+  opts?: { enabled?: boolean; version?: string },
 ) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   const cfg = PACKAGE_CONFIG[type];
+  // `version` rides the query key so switching the run-options version dropdown
+  // refetches the version-pinned detail instead of serving the cached draft
+  // (issue #770). Omitted → `"draft"`, preserving every existing caller's key.
+  const version = opts?.version ?? VERSION_DRAFT;
 
   return useQuery({
-    queryKey: packageKeys.detail(cfg.path, orgId, applicationId, id!),
-    queryFn: () => fetchPackageDetail(type, id!),
+    queryKey: packageKeys.detail(cfg.path, orgId, applicationId, id!, version),
+    queryFn: () => fetchPackageDetail(type, id!, version),
     enabled: !!orgId && !!applicationId && !!id && (opts?.enabled ?? true),
   });
 }

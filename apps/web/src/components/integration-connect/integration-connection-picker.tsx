@@ -44,6 +44,7 @@ import { connectableAuthKeys } from "./connectable-auth-keys";
 import { requiredScopesForAgent } from "@appstrate/core/integration";
 import { client } from "../../api/client";
 import { splitPackageRef } from "../../lib/package-paths";
+import { isVersioned } from "../../lib/version-selector";
 
 /**
  * How the picker persists the actor's pick:
@@ -94,6 +95,7 @@ export function IntegrationConnectionPicker({
   agentTools,
   agentScopes,
   persistence = DEFAULT_PERSISTENCE,
+  version,
 }: {
   integrationId: string;
   agentPackageId: string;
@@ -103,15 +105,22 @@ export function IntegrationConnectionPicker({
   agentTools: string[] | "*" | undefined;
   agentScopes: string[] | undefined;
   persistence?: ConnectionPickerPersistence;
+  /**
+   * Version selector for the readiness verdict (#770). A non-`draft` value
+   * pins the per-integration resolution + run-blocking flag to that published
+   * manifest so the run-options modal matches the run. Omitted → draft.
+   */
+  version?: string;
 }) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: resolution, isPending } = useIntegrationAgentResolution(
     integrationId,
     agentPackageId,
+    version,
   );
   // Authoritative run-blocking flag for this integration (run semantics) — same
   // bulk query as the launch badge, selected per-integration.
-  const { data: runBlocking } = useIntegrationRunBlocking(integrationId, agentPackageId);
+  const { data: runBlocking } = useIntegrationRunBlocking(integrationId, agentPackageId, version);
   const upsertPin = useUpsertMemberIntegrationPin();
   const deletePin = useDeleteMemberIntegrationPin();
   const { openPopup, isPending: oauthPending } = useIntegrationOAuthPopup();
@@ -258,7 +267,10 @@ export function IntegrationConnectionPicker({
         return;
       }
       const { data: fresh } = await client.GET("/api/agents/{scope}/{name}/connection-readiness", {
-        params: { path: splitPackageRef(agentPackageId) },
+        params: {
+          path: splitPackageRef(agentPackageId),
+          ...(isVersioned(version) ? { query: { version } } : {}),
+        },
       });
       const freshCandidates = fresh?.integrations.find((i) => i.integration_id === integrationId)
         ?.resolution.candidates;

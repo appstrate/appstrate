@@ -69,8 +69,8 @@ export const packageKeys = {
   familyInOrg: (path: string, orgId: Id) => ["packages", path, orgId] as const,
   list: (path: string, orgId: Id, applicationId: Id, filter: string) =>
     ["packages", path, orgId, applicationId, filter] as const,
-  detail: (path: string, orgId: Id, applicationId: Id, id: string) =>
-    ["packages", path, orgId, applicationId, id] as const,
+  detail: (path: string, orgId: Id, applicationId: Id, id: string, version: string = "draft") =>
+    ["packages", path, orgId, applicationId, id, version] as const,
 };
 
 /** Agent catalog list (sidebar, agent list page). */

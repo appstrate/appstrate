@@ -235,6 +235,14 @@ export const agentsPaths = {
         { $ref: "#/components/parameters/XAppId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "version",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). **Omitting the parameter resolves the `draft`** — preserving the launch-badge default. Pass a concrete version to get the same run-blocking verdict the run would produce for that pinned version (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents.",
+        },
       ],
       responses: {
         "200": {
