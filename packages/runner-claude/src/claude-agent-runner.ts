@@ -87,10 +87,30 @@ export interface ClaudeAgentRunnerOptions {
   query?: ClaudeQueryFn;
   /** Injectable clock for deterministic tests. */
   now?: () => number;
+  /**
+   * Idle-stall watchdog: max ms with no SDK stream message before the run is
+   * aborted as a failure. Defaults to {@link DEFAULT_IDLE_TIMEOUT_MS}; `0` or a
+   * negative value disables it. Catches the silent hang when the claude-code
+   * binary retries an upstream 429 (plan / rate limit) up to 10× in the
+   * background without ever emitting a message — without this the only backstop
+   * is the platform's 300s container watchdog, which can only ever produce a
+   * `timeout` status (never an actionable `failed` + rate-limit message).
+   */
+  idleTimeoutMs?: number;
 }
 
 /** Upper bound on agent turns per run (autonomous loop). */
 const DEFAULT_MAX_TURNS = 100;
+
+/**
+ * Default idle-stall watchdog window. Picked to sit comfortably below the
+ * platform's 300s container watchdog (so a stall surfaces as a `failed` run
+ * with an explicit message instead of a SIGKILL-induced `timeout`) while
+ * staying well above any legitimate gap between SDK stream messages — note a
+ * long native tool call (e.g. a heavy Bash build) produces no intermediate
+ * message, so this must not be set too tight.
+ */
+const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
 
 function resolveStartMessage(context: ExecutionContext): string {
   // Shared string|null|JSON.stringify normalisation; the fallback sentence
@@ -174,6 +194,30 @@ export class ClaudeAgentRunner implements Runner {
       else signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
     }
 
+    // Idle-stall watchdog. Aborts the SDK's OWN controller (never the AFPS
+    // `signal`) on prolonged silence: that keeps `signal.aborted === false`, so
+    // `finalizeThrownFailure` runs its full epilogue (status="failed" + explicit
+    // error) instead of its abort-rethrow arm reserved for real cancellation.
+    // Re-armed on every stream message; cleared once a message arrives and in
+    // every exit path so the timer can't outlive the run.
+    const idleMs = this.opts.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    let idleAborted = false;
+    const clearIdle = (): void => {
+      if (idleTimer !== undefined) {
+        clearTimeout(idleTimer);
+        idleTimer = undefined;
+      }
+    };
+    const armIdle = (): void => {
+      if (idleMs <= 0) return;
+      clearIdle();
+      idleTimer = setTimeout(() => {
+        idleAborted = true;
+        controller.abort(new Error("claude-agent-runner: idle-stall watchdog"));
+      }, idleMs);
+    };
+
     const queryOptions: Record<string, unknown> = {
       pathToClaudeCodeExecutable: this.opts.binaryPath,
       env: buildClaudeSdkEnv({
@@ -200,14 +244,30 @@ export class ClaudeAgentRunner implements Runner {
         prompt: resolveStartMessage(context),
         options: queryOptions,
       });
+      armIdle();
       for await (const msg of stream) {
+        clearIdle(); // the model is responsive — stand the watchdog down
         for (const event of mapper.map(msg)) await emit(event);
         // Drain journaled runtime events at this message boundary (single sink →
         // sequence intact). The SDK awaits each tool's completion before the
         // next message, so by the time we drain the tool's events are journaled.
         await drainAndEmit();
+        armIdle(); // re-arm for the gap before the next message
       }
+      clearIdle();
     } catch (err) {
+      clearIdle();
+      // A watchdog-fired abort throws an opaque SDK AbortError; translate it
+      // into an explicit, actionable failure. Gated on `!signal.aborted` so a
+      // real cancellation that raced the watchdog still flows through the
+      // epilogue's abort-rethrow arm untouched.
+      const failure =
+        idleAborted && !signal?.aborted
+          ? new Error(
+              `claude-agent-runner: no agent activity for ${Math.round(idleMs / 1000)}s — ` +
+                "the model was unreachable (likely a Claude plan / rate limit)",
+            )
+          : err;
       // Shared thrown-failure epilogue (abort-rethrow → emit appstrate.error →
       // best-effort final drain → reduce → status="failed" → stamp usage →
       // finalize). No redaction needed — the Claude path holds no in-run
@@ -215,7 +275,7 @@ export class ClaudeAgentRunner implements Runner {
       // flight), so the transform stays identity.
       await finalizeThrownFailure({
         events,
-        err,
+        err: failure,
         signal,
         runId,
         now,

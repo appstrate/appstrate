@@ -285,5 +285,95 @@ describe("ClaudeAgentRunner — runtime-event drain", () => {
     expect(m.result?.status).toBe("success");
   });
 });
+describe("ClaudeAgentRunner — idle-stall watchdog", () => {
+  // A `query` that yields an optional prelude, then hangs until the SDK's own
+  // AbortController (passed in `options.abortController`) fires — at which point
+  // it throws, mirroring how the real SDK surfaces an aborted run. This models
+  // the claude-code binary silently retrying an upstream 429 with no messages.
+  function hangingQuery(prelude: SdkRunMessage[] = []) {
+    const fn = (input: ClaudeQueryInput): AsyncIterable<SdkRunMessage> => {
+      const controller = (input.options as { abortController?: AbortController }).abortController;
+      return (async function* () {
+        for (const m of prelude) yield m;
+        await new Promise<void>((resolve) => {
+          const sig = controller?.signal;
+          if (!sig || sig.aborted) return resolve();
+          sig.addEventListener("abort", () => resolve(), { once: true });
+        });
+        throw new Error("aborted by SDK controller");
+      })();
+    };
+    return { fn };
+  }
+
+  it("aborts a silent hang → failed with an explicit rate-limit message", async () => {
+    const { fn } = hangingQuery();
+    const m = memorySink();
+    await new ClaudeAgentRunner(baseOpts({ query: fn, idleTimeoutMs: 20 })).run({
+      context: ctx,
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+    expect(m.result?.status).toBe("failed");
+    expect(m.result?.error?.message).toMatch(/rate limit/i);
+    expect(m.result?.error?.message).toMatch(/no agent activity/i);
+    expect(m.events.some((e) => e.type === "appstrate.error")).toBe(true);
+  });
+
+  it("re-arms after each message → still fails when the stream stalls mid-run", async () => {
+    const { fn } = hangingQuery([
+      { type: "assistant", message: { content: [{ type: "text", text: "thinking" }] } },
+    ]);
+    const m = memorySink();
+    await new ClaudeAgentRunner(baseOpts({ query: fn, idleTimeoutMs: 20 })).run({
+      context: ctx,
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+    expect(m.result?.status).toBe("failed");
+    expect(m.result?.error?.message).toMatch(/no agent activity/i);
+  });
+
+  it("does not fire on a fast run even with a tiny window (no false positive)", async () => {
+    const { fn } = fakeQuery([
+      { type: "assistant", message: { content: [{ type: "text", text: "quick" }] } },
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        total_cost_usd: 0.01,
+        duration_ms: 10,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    ]);
+    const m = memorySink();
+    await new ClaudeAgentRunner(baseOpts({ query: fn, idleTimeoutMs: 20 })).run({
+      context: ctx,
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+    expect(m.result?.status).toBe("success");
+  });
+
+  it("a real signal abort racing the watchdog still rethrows (not masked as a stall)", async () => {
+    const controller = new AbortController();
+    const fn = () =>
+      (async function* (): AsyncIterable<SdkRunMessage> {
+        yield { type: "assistant", message: { content: [{ type: "text", text: "step" }] } };
+        controller.abort();
+        throw new Error("aborted by signal");
+      })();
+    const m = memorySink();
+    await expect(
+      new ClaudeAgentRunner(baseOpts({ query: fn, idleTimeoutMs: 20 })).run({
+        context: ctx,
+        eventSink: m.sink,
+        bundle: undefined as never,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow();
+    expect(m.result).toBeNull();
+  });
+});
 // `buildClaudeSdkEnv` is shared infra — its tests live in
 // `@appstrate/core` (test/claude-binary.test.ts).
