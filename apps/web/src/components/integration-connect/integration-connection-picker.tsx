@@ -44,6 +44,7 @@ import { connectableAuthKeys } from "./connectable-auth-keys";
 import { requiredScopesForAgent } from "@appstrate/core/integration";
 import { client } from "../../api/client";
 import { splitPackageRef } from "../../lib/package-paths";
+import { isVersioned } from "../../lib/version-selector";
 
 /**
  * How the picker persists the actor's pick:
@@ -268,7 +269,7 @@ export function IntegrationConnectionPicker({
       const { data: fresh } = await client.GET("/api/agents/{scope}/{name}/connection-readiness", {
         params: {
           path: splitPackageRef(agentPackageId),
-          ...(version && version !== "draft" ? { query: { version } } : {}),
+          ...(isVersioned(version) ? { query: { version } } : {}),
         },
       });
       const freshCandidates = fresh?.integrations.find((i) => i.integration_id === integrationId)

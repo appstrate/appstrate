@@ -9,6 +9,7 @@ import { stripScope } from "@appstrate/core/naming";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
+import { VERSION_DRAFT, isVersioned } from "../lib/version-selector";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { packageKeys, agentsKeys } from "../lib/query-keys";
@@ -118,9 +119,8 @@ async function fetchPackageDetail(
     // `version` is only meaningful for agents (issue #770): a non-`draft`
     // selector projects that published manifest's config/input/integrations/
     // skills, matching what the run will execute. Omitted/`draft` → draft.
-    const versioned = version && version !== "draft";
     const { data } = await client.GET("/api/packages/agents/{scope}/{name}", {
-      params: { path, ...(versioned ? { query: { version } } : {}) },
+      params: { path, ...(isVersioned(version) ? { query: { version } } : {}) },
     });
     return normalizeAgentDetail(data!);
   }
@@ -172,7 +172,7 @@ function usePackageDetail<T extends PackageType>(
   // `version` rides the query key so switching the run-options version dropdown
   // refetches the version-pinned detail instead of serving the cached draft
   // (issue #770). Omitted → `"draft"`, preserving every existing caller's key.
-  const version = opts?.version ?? "draft";
+  const version = opts?.version ?? VERSION_DRAFT;
 
   return useQuery({
     queryKey: packageKeys.detail(cfg.path, orgId, applicationId, id!, version),

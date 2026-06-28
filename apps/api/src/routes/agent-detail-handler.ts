@@ -3,7 +3,10 @@
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getPackage, getPackageWithAccess } from "../services/package-catalog.ts";
-import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
+import {
+  resolveAgentRunVersion,
+  VERSION_SELECTOR_DRAFT,
+} from "../services/agent-version-resolver.ts";
 import { getOrgItem } from "../services/package-items/crud.ts";
 import { CONFIG_BY_TYPE } from "../services/package-items/config.ts";
 import {
@@ -62,7 +65,7 @@ export async function buildAgentDetailDto(
   // version manifest's `dependencies.skills` map (the resolved `agent.skills`
   // closure is the draft's — id + range is what the dependency-override UI needs).
   const versionSel = opts.version?.trim();
-  const versioned = !!versionSel && versionSel !== "draft";
+  const versioned = !!versionSel && versionSel !== VERSION_SELECTOR_DRAFT;
   const effective = versioned ? await resolveAgentRunVersion(agent, versionSel) : null;
   const m = effective?.agent.manifest ?? agent.manifest;
   const effectivePrompt = effective?.agent.prompt ?? agent.prompt;
