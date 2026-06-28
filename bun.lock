@@ -354,11 +354,10 @@
         "lucide-react": "^1.14.0",
       },
       "peerDependencies": {
-        "@tanstack/react-query": "*",
+        "@tanstack/react-query": "^5",
         "hono": "*",
         "lucide-react": "*",
         "react": "*",
-        "sonner": "*",
       },
     },
     "packages/module-claude-code": {
