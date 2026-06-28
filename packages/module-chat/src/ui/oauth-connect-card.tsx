@@ -3,9 +3,9 @@
 /**
  * In-chat integration connect card.
  *
- * When the assistant calls `initiateIntegrationConnect` (or the legacy
- * `initiateIntegrationOAuth`), the platform returns a URL to open. Instead of
- * dumping that raw link (which, opened in a full tab, dead-ends on a blank
+ * When the assistant calls `initiateIntegrationConnect`, the platform returns a
+ * URL to open. Instead of dumping that raw link (which, opened in a full tab,
+ * dead-ends on a blank
  * `window.close()` page), we render a one-click button that opens the flow in a
  * popup and *resumes the conversation automatically* once the connection lands
  * — no copy-paste, no "did it work?" round-trip. The URL dispatches server-side

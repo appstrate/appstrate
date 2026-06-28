@@ -283,56 +283,6 @@ export function useDeactivateIntegration() {
   });
 }
 
-export function useConnectIntegrationFields() {
-  const { t } = useTranslation("settings");
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; authKey: string } };
-      body: { credentials: Record<string, string>; connection_id?: string };
-    }) => {
-      const { data } = await client.POST(
-        "/api/integrations/{packageId}/auths/{authKey}/connect/fields",
-        vars,
-      );
-      // Non-2xx throws in the client middleware, so a missing body on a 200
-      // is a broken server contract — surface it instead of returning undefined.
-      if (!data) throw new Error("empty response");
-      return data;
-    },
-    onSuccess: () => {
-      toast.success(t("integration.connect.success"));
-      void invalidateIntegrationQueries(qc);
-      // Cross-app connections page (/preferences/connections) — keep parity with
-      // the OAuth popup path so a fields connect/renew refreshes that list too.
-      void qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
-    },
-    onError: () => toast.error(t("integration.connect.error")),
-  });
-}
-
-export function useInitiateIntegrationOAuth() {
-  const { t } = useTranslation("settings");
-  return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; authKey: string } };
-      body: {
-        scopes?: string[];
-        force_account_select?: boolean;
-        connection_id?: string;
-      };
-    }) => {
-      const { data } = await client.POST(
-        "/api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
-        vars,
-      );
-      if (!data) throw new Error("empty response");
-      return data;
-    },
-    onError: () => toast.error(t("integration.connect.error")),
-  });
-}
-
 /**
  * Mint a hosted-connect-portal session (issue #769). Auth-type-agnostic: the
  * returned `connect_url` dispatches server-side to the provider OAuth screen or
