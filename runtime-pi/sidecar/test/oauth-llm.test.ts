@@ -42,7 +42,15 @@ function setupFetchMock(handler: (url: string, init: RequestInit) => Promise<Res
     const u = typeof url === "string" ? url : (url as URL).toString();
     const headers: Record<string, string> = {};
     if (init?.headers) {
-      for (const [k, v] of Object.entries(init.headers as Record<string, string>)) headers[k] = v;
+      // The oauth path forwards a `Headers` instance; the non-oauth path a
+      // plain object. Normalize both (Headers/[k,v][] are iterable, plain
+      // objects via Object.entries) so captured headers are never empty.
+      const h = init.headers;
+      const entries: Iterable<[string, string]> =
+        h instanceof Headers || Symbol.iterator in Object(h)
+          ? (h as Headers)
+          : Object.entries(h as Record<string, string>);
+      for (const [k, v] of entries) headers[k.toLowerCase()] = v;
     }
     const body = typeof init?.body === "string" ? init.body : undefined;
     calls.push({ url: u, method: init?.method ?? "GET", headers, body });
