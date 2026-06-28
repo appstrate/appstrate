@@ -363,6 +363,11 @@ export function skipAuth(path: string, publicPaths: Set<string>, headers?: Heade
   if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
   if (path === "/api/integrations/callback") return true; // Integration OAuth redirect — no session
+  // Hosted connect portal (issue #769) — token/page-cookie authenticated at the
+  // route layer. The authed MINT route lives at
+  // `/api/integrations/:packageId/auths/:authKey/connect/session` (packageId
+  // prefix) and does NOT match this, so it keeps its session/permission guard.
+  if (path.startsWith("/api/integrations/connect/")) return true;
   if (path === "/api/uploads/_content") return true; // FS direct-upload sink — auth via HMAC token
   if (path === "/api/docs" || path === "/api/openapi.json") return true;
   // Unified-runner run-scoped routes: event ingestion

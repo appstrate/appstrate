@@ -1311,6 +1311,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/connect/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Hosted form render context (page cookie)
+         * @description Returns the auth manifest + display metadata for the hosted credential form. Authenticated by the page cookie set during dispatch. Never returns a secret.
+         */
+        get: operations["getIntegrationConnectContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/connect/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Hosted connect dispatch (token)
+         * @description Public entry the connect URL points at. Verifies the single-use session token, pins a page cookie, then 302-redirects to the provider OAuth screen (oauth2) or the hosted form (non-oauth). On failure returns an HTML error page. Authenticated by the signed token, not a session.
+         */
+        get: operations["startIntegrationConnect"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/connect/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hosted form credential submit (page cookie + CSRF)
+         * @description Persists credentials entered on the hosted form. Context + actor come from the page cookie; the request carries only the credentials and echoes the CSRF nonce in the `x-connect-csrf` header.
+         */
+        post: operations["submitIntegrationConnect"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/{packageId}": {
         parameters: {
             query?: never;
@@ -1393,6 +1453,26 @@ export interface paths {
         put?: never;
         /** Initiate the OAuth2 PKCE flow for an integration auth */
         post: operations["initiateIntegrationOAuth"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/auths/{authKey}/connect/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a hosted connect-portal session (auth-type-agnostic)
+         * @description Unified connect entry point (issue #769). Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the hosted credential form by auth type. The credential secret never transits the model or the chat bundle. Requires `CONNECT_SESSION_SECRET` to be configured (503 otherwise).
+         */
+        post: operations["initiateIntegrationConnect"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9748,6 +9828,145 @@ export interface operations {
             };
         };
     };
+    getIntegrationConnectContext: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Hosted connect context */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        package_id: string;
+                        auth_key: string;
+                        display_name: string;
+                        icon?: string | null;
+                        auth: {
+                            [key: string]: unknown;
+                        };
+                        connection_id?: string | null;
+                        csrf?: string | null;
+                    };
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    startIntegrationConnect: {
+        parameters: {
+            query: {
+                /** @description Connect-session capability token. */
+                token: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTML error page (token missing/invalid/used) — see 4xx detail. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Redirect to the provider OAuth screen or the hosted form. */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing token (HTML error page). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid, expired, or already-used token (HTML error page). */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    submitIntegrationConnect: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Double-submit CSRF nonce (from GET /connect/context). */
+                "x-connect-csrf": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    credentials: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Connection stored */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ok: boolean;
+                        connection: {
+                            /** Format: uuid */
+                            id: string;
+                            packageId: string;
+                            auth_key: string;
+                            account_id: string;
+                            identity_claims: {
+                                [key: string]: unknown;
+                            } | null;
+                            scopes_granted: string[];
+                            needs_reconnection: boolean;
+                            /** Format: date-time */
+                            expiresAt: string | null;
+                            /** @enum {string} */
+                            owner_type: "user" | "end_user";
+                            owner_id: string;
+                            label?: string | null;
+                            shared_with_org?: boolean;
+                            /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                            client_ref: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                            /** Format: date-time */
+                            updatedAt: string;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     getIntegration: {
         parameters: {
             query?: never;
@@ -10123,6 +10342,67 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    initiateIntegrationConnect: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Auth key as declared in the manifest's `auths` map. */
+                authKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    scopes?: string[];
+                    force_account_select?: boolean;
+                    /**
+                     * Format: uuid
+                     * @description Reconnect/upgrade an existing connection in place.
+                     */
+                    connection_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Connect URL */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        connect_url: string;
+                        /** @description Absolute expiry of the connect session (epoch ms). */
+                        expires_at: number;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Hosted connect portal not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     setDefaultIntegrationClient: {

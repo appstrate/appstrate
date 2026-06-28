@@ -49,6 +49,12 @@ export interface ConnectSessionClaims {
   scopes?: string[];
   /** Single-use replay-guard id (consumed server-side, e.g. via Redis). */
   jti: string;
+  /**
+   * Double-submit CSRF nonce — set only on the page-cookie variant of the
+   * token (minted after the initial capability token is consumed). The hosted
+   * form echoes it back in a header on submit.
+   */
+  csrf?: string;
   /** Expiration unix timestamp (seconds). */
   exp: number;
 }

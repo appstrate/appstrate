@@ -85,6 +85,17 @@ import {
   deleteOrgDefault,
 } from "../services/integration-org-defaults-service.ts";
 import { oauthStateStore } from "../services/connect/oauth-state-store.ts";
+import {
+  buildConnectUrl,
+  readConnectToken,
+  consumeJti,
+  setConnectPageCookie,
+  readConnectPageCookie,
+  clearConnectPageCookie,
+  scopeFromClaims,
+  actorFromClaims,
+  CONNECT_CSRF_HEADER,
+} from "../services/connect/connect-session.ts";
 
 // ─────────────────────────────────────────────
 // Zod schemas
@@ -112,6 +123,22 @@ export const connectOAuthSchema = z.object({
   scopes: z.array(z.string()).optional(),
   force_account_select: z.boolean().optional(),
   connection_id: z.uuid().optional(),
+});
+
+// Mint a hosted-connect-portal session — auth-type-agnostic (issue #769). The
+// caller scopes the connect (optional OAuth scopes + reconnect target); the
+// server dispatches OAuth vs credential-form when the URL is opened.
+export const connectSessionSchema = z.object({
+  scopes: z.array(z.string()).optional(),
+  force_account_select: z.boolean().optional(),
+  connection_id: z.uuid().optional(),
+});
+
+// Hosted-form submit — credentials only; all context comes from the page cookie.
+export const connectSubmitSchema = z.object({
+  credentials: z.record(z.string(), z.unknown()).refine((c) => Object.keys(c).length > 0, {
+    message: "credentials must contain at least one field",
+  }),
 });
 
 export const setDefaultClientSchema = z.object({
@@ -623,6 +650,154 @@ export function createIntegrationsRouter() {
       return c.json({ auth_url: result.redirectUrl, state: result.state });
     },
   );
+
+  // ─── Hosted connect portal (issue #769) ────
+  //
+  // Unified, auth-type-agnostic connect surface. The agent (or any client)
+  // mints a session here and receives ONE `connect_url`; opening it dispatches
+  // to the provider's OAuth screen (oauth2) or the hosted credential form
+  // (api_key/basic/mtls/custom). The credential secret never transits the model
+  // or the chat bundle — it is entered directly on the hosted form.
+  router.post(
+    "/:packageId{@[^/]+/[^/]+}/auths/:authKey/connect/session",
+    requirePermission("integrations", "connect"),
+    async (c) => {
+      const packageId = c.req.param("packageId")!;
+      const authKey = c.req.param("authKey")!;
+      const scope = getAppScope(c);
+      const actor = getActor(c);
+      await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
+      const body = parseBody(connectSessionSchema, await c.req.json().catch(() => ({})));
+      // Validate the auth exists (404/409 surfaced now, not after the redirect).
+      await readIntegrationAuth(scope, packageId, authKey);
+      const { connectUrl, expiresAt } = buildConnectUrl({
+        org_id: scope.orgId,
+        application_id: scope.applicationId,
+        ...(actor.type === "user" ? { user_id: actor.id } : { end_user_id: actor.id }),
+        package_id: packageId,
+        auth_key: authKey,
+        ...(body.connection_id ? { connection_id: body.connection_id } : {}),
+        ...(body.scopes ? { scopes: body.scopes } : {}),
+      });
+      return c.json({ connect_url: connectUrl, expires_at: expiresAt });
+    },
+  );
+
+  // GET /connect/start?token=… — the single dispatch entry point. Verifies the
+  // capability token, consumes its jti (single-use), pins a page cookie, then
+  // redirects: oauth2 → provider screen; else → the hosted SPA form at /connect.
+  router.get("/connect/start", async (c) => {
+    const token = c.req.query("token");
+    if (!token) return c.html(popupHtmlError("Missing connect token", {}, 4000), 400);
+    const claims = readConnectToken(token);
+    if (!claims) return c.html(popupHtmlError("This connect link is invalid or expired.", {}), 410);
+    if (!(await consumeJti(claims.jti, claims.exp))) {
+      return c.html(popupHtmlError("This connect link has already been used.", {}), 410);
+    }
+    const scope = scopeFromClaims(claims);
+    const actor = actorFromClaims(claims);
+    let auth: Awaited<ReturnType<typeof readIntegrationAuth>>["auth"];
+    try {
+      ({ auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key));
+    } catch {
+      return c.html(popupHtmlError("This integration is no longer available.", {}), 410);
+    }
+
+    // Pin the page cookie BEFORE dispatch so the non-oauth form has context.
+    setConnectPageCookie(c, claims);
+
+    if (auth.type === "oauth2") {
+      // Same scope-union semantics as POST /connect/oauth2.
+      const granted = claims.connection_id
+        ? await getCurrentScopesGranted({
+            scope,
+            integrationId: claims.package_id,
+            authKey: claims.auth_key,
+            actor,
+            connectionId: claims.connection_id,
+          })
+        : [];
+      const defaultScopes = (auth as { default_scopes?: string[] }).default_scopes ?? [];
+      const scopes = [...new Set([...defaultScopes, ...(claims.scopes ?? []), ...granted])];
+      const strategy = resolveStrategy(auth);
+      if (!strategy.begin) {
+        return c.html(popupHtmlError("This integration cannot be connected.", {}), 500);
+      }
+      const result = await strategy.begin(
+        {
+          scope,
+          actor,
+          integrationId: claims.package_id,
+          authKey: claims.auth_key,
+          ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+        },
+        { scopes, forceAccountSelect: false },
+      );
+      return c.redirect(result.redirectUrl);
+    }
+
+    // Non-oauth → hand off to the hosted SPA form. The page reads context via
+    // GET /connect/context (page cookie); no token in the URL.
+    return c.redirect("/connect");
+  });
+
+  // GET /connect/context — the hosted SPA form reads its render context here
+  // (page cookie). Returns the auth manifest + display metadata, never a secret.
+  router.get("/connect/context", async (c) => {
+    const claims = readConnectPageCookie(c);
+    if (!claims) throw notFound("No active connect session");
+    const scope = scopeFromClaims(claims);
+    const { manifest, auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
+    return c.json({
+      package_id: claims.package_id,
+      auth_key: claims.auth_key,
+      display_name: manifest.display_name ?? claims.package_id,
+      icon: manifest.icon ?? null,
+      auth,
+      connection_id: claims.connection_id ?? null,
+      csrf: claims.csrf ?? null,
+    });
+  });
+
+  // POST /connect/submit — hosted-form credential submit. Context + actor come
+  // from the page cookie; the request carries only the credentials + CSRF nonce.
+  router.post("/connect/submit", async (c) => {
+    const claims = readConnectPageCookie(c);
+    if (!claims) throw notFound("No active connect session");
+    // Double-submit CSRF: the nonce minted into the page cookie must match the
+    // header the SPA echoes back (read from GET /connect/context).
+    const headerCsrf = c.req.header(CONNECT_CSRF_HEADER);
+    if (!claims.csrf || !headerCsrf || headerCsrf !== claims.csrf) {
+      throw invalidRequest("Invalid or missing CSRF token");
+    }
+    const scope = scopeFromClaims(claims);
+    const actor = actorFromClaims(claims);
+    const body = parseBody(connectSubmitSchema, await c.req.json());
+    try {
+      const { auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
+      if (auth.type === "oauth2") {
+        throw invalidRequest("This integration uses OAuth — open the connect link instead");
+      }
+      const conn = await resolveStrategy(auth, {
+        connectToolExecutor: createConnectRunExecutor(),
+      }).complete(
+        {
+          scope,
+          actor,
+          integrationId: claims.package_id,
+          authKey: claims.auth_key,
+          ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+        },
+        { kind: "fields", credentials: body.credentials },
+      );
+      clearConnectPageCookie(c);
+      return c.json({ ok: true, connection: conn });
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      logger.error("Hosted connect submit failed", { err: String(err) });
+      throw internalError();
+    }
+  });
 
   // DELETE /:packageId/connections/:connectionId was removed — destructive
   // delete is now owner-scoped via `DELETE /api/me/connections/:connectionId`
