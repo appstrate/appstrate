@@ -47,11 +47,13 @@ import {
 } from "./tool-result.ts";
 
 /**
- * `invoke_operation` operationId starting an integration OAuth flow. When the
- * model calls it, the result carries an `auth_url`; we surface a connect button
- * that resumes the conversation on completion (see oauth-connect-card).
+ * `invoke_operation` operationIds that kick off an integration connect flow.
+ * `initiateIntegrationConnect` is the unified, auth-type-agnostic op (issue
+ * #769) whose result carries a `connect_url`; `initiateIntegrationOAuth` is the
+ * legacy OAuth-only op carrying an `auth_url`. Either renders the connect card
+ * (button + auto-resume on completion — see oauth-connect-card).
  */
-const INITIATE_OAUTH_OP = "initiateIntegrationOAuth";
+const INITIATE_CONNECT_OPS = new Set(["initiateIntegrationConnect", "initiateIntegrationOAuth"]);
 
 // Readable label + icon for an Appstrate API operation, by verb prefix — a
 // heuristic, not an exhaustive operationId map (which would rot). The first
@@ -233,9 +235,10 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
     const { args, result } = props;
     const opId = args?.operation_id ?? "";
 
-    // OAuth kickoff → interactive connect card (button + auto-resume) once the
-    // result carries auth_url. Until then, fall through to the standard card.
-    if (opId === INITIATE_OAUTH_OP) {
+    // Connect kickoff → render an interactive connect card (button + auto-resume)
+    // once the result carries the connect/auth url. Until then, fall through to
+    // the generic running line.
+    if (INITIATE_CONNECT_OPS.has(opId)) {
       const offer = extractAuthOffer(result);
       if (offer) {
         return (

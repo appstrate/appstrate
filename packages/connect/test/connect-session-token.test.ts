@@ -51,9 +51,10 @@ describe("connect-session-token", () => {
   it("rejects a tampered payload", () => {
     const token = mintConnectSession(baseClaims(), SECRET);
     const [, sig] = token.split(".");
-    const forged = Buffer.from(JSON.stringify(baseClaims({ org_id: "org_evil" })), "utf-8").toString(
-      "base64url",
-    );
+    const forged = Buffer.from(
+      JSON.stringify(baseClaims({ org_id: "org_evil" })),
+      "utf-8",
+    ).toString("base64url");
     expect(verifyConnectSession(`${forged}.${sig}`, SECRET)).toBeNull();
   });
 

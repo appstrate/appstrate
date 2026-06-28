@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * In-chat OAuth connect card.
+ * In-chat integration connect card.
  *
- * When the assistant calls `initiateIntegrationOAuth`, the platform returns an
- * `auth_url`. Instead of dumping that raw link (which, opened in a full tab,
- * dead-ends on a blank `window.close()` page), we render a one-click button
- * that opens the flow in a popup and *resumes the conversation automatically*
- * once the connection lands — no copy-paste, no "did it work?" round-trip.
+ * When the assistant calls `initiateIntegrationConnect` (or the legacy
+ * `initiateIntegrationOAuth`), the platform returns a URL to open. Instead of
+ * dumping that raw link (which, opened in a full tab, dead-ends on a blank
+ * `window.close()` page), we render a one-click button that opens the flow in a
+ * popup and *resumes the conversation automatically* once the connection lands
+ * — no copy-paste, no "did it work?" round-trip. The URL dispatches server-side
+ * to the provider OAuth screen or the hosted credential form (issue #769), so
+ * the card is auth-type-agnostic.
  *
  * Completion is detected from three signals, in order of immediacy:
  *  1. `postMessage` from the callback popup (same-browser, instant).
