@@ -38,6 +38,7 @@ import type {
   ModelProviderHooks,
   ModelProviderIdentity,
 } from "@appstrate/core/module";
+import { validateOfflineExpiry } from "@appstrate/core/module";
 import { base64UrlEncode, decodeJwtPayload } from "@appstrate/core/jwt";
 
 // ---------------------------------------------------------------------------
@@ -152,26 +153,10 @@ const codexHooks: ModelProviderHooks = {
     }
     // Prefer the credential row's `expiresAt` (the platform's source of
     // truth, kept fresh by the refresh worker); fall back to the token's
-    // own `exp` claim (seconds → ms) when the row carries none.
+    // own `exp` claim (seconds → ms) when the row carries none. The shared
+    // gate rejects an absent expiry (unverifiable offline) and a past one.
     const expiresAtMs = ctx.expiresAt ?? (claims.exp !== undefined ? claims.exp * 1000 : undefined);
-    // No expiry source at all (neither the row's `expiresAt` nor the token's
-    // `exp` claim) → expiry is unverifiable offline. A dead token with no
-    // expiry metadata would otherwise pass; treat absence as NOT verifiable.
-    if (expiresAtMs === undefined || expiresAtMs === null) {
-      return {
-        ok: false,
-        error: "AUTH_FAILED",
-        message: "credential expiry could not be verified",
-      };
-    }
-    if (expiresAtMs <= Date.now()) {
-      return {
-        ok: false,
-        error: "AUTH_FAILED",
-        message: "Codex access token has expired — reconnect the subscription",
-      };
-    }
-    return { ok: true };
+    return validateOfflineExpiry(expiresAtMs);
   },
 };
 

@@ -42,6 +42,7 @@ import type {
   ModelProviderDefinition,
   ModelProviderHooks,
 } from "@appstrate/core/module";
+import { validateOfflineExpiry } from "@appstrate/core/module";
 import { runClaudeAgentChat } from "./claude-agent/engine.ts";
 
 const claudeCodeHooks: ModelProviderHooks = {
@@ -68,24 +69,10 @@ const claudeCodeHooks: ModelProviderHooks = {
       };
     }
     // Anthropic OAuth tokens are opaque (not JWTs), so the credential row's
-    // `expiresAt` is the ONLY expiry source. When it's absent, expiry is
-    // unverifiable offline — a dead token with no expiry metadata would
-    // otherwise pass, so reject rather than silently accept.
-    if (ctx.expiresAt === undefined || ctx.expiresAt === null) {
-      return {
-        ok: false,
-        error: "AUTH_FAILED",
-        message: "credential expiry could not be verified",
-      };
-    }
-    if (ctx.expiresAt <= Date.now()) {
-      return {
-        ok: false,
-        error: "AUTH_FAILED",
-        message: "Claude subscription token has expired — reconnect the subscription",
-      };
-    }
-    return { ok: true };
+    // `expiresAt` is the ONLY expiry source. The shared gate rejects an
+    // absent expiry (a dead token with no expiry metadata must not pass) and
+    // a past expiry.
+    return validateOfflineExpiry(ctx.expiresAt);
   },
 };
 

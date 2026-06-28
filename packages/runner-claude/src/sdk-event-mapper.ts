@@ -57,17 +57,13 @@ interface SdkToolUseBlock {
 // `mapAssistant` walks.
 type SdkContentBlock = SdkTextBlock | SdkToolUseBlock | { type: string };
 
-/** Anthropic usage counters — already snake_case, maps 1:1 onto {@link TokenUsage}. */
-export interface SdkUsage {
-  input_tokens?: number;
-  output_tokens?: number;
-  cache_creation_input_tokens?: number;
-  cache_read_input_tokens?: number;
-}
+// Anthropic usage counters are already snake_case and structurally identical
+// to the canonical {@link TokenUsage}, so the SDK `usage` field is typed as
+// `TokenUsage` directly — no parallel `SdkUsage` shape to keep in sync.
 
 export interface SdkAssistantMessage {
   type: "assistant";
-  message?: { content?: SdkContentBlock[] | unknown; usage?: SdkUsage };
+  message?: { content?: SdkContentBlock[] | unknown; usage?: TokenUsage };
   /** Per-turn assistant error (e.g. mid-loop provider failure the agent may recover from). */
   error?: { message?: string } | string;
 }
@@ -83,7 +79,7 @@ export interface SdkResultMessage {
   result?: string;
   errors?: string[];
   total_cost_usd?: number;
-  usage?: SdkUsage;
+  usage?: TokenUsage;
   duration_ms?: number;
   structured_output?: unknown;
 }
@@ -118,7 +114,7 @@ function errorCodeForSubtype(subtype: string | undefined): string {
   }
 }
 
-function addUsage(into: TokenUsage, delta: SdkUsage | undefined): void {
+function addUsage(into: TokenUsage, delta: TokenUsage | undefined): void {
   if (!delta) return;
   into.input_tokens = (into.input_tokens ?? 0) + (delta.input_tokens ?? 0);
   into.output_tokens = (into.output_tokens ?? 0) + (delta.output_tokens ?? 0);

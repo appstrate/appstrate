@@ -13,10 +13,5 @@ export {
   type ClaudeQueryFn,
   type ClaudeQueryInput,
 } from "./claude-agent-runner.ts";
-export {
-  SdkRunEventMapper,
-  type SdkRunMessage,
-  type SdkTerminal,
-  type SdkUsage,
-} from "./sdk-event-mapper.ts";
+export { SdkRunEventMapper, type SdkRunMessage, type SdkTerminal } from "./sdk-event-mapper.ts";
 export { parseToolResultBlocks, type ClaudeToolResult } from "./claude-blocks.ts";

@@ -524,6 +524,36 @@ export type CredentialValidationResult =
   | { ok: false; error: string; message: string };
 
 /**
+ * Shared OFFLINE expiry gate for subscription-credential `validateCredential`
+ * hooks. Rejects when no expiry source is known (a dead token with no expiry
+ * metadata must not pass) and when the expiry is in the past. The caller owns
+ * the provider-specific pre-conditions (bearer well-formedness, required JWT
+ * claims) and resolves `expiresAtMs` from whatever sources it trusts (the
+ * credential row's `expiresAt`, a token `exp` claim, …); this helper carries
+ * only the expiry rule + its stable error code/messages so the two
+ * subscription modules can't drift on wording or behavior.
+ */
+export function validateOfflineExpiry(
+  expiresAtMs: number | null | undefined,
+): CredentialValidationResult {
+  if (expiresAtMs === undefined || expiresAtMs === null) {
+    return {
+      ok: false,
+      error: "AUTH_FAILED",
+      message: "credential expiry could not be verified",
+    };
+  }
+  if (expiresAtMs <= Date.now()) {
+    return {
+      ok: false,
+      error: "AUTH_FAILED",
+      message: "subscription token has expired — reconnect the subscription",
+    };
+  }
+  return { ok: true };
+}
+
+/**
  * Provider-scoped hooks. All hooks are optional. The platform dispatches
  * each by `providerId` — a module's hook only runs for providers it
  * declared, never globally.
