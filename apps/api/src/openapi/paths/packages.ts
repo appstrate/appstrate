@@ -960,6 +960,14 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XAppId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "version",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns config / input / integrations / skills from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents.",
+        },
       ],
       responses: {
         "200": {

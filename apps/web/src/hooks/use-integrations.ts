@@ -162,16 +162,23 @@ export function agentConnectionReadinessQueryOptions(
   orgId: string | null | undefined,
   applicationId: string | null | undefined,
   agentPackageId: string | undefined,
+  version?: string,
 ) {
   const { scope, name } = agentPackageId
     ? splitPackageRef(agentPackageId)
     : { scope: "", name: "" };
+  // A non-`draft` version pins the verdict to that published manifest, so the
+  // run-options modal's per-integration badge matches the run (#770). Omitted/
+  // `draft` → no query param → the draft verdict the launch badge has always
+  // shown. `version` rides the query so the cache key splits per version.
+  const versioned = version && version !== "draft";
   return $api.queryOptions(
     "get",
     "/api/agents/{scope}/{name}/connection-readiness",
     {
       params: {
         path: { scope, name },
+        ...(versioned ? { query: { version } } : {}),
         header: {
           "X-Org-Id": orgId ?? undefined,
           "X-Application-Id": applicationId ?? undefined,
@@ -204,11 +211,12 @@ export function useAgentConnectionReadiness(agentPackageId: string | undefined) 
 export function useIntegrationAgentResolution(
   integrationId: string | undefined,
   agentPackageId: string | undefined,
+  version?: string,
 ) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
-    ...agentConnectionReadinessQueryOptions(orgId, applicationId, agentPackageId),
+    ...agentConnectionReadinessQueryOptions(orgId, applicationId, agentPackageId, version),
     enabled: Boolean(orgId && applicationId && integrationId && agentPackageId),
     select: (data) =>
       data.integrations.find((i) => i.integration_id === integrationId)?.resolution ?? null,
@@ -223,11 +231,12 @@ export function useIntegrationAgentResolution(
 export function useIntegrationRunBlocking(
   integrationId: string | undefined,
   agentPackageId: string | undefined,
+  version?: string,
 ) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
-    ...agentConnectionReadinessQueryOptions(orgId, applicationId, agentPackageId),
+    ...agentConnectionReadinessQueryOptions(orgId, applicationId, agentPackageId, version),
     enabled: Boolean(orgId && applicationId && integrationId && agentPackageId),
     select: (data) =>
       data.integrations.find((i) => i.integration_id === integrationId)?.run_blocking ?? false,

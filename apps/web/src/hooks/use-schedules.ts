@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { schemaHasFileFields, type JSONSchemaObject } from "@appstrate/core/form";
+import {
+  schemaHasFileFields,
+  type JSONSchemaObject,
+  type SchemaWrapper,
+} from "@appstrate/core/form";
 import { client, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
@@ -164,6 +168,12 @@ export function useDeleteSchedule() {
 
 export interface ScheduleFormDeps {
   inputSchema: JSONSchemaObject | undefined;
+  /**
+   * Full input wrapper (schema + ui_hints + file_constraints + property_order)
+   * — the run-options modal feeds this to `<SchemaForm>` so version-pinned
+   * input renders with full fidelity, not just the bare schema (#770).
+   */
+  inputWrapper: SchemaWrapper | undefined;
   configSchema: JSONSchemaObject | undefined;
   persistedConfig: Record<string, unknown>;
   persistedModelId: string | null;
@@ -176,15 +186,27 @@ export interface ScheduleFormDeps {
    * integrations.
    */
   agentIntegrations: Array<{ id: string; tools?: string[] | "*" }>;
+  /**
+   * Agent's declared skill dependencies — drives the per-skill dependency
+   * override picker. Version-pinned when `version` is passed (#770).
+   */
+  skills: Array<{ id: string; version?: string; name?: string }>;
 }
 
 /**
  * Aggregates the agent-detail / model / proxy lookups that both
  * `ScheduleCreatePage` and `ScheduleEditPage` feed into `<ScheduleForm>`.
  * Returns `null` while inputs aren't ready or no agent is selected.
+ *
+ * `version` (#770) pins the agent-detail projection to a published version so
+ * the config / input / integrations / skills the form renders match the version
+ * the run will execute. Omitted → `draft` (the editor working copy).
  */
-export function useScheduleFormDeps(packageId: string | undefined): ScheduleFormDeps | null {
-  const { data: agentDetail } = usePackageDetail("agent", packageId);
+export function useScheduleFormDeps(
+  packageId: string | undefined,
+  version?: string,
+): ScheduleFormDeps | null {
+  const { data: agentDetail } = usePackageDetail("agent", packageId, { version });
   const { data: agentModel } = useAgentModel(packageId);
   const { data: agentProxy } = useAgentProxy(packageId);
 
@@ -195,8 +217,14 @@ export function useScheduleFormDeps(packageId: string | undefined): ScheduleForm
     id: d.id,
     ...(d.tools ? { tools: d.tools } : {}),
   }));
+  const skillDeps = (agentDetail?.dependencies?.skills ?? []).map((s) => ({
+    id: s.id,
+    ...(s.version ? { version: s.version } : {}),
+    ...(s.name ? { name: s.name } : {}),
+  }));
   return {
     inputSchema,
+    inputWrapper: agentDetail?.input ?? undefined,
     configSchema: agentDetail?.config?.schema ?? undefined,
     persistedConfig: agentDetail?.config?.current ?? {},
     persistedModelId: agentModel?.modelId ?? null,
@@ -204,5 +232,6 @@ export function useScheduleFormDeps(packageId: string | undefined): ScheduleForm
     persistedVersion: agentDetail?.version ?? null,
     hasFileInputs: schemaHasFileFields(inputSchema),
     agentIntegrations: integrationDeps,
+    skills: skillDeps,
   };
 }

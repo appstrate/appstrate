@@ -69,6 +69,12 @@ export interface RunOverridesPanelProps {
   /** Current value (controlled). */
   value: RunOverridesValue;
   onChange: (next: RunOverridesValue) => void;
+  /**
+   * Version selector (#770) forwarded to the integration connection pickers so
+   * their per-integration readiness verdict matches the run for a pinned
+   * version. Omitted → draft (the schedule editor passes nothing).
+   */
+  version?: string;
 }
 
 /**
@@ -96,6 +102,7 @@ export function RunOverridesPanel({
   agentIntegrations,
   value,
   onChange,
+  version,
 }: RunOverridesPanelProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: orgModels } = useModels();
@@ -240,6 +247,7 @@ export function RunOverridesPanel({
         <ScheduleConnectionOverridesSection
           agentPackageId={packageId}
           integrations={agentIntegrations}
+          version={version}
           value={value.connection_overrides ?? {}}
           onChange={(next) => {
             // Drop falsy entries — empty string === "Inherit", which is
@@ -278,11 +286,13 @@ export function RunOverridesPanel({
 function ScheduleConnectionOverridesSection({
   agentPackageId,
   integrations,
+  version,
   value,
   onChange,
 }: {
   agentPackageId: string;
   integrations: AgentIntegrationRef[];
+  version?: string;
   value: Record<string, string>;
   onChange: (next: Record<string, string>) => void;
 }) {
@@ -297,6 +307,7 @@ function ScheduleConnectionOverridesSection({
             key={integ.id}
             agentPackageId={agentPackageId}
             integration={integ}
+            version={version}
             value={value[integ.id] ?? ""}
             onChange={(connId) => {
               const next = { ...value };
@@ -314,11 +325,13 @@ function ScheduleConnectionOverridesSection({
 function IntegrationOverrideRow({
   agentPackageId,
   integration,
+  version,
   value,
   onChange,
 }: {
   agentPackageId: string;
   integration: AgentIntegrationRef;
+  version?: string;
   /** Currently-picked connection id; empty = inherit. */
   value: string;
   onChange: (next: string) => void;
@@ -345,6 +358,7 @@ function IntegrationOverrideRow({
         agentTools={integration.tools}
         agentScopes={undefined}
         persistence={{ mode: "override", value, onChange }}
+        version={version}
       />
     </div>
   );

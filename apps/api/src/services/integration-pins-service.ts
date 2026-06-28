@@ -53,6 +53,7 @@ import type { AppScope } from "../lib/scope.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
+import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import { fetchIntegrationManifest } from "./integration-service.ts";
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import {
@@ -818,10 +819,21 @@ export async function resolveAgentConnectionReadiness(args: {
   agentPackageId: string;
   actor: Actor;
   isAdmin: boolean;
+  /**
+   * Version selector (`draft` | `published` | concrete semver | dist-tag).
+   * Omitted ⇒ `draft` — preserves the launch-badge default. Any other value
+   * resolves the same manifest the run would execute (issue #770), so the
+   * readiness verdict matches the run for a pinned version, not the draft.
+   */
+  version?: string;
 }): Promise<AgentConnectionReadiness> {
-  const { scope, agentPackageId, actor, isAdmin } = args;
-  const agent = await getPackage(agentPackageId, scope.orgId);
-  if (!agent) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
+  const { scope, agentPackageId, actor, isAdmin, version } = args;
+  const loaded = await getPackage(agentPackageId, scope.orgId);
+  if (!loaded) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
+  // Resolve the effective definition for the selected version. `draft`/omitted
+  // short-circuits to the draft `LoadedPackage` untouched; a concrete version
+  // substitutes the published manifest via the same resolver the run uses.
+  const { agent } = await resolveAgentRunVersion(loaded, version ?? "draft");
   const agentManifest = agent.manifest as unknown as Record<string, unknown>;
   const declared = parseManifestIntegrations(agentManifest);
 

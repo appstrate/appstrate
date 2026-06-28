@@ -3,6 +3,7 @@
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getPackage, getPackageWithAccess } from "../services/package-catalog.ts";
+import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { getOrgItem } from "../services/package-items/crud.ts";
 import { CONFIG_BY_TYPE } from "../services/package-items/config.ts";
 import {
@@ -36,7 +37,7 @@ import { getAppScope } from "../lib/scope.ts";
  */
 export async function buildAgentDetailDto(
   c: Context<AppEnv>,
-  opts: { itemId?: string; requireAccess?: boolean } = {},
+  opts: { itemId?: string; requireAccess?: boolean; version?: string } = {},
 ): Promise<Record<string, unknown> | null> {
   const scope = getAppScope(c);
   const { orgId, applicationId } = scope;
@@ -54,7 +55,28 @@ export async function buildAgentDetailDto(
     return null;
   }
 
-  const m = agent.manifest;
+  // Version-aware projection (issue #770). `draft`/omitted reads the live
+  // manifest; a concrete version substitutes the published manifest + prompt
+  // via the same resolver the run uses, so the detail (config/input/integrations)
+  // matches what the run will execute. Skills are pinned per-version from the
+  // version manifest's `dependencies.skills` map (the resolved `agent.skills`
+  // closure is the draft's — id + range is what the dependency-override UI needs).
+  const versionSel = opts.version?.trim();
+  const versioned = !!versionSel && versionSel !== "draft";
+  const effective = versioned ? await resolveAgentRunVersion(agent, versionSel) : null;
+  const m = effective?.agent.manifest ?? agent.manifest;
+  const effectivePrompt = effective?.agent.prompt ?? agent.prompt;
+
+  const skillDeps = versioned
+    ? Object.entries(
+        (m as { dependencies?: { skills?: Record<string, string> } }).dependencies?.skills ?? {},
+      ).map(([id, version]) => ({ id, ...(version ? { version } : {}) }))
+    : agent.skills.map((s) => ({
+        id: s.id,
+        ...(s.version ? { version: s.version } : {}),
+        ...(s.name ? { name: s.name } : {}),
+        ...(s.description ? { description: s.description } : {}),
+      }));
 
   const packageConfig = await getPackageConfig(applicationId, agent.id);
 
@@ -86,12 +108,7 @@ export async function buildAgentDetailDto(
     scope: parsed ? `@${parsed.scope}` : null,
     version: m.version ?? null,
     dependencies: {
-      skills: agent.skills.map((s) => ({
-        id: s.id,
-        ...(s.version ? { version: s.version } : {}),
-        ...(s.name ? { name: s.name } : {}),
-        ...(s.description ? { description: s.description } : {}),
-      })),
+      skills: skillDeps,
       // AFPS §4.1 mcp_servers dependency group ({ id: version-range }). Agents
       // can declare these via an imported manifest even though the dashboard
       // editor doesn't surface them — return them so the detail response is a
@@ -131,17 +148,17 @@ export async function buildAgentDetailDto(
     forked_from: rawItem?.forked_from ?? null,
     ...(agent.source !== "system" && rawItem
       ? {
-          manifest: agent.manifest,
+          manifest: m,
           updatedAt: rawItem.updatedAt,
           lock_version: rawItem.lock_version,
-          prompt: agent.prompt,
+          prompt: effectivePrompt,
         }
       : {}),
   };
 }
 
 export async function agentDetailHandler(c: Context<AppEnv>) {
-  const dto = await buildAgentDetailDto(c, {});
+  const dto = await buildAgentDetailDto(c, { version: c.req.query("version") });
   if (!dto) {
     throw notFound(`Agent '${getItemId(c)}' not found`);
   }
