@@ -24,7 +24,13 @@ import { Button } from "./button.tsx";
 import { CollapsibleToolCard } from "./collapsible-tool-card.tsx";
 import { MarkdownText } from "./markdown-text.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
-import { InvokeOperationToolUI } from "./tool-uis.tsx";
+import {
+  InvokeOperationToolUI,
+  SearchOperationsToolUI,
+  DescribeOperationToolUI,
+  GetMeToolUI,
+} from "./tool-uis.tsx";
+import { deriveToolPhase, type ToolPhase } from "./tool-result.ts";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 
@@ -36,6 +42,9 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
     >
       {/* Register the rich tool cards (these render nothing themselves). */}
       <InvokeOperationToolUI />
+      <SearchOperationsToolUI />
+      <DescribeOperationToolUI />
+      <GetMeToolUI />
 
       {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
@@ -44,7 +53,7 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
       </AuiIf>
 
       <AuiIf condition={(s) => !s.thread.isEmpty}>
-        <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto scroll-smooth px-4">
+        <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto scroll-smooth px-4 pt-6">
           <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
 
           <div className="min-h-6 flex-grow" />
@@ -225,12 +234,12 @@ function ThinkingIndicator() {
 /** Collapsible card wrapping a run of consecutive tool calls. */
 function ToolGroup({
   count,
-  running,
+  phase,
   children,
-}: React.PropsWithChildren<{ count: number; running: boolean }>) {
+}: React.PropsWithChildren<{ count: number; phase: ToolPhase }>) {
   return (
     <CollapsibleToolCard
-      running={running}
+      phase={phase}
       header={
         <>
           <span className="text-muted-foreground">tools</span>{" "}
@@ -263,7 +272,10 @@ function AssistantMessage() {
                 // A lone tool call keeps its own card — no wrapper for 1.
                 if (part.indices.length === 1) return children;
                 return (
-                  <ToolGroup count={part.indices.length} running={part.status.type === "running"}>
+                  <ToolGroup
+                    count={part.indices.length}
+                    phase={deriveToolPhase({ status: part.status })}
+                  >
                     {children}
                   </ToolGroup>
                 );

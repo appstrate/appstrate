@@ -1,32 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** Default rendering for an MCP tool call: a collapsible card with args/result. */
+/**
+ * Default rendering for any MCP tool call with no dedicated rich card: the same
+ * compact, error-aware row as the modeled tools (raw input/output JSON in a
+ * modal on click), with a generic icon and the tool name as label.
+ */
 
 import type { ToolCallMessagePartComponent } from "@assistant-ui/react";
-import { CollapsibleToolCard } from "./collapsible-tool-card.tsx";
+import { WrenchIcon } from "lucide-react";
+import { ToolCallCard } from "./tool-uis.tsx";
+import { deriveToolPhase } from "./tool-result.ts";
 
-export const ToolFallback: ToolCallMessagePartComponent = ({
-  toolName,
-  argsText,
-  result,
-  status,
-}) => (
-  <CollapsibleToolCard
-    running={status.type === "running"}
-    header={
-      <>
-        <span className="text-muted-foreground">tool</span>{" "}
-        <span className="font-medium">{toolName}</span>
-      </>
-    }
-  >
-    <div className="space-y-2 border-t px-3 py-2 text-xs">
-      <pre className="text-muted-foreground overflow-x-auto whitespace-pre-wrap">{argsText}</pre>
-      {result !== undefined && (
-        <pre className="overflow-x-auto border-t pt-2 whitespace-pre-wrap">
-          {typeof result === "string" ? result : JSON.stringify(result, null, 2)}
-        </pre>
-      )}
-    </div>
-  </CollapsibleToolCard>
+export const ToolFallback: ToolCallMessagePartComponent = (props) => (
+  <ToolCallCard
+    phase={deriveToolPhase(props)}
+    Icon={WrenchIcon}
+    label={props.toolName}
+    args={props.args}
+    result={props.result}
+    isError={props.isError}
+    toolCallId={props.toolCallId}
+    artifact={props.artifact}
+    timing={props.timing}
+  />
 );
