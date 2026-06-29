@@ -134,7 +134,7 @@ function ConversationRow({
       <button
         type="button"
         onClick={() => select?.(session.id)}
-        className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
+        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-none bg-transparent px-0 py-1 text-left text-inherit hover:bg-transparent"
       >
         {unread && (
           <span
@@ -151,7 +151,7 @@ function ConversationRow({
         <span className="text-muted-foreground text-xs transition-opacity group-hover:opacity-0">
           {relativeTime(session.updatedAt)}
         </span>
-        <div className="absolute right-0 flex items-center opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="bg-background absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100">
           <button
             type="button"
             aria-label="Renommer"

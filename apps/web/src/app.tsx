@@ -1,15 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, lazy, Suspense } from "react";
-import {
-  Routes,
-  Route,
-  Outlet,
-  useLocation,
-  useSearchParams,
-  Navigate,
-  Link,
-} from "react-router-dom";
+import { Routes, Route, Outlet, useLocation, useSearchParams, Navigate } from "react-router-dom";
 import { PackageList } from "./pages/package-list";
 import { DashboardPage } from "./pages/dashboard";
 import { InviteAcceptPage } from "./pages/invite-accept";
@@ -24,6 +16,7 @@ import { ErrorBoundary } from "./components/error-boundary";
 import { HostedAuthGate } from "./components/hosted-auth-gate";
 import { AppSidebar } from "./components/app-sidebar";
 import { NotificationBell } from "./components/notification-bell";
+import { NavUser } from "./components/nav-user";
 import { LoadingState } from "./components/page-states";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
 
@@ -32,11 +25,9 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useApplicationResolver } from "./hooks/use-current-application";
-import { useTheme } from "./stores/theme-store";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
-import { Separator } from "@appstrate/ui/components/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@appstrate/ui/components/sidebar";
 import { AppToaster } from "./components/app-toaster";
 
@@ -192,7 +183,6 @@ function LazyRoute({ children }: { children: React.ReactNode }) {
 }
 
 function MainLayout() {
-  const { resolvedTheme } = useTheme();
   const { open: sidebarOpen, setOpen: setSidebarOpen } = useSidebarStore();
   useApplicationResolver();
 
@@ -201,20 +191,12 @@ function MainLayout() {
       <AppSidebar />
       <SidebarInset>
         <header className="flex h-16 shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-          <div className="flex items-center gap-2 px-4">
-            <SidebarTrigger className="-ml-1" />
-            <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
-            <Link to="/">
-              <img
-                src={resolvedTheme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
-                alt="Appstrate"
-                className="h-7 w-auto"
-              />
-            </Link>
-          </div>
+          {/* Mobile-only trigger — desktop collapse lives in the sidebar header */}
+          <SidebarTrigger className="ml-2 md:hidden" />
           <div className="flex-1" />
-          <div className="px-4">
+          <div className="flex items-center gap-1 px-4">
             <NotificationBell />
+            <NavUser />
           </div>
         </header>
         <div className="flex flex-1 flex-col">
