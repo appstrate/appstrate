@@ -80,7 +80,7 @@ import {
 
 // --- Integration schemas (routes/integrations.ts) ---
 import {
-  connectFieldsSchema,
+  importConnectionSchema,
   connectOAuthSchema,
   updateSettingsSchema,
   setPinSchema,
@@ -338,14 +338,14 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   {
     method: "POST",
     path: "/api/integrations/{packageId}/auths/{authKey}/connect/fields",
-    jsonSchema: toJsonSchema(connectFieldsSchema),
-    description: "Connect integration via api_key/basic/custom fields",
+    jsonSchema: toJsonSchema(importConnectionSchema),
+    description: "Import integration connection via api_key/basic/custom credentials",
   },
   {
     method: "POST",
     path: "/api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
     jsonSchema: toJsonSchema(connectOAuthSchema),
-    description: "Kick off integration OAuth2 connect",
+    description: "Headless OAuth2 start for an integration auth",
   },
   {
     method: "PATCH",

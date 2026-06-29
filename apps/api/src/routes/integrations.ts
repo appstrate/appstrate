@@ -14,9 +14,21 @@
  *   - `POST   /:packageId/auths/:authKey/oauth-clients`  — admin: register a custom OAuth client
  *   - `PUT    /:packageId/oauth-clients/:clientId`   — admin: rotate a custom OAuth client
  *   - `DELETE /:packageId/oauth-clients/:clientId`   — admin: delete a custom OAuth client
- *   - `POST   /:packageId/auths/:authKey/connect/oauth2`  — initiate OAuth2 PKCE flow
- *   - `POST   /:packageId/auths/:authKey/connect/fields`  — connect api_key/basic/custom
+ *   - `POST   /:packageId/auths/:authKey/connect/session` — Porte A: mint a hosted
+ *       Connect portal session (interactive, auth-type-agnostic). Primary surface.
+ *   - `POST   /:packageId/auths/:authKey/connect/oauth2`  — Porte B (programmatic):
+ *       headless OAuth2 start — returns an `auth_url` the caller redirects to itself.
+ *   - `POST   /:packageId/auths/:authKey/connect/fields`  — Porte B (programmatic):
+ *       import a connection by submitting api_key/basic/custom credentials directly.
  *   - `GET    /callback`                              — OAuth2 callback handler
+ *
+ * Two connection-establishment surfaces, mirroring the Nango split:
+ *   - Porte A — the hosted **Connect** portal: the end-user enters the secret on a
+ *     platform-hosted form (or the provider's OAuth screen). The secret never
+ *     transits the caller, the model, or the chat bundle. Use from agents/UI.
+ *   - Porte B — the **programmatic/headless** surface for backends that already
+ *     hold the credential (`connect/fields` = "import a connection") or want to
+ *     drive the OAuth redirect themselves (`connect/oauth2`). Server-to-server.
  *
  * Destructive connection delete moved to `DELETE /api/me/connections/:id` — the
  * single owner-scoped entry point. The agent-surface "unlink" button is gone:
@@ -108,7 +120,9 @@ import {
 // integration manifest's `credentials.schema` (AJV) downstream. Narrowing to
 // `Record<string, string>` here would silently reject every well-formed
 // non-string credential shape before AJV ever got to see it.
-export const connectFieldsSchema = z.object({
+// Porte B programmatic import — the backend already holds the credential and
+// submits it directly ("import a connection", Nango `POST /connection`).
+export const importConnectionSchema = z.object({
   credentials: z.record(z.string(), z.unknown()).refine((c) => Object.keys(c).length > 0, {
     message: "credentials must contain at least one field",
   }),
@@ -537,6 +551,10 @@ export function createIntegrationsRouter() {
 
   // ─── Connect flows ─────────────────────────
 
+  // Porte B — import a connection (programmatic). The caller submits the
+  // credential it already holds; the connection is created directly. No hosted
+  // form, no end-user interaction. The interactive path is the Connect portal
+  // (`connect/session`) — use that whenever a human/agent supplies the secret.
   router.post(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/connect/fields",
     requirePermission("integrations", "connect"),
@@ -546,7 +564,7 @@ export function createIntegrationsRouter() {
       const scope = getAppScope(c);
       const actor = getActor(c);
       await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
-      const body = parseBody(connectFieldsSchema, await c.req.json());
+      const body = parseBody(importConnectionSchema, await c.req.json());
       try {
         const { auth } = await readIntegrationAuth(scope, packageId, authKey);
         if (auth.type === "oauth2") {

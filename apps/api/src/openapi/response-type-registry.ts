@@ -135,14 +135,14 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     sharedTypeName: "IntegrationOAuthClient",
     description: "PUT .../oauth-clients/{clientId} 200 ↔ IntegrationOAuthClient",
   },
-  // Inline connection response (connect/fields 200) — the PR added `client_ref`
+  // Inline connection response (import-connection 200) — the PR added `client_ref`
   // to both the schema and the type; register so they stay locked together.
   {
     path: "/api/integrations/{packageId}/auths/{authKey}/connect/fields",
     method: "post",
     status: "200",
     sharedTypeName: "IntegrationConnection",
-    description: "POST .../connect/fields 200 ↔ IntegrationConnection",
+    description: "POST .../connect/fields (import) 200 ↔ IntegrationConnection",
   },
   { specSchemaName: "TestResult", sharedTypeName: "TestResult", description: "TestResult" },
   // --- Organization ---

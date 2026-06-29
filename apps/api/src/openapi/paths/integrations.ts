@@ -695,9 +695,11 @@ export const integrationsPaths = {
   },
   "/api/integrations/{packageId}/auths/{authKey}/connect/fields": {
     post: {
-      operationId: "connectIntegrationFields",
+      operationId: "importIntegrationConnection",
       tags: ["Integrations"],
-      summary: "Connect an api_key / basic / custom integration auth",
+      summary: "Import a connection by submitting credentials directly (programmatic)",
+      description:
+        "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -743,7 +745,9 @@ export const integrationsPaths = {
     post: {
       operationId: "initiateIntegrationOAuth",
       tags: ["Integrations"],
-      summary: "Initiate the OAuth2 PKCE flow for an integration auth",
+      summary: "Headless OAuth2 PKCE start — returns an authorize URL (programmatic)",
+      description:
+        "Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the shared `/callback`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -792,9 +796,9 @@ export const integrationsPaths = {
     post: {
       operationId: "initiateIntegrationConnect",
       tags: ["Integrations"],
-      summary: "Mint a hosted connect-portal session (auth-type-agnostic)",
+      summary: "Mint a hosted Connect portal session (interactive, auth-type-agnostic)",
       description:
-        "Unified connect entry point (issue #769). Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the hosted credential form by auth type. The credential secret never transits the model or the chat bundle. Requires `CONNECT_SESSION_SECRET` to be configured (503 otherwise).",
+        "Porte A — the hosted **Connect** portal (issue #769), the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`). Requires `CONNECT_SESSION_SECRET` to be configured (503 otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },

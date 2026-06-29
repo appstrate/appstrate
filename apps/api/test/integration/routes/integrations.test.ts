@@ -729,8 +729,8 @@ describe("api_key credentials schema validation (delivery.http silent-no-op guar
   });
 });
 
-// R8b — connectFieldsSchema accepts JSON-typed credentials (not string-only)
-describe("connectFieldsSchema — non-string credential values (R8b)", () => {
+// R8b — importConnectionSchema accepts JSON-typed credentials (not string-only)
+describe("importConnectionSchema — non-string credential values (R8b)", () => {
   let ctx: TestContext;
 
   /**
