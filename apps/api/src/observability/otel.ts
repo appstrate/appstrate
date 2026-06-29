@@ -70,6 +70,7 @@ let runDuration: Histogram | undefined;
 let runTerminal: Counter | undefined;
 let containerSpawn: Histogram | undefined;
 let llmLatency: Histogram | undefined;
+let processAnomaly: Counter | undefined;
 
 /**
  * Pull provider for the scheduler queue-depth observable gauge. The scheduler
@@ -238,6 +239,11 @@ function createInstruments(m: Meter): void {
     unit: "s",
     description: "Upstream LLM call latency observed at the platform proxy seam.",
     advice: { explicitBucketBoundaries: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60] },
+  });
+  processAnomaly = m.createCounter("appstrate.process.anomaly", {
+    description:
+      "Count of async errors that escaped every request try/catch and hit the " +
+      "process-level last-resort handler, tagged by kind (uncaughtException|unhandledRejection).",
   });
   m.createObservableGauge("appstrate.scheduler.queue_depth", {
     description: "Pending jobs in the run-scheduler queue (BullMQ).",
@@ -437,6 +443,16 @@ export function recordRunTerminal(attrs: { status: string; errorCode?: string })
     status: attrs.status,
     error_code: clampErrorCode(attrs.errorCode),
   });
+}
+
+/**
+ * Record one async error that escaped the request lifecycle and reached the
+ * process-level last-resort handler. A non-zero rate under normal load is a
+ * real upstream regression to chase — NOT a healthy steady state.
+ */
+export function recordProcessAnomaly(attrs: { kind: string }): void {
+  if (!enabled) return;
+  processAnomaly?.add(1, { kind: attrs.kind });
 }
 
 export function recordContainerSpawn(

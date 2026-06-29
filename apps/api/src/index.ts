@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { getEnv } from "@appstrate/env";
-import { initObservability, observability } from "./observability/index.ts";
+import { initObservability, observability, recordProcessAnomaly } from "./observability/index.ts";
 import { logger } from "./lib/logger.ts";
 import { boot } from "./lib/boot.ts";
 import { createShutdownHandler } from "./lib/shutdown.ts";
@@ -250,6 +250,48 @@ const shutdown = createShutdownHandler(() => {
 });
 process.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());
+
+// ── Process-level last-resort net ──────────────────────────────────────────
+// Single-process, multi-tenant server: an async error that escapes EVERY
+// request try/catch would otherwise crash Bun and take down every tenant. This
+// is a BACKSTOP, not a fix — the known offender (an LLM stream teardown that
+// rejects after the response is already on the wire) is caught at its source in
+// `services/llm-proxy/metering.ts#guardSseTeardown`. A non-zero
+// `appstrate.process.anomaly` rate under normal load signals a NEW escape to
+// chase upstream, not a healthy steady state.
+const UNCAUGHT_DRAIN_CEILING_MS = 35_000;
+let crashing = false;
+
+function formatProcessError(err: unknown): string {
+  return err instanceof Error ? (err.stack ?? err.message) : String(err);
+}
+
+// A rejected promise leaves the event loop intact — log, meter, keep serving
+// the other tenants. (Node's default since v15 would crash here.)
+process.on("unhandledRejection", (reason) => {
+  recordProcessAnomaly({ kind: "unhandledRejection" });
+  logger.error("Unhandled promise rejection (kept alive)", {
+    kind: "unhandledRejection",
+    error: formatProcessError(reason),
+  });
+});
+
+// A thrown exception that unwound to the top leaves the process in an undefined
+// state — crash-only per Node guidance. Drain in-flight runs gracefully, then
+// let the supervisor restart a clean process; force-exit if the drain hangs.
+process.on("uncaughtException", (err, origin) => {
+  recordProcessAnomaly({ kind: "uncaughtException" });
+  logger.error("Uncaught exception (shutting down)", {
+    kind: "uncaughtException",
+    origin,
+    error: formatProcessError(err),
+  });
+  if (crashing) return;
+  crashing = true;
+  const force = setTimeout(() => process.exit(1), UNCAUGHT_DRAIN_CEILING_MS);
+  force.unref();
+  void shutdown();
+});
 
 // Routes
 const userAgentsRouter = createUserAgentsRouter();

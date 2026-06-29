@@ -194,6 +194,53 @@ export interface MeteredForwardOptions {
 }
 
 /**
+ * Wrap the client-facing SSE stream so a teardown that rejects/throws AFTER
+ * the response headers are already on the wire is caught HERE — at the seam we
+ * own — instead of escaping the request lifecycle as an unhandled rejection.
+ *
+ * Why this is the root-cause fix: the upstream body is `tee()`d into a
+ * client branch and a metering branch. The metering tap is already guarded
+ * (its `.catch` logs + no-ops). The client branch, returned as the `Response`
+ * body and sometimes `pipeThrough`-swapped, has no such guard — when an
+ * upstream gateway breaks mid-flux the `tee()` branch (and any internal
+ * `pipeThrough` pipe) rejects with no request `try/catch` left to catch it. On
+ * a single-process multi-tenant server that lands as a process-level
+ * `unhandledRejection` — one tenant's broken stream threatening every tenant.
+ *
+ * We pump the source through our own reader inside a `try/catch`: a mid-stream
+ * error closes the client stream cleanly (the caller sees a truncated SSE
+ * stream — the best achievable once upstream broke) and is logged. Identity
+ * passthrough otherwise — `pull` is demand-driven, so backpressure is
+ * preserved and nothing is buffered.
+ */
+export function guardSseTeardown(
+  source: ReadableStream<Uint8Array>,
+  onTeardownError: (err: unknown) => void,
+): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(value);
+      } catch (err) {
+        onTeardownError(err);
+        controller.close();
+      }
+    },
+    cancel(reason) {
+      // Client disconnected — release the upstream/tee branch. Swallow a
+      // cancel rejection so teardown cleanup can't itself escape.
+      void reader.cancel(reason).catch(() => {});
+    },
+  });
+}
+
+/**
  * Forward an upstream LLM response to the caller and record usage — the single
  * forwarding terminus shared by the protocol-adapter core ({@link proxyLlmCall})
  * and the Claude Code subscription SDK gateway. Handles the three branches
@@ -247,9 +294,17 @@ export async function forwardMeteredResponse(
         });
       });
     const headers = cloneResponseHeaders(upstream.headers);
-    const clientStream2 = swap
-      ? clientStream.pipeThrough(createSseModelSwapStream(swap))
-      : clientStream;
+    const swapped = swap ? clientStream.pipeThrough(createSseModelSwapStream(swap)) : clientStream;
+    // Guard the client-facing branch: an upstream teardown that rejects AFTER
+    // the response is on the wire is caught at the seam we own (see
+    // {@link guardSseTeardown}) instead of escaping the request lifecycle.
+    const clientStream2 = guardSseTeardown(swapped, (err) => {
+      logger.error(`${logLabel}: SSE client stream teardown failed`, {
+        runId: ctx.runId,
+        presetId: ctx.presetId,
+        error: getErrorMessage(err),
+      });
+    });
     return new Response(clientStream2, { status: upstream.status, headers });
   }
 

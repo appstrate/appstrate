@@ -10,7 +10,11 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { computeCostUsd, tapSseUsage } from "../../src/services/llm-proxy/metering.ts";
+import {
+  computeCostUsd,
+  tapSseUsage,
+  guardSseTeardown,
+} from "../../src/services/llm-proxy/metering.ts";
 import { anthropicMessagesAdapter } from "../../src/services/llm-proxy/anthropic.ts";
 import type { UpstreamUsage } from "../../src/services/llm-proxy/types.ts";
 
@@ -100,5 +104,69 @@ describe("tapSseUsage (anthropic-messages)", () => {
   it("returns null when the stream carries no usage-bearing frame", async () => {
     const frames = `event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n`;
     expect(await tapSseUsage(streamFrom([frames]), anthropicMessagesAdapter)).toBeNull();
+  });
+});
+
+async function readAll(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const dec = new TextDecoder();
+  const reader = stream.getReader();
+  let out = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    out += dec.decode(value, { stream: true });
+  }
+  return out;
+}
+
+describe("guardSseTeardown", () => {
+  it("passes frames through unchanged when the source closes normally", async () => {
+    const seen: unknown[] = [];
+    const guarded = guardSseTeardown(streamFrom(["a", "bc", "d"]), (e) => seen.push(e));
+    expect(await readAll(guarded)).toBe("abcd");
+    expect(seen).toEqual([]);
+  });
+
+  it("catches a mid-stream source error: yields what arrived, closes, reports once", async () => {
+    // The defining case: an upstream teardown that rejects AFTER bytes are on
+    // the wire must NOT escape as an unhandled rejection — it closes the client
+    // stream cleanly and surfaces via the callback.
+    const enc = new TextEncoder();
+    let sent = false;
+    const boom = new Error("upstream gateway broke mid-flux");
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (!sent) {
+          controller.enqueue(enc.encode("partial"));
+          sent = true;
+          return;
+        }
+        controller.error(boom);
+      },
+    });
+
+    const seen: unknown[] = [];
+    const guarded = guardSseTeardown(source, (e) => seen.push(e));
+
+    // readAll must resolve (not reject) — the error was swallowed at the seam.
+    expect(await readAll(guarded)).toBe("partial");
+    expect(seen).toEqual([boom]);
+  });
+
+  it("propagates client cancel to the source", async () => {
+    let cancelledWith: unknown = undefined;
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode("x"));
+      },
+      cancel(reason) {
+        cancelledWith = reason;
+      },
+    });
+    const guarded = guardSseTeardown(source, () => {});
+    const reader = guarded.getReader();
+    await reader.read();
+    await reader.cancel("client gone");
+    expect(cancelledWith).toBe("client gone");
   });
 });
