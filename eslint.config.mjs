@@ -33,7 +33,6 @@ export default tseslint.config(
       "**/dist",
       "**/node_modules",
       ".claude/",
-      "apps/web/src/components/ui",
       // Generated OpenAPI types — managed by scripts/generate-api-types.ts
       "apps/web/src/api/schema.d.ts",
     ],

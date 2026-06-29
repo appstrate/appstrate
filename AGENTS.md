@@ -68,7 +68,7 @@ appstrate/
 │       └── stores/           # Zustand stores (auth, org, profile)
 ├── packages/
 │   ├── core/                 # @appstrate/core -- shared validation, storage, utilities
-│   ├── ui/                   # @appstrate/ui -- React components (schema-form, widgets) published to npm
+│   ├── ui/                   # @appstrate/ui -- React design system (shadcn components, schema-form, widgets) -- private workspace pkg, consumed by web
 │   ├── afps-runtime/         # @appstrate/afps-runtime -- portable AFPS bundle runner + signing + conformance + `afps` CLI
 │   ├── mcp-transport/        # @appstrate/mcp-transport -- MCP SDK adapter consumed by sidecar + runtime-pi
 │   ├── db/                   # @appstrate/db -- Drizzle ORM + Better Auth
