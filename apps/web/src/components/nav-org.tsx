@@ -14,6 +14,7 @@ import {
   Users,
   Boxes,
   MessageSquare,
+  Settings,
   type LucideIcon,
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
@@ -72,6 +73,7 @@ export function NavOrg() {
       ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]
       : []),
     ...(isAdmin ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }] : []),
+    ...(isAdmin ? [{ path: "/org-settings", label: t("nav.settings"), icon: Settings }] : []),
   ];
 
   const renderItems = (
