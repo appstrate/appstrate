@@ -76,6 +76,22 @@ describe("End-Users API", () => {
 
       expect(res.status).toBe(401);
     });
+
+    it("rejects unknown top-level keys with 400 unknown_field (strict schema)", async () => {
+      const res = await app.request("/api/end-users", {
+        method: "POST",
+        headers: { ...apiKeyHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Strict", role: "admin" }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as {
+        code?: string;
+        errors?: Array<{ code?: string }>;
+      };
+      expect(body.code).toBe("validation_failed");
+      expect(body.errors?.some((e) => e.code === "unknown_field")).toBe(true);
+    });
   });
 
   describe("GET /api/end-users", () => {

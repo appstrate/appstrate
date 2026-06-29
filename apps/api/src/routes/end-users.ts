@@ -22,31 +22,38 @@ import { recordAuditFromContext } from "../services/audit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getAppScope } from "../lib/scope.ts";
 
-export const createEndUserSchema = z.object({
-  name: z.string().max(200).nullable().optional(),
-  email: z.email().nullable().optional(),
-  externalId: z.string().max(255).nullable().optional(),
-  metadata: z
-    .record(
-      z.string().min(1).max(40),
-      z.union([z.string().max(500), z.number(), z.boolean(), z.null()]),
-    )
-    .refine((obj) => Object.keys(obj).length <= 50, "Maximum 50 metadata keys")
-    .optional(),
-});
+// Strict: reject unknown top-level keys. End-user identity is a sensitive
+// write surface — silently dropping an unexpected field could mask a client
+// bug or a privilege-shaped typo. Unknown keys surface as 400 `unknown_field`.
+export const createEndUserSchema = z
+  .object({
+    name: z.string().max(200).nullable().optional(),
+    email: z.email().nullable().optional(),
+    externalId: z.string().max(255).nullable().optional(),
+    metadata: z
+      .record(
+        z.string().min(1).max(40),
+        z.union([z.string().max(500), z.number(), z.boolean(), z.null()]),
+      )
+      .refine((obj) => Object.keys(obj).length <= 50, "Maximum 50 metadata keys")
+      .optional(),
+  })
+  .strict();
 
-export const updateEndUserSchema = z.object({
-  name: z.string().max(200).nullable().optional(),
-  email: z.email().nullable().optional(),
-  externalId: z.string().max(255).nullable().optional(),
-  metadata: z
-    .record(
-      z.string().min(1).max(40),
-      z.union([z.string().max(500), z.number(), z.boolean(), z.null()]),
-    )
-    .refine((obj) => Object.keys(obj).length <= 50, "Maximum 50 metadata keys")
-    .optional(),
-});
+export const updateEndUserSchema = z
+  .object({
+    name: z.string().max(200).nullable().optional(),
+    email: z.email().nullable().optional(),
+    externalId: z.string().max(255).nullable().optional(),
+    metadata: z
+      .record(
+        z.string().min(1).max(40),
+        z.union([z.string().max(500), z.number(), z.boolean(), z.null()]),
+      )
+      .refine((obj) => Object.keys(obj).length <= 50, "Maximum 50 metadata keys")
+      .optional(),
+  })
+  .strict();
 
 export function createEndUsersRouter() {
   const router = new Hono<AppEnv>();
