@@ -36,7 +36,7 @@ function SidebarLogo() {
       </Link>
       {/* Collapsed-only app icon — hidden as soon as the header is hovered */}
       <img
-        src="/favicon.svg"
+        src={resolvedTheme === "dark" ? "/icon-dark.svg" : "/icon-light.svg"}
         alt="Appstrate"
         className="hidden size-7 shrink-0 group-data-[collapsible=icon]:block group-data-[collapsible=icon]:group-hover/logo:hidden"
       />
