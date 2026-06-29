@@ -10,9 +10,16 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { computeCostUsd, tapSseUsage } from "../../src/services/llm-proxy/metering.ts";
+import {
+  computeCostUsd,
+  tapSseUsage,
+  guardSseTeardown,
+  forwardMeteredResponse,
+  type MeteredForwardContext,
+} from "../../src/services/llm-proxy/metering.ts";
 import { anthropicMessagesAdapter } from "../../src/services/llm-proxy/anthropic.ts";
 import type { UpstreamUsage } from "../../src/services/llm-proxy/types.ts";
+import type { ResolvedModel } from "../../src/services/org-models.ts";
 
 function streamFrom(chunks: string[]): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
@@ -100,5 +107,116 @@ describe("tapSseUsage (anthropic-messages)", () => {
   it("returns null when the stream carries no usage-bearing frame", async () => {
     const frames = `event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n`;
     expect(await tapSseUsage(streamFrom([frames]), anthropicMessagesAdapter)).toBeNull();
+  });
+});
+
+async function readAll(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const dec = new TextDecoder();
+  const reader = stream.getReader();
+  let out = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    out += dec.decode(value, { stream: true });
+  }
+  return out;
+}
+
+describe("guardSseTeardown", () => {
+  it("passes frames through unchanged when the source closes normally", async () => {
+    const seen: unknown[] = [];
+    const guarded = guardSseTeardown(streamFrom(["a", "bc", "d"]), (e) => seen.push(e));
+    expect(await readAll(guarded)).toBe("abcd");
+    expect(seen).toEqual([]);
+  });
+
+  it("catches a mid-stream source error: yields what arrived, closes, reports once", async () => {
+    // The defining case: an upstream teardown that rejects AFTER bytes are on
+    // the wire must NOT escape as an unhandled rejection — it closes the client
+    // stream cleanly and surfaces via the callback.
+    const enc = new TextEncoder();
+    let sent = false;
+    const boom = new Error("upstream gateway broke mid-flux");
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (!sent) {
+          controller.enqueue(enc.encode("partial"));
+          sent = true;
+          return;
+        }
+        controller.error(boom);
+      },
+    });
+
+    const seen: unknown[] = [];
+    const guarded = guardSseTeardown(source, (e) => seen.push(e));
+
+    // readAll must resolve (not reject) — the error was swallowed at the seam.
+    expect(await readAll(guarded)).toBe("partial");
+    expect(seen).toEqual([boom]);
+  });
+
+  it("full forward path: upstream errors mid-flux under alias-swap → body completes, no escape", async () => {
+    // End-to-end through `forwardMeteredResponse` (tee + tap + pipeThrough swap
+    // + guard). The upstream emits one frame then errors. With the guard wired
+    // BEFORE the swap pipe, the returned body must read to completion (no
+    // rejection escaping the `pipeThrough` internal pipe) and the one frame
+    // that arrived must be alias-swapped.
+    const enc = new TextEncoder();
+    let sent = 0;
+    const upstreamBody = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent === 0) {
+          controller.enqueue(enc.encode('data: {"type":"x","model":"real-model"}\n\n'));
+          sent++;
+          return;
+        }
+        controller.error(new Error("upstream gateway broke mid-flux"));
+      },
+    });
+    const upstream = new Response(upstreamBody, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+    const ctx: MeteredForwardContext = {
+      principal: { kind: "jwt_user", userId: "u", orgId: "o" },
+      runId: null,
+      presetId: "preset",
+      // Only read by the metering path, which no-ops on the null usage an
+      // errored stream yields — a minimal stand-in is sufficient here.
+      resolved: {
+        modelId: "real-model",
+        apiShape: "anthropic-messages",
+      } as unknown as ResolvedModel,
+      started: 0,
+    };
+
+    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, ctx, {
+      swap: { alias: "alias-model", real: "real-model" },
+      logLabel: "test",
+    });
+    const out = await readAll(res.body!);
+    expect(out).toContain("alias-model");
+    expect(out).not.toContain("real-model");
+  });
+
+  it("propagates client cancel to the source without a spurious teardown error", async () => {
+    let cancelledWith: unknown = undefined;
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode("x"));
+      },
+      cancel(reason) {
+        cancelledWith = reason;
+      },
+    });
+    const seen: unknown[] = [];
+    const guarded = guardSseTeardown(source, (e) => seen.push(e));
+    const reader = guarded.getReader();
+    await reader.read();
+    await reader.cancel("client gone");
+    expect(cancelledWith).toBe("client gone");
+    // A normal disconnect must NOT be reported as an upstream teardown.
+    expect(seen).toEqual([]);
   });
 });

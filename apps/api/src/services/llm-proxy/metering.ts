@@ -193,6 +193,78 @@ export interface MeteredForwardOptions {
   onUpstreamError?: (status: number) => void;
 }
 
+/** `controller.close()` throws if the stream is already closed/errored (e.g. the
+ * consumer cancelled mid-pull). That is not a teardown — swallow it. */
+function closeSafely(controller: ReadableStreamDefaultController<Uint8Array>): void {
+  try {
+    controller.close();
+  } catch {
+    // already closed/errored — nothing to do
+  }
+}
+
+/**
+ * Wrap an SSE source so a teardown that rejects/throws AFTER the response
+ * headers are already on the wire is caught HERE — at the seam we own —
+ * instead of escaping the request lifecycle as an unhandled rejection.
+ *
+ * Context: the upstream body is `tee()`d into a client branch and a metering
+ * branch. The metering tap is already guarded (its `.catch` logs + no-ops).
+ * The client branch — returned as the `Response` body, sometimes
+ * `pipeThrough`-swapped for model aliases — was not. When an upstream gateway
+ * breaks mid-flux the `tee()` branch rejects with no request `try/catch` left
+ * to catch it. On a single-process multi-tenant server that lands as a
+ * process-level `unhandledRejection` — one tenant's broken stream threatening
+ * every tenant.
+ *
+ * IMPORTANT — wrap BEFORE the alias-swap `pipeThrough`, not after. The guarded
+ * wrapper never errors (it closes cleanly on an upstream reject), so the
+ * internal `pipeTo` that `pipeThrough` runs sees a normal close instead of a
+ * rejected abort. That removes the leak regardless of whether the runtime
+ * marks `pipeThrough`'s internal pipe promise `[[handled]]` — guarding the
+ * consumer read alone would not. The swap transform then flushes its buffered
+ * partial line on that clean close.
+ *
+ * `pull` is demand-driven, so backpressure is preserved and nothing is
+ * buffered. `onTeardownError` fires only for a genuine upstream read rejection
+ * — never for a consumer-cancel close race (those are swallowed).
+ */
+export function guardSseTeardown(
+  source: ReadableStream<Uint8Array>,
+  onTeardownError: (err: unknown) => void,
+): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      let result: Awaited<ReturnType<typeof reader.read>>;
+      try {
+        result = await reader.read();
+      } catch (err) {
+        // The only genuine teardown signal: the upstream/tee branch rejected
+        // mid-flux. Report once, then close the client stream cleanly (the
+        // caller sees a truncated SSE stream — the best achievable here).
+        onTeardownError(err);
+        closeSafely(controller);
+        return;
+      }
+      if (result.done) {
+        closeSafely(controller);
+        return;
+      }
+      try {
+        controller.enqueue(result.value);
+      } catch {
+        // Consumer cancelled between read and enqueue — not a teardown.
+      }
+    },
+    cancel(reason) {
+      // Client disconnected — release the upstream/tee branch. Swallow a
+      // cancel rejection so teardown cleanup can't itself escape.
+      void reader.cancel(reason).catch(() => {});
+    },
+  });
+}
+
 /**
  * Forward an upstream LLM response to the caller and record usage — the single
  * forwarding terminus shared by the protocol-adapter core ({@link proxyLlmCall})
@@ -247,9 +319,18 @@ export async function forwardMeteredResponse(
         });
       });
     const headers = cloneResponseHeaders(upstream.headers);
-    const clientStream2 = swap
-      ? clientStream.pipeThrough(createSseModelSwapStream(swap))
-      : clientStream;
+    // Guard the raw client branch FIRST (before the alias-swap pipe) so the
+    // swapped stream is fed by a source that never errors — see
+    // {@link guardSseTeardown} for why guarding after `pipeThrough` would leave
+    // its internal pipe promise exposed.
+    const guarded = guardSseTeardown(clientStream, (err) => {
+      logger.error(`${logLabel}: SSE client stream teardown failed`, {
+        runId: ctx.runId,
+        presetId: ctx.presetId,
+        error: getErrorMessage(err),
+      });
+    });
+    const clientStream2 = swap ? guarded.pipeThrough(createSseModelSwapStream(swap)) : guarded;
     return new Response(clientStream2, { status: upstream.status, headers });
   }
 
