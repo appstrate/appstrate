@@ -707,6 +707,12 @@ export function createIntegrationsRouter() {
   // capability token, consumes its jti (single-use), pins a page cookie, then
   // redirects: oauth2 → provider screen; else → the hosted SPA form at /connect.
   router.get("/connect/start", async (c) => {
+    // The single-use capability token rides this request's query string. Strip
+    // the Referer entirely so the token can never leak to the provider (oauth2
+    // redirect) or any downstream navigation — defence in depth on top of the
+    // single-use jti + short TTL (the modern default policy already drops the
+    // query cross-origin, but `no-referrer` removes the origin too).
+    c.header("Referrer-Policy", "no-referrer");
     const token = c.req.query("token");
     if (!token) return c.html(popupHtmlError("Missing connect token", {}, 4000), 400);
     const claims = readConnectToken(token);
@@ -744,16 +750,33 @@ export function createIntegrationsRouter() {
       if (!strategy.begin) {
         return c.html(popupHtmlError("This integration cannot be connected.", {}), 500);
       }
-      const result = await strategy.begin(
-        {
-          scope,
-          actor,
-          integrationId: claims.package_id,
+      // `begin` can throw on a transient/structural fault (OAuth client removed
+      // between mint and click, provider discovery error, network). Without this
+      // guard the throw escapes to the global error handler, which renders raw
+      // `application/problem+json` inside the popup instead of the friendly
+      // popupHtmlError page every other failure path here returns. The jti is
+      // already burned, so the user re-mints (one click) — surface a readable
+      // error rather than a JSON blob.
+      let result: Awaited<ReturnType<NonNullable<typeof strategy.begin>>>;
+      try {
+        result = await strategy.begin(
+          {
+            scope,
+            actor,
+            integrationId: claims.package_id,
+            authKey: claims.auth_key,
+            ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+          },
+          { scopes, forceAccountSelect: claims.force_account_select ?? false },
+        );
+      } catch (err) {
+        logger.error("Hosted connect OAuth begin failed", {
+          err: String(err),
+          packageId: claims.package_id,
           authKey: claims.auth_key,
-          ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
-        },
-        { scopes, forceAccountSelect: claims.force_account_select ?? false },
-      );
+        });
+        return c.html(popupHtmlError("Could not start the connection. Please try again.", {}), 502);
+      }
       return c.redirect(result.redirectUrl);
     }
 

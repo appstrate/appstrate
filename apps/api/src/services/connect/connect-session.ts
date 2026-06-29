@@ -105,6 +105,20 @@ export async function consumeJti(jti: string, expSeconds: number): Promise<boole
  * (new jti, CSRF nonce, same context) and set it as an httpOnly, SameSite=Strict
  * cookie scoped to the hosted connect path. Returns the CSRF nonce for the page
  * to read via the context endpoint.
+ *
+ * SameSite=Strict is safe here because every post-dispatch hop is same-site to
+ * us: `/connect/start` (which sets this cookie) redirects to `/connect`, whose
+ * fetches to `/connect/context` + `/connect/submit` are same-origin, so the
+ * cookie is always sent. The only cross-site hop is the initial popup open,
+ * which SETS (never reads) the cookie.
+ *
+ * Known EMBEDDED caveat (non-oauth, cross-origin opener): the cookie is written
+ * during a cross-site→same-site redirect chain, which Safari's bounce-tracking
+ * protection / ITP may classify as tracking and purge — breaking the hosted
+ * form for embedded end-users on Safari. This is inherent to the popup model
+ * (Nango hits the same wall); first-party (same-origin opener) flows are
+ * unaffected. Revisit with a partitioned/storage-access approach if embedded
+ * Safari support becomes a requirement.
  */
 export function setConnectPageCookie(c: Context<AppEnv>, claims: ConnectSessionClaims): string {
   const csrf = newId();

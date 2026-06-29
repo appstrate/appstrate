@@ -40,11 +40,16 @@ type Phase = "loading" | "form" | "submitting" | "done" | "error";
 function signalSuccess(packageId: string): void {
   const detail = { type: INTEGRATION_MESSAGE_TYPE, ok: true, packageId };
   try {
-    // Same-origin only — the opener is our own SPA, so never broadcast the
-    // success signal to an arbitrary cross-origin opener.
-    if (window.opener) window.opener.postMessage(detail, window.location.origin);
+    // Broadcast to the opener regardless of origin (`"*"`), matching the OAuth
+    // callback page (`oauth-popup-html.ts`). The payload is a non-secret
+    // completion ping (`{ type, ok, packageId }`) — no credential ever crosses
+    // it — and a same-origin lock would silently starve EMBEDDED integrators
+    // (cross-origin opener) of the signal, leaving them only the popup-close
+    // fallback. Our own SPA listener still validates `e.origin` on receipt, so
+    // a wide targetOrigin here doesn't weaken what we trust inbound.
+    if (window.opener) window.opener.postMessage(detail, "*");
   } catch {
-    /* opener gone or cross-origin — fall through to the channel */
+    /* opener gone — fall through to the channel */
   }
   try {
     const bc = new BroadcastChannel(INTEGRATION_BROADCAST_CHANNEL);
