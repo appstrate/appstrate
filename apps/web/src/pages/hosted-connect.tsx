@@ -40,7 +40,9 @@ type Phase = "loading" | "form" | "submitting" | "done" | "error";
 function signalSuccess(packageId: string): void {
   const detail = { type: INTEGRATION_MESSAGE_TYPE, ok: true, packageId };
   try {
-    if (window.opener) window.opener.postMessage(detail, "*");
+    // Same-origin only — the opener is our own SPA, so never broadcast the
+    // success signal to an arbitrary cross-origin opener.
+    if (window.opener) window.opener.postMessage(detail, window.location.origin);
   } catch {
     /* opener gone or cross-origin — fall through to the channel */
   }
@@ -59,6 +61,10 @@ export function HostedConnectPage() {
   const [context, setContext] = useState<ConnectContext | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  // Technical reason behind a context-load failure (HTTP status or network
+  // error). Shown under the generic body so an invalid/expired link, a removed
+  // integration, and a network outage don't all look identical.
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,13 +73,14 @@ export function HostedConnectPage() {
         const res = await fetch("/api/integrations/connect/context", {
           credentials: "include",
         });
-        if (!res.ok) throw new Error(`context ${res.status}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const ctx = (await res.json()) as ConnectContext;
         if (cancelled) return;
         setContext(ctx);
         setPhase("form");
-      } catch {
+      } catch (err) {
         if (cancelled) return;
+        setErrorDetail(err instanceof Error ? err.message : String(err));
         setPhase("error");
       }
     })();
@@ -84,7 +91,12 @@ export function HostedConnectPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!context?.csrf) return;
+    // A missing CSRF nonce means the page session is broken (cookie cleared or
+    // context never carried one) — surface it instead of a dead-button no-op.
+    if (!context?.csrf) {
+      setError(t("integration.connect.hosted.errorBody"));
+      return;
+    }
     setPhase("submitting");
     setError(null);
     try {
@@ -132,6 +144,9 @@ export function HostedConnectPage() {
             <p className="text-muted-foreground text-sm">
               {t("integration.connect.hosted.errorBody")}
             </p>
+            {errorDetail && (
+              <p className="text-muted-foreground/60 font-mono text-xs">{errorDetail}</p>
+            )}
           </div>
         )}
 

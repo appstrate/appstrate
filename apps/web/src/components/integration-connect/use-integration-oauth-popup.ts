@@ -91,6 +91,10 @@ export function useHostedConnectPopup() {
               (data as { type?: string }).type === INTEGRATION_MESSAGE_TYPE &&
               (data as { ok?: boolean }).ok === true;
             const onMessage = (e: MessageEvent) => {
+              // The success page (hosted form + OAuth popup HTML) is served from
+              // our own origin, so reject foreign-origin messages — a forged
+              // signal from another tab must not stand in for a real connect.
+              if (e.origin !== window.location.origin) return;
               if (isSignal(e.data)) onHit();
             };
             window.addEventListener("message", onMessage);
@@ -148,7 +152,10 @@ export function useHostedConnectPopup() {
           toast.error(t("integration.popup.timeout"));
           return;
         }
-        throw err;
+        // Mint failure (e.g. portal not configured / 5xx), network error, or any
+        // other unexpected throw: surface a generic toast here so callers never
+        // have to handle a rejected openPopup() — the cache stays untouched.
+        toast.error(t("integration.popup.failed"));
       }
     },
     [initiateConnect, qc, t],

@@ -835,6 +835,7 @@
   "integration.oauthClient.delete.success": "Client OAuth supprimé.",
   "integration.popup.blocked": "La popup OAuth a été bloquée — autorisez les popups pour ce site puis recommencez.",
   "integration.popup.timeout": "La connexion a expiré. Veuillez réessayer.",
+  "integration.popup.failed": "Impossible de démarrer la connexion. Veuillez réessayer.",
   "agentEditor.integrations.authKey.label": "Méthode d'authentification",
   "agentEditor.integrations.authKey.default": "Par défaut (selon l'intégration)",
   "agentEditor.integrations.apiCall.label": "Appel API générique (api_call)",

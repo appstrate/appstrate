@@ -106,6 +106,7 @@ import {
   clearConnectPageCookie,
   scopeFromClaims,
   actorFromClaims,
+  csrfMatches,
   CONNECT_CSRF_HEADER,
 } from "../services/connect/connect-session.ts";
 
@@ -710,20 +711,21 @@ export function createIntegrationsRouter() {
     if (!token) return c.html(popupHtmlError("Missing connect token", {}, 4000), 400);
     const claims = readConnectToken(token);
     if (!claims) return c.html(popupHtmlError("This connect link is invalid or expired.", {}), 410);
-    if (!(await consumeJti(claims.jti, claims.exp))) {
-      return c.html(popupHtmlError("This connect link has already been used.", {}), 410);
-    }
     const scope = scopeFromClaims(claims);
     const actor = actorFromClaims(claims);
+    // Resolve the integration BEFORE consuming the jti — if the auth no longer
+    // exists, the capability token stays unburned so the caller can retry once
+    // the integration is back, rather than being forced to re-mint.
     let auth: Awaited<ReturnType<typeof readIntegrationAuth>>["auth"];
     try {
       ({ auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key));
     } catch {
       return c.html(popupHtmlError("This integration is no longer available.", {}), 410);
     }
-
-    // Pin the page cookie BEFORE dispatch so the non-oauth form has context.
-    setConnectPageCookie(c, claims);
+    // Single-use: burn the jti only once we know the link is actionable.
+    if (!(await consumeJti(claims.jti, claims.exp))) {
+      return c.html(popupHtmlError("This connect link has already been used.", {}), 410);
+    }
 
     if (auth.type === "oauth2") {
       // Same scope-union semantics as POST /connect/oauth2.
@@ -755,8 +757,11 @@ export function createIntegrationsRouter() {
       return c.redirect(result.redirectUrl);
     }
 
-    // Non-oauth → hand off to the hosted SPA form. The page reads context via
-    // GET /connect/context (page cookie); no token in the URL.
+    // Non-oauth → hand off to the hosted SPA form. Pin the page cookie so the
+    // form can read context via GET /connect/context (no token in the URL). The
+    // oauth2 branch above never reaches here, so the cookie is set only when the
+    // hosted form actually needs it.
+    setConnectPageCookie(c, claims);
     return c.redirect("/connect");
   });
 
@@ -784,14 +789,14 @@ export function createIntegrationsRouter() {
     const claims = readConnectPageCookie(c);
     if (!claims) throw notFound("No active connect session");
     // Double-submit CSRF: the nonce minted into the page cookie must match the
-    // header the SPA echoes back (read from GET /connect/context).
-    const headerCsrf = c.req.header(CONNECT_CSRF_HEADER);
-    if (!claims.csrf || !headerCsrf || headerCsrf !== claims.csrf) {
+    // header the SPA echoes back (read from GET /connect/context). Compared in
+    // constant time so the nonce can't be recovered by timing.
+    if (!csrfMatches(claims, c.req.header(CONNECT_CSRF_HEADER))) {
       throw invalidRequest("Invalid or missing CSRF token");
     }
     const scope = scopeFromClaims(claims);
     const actor = actorFromClaims(claims);
-    const body = parseBody(connectSubmitSchema, await c.req.json());
+    const body = parseBody(connectSubmitSchema, await c.req.json().catch(() => ({})));
     try {
       const { auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
       if (auth.type === "oauth2") {

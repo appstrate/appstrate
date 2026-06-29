@@ -13,7 +13,7 @@
  * The token is the ONLY context source for the unauthenticated hosted surface;
  * the credential secret never rides the token or the query string.
  */
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import {
@@ -138,6 +138,18 @@ export function readConnectPageCookie(c: Context<AppEnv>): ConnectSessionClaims 
 /** Clear the page cookie (after a successful submit). */
 export function clearConnectPageCookie(c: Context<AppEnv>): void {
   deleteCookie(c, CONNECT_PAGE_COOKIE, { path: CONNECT_COOKIE_PATH });
+}
+
+/**
+ * Constant-time double-submit CSRF check. Returns true only when the page
+ * cookie carries a nonce AND the header echoes it back byte-for-byte. Compared
+ * in constant time so a mismatch can't be timed out character by character.
+ */
+export function csrfMatches(claims: ConnectSessionClaims, header: string | undefined): boolean {
+  if (!claims.csrf || !header) return false;
+  const a = Buffer.from(claims.csrf);
+  const b = Buffer.from(header);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 /** Build an `AppScope` from token claims. */
