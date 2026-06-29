@@ -54,9 +54,7 @@ export const CLAUDE_CODE_PROVIDER_ID = "claude-code";
 // The shared, no-forge Anthropic OAuth-gateway policy (OAuth-beta merge, bearer
 // swap, x-api-key drop, auth-error envelope) lives in
 // `@appstrate/core/claude-oauth-gateway` so this chat gateway and the sidecar
-// run gateway cannot drift. Re-exported so existing callers/tests keep the
-// `anthropicAuthErrorResponse` symbol on this module.
-export { anthropicAuthErrorResponse };
+// run gateway cannot drift.
 
 /** URL prefix this gateway is mounted under (within the llm-proxy router). */
 const ROUTE_PREFIX = "/api/llm-proxy/claude-code-sdk";

@@ -421,7 +421,3 @@ export async function handleImportBundle(
   }
   return importBundle(bundle, scope, userId);
 }
-
-// Re-export the root extractor so the route doesn't have to reach into
-// `@appstrate/afps-runtime/bundle` directly for the bundle-of-one path.
-export { extractRootFromAfps };

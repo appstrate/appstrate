@@ -29,7 +29,6 @@ import {
   serializeRecord,
 } from "./integrity.ts";
 import {
-  BUNDLE_FORMAT_VERSION,
   parsePackageIdentity,
   type AfpsManifest,
   type Bundle,
@@ -349,5 +348,3 @@ function sha256Digest(data: Uint8Array): Buffer {
   h.update(data);
   return h.digest();
 }
-
-export { BUNDLE_FORMAT_VERSION };

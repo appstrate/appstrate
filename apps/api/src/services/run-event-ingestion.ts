@@ -28,7 +28,6 @@ import { runs, TERMINAL_RUN_EVENT_TYPES, type RunResultPayload } from "@appstrat
 import { type CloudEventEnvelope } from "@appstrate/afps-runtime/events";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
-import { notFound } from "../lib/errors.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
@@ -969,7 +968,3 @@ function mapTerminalStatus(result: RunResult): "success" | "failed" | "timeout" 
   if (result.status) return result.status;
   return result.error ? "failed" : "success";
 }
-
-// notFound is imported for symmetry with gone() — callers (the middleware)
-// map null lookups to 404. Exported so the middleware has a single source.
-export { notFound };
