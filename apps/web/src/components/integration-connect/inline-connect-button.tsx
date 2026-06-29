@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Plug, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,15 +9,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { FieldsConnectModal } from "./fields-connect-modal";
-import { useIntegrationOAuthPopup } from "./use-integration-oauth-popup";
+import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
 
 /**
  * Agent-driven inline connect/upgrade trigger.
  *
- * Mono-auth integrations (Gmail, ClickUp): single button — primary click
- * routes to the OAuth popup or the credentials modal based on auth type.
+ * Every auth type (oauth2 / api_key / basic / mtls / custom) goes through the
+ * unified hosted connect portal (issue #769): one `openPopup` call mints a
+ * connect session and opens its `connect_url`, which dispatches server-side to
+ * the provider OAuth screen or the hosted credential form. The button therefore
+ * never branches on the auth type and the credential secret never touches this
+ * bundle.
  *
  * Multi-auth integrations (GitHub: oauth + pat): same primary button
  * with a chevron that opens a dropdown listing every declared auth so
@@ -109,11 +111,7 @@ export function InlineConnectButton({
 }: InlineConnectButtonProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: detail } = useIntegrationDetail(packageId);
-  const { openPopup, isPending } = useIntegrationOAuthPopup();
-  // When set, the credentials modal renders for that authKey. Unifies
-  // the single-auth and multi-auth paths — both eventually call
-  // setFieldsAuthKey(key) for non-oauth types.
-  const [fieldsAuthKey, setFieldsAuthKey] = useState<string | null>(null);
+  const { openPopup, isPending } = useHostedConnectPopup();
 
   const auths = detail?.manifest?.auths ?? {};
   const authKeys = Object.keys(auths);
@@ -121,29 +119,27 @@ export function InlineConnectButton({
   // for the whole integration. When the button is locked to a section's
   // authKey, render the single-button path bound to that method.
   const showDropdown = authKeys.length > 1 && !lockToAuthKey;
-  const displayName = detail?.manifest.display_name ?? packageId;
 
   // Guard: a fresh agent run might 412 before the integration manifest
   // is in cache. Disable the trigger until the detail loads rather than
-  // popping a modal with no auth metadata.
+  // opening a portal with no auth metadata.
   const disabled = authKeys.length === 0 || isPending;
 
+  // Every auth type goes through the hosted connect portal — the openPopup
+  // call mints a session and opens its connect_url, which dispatches to the
+  // OAuth screen or the hosted credential form server-side.
   const triggerConnect = (key: string) => {
-    const auth = auths[key];
-    if (!auth) return;
-    if (auth.type === "oauth2") {
-      void openPopup({
-        packageId,
-        authKey: key,
-        ...(scopes ? { scopes } : {}),
-        ...(forceAccountSelect ? { forceAccountSelect: true } : {}),
-        ...(connectionId ? { connectionId } : {}),
-      })
-        .then(() => onConnected?.())
-        .catch(() => {});
-    } else {
-      setFieldsAuthKey(key);
-    }
+    if (!auths[key]) return;
+    // openPopup never rejects — every failure path surfaces its own toast and
+    // resolves — so a fired-and-forgotten `.then` is enough; `onConnected` means
+    // "re-read the truth", not "connect succeeded".
+    void openPopup({
+      packageId,
+      authKey: key,
+      ...(scopes ? { scopes } : {}),
+      ...(forceAccountSelect ? { forceAccountSelect: true } : {}),
+      ...(connectionId ? { connectionId } : {}),
+    }).then(() => onConnected?.());
   };
 
   const text =
@@ -155,7 +151,6 @@ export function InlineConnectButton({
         : t("detail.integrationConnect"));
   const Icon = intent === "connect" ? Plug : RefreshCw;
   const tooltip = intent === "upgrade" ? t("detail.integrationUpgradeTooltip") : undefined;
-  const fieldsAuth = fieldsAuthKey ? auths[fieldsAuthKey] : null;
 
   return (
     <>
@@ -198,18 +193,6 @@ export function InlineConnectButton({
           <Icon className="mr-1 size-3" />
           {text}
         </Button>
-      )}
-      {fieldsAuth && fieldsAuthKey && (
-        <FieldsConnectModal
-          open={true}
-          onClose={() => setFieldsAuthKey(null)}
-          packageId={packageId}
-          authKey={fieldsAuthKey}
-          auth={fieldsAuth}
-          displayName={displayName}
-          {...(connectionId ? { connectionId } : {})}
-          {...(onConnected ? { onConnected: () => onConnected() } : {})}
-        />
       )}
     </>
   );

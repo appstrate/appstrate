@@ -111,6 +111,22 @@ const envSchema = z
       .refine((v) => v.split(",").every((k) => k.length >= 16), {
         message: "UPLOAD_SIGNING_SECRET: each comma-separated key must be at least 16 chars",
       }),
+    // Dedicated HMAC secret for hosted-connect-portal session tokens (issue
+    // #769) — short-lived capability tokens that gate the unified integration
+    // connect flow. Optional: when unset, the hosted connect surface is
+    // disabled (the mint route 503s) and existing OAuth/fields paths are
+    // unaffected. Same comma-separated keyring rotation as the upload secret;
+    // each key ≥16 chars. Keep separate from BETTER_AUTH_SECRET / the upload
+    // secret so each can rotate independently.
+    CONNECT_SESSION_SECRET: z
+      .string()
+      .refine((v) => v.split(",").every((k) => k.length >= 16), {
+        message: "CONNECT_SESSION_SECRET: each comma-separated key must be at least 16 chars",
+      })
+      .optional(),
+    // TTL for hosted-connect-portal session tokens, in milliseconds. Short by
+    // design — a connect token is a one-shot capability, not a session.
+    CONNECT_SESSION_TTL_MS: z.coerce.number().int().positive().default(600_000),
     // S3 storage (optional — falls back to filesystem when S3_BUCKET is absent)
     S3_BUCKET: z.string().optional(),
     S3_REGION: z.string().optional(),

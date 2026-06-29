@@ -182,7 +182,6 @@ function ManagedIntegrationCard({
         agentPackageId={agentPackageId}
         manifest={manifest}
         authStatuses={authStatuses}
-        displayName={displayName}
         agentTools={agentTools}
         agentScopes={agentScopes}
       />

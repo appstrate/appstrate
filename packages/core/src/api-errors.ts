@@ -249,6 +249,15 @@ export function badGateway(detail: string): ApiError {
   });
 }
 
+export function serviceUnavailable(detail: string): ApiError {
+  return new ApiError({
+    status: 503,
+    code: "service_unavailable",
+    title: "Service Unavailable",
+    detail,
+  });
+}
+
 export function systemEntityForbidden(type: string, id: string, verb = "modify"): ApiError {
   return new ApiError({
     status: 403,

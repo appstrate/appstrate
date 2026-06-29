@@ -14,9 +14,21 @@
  *   - `POST   /:packageId/auths/:authKey/oauth-clients`  — admin: register a custom OAuth client
  *   - `PUT    /:packageId/oauth-clients/:clientId`   — admin: rotate a custom OAuth client
  *   - `DELETE /:packageId/oauth-clients/:clientId`   — admin: delete a custom OAuth client
- *   - `POST   /:packageId/auths/:authKey/connect/oauth2`  — initiate OAuth2 PKCE flow
- *   - `POST   /:packageId/auths/:authKey/connect/fields`  — connect api_key/basic/custom
+ *   - `POST   /:packageId/auths/:authKey/connect/session` — Porte A: mint a hosted
+ *       Connect portal session (interactive, auth-type-agnostic). Primary surface.
+ *   - `POST   /:packageId/auths/:authKey/connect/oauth2`  — Porte B (programmatic):
+ *       headless OAuth2 start — returns an `auth_url` the caller redirects to itself.
+ *   - `POST   /:packageId/auths/:authKey/connect/fields`  — Porte B (programmatic):
+ *       import a connection by submitting api_key/basic/custom credentials directly.
  *   - `GET    /callback`                              — OAuth2 callback handler
+ *
+ * Two connection-establishment surfaces, mirroring the Nango split:
+ *   - Porte A — the hosted **Connect** portal: the end-user enters the secret on a
+ *     platform-hosted form (or the provider's OAuth screen). The secret never
+ *     transits the caller, the model, or the chat bundle. Use from agents/UI.
+ *   - Porte B — the **programmatic/headless** surface for backends that already
+ *     hold the credential (`connect/fields` = "import a connection") or want to
+ *     drive the OAuth redirect themselves (`connect/oauth2`). Server-to-server.
  *
  * Destructive connection delete moved to `DELETE /api/me/connections/:id` — the
  * single owner-scoped entry point. The agent-surface "unlink" button is gone:
@@ -85,6 +97,18 @@ import {
   deleteOrgDefault,
 } from "../services/integration-org-defaults-service.ts";
 import { oauthStateStore } from "../services/connect/oauth-state-store.ts";
+import {
+  buildConnectUrl,
+  readConnectToken,
+  consumeJti,
+  setConnectPageCookie,
+  readConnectPageCookie,
+  clearConnectPageCookie,
+  scopeFromClaims,
+  actorFromClaims,
+  csrfMatches,
+  CONNECT_CSRF_HEADER,
+} from "../services/connect/connect-session.ts";
 
 // ─────────────────────────────────────────────
 // Zod schemas
@@ -97,7 +121,9 @@ import { oauthStateStore } from "../services/connect/oauth-state-store.ts";
 // integration manifest's `credentials.schema` (AJV) downstream. Narrowing to
 // `Record<string, string>` here would silently reject every well-formed
 // non-string credential shape before AJV ever got to see it.
-export const connectFieldsSchema = z.object({
+// Porte B programmatic import — the backend already holds the credential and
+// submits it directly ("import a connection", Nango `POST /connection`).
+export const importConnectionSchema = z.object({
   credentials: z.record(z.string(), z.unknown()).refine((c) => Object.keys(c).length > 0, {
     message: "credentials must contain at least one field",
   }),
@@ -112,6 +138,22 @@ export const connectOAuthSchema = z.object({
   scopes: z.array(z.string()).optional(),
   force_account_select: z.boolean().optional(),
   connection_id: z.uuid().optional(),
+});
+
+// Mint a hosted-connect-portal session — auth-type-agnostic (issue #769). The
+// caller scopes the connect (optional OAuth scopes + reconnect target); the
+// server dispatches OAuth vs credential-form when the URL is opened.
+export const connectSessionSchema = z.object({
+  scopes: z.array(z.string()).optional(),
+  force_account_select: z.boolean().optional(),
+  connection_id: z.uuid().optional(),
+});
+
+// Hosted-form submit — credentials only; all context comes from the page cookie.
+export const connectSubmitSchema = z.object({
+  credentials: z.record(z.string(), z.unknown()).refine((c) => Object.keys(c).length > 0, {
+    message: "credentials must contain at least one field",
+  }),
 });
 
 export const setDefaultClientSchema = z.object({
@@ -510,6 +552,10 @@ export function createIntegrationsRouter() {
 
   // ─── Connect flows ─────────────────────────
 
+  // Porte B — import a connection (programmatic). The caller submits the
+  // credential it already holds; the connection is created directly. No hosted
+  // form, no end-user interaction. The interactive path is the Connect portal
+  // (`connect/session`) — use that whenever a human/agent supplies the secret.
   router.post(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/connect/fields",
     requirePermission("integrations", "connect"),
@@ -519,7 +565,7 @@ export function createIntegrationsRouter() {
       const scope = getAppScope(c);
       const actor = getActor(c);
       await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
-      const body = parseBody(connectFieldsSchema, await c.req.json());
+      const body = parseBody(importConnectionSchema, await c.req.json());
       try {
         const { auth } = await readIntegrationAuth(scope, packageId, authKey);
         if (auth.type === "oauth2") {
@@ -623,6 +669,182 @@ export function createIntegrationsRouter() {
       return c.json({ auth_url: result.redirectUrl, state: result.state });
     },
   );
+
+  // ─── Hosted connect portal (issue #769) ────
+  //
+  // Unified, auth-type-agnostic connect surface. The agent (or any client)
+  // mints a session here and receives ONE `connect_url`; opening it dispatches
+  // to the provider's OAuth screen (oauth2) or the hosted credential form
+  // (api_key/basic/mtls/custom). The credential secret never transits the model
+  // or the chat bundle — it is entered directly on the hosted form.
+  router.post(
+    "/:packageId{@[^/]+/[^/]+}/auths/:authKey/connect/session",
+    requirePermission("integrations", "connect"),
+    async (c) => {
+      const packageId = c.req.param("packageId")!;
+      const authKey = c.req.param("authKey")!;
+      const scope = getAppScope(c);
+      const actor = getActor(c);
+      await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
+      const body = parseBody(connectSessionSchema, await c.req.json().catch(() => ({})));
+      // Validate the auth exists (404/409 surfaced now, not after the redirect).
+      await readIntegrationAuth(scope, packageId, authKey);
+      const { connectUrl, expiresAt } = buildConnectUrl({
+        org_id: scope.orgId,
+        application_id: scope.applicationId,
+        ...(actor.type === "user" ? { user_id: actor.id } : { end_user_id: actor.id }),
+        package_id: packageId,
+        auth_key: authKey,
+        ...(body.connection_id ? { connection_id: body.connection_id } : {}),
+        ...(body.scopes ? { scopes: body.scopes } : {}),
+        ...(body.force_account_select ? { force_account_select: true } : {}),
+      });
+      return c.json({ connect_url: connectUrl, expires_at: expiresAt });
+    },
+  );
+
+  // GET /connect/start?token=… — the single dispatch entry point. Verifies the
+  // capability token, consumes its jti (single-use), pins a page cookie, then
+  // redirects: oauth2 → provider screen; else → the hosted SPA form at /connect.
+  router.get("/connect/start", async (c) => {
+    // The single-use capability token rides this request's query string. Strip
+    // the Referer entirely so the token can never leak to the provider (oauth2
+    // redirect) or any downstream navigation — defence in depth on top of the
+    // single-use jti + short TTL (the modern default policy already drops the
+    // query cross-origin, but `no-referrer` removes the origin too).
+    c.header("Referrer-Policy", "no-referrer");
+    const token = c.req.query("token");
+    if (!token) return c.html(popupHtmlError("Missing connect token", {}, 4000), 400);
+    const claims = readConnectToken(token);
+    if (!claims) return c.html(popupHtmlError("This connect link is invalid or expired.", {}), 410);
+    const scope = scopeFromClaims(claims);
+    const actor = actorFromClaims(claims);
+    // Resolve the integration BEFORE consuming the jti — if the auth no longer
+    // exists, the capability token stays unburned so the caller can retry once
+    // the integration is back, rather than being forced to re-mint.
+    let auth: Awaited<ReturnType<typeof readIntegrationAuth>>["auth"];
+    try {
+      ({ auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key));
+    } catch {
+      return c.html(popupHtmlError("This integration is no longer available.", {}), 410);
+    }
+    // Single-use: burn the jti only once we know the link is actionable.
+    if (!(await consumeJti(claims.jti, claims.exp))) {
+      return c.html(popupHtmlError("This connect link has already been used.", {}), 410);
+    }
+
+    if (auth.type === "oauth2") {
+      // Same scope-union semantics as POST /connect/oauth2.
+      const granted = claims.connection_id
+        ? await getCurrentScopesGranted({
+            scope,
+            integrationId: claims.package_id,
+            authKey: claims.auth_key,
+            actor,
+            connectionId: claims.connection_id,
+          })
+        : [];
+      const defaultScopes = (auth as { default_scopes?: string[] }).default_scopes ?? [];
+      const scopes = [...new Set([...defaultScopes, ...(claims.scopes ?? []), ...granted])];
+      const strategy = resolveStrategy(auth);
+      if (!strategy.begin) {
+        return c.html(popupHtmlError("This integration cannot be connected.", {}), 500);
+      }
+      // `begin` can throw on a transient/structural fault (OAuth client removed
+      // between mint and click, provider discovery error, network). Without this
+      // guard the throw escapes to the global error handler, which renders raw
+      // `application/problem+json` inside the popup instead of the friendly
+      // popupHtmlError page every other failure path here returns. The jti is
+      // already burned, so the user re-mints (one click) — surface a readable
+      // error rather than a JSON blob.
+      let result: Awaited<ReturnType<NonNullable<typeof strategy.begin>>>;
+      try {
+        result = await strategy.begin(
+          {
+            scope,
+            actor,
+            integrationId: claims.package_id,
+            authKey: claims.auth_key,
+            ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+          },
+          { scopes, forceAccountSelect: claims.force_account_select ?? false },
+        );
+      } catch (err) {
+        logger.error("Hosted connect OAuth begin failed", {
+          err: String(err),
+          packageId: claims.package_id,
+          authKey: claims.auth_key,
+        });
+        return c.html(popupHtmlError("Could not start the connection. Please try again.", {}), 502);
+      }
+      return c.redirect(result.redirectUrl);
+    }
+
+    // Non-oauth → hand off to the hosted SPA form. Pin the page cookie so the
+    // form can read context via GET /connect/context (no token in the URL). The
+    // oauth2 branch above never reaches here, so the cookie is set only when the
+    // hosted form actually needs it.
+    setConnectPageCookie(c, claims);
+    return c.redirect("/connect");
+  });
+
+  // GET /connect/context — the hosted SPA form reads its render context here
+  // (page cookie). Returns the auth manifest + display metadata, never a secret.
+  router.get("/connect/context", async (c) => {
+    const claims = readConnectPageCookie(c);
+    if (!claims) throw notFound("No active connect session");
+    const scope = scopeFromClaims(claims);
+    const { manifest, auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
+    return c.json({
+      package_id: claims.package_id,
+      auth_key: claims.auth_key,
+      display_name: manifest.display_name ?? claims.package_id,
+      icon: manifest.icon ?? null,
+      auth,
+      connection_id: claims.connection_id ?? null,
+      csrf: claims.csrf ?? null,
+    });
+  });
+
+  // POST /connect/submit — hosted-form credential submit. Context + actor come
+  // from the page cookie; the request carries only the credentials + CSRF nonce.
+  router.post("/connect/submit", async (c) => {
+    const claims = readConnectPageCookie(c);
+    if (!claims) throw notFound("No active connect session");
+    // Double-submit CSRF: the nonce minted into the page cookie must match the
+    // header the SPA echoes back (read from GET /connect/context). Compared in
+    // constant time so the nonce can't be recovered by timing.
+    if (!csrfMatches(claims, c.req.header(CONNECT_CSRF_HEADER))) {
+      throw invalidRequest("Invalid or missing CSRF token");
+    }
+    const scope = scopeFromClaims(claims);
+    const actor = actorFromClaims(claims);
+    const body = parseBody(connectSubmitSchema, await c.req.json().catch(() => ({})));
+    try {
+      const { auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
+      if (auth.type === "oauth2") {
+        throw invalidRequest("This integration uses OAuth — open the connect link instead");
+      }
+      const conn = await resolveStrategy(auth, {
+        connectToolExecutor: createConnectRunExecutor(),
+      }).complete(
+        {
+          scope,
+          actor,
+          integrationId: claims.package_id,
+          authKey: claims.auth_key,
+          ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+        },
+        { kind: "fields", credentials: body.credentials },
+      );
+      clearConnectPageCookie(c);
+      return c.json({ ok: true, connection: conn });
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      logger.error("Hosted connect submit failed", { err: String(err) });
+      throw internalError();
+    }
+  });
 
   // DELETE /:packageId/connections/:connectionId was removed — destructive
   // delete is now owner-scoped via `DELETE /api/me/connections/:connectionId`

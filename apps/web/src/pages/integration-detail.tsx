@@ -25,9 +25,10 @@
  *     keywords.
  *   - Versions — read-only release history (non-system packages only).
  *
- * OAuth connect drives a popup against `/api/integrations/.../connect/oauth2`,
- * polls for popup close, then refetches the detail to surface the new
- * connection row.
+ * Connect drives a popup through the hosted connect portal (issue #769) —
+ * mint `/connect/session`, open the returned `connect_url` (which dispatches to
+ * the provider OAuth screen or the hosted credential form), then refetch the
+ * detail to surface the new connection row.
  */
 
 import { useState } from "react";

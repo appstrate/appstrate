@@ -695,9 +695,11 @@ export const integrationsPaths = {
   },
   "/api/integrations/{packageId}/auths/{authKey}/connect/fields": {
     post: {
-      operationId: "connectIntegrationFields",
+      operationId: "importIntegrationConnection",
       tags: ["Integrations"],
-      summary: "Connect an api_key / basic / custom integration auth",
+      summary: "Import a connection by submitting credentials directly (programmatic)",
+      description:
+        "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -743,7 +745,9 @@ export const integrationsPaths = {
     post: {
       operationId: "initiateIntegrationOAuth",
       tags: ["Integrations"],
-      summary: "Initiate the OAuth2 PKCE flow for an integration auth",
+      summary: "Headless OAuth2 PKCE start — returns an authorize URL (programmatic)",
+      description:
+        "Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the shared `/callback`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -784,6 +788,184 @@ export const integrationsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/auths/{authKey}/connect/session": {
+    post: {
+      operationId: "initiateIntegrationConnect",
+      tags: ["Integrations"],
+      summary: "Mint a hosted Connect portal session (interactive, auth-type-agnostic)",
+      description:
+        "Porte A — the hosted **Connect** portal (issue #769), the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`). Requires `CONNECT_SESSION_SECRET` to be configured (503 otherwise).",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        packageIdParam,
+        authKeyParam,
+      ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                scopes: { type: "array", items: { type: "string" } },
+                force_account_select: { type: "boolean" },
+                connection_id: {
+                  type: "string",
+                  format: "uuid",
+                  description: "Reconnect/upgrade an existing connection in place.",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Connect URL",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["connect_url", "expires_at"],
+                properties: {
+                  connect_url: { type: "string", format: "uri" },
+                  expires_at: {
+                    type: "integer",
+                    description: "Absolute expiry of the connect session (epoch ms).",
+                  },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "503": {
+          description: "Hosted connect portal not configured",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/integrations/connect/start": {
+    get: {
+      operationId: "startIntegrationConnect",
+      tags: ["Integrations"],
+      summary: "Hosted connect dispatch (token)",
+      description:
+        "Public entry the connect URL points at. Verifies the single-use session token, pins a page cookie, then 302-redirects to the provider OAuth screen (oauth2) or the hosted form (non-oauth). On failure returns an HTML error page. Authenticated by the signed token, not a session.",
+      parameters: [
+        {
+          name: "token",
+          in: "query",
+          required: true,
+          schema: { type: "string" },
+          description: "Connect-session capability token.",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "HTML error page (token missing/invalid/used) — see 4xx detail.",
+          content: { "text/html": { schema: { type: "string" } } },
+        },
+        "302": { description: "Redirect to the provider OAuth screen or the hosted form." },
+        "400": { description: "Missing token (HTML error page)." },
+        "410": { description: "Invalid, expired, or already-used token (HTML error page)." },
+      },
+    },
+  },
+  "/api/integrations/connect/context": {
+    get: {
+      operationId: "getIntegrationConnectContext",
+      tags: ["Integrations"],
+      summary: "Hosted form render context (page cookie)",
+      description:
+        "Returns the auth manifest + display metadata for the hosted credential form. Authenticated by the page cookie set during dispatch. Never returns a secret.",
+      responses: {
+        "200": {
+          description: "Hosted connect context",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["package_id", "auth_key", "display_name", "auth"],
+                properties: {
+                  package_id: { type: "string" },
+                  auth_key: { type: "string" },
+                  display_name: { type: "string" },
+                  icon: { type: ["string", "null"] },
+                  auth: { type: "object", additionalProperties: true },
+                  connection_id: { type: ["string", "null"] },
+                  csrf: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/integrations/connect/submit": {
+    post: {
+      operationId: "submitIntegrationConnect",
+      tags: ["Integrations"],
+      summary: "Hosted form credential submit (page cookie + CSRF)",
+      description:
+        "Persists credentials entered on the hosted form. Context + actor come from the page cookie; the request carries only the credentials and echoes the CSRF nonce in the `x-connect-csrf` header.",
+      parameters: [
+        {
+          name: "x-connect-csrf",
+          in: "header",
+          required: true,
+          schema: { type: "string" },
+          description: "Double-submit CSRF nonce (from GET /connect/context).",
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["credentials"],
+              properties: {
+                credentials: { type: "object", additionalProperties: true },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Connection stored",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["ok", "connection"],
+                properties: {
+                  ok: { type: "boolean" },
+                  connection: integrationConnectionSchema,
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },

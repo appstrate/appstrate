@@ -62,7 +62,7 @@ const ERROR_SENTINEL = "APPSTRATE_CONNECT_ERROR:";
  * `{{name}}` placeholders only on strings (a URL or header value template
  * has no notion of "substitute a number"), so non-string credential values
  * are JSON-stringified at this boundary. The route layer's
- * `connectFieldsSchema` accepts JSON-typed credentials per JSON Schema
+ * `importConnectionSchema` accepts JSON-typed credentials per JSON Schema
  * 2020-12 §7.5; this is where they get serialized for the wire-level
  * substitution contract.
  */

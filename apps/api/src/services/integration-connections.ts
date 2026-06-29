@@ -2112,7 +2112,8 @@ export function serializeIntegrationConnection(
 
 // The api_key/basic/custom paste-the-bag connect flow now lives in
 // `services/connect/fields-strategy.ts` (FieldsStrategy) — selected via
-// `resolveStrategy` and reached through the connect/fields route adapter.
+// `resolveStrategy`, reached through the programmatic import-connection route
+// (`POST .../connect/fields`) and the hosted Connect portal submit.
 
 // ─────────────────────────────────────────────
 // Aggregate views for the marketplace UI

@@ -32,6 +32,18 @@ describe("extractAuthOffer", () => {
     });
   });
 
+  it("reads the unified connect_url offer (issue #769)", () => {
+    // initiateIntegrationConnect returns { connect_url, expires_at } — no state.
+    expect(
+      extractAuthOffer({ connect_url: "https://app/api/integrations/connect/start?token=t" }),
+    ).toEqual({ authUrl: "https://app/api/integrations/connect/start?token=t", state: undefined });
+    expect(
+      extractAuthOffer({
+        content: [{ type: "text", text: JSON.stringify({ connect_url: "https://x/c" }) }],
+      }),
+    ).toEqual({ authUrl: "https://x/c", state: undefined });
+  });
+
   it("reads a direct body and camelCase keys", () => {
     expect(extractAuthOffer(BODY)).toEqual({ authUrl: BODY.auth_url, state: "abc-123" });
     expect(extractAuthOffer({ authUrl: "https://x/y", state: "s" })).toEqual({

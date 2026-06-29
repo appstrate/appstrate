@@ -35,6 +35,7 @@ import { useApplicationResolver } from "./hooks/use-current-application";
 import { useTheme } from "./stores/theme-store";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
+import { HostedConnectPage } from "./pages/hosted-connect";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
@@ -325,6 +326,18 @@ export function App() {
       <div className="flex min-h-screen items-center justify-center">
         <Spinner />
       </div>
+    );
+  }
+
+  // Hosted connect portal (issue #769) — standalone, auth-agnostic. Rendered
+  // before every auth/bootstrap gate because it authenticates via its own
+  // httpOnly page cookie (pinned by the dispatch redirect), not the platform
+  // session: it must work for embedded end-users with no Better Auth user.
+  if (window.location.pathname === "/connect") {
+    return (
+      <ErrorBoundary>
+        <HostedConnectPage />
+      </ErrorBoundary>
     );
   }
 

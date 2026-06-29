@@ -354,7 +354,6 @@ function IntegrationOverrideRow({
         agentPackageId={agentPackageId}
         manifest={detail.manifest}
         authStatuses={detail.auths}
-        displayName={displayName}
         agentTools={integration.tools}
         agentScopes={undefined}
         persistence={{ mode: "override", value, onChange }}
