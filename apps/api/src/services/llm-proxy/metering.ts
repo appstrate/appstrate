@@ -193,25 +193,41 @@ export interface MeteredForwardOptions {
   onUpstreamError?: (status: number) => void;
 }
 
+/** `controller.close()` throws if the stream is already closed/errored (e.g. the
+ * consumer cancelled mid-pull). That is not a teardown — swallow it. */
+function closeSafely(controller: ReadableStreamDefaultController<Uint8Array>): void {
+  try {
+    controller.close();
+  } catch {
+    // already closed/errored — nothing to do
+  }
+}
+
 /**
- * Wrap the client-facing SSE stream so a teardown that rejects/throws AFTER
- * the response headers are already on the wire is caught HERE — at the seam we
- * own — instead of escaping the request lifecycle as an unhandled rejection.
+ * Wrap an SSE source so a teardown that rejects/throws AFTER the response
+ * headers are already on the wire is caught HERE — at the seam we own —
+ * instead of escaping the request lifecycle as an unhandled rejection.
  *
- * Why this is the root-cause fix: the upstream body is `tee()`d into a
- * client branch and a metering branch. The metering tap is already guarded
- * (its `.catch` logs + no-ops). The client branch, returned as the `Response`
- * body and sometimes `pipeThrough`-swapped, has no such guard — when an
- * upstream gateway breaks mid-flux the `tee()` branch (and any internal
- * `pipeThrough` pipe) rejects with no request `try/catch` left to catch it. On
- * a single-process multi-tenant server that lands as a process-level
- * `unhandledRejection` — one tenant's broken stream threatening every tenant.
+ * Context: the upstream body is `tee()`d into a client branch and a metering
+ * branch. The metering tap is already guarded (its `.catch` logs + no-ops).
+ * The client branch — returned as the `Response` body, sometimes
+ * `pipeThrough`-swapped for model aliases — was not. When an upstream gateway
+ * breaks mid-flux the `tee()` branch rejects with no request `try/catch` left
+ * to catch it. On a single-process multi-tenant server that lands as a
+ * process-level `unhandledRejection` — one tenant's broken stream threatening
+ * every tenant.
  *
- * We pump the source through our own reader inside a `try/catch`: a mid-stream
- * error closes the client stream cleanly (the caller sees a truncated SSE
- * stream — the best achievable once upstream broke) and is logged. Identity
- * passthrough otherwise — `pull` is demand-driven, so backpressure is
- * preserved and nothing is buffered.
+ * IMPORTANT — wrap BEFORE the alias-swap `pipeThrough`, not after. The guarded
+ * wrapper never errors (it closes cleanly on an upstream reject), so the
+ * internal `pipeTo` that `pipeThrough` runs sees a normal close instead of a
+ * rejected abort. That removes the leak regardless of whether the runtime
+ * marks `pipeThrough`'s internal pipe promise `[[handled]]` — guarding the
+ * consumer read alone would not. The swap transform then flushes its buffered
+ * partial line on that clean close.
+ *
+ * `pull` is demand-driven, so backpressure is preserved and nothing is
+ * buffered. `onTeardownError` fires only for a genuine upstream read rejection
+ * — never for a consumer-cancel close race (those are swallowed).
  */
 export function guardSseTeardown(
   source: ReadableStream<Uint8Array>,
@@ -220,16 +236,25 @@ export function guardSseTeardown(
   const reader = source.getReader();
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
+      let result: Awaited<ReturnType<typeof reader.read>>;
       try {
-        const { done, value } = await reader.read();
-        if (done) {
-          controller.close();
-          return;
-        }
-        controller.enqueue(value);
+        result = await reader.read();
       } catch (err) {
+        // The only genuine teardown signal: the upstream/tee branch rejected
+        // mid-flux. Report once, then close the client stream cleanly (the
+        // caller sees a truncated SSE stream — the best achievable here).
         onTeardownError(err);
-        controller.close();
+        closeSafely(controller);
+        return;
+      }
+      if (result.done) {
+        closeSafely(controller);
+        return;
+      }
+      try {
+        controller.enqueue(result.value);
+      } catch {
+        // Consumer cancelled between read and enqueue — not a teardown.
       }
     },
     cancel(reason) {
@@ -294,17 +319,18 @@ export async function forwardMeteredResponse(
         });
       });
     const headers = cloneResponseHeaders(upstream.headers);
-    const swapped = swap ? clientStream.pipeThrough(createSseModelSwapStream(swap)) : clientStream;
-    // Guard the client-facing branch: an upstream teardown that rejects AFTER
-    // the response is on the wire is caught at the seam we own (see
-    // {@link guardSseTeardown}) instead of escaping the request lifecycle.
-    const clientStream2 = guardSseTeardown(swapped, (err) => {
+    // Guard the raw client branch FIRST (before the alias-swap pipe) so the
+    // swapped stream is fed by a source that never errors — see
+    // {@link guardSseTeardown} for why guarding after `pipeThrough` would leave
+    // its internal pipe promise exposed.
+    const guarded = guardSseTeardown(clientStream, (err) => {
       logger.error(`${logLabel}: SSE client stream teardown failed`, {
         runId: ctx.runId,
         presetId: ctx.presetId,
         error: getErrorMessage(err),
       });
     });
+    const clientStream2 = swap ? guarded.pipeThrough(createSseModelSwapStream(swap)) : guarded;
     return new Response(clientStream2, { status: upstream.status, headers });
   }
 
