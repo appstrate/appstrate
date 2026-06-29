@@ -7,7 +7,7 @@
 
 import type { WidgetProps } from "@rjsf/utils";
 import Select, { type StylesConfig } from "react-select";
-import { cn } from "./cn.ts";
+import { cn } from "../cn.ts";
 import { LABEL_CLASS } from "./primitives.tsx";
 export { FileWidget } from "./file-widget.tsx";
 

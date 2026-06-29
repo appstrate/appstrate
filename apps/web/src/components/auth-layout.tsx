@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 import { ThemeToggle } from "./theme-toggle";
 
 interface AuthLayoutProps {

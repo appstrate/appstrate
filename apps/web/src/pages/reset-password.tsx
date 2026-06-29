@@ -7,7 +7,7 @@ import { AlertCircle, CheckCircle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 import { AuthLayout } from "../components/auth-layout";
 import { AuthSuccessState } from "../components/auth-success-state";
 import { useAuth } from "../hooks/use-auth";

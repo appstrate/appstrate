@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 import { Unplug, Pencil, Check, X } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 import {
   useMyConnections,
   useDisconnectIntegrationConnection,

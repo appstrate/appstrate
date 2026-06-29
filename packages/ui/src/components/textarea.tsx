@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as React from "react";
-import { cn } from "./lib/utils.ts";
+import { cn } from "../cn.ts";
 
 const Textarea = React.forwardRef<
   HTMLTextAreaElement,

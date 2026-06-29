@@ -5,7 +5,7 @@ import { JsonView as JsonViewLite, allExpanded, defaultStyles } from "react-json
 import "react-json-view-lite/dist/index.css";
 import { Copy, Check } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 
 interface JsonViewProps {
   data: unknown;

@@ -21,7 +21,7 @@ import type {
 } from "@rjsf/utils";
 import { getSubmitButtonOptions } from "@rjsf/utils";
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
-import { cn } from "./cn.ts";
+import { cn } from "../cn.ts";
 import { Button, INPUT_CLASS, LABEL_CLASS } from "./primitives.tsx";
 import type { SchemaFormContext } from "./context.ts";
 

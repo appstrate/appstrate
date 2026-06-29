@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Check, Sparkles } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 import { PLAN_ICONS, PLAN_DESCRIPTION_KEYS, type BillingPlanDetail } from "../hooks/use-billing";
 
 interface PlanCardProps {

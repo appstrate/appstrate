@@ -24,7 +24,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
-} from "@/components/ui/sidebar";
+} from "@appstrate/ui/components/sidebar";
 
 function getInitials(name: string): string {
   return name

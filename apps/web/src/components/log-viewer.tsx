@@ -14,7 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 import { formatTimestamp, typeColors, levelColors, type LogEntry } from "./log-utils";
 
 const levelConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {

@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 
 export type FormFieldType =
   | "text"

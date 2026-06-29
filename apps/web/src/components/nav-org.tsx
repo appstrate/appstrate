@@ -30,7 +30,7 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "@/components/ui/sidebar";
+} from "@appstrate/ui/components/sidebar";
 
 export function NavOrg() {
   const { t } = useTranslation();

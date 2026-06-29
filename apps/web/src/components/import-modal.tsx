@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
 import { Modal } from "./modal";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { useImportPackage, useImportFromGithub } from "../hooks/use-mutations";
 import { toast } from "sonner";

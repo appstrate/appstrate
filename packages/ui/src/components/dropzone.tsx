@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Upload, X, File as FileIcon, AlertCircle } from "lucide-react";
-import { cn } from "./lib/utils.ts";
+import { cn } from "../cn.ts";
 
 /** Handed to `upload` so it can report progress and honor cancellation. */
 export interface DropzoneUploadController {

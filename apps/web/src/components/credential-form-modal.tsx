@@ -25,7 +25,7 @@ import { useState } from "react";
 import { useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";

@@ -9,7 +9,7 @@ import { useAppForm } from "../../hooks/use-app-form";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 import { useAuth } from "../../hooks/use-auth";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { GoogleIcon, GitHubIcon } from "../../components/icons";

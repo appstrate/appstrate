@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useWatch } from "react-hook-form";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { useAppForm } from "../../hooks/use-app-form";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";

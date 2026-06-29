@@ -15,7 +15,7 @@ import {
   CommandList,
   CommandSeparator,
 } from "@appstrate/ui/components/command";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 
 interface ScopeMultiSelectProps {
   available: string[];

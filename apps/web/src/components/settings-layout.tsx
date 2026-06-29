@@ -14,7 +14,7 @@ import {
   SidebarInset,
   SidebarMenu,
   SidebarProvider,
-} from "@/components/ui/sidebar";
+} from "@appstrate/ui/components/sidebar";
 import {
   Select,
   SelectContent,

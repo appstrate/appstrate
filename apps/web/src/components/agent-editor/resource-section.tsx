@@ -4,7 +4,7 @@ import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef } from "re
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 import { SectionCard } from "../section-card";
 import {
   usePackageList,

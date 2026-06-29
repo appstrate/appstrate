@@ -35,6 +35,8 @@
   "exports": {
     "./schema-form": "./src/schema-form/index.tsx",
     "./components/*": "./src/components/*.tsx",
+    "./cn": "./src/cn.ts",
+    "./use-mobile": "./src/use-mobile.ts",
     "./vite": "./src/vite.js"
   },
   "dependencies": {
@@ -55,6 +57,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0"
   },
   "peerDependencies": {

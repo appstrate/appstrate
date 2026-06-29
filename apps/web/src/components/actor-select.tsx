@@ -14,7 +14,7 @@ import {
   CommandItem,
   CommandList,
 } from "@appstrate/ui/components/command";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 import { $api } from "../api/client";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useEndUsers, useEndUser } from "../hooks/use-end-users";

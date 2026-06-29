@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Input } from "@appstrate/ui/components/input";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 
 /**
  * A label that turns into an inline text input on click (when editable). Saves

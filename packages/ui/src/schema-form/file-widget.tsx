@@ -7,7 +7,7 @@ import type { WidgetProps } from "@rjsf/utils";
 import { formatBytes as formatSize } from "@appstrate/core/format";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button, LABEL_CLASS } from "./primitives.tsx";
-import { cn } from "./cn.ts";
+import { cn } from "../cn.ts";
 import { createUploader, isUploadUri, type UploadFn } from "./upload-client.ts";
 import { fileMatchesAccept } from "./accept-match.ts";
 import type { SchemaFormContext } from "./context.ts";
