@@ -133,12 +133,23 @@ export function ZaiIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-// Original terminal-prompt glyph (chevron + cursor bar) — OpenCode Go has no
-// single vendor logo (it aggregates many models), so we use a neutral mark.
+// OpenCode Go wordmark — blocky "GO". The brand renders it two-tone (bright
+// strokes + dimmer fills); we keep that distinction theme-safe by drawing the
+// dim blocks at reduced opacity, so the whole mark still derives from
+// currentColor and adapts to light/dark surfaces.
 export function OpenCodeIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
-      <path d="M3.7 4.3 2.3 5.7 8.6 12l-6.3 6.3 1.4 1.4 7-7a1 1 0 0 0 0-1.4l-7-7zM12 18h9.5v2H12z" />
+      {/* bright strokes */}
+      <rect x="10" y="5.3" width="2" height="13.3" />
+      <rect x="2.7" y="8" width="10" height="2.7" />
+      <rect x="14.7" y="8" width="6" height="2.7" />
+      {/* dim fills */}
+      <g opacity="0.55">
+        <rect x="2" y="10.7" width="3.3" height="5.3" />
+        <rect x="5.3" y="13.3" width="2.7" height="2.7" />
+        <rect x="14.7" y="10.7" width="6" height="5.3" />
+      </g>
     </svg>
   );
 }
