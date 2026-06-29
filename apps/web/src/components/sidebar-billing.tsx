@@ -10,7 +10,7 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-} from "@/components/ui/sidebar";
+} from "@appstrate/ui/components/sidebar";
 
 export function SidebarBilling() {
   const { t } = useTranslation();

@@ -29,7 +29,7 @@ import {
   isApiCallToolName,
   readDefaultTools,
 } from "@appstrate/core/integration";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Spinner } from "../spinner";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
 import type { ResourceEntry } from "./types";

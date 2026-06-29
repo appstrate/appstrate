@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@appstrate/ui/components/label";
+import { Input } from "@appstrate/ui/components/input";
+import { Textarea } from "@appstrate/ui/components/textarea";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+} from "@appstrate/ui/components/select";
+import { cn } from "@appstrate/ui/cn";
 
 export type FormFieldType =
   | "text"

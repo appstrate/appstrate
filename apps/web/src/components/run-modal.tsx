@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type RjsfForm from "@rjsf/core";
 import { Modal } from "./modal";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
 import type { SchemaWrapper, JSONSchemaObject } from "@appstrate/core/form";

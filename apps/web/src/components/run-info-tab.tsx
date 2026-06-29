@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Coins, FileCode2 } from "lucide-react";
-import { cn } from "../lib/utils";
+import { cn } from "@appstrate/ui/cn";
 import { JsonView } from "./json-view";
 import { SectionCard } from "./section-card";
 import { EmptyState } from "./page-states";

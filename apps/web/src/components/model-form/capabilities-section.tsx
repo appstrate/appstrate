@@ -12,9 +12,9 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Input } from "@appstrate/ui/components/input";
+import { Label } from "@appstrate/ui/components/label";
 import type { UseFormRegisterReturn } from "react-hook-form";
 
 interface CapabilitiesSectionProps {

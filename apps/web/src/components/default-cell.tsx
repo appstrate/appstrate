@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@appstrate/ui/components/badge";
+import { Button } from "@appstrate/ui/components/button";
 
 /**
  * The "default" toggle shared by every system+DB table where exactly one row is

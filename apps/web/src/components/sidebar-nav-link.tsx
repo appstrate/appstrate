@@ -2,7 +2,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
-import { SidebarMenuItem, SidebarMenuButton } from "@/components/ui/sidebar";
+import { SidebarMenuItem, SidebarMenuButton } from "@appstrate/ui/components/sidebar";
 
 export function SidebarNavLink({
   to,

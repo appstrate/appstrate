@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { Spinner } from "./spinner";
 import type { LucideIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 
 export function LoadingState() {
   return (

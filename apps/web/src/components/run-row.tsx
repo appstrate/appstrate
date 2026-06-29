@@ -6,7 +6,7 @@ import { Shield } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
-import { cn } from "@/lib/utils";
+import { cn } from "@appstrate/ui/cn";
 import { formatDateField } from "../lib/markdown";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 

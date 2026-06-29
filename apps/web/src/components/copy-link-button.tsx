@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
+import { Button } from "@appstrate/ui/components/button";
 import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 
 export function CopyLinkButton({ token }: { token: string }) {

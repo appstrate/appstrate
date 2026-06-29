@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@appstrate/ui/components/badge";
 
 /**
  * The provenance badge shared by every system+DB table (integration OAuth

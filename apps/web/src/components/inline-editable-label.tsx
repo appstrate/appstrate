@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { Input } from "@appstrate/ui/components/input";
+import { cn } from "@appstrate/ui/cn";
 
 /**
  * A label that turns into an inline text input on click (when editable). Saves

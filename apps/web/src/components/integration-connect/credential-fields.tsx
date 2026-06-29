@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useTranslation } from "react-i18next";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@appstrate/ui/components/input";
+import { Label } from "@appstrate/ui/components/label";
+import { Textarea } from "@appstrate/ui/components/textarea";
 import type { IntegrationManifestAuth } from "../../hooks/use-integrations";
 
 /**

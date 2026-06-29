@@ -5,17 +5,17 @@ import { useTranslation } from "react-i18next";
 import { useForm, Controller } from "react-hook-form";
 import { Modal } from "./modal";
 import { RevealedSecret } from "./revealed-secret";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Button } from "@appstrate/ui/components/button";
+import { Badge } from "@appstrate/ui/components/badge";
+import { Input } from "@appstrate/ui/components/input";
+import { Label } from "@appstrate/ui/components/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@appstrate/ui/components/select";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Spinner } from "./spinner";
 import { ScopeMultiSelect } from "./scope-multi-select";

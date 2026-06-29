@@ -36,9 +36,9 @@ import { useTheme } from "./stores/theme-store";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
-import { Separator } from "@/components/ui/separator";
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import { Toaster } from "@/components/ui/sonner";
+import { Separator } from "@appstrate/ui/components/separator";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@appstrate/ui/components/sidebar";
+import { AppToaster } from "./components/app-toaster";
 
 // Module-owned pages live under `apps/web/src/modules/<name>/` and are
 // lazy-loaded so their bundle is never fetched when the corresponding module
@@ -472,7 +472,7 @@ export function App() {
   if (features.smtp && !user.emailVerified) {
     return (
       <ErrorBoundary>
-        <Toaster />
+        <AppToaster />
         <VerifyEmailPage />
       </ErrorBoundary>
     );
@@ -480,7 +480,7 @@ export function App() {
 
   return (
     <ErrorBoundary>
-      <Toaster />
+      <AppToaster />
       {/*
        * Mounted outside OrgGate/MainLayout so an in-flight OAuth pairing
        * completes (toast + credential invalidation) even when the user is

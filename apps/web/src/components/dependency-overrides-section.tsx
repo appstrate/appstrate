@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Label } from "@/components/ui/label";
+import { Label } from "@appstrate/ui/components/label";
 import { PackageVersionSelect } from "./package-version-select";
 
 const INHERIT = "__inherit__";

@@ -7,7 +7,7 @@ import { Check, ChevronsUpDown, LogOut, Settings, FileText, Palette } from "luci
 import { useAuth } from "../hooks/use-auth";
 import { useTheme } from "../stores/theme-store";
 import { themeOptions } from "../lib/theme";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@appstrate/ui/components/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,13 +18,13 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@appstrate/ui/components/dropdown-menu";
 import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
-} from "@/components/ui/sidebar";
+} from "@appstrate/ui/components/sidebar";
 
 function getInitials(name: string): string {
   return name

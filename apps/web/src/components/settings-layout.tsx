@@ -14,14 +14,14 @@ import {
   SidebarInset,
   SidebarMenu,
   SidebarProvider,
-} from "@/components/ui/sidebar";
+} from "@appstrate/ui/components/sidebar";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@appstrate/ui/components/select";
 
 export interface SettingsNavItem {
   to: string;

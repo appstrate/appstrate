@@ -2,8 +2,8 @@
 
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@appstrate/ui/components/badge";
+import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { PageHeader } from "@/components/page-header";
 import { LoadingState, ErrorState } from "@/components/page-states";
 import { WebhookDeliveriesTab } from "../components/webhook-deliveries-tab";

@@ -2,8 +2,8 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@appstrate/ui/components/button";
+import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Spinner } from "./spinner";
 import { PageHeader, type BreadcrumbEntry } from "./page-header";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";

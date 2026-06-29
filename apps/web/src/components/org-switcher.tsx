@@ -17,15 +17,15 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@appstrate/ui/components/dropdown-menu";
 import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSkeleton,
   useSidebar,
-} from "@/components/ui/sidebar";
-import { cn } from "@/lib/utils";
+} from "@appstrate/ui/components/sidebar";
+import { cn } from "@appstrate/ui/cn";
 
 function OrgAvatar({ name, className }: { name: string; className?: string }) {
   return (

@@ -10,7 +10,7 @@ import { LoadingState, ErrorState, EmptyState } from "../components/page-states"
 import { useLibrary, useTogglePackageInstall } from "../hooks/use-library";
 import type { LibraryPackageItem, LibraryApp } from "../hooks/use-library";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import {
   Table,
   TableHeader,
@@ -18,9 +18,9 @@ import {
   TableRow,
   TableHead,
   TableCell,
-} from "@/components/ui/table";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Badge } from "@/components/ui/badge";
+} from "@appstrate/ui/components/table";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Badge } from "@appstrate/ui/components/badge";
 
 const TABS = ["agents", "skills", "integrations"] as const;
 type Tab = (typeof TABS)[number];

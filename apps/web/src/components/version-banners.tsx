@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 
 export function VersionBanners({
   isHistorical,

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import type { PackageType } from "@appstrate/core/validation";
 import type { VersionDetailResponse } from "@appstrate/shared-types";
 import { DraftDiffView } from "./draft-diff-view";

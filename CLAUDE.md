@@ -82,7 +82,7 @@ appstrate/
 │
 ├── packages/emails/src/      # @appstrate/emails — template registry + rendering (cloud override)
 ├── packages/core/            # @appstrate/core — shared validation, storage, utilities (published on npm)
-├── packages/ui/              # @appstrate/ui — React components (published on npm)
+├── packages/ui/              # @appstrate/ui — React components (private workspace pkg, consumed by web)
 ├── packages/afps-runtime/    # @appstrate/afps-runtime — portable AFPS bundle runner + standalone `afps` CLI
 ├── packages/mcp-transport/   # @appstrate/mcp-transport — MCP SDK adapter (sidecar + runtime-pi)
 ├── packages/env/src/         # @appstrate/env — Zod env validation (authoritative)

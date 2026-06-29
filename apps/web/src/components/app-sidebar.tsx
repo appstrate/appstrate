@@ -5,7 +5,12 @@ import { OrgSwitcher } from "@/components/org-switcher";
 import { NavOrg } from "@/components/nav-org";
 import { SidebarBilling } from "@/components/sidebar-billing";
 import { NavUser } from "@/components/nav-user";
-import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from "@/components/ui/sidebar";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+} from "@appstrate/ui/components/sidebar";
 
 export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
   return (
