@@ -133,6 +133,23 @@ export function ZaiIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// OpenCode Go official wordmark ("GO"), two-tone via currentColor (solid
+// strokes + 0.2-opacity fills) so it stays theme-safe. The artwork is 54×30;
+// the picker renders icons in a square box, so we scale it to fit 24×24 and
+// center it vertically to preserve the aspect ratio.
+export function OpenCodeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" {...props}>
+      <g transform="translate(0 5.333) scale(0.4444)">
+        <path d="M24 30H0V0H24V6H6V24H18V18H12V12H24V30Z" fill="currentColor" />
+        <path d="M12 18H18V24H6V12H12V18Z" fill="currentColor" fillOpacity="0.2" />
+        <path d="M48 12V24H36V12H48Z" fill="currentColor" fillOpacity="0.2" />
+        <path d="M54 30H30V0H54V30ZM36 24H48V6H36V24Z" fill="currentColor" />
+      </g>
+    </svg>
+  );
+}
+
 // eslint-disable-next-line react-refresh/only-export-components
 export const PROVIDER_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   anthropic: AnthropicIcon,
@@ -148,6 +165,7 @@ export const PROVIDER_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement
   "together-ai": TogetherIcon,
   "fireworks-ai": FireworksIcon,
   zai: ZaiIcon,
+  "opencode-go": OpenCodeIcon,
 };
 
 /**

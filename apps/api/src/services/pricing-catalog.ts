@@ -48,6 +48,7 @@ import moonshotPricing from "../data/pricing/moonshot.json" with { type: "json" 
 import togetherAiPricing from "../data/pricing/together-ai.json" with { type: "json" };
 import fireworksAiPricing from "../data/pricing/fireworks-ai.json" with { type: "json" };
 import zaiPricing from "../data/pricing/zai.json" with { type: "json" };
+import opencodeGoPricing from "../data/pricing/opencode-go.json" with { type: "json" };
 
 /**
  * Catalog index keyed on `providerId`. Adding a JSON under
@@ -73,6 +74,7 @@ const PROVIDER_INDEX: Record<string, Record<string, CatalogModelEntry>> = {
   "together-ai": togetherAiPricing as Record<string, CatalogModelEntry>,
   "fireworks-ai": fireworksAiPricing as Record<string, CatalogModelEntry>,
   zai: zaiPricing as Record<string, CatalogModelEntry>,
+  "opencode-go": opencodeGoPricing as Record<string, CatalogModelEntry>,
 };
 
 /**

@@ -230,6 +230,49 @@ const zai: ModelProviderDefinition = {
   featuredModels: featured("zai"),
 };
 
+/**
+ * OpenCode Go — single-key subscription aggregating several open-source
+ * coding models (GLM, Kimi, DeepSeek, MiMo) behind one OpenAI-compatible
+ * endpoint. Structurally an aggregator (openrouter-class), but unlike
+ * openrouter it exposes a small, fixed model set, so we vendor a dedicated
+ * `opencode-go` pricing catalog and pin `featuredModels` here rather than
+ * relying on live search.
+ *
+ * Only the `/chat/completions` (openai-completions) models are wired. Go
+ * also serves Qwen/MiniMax on an Anthropic-style `/messages` endpoint;
+ * those need a second provider entry (different apiShape) and are out of
+ * scope for this first pass. Auth is a static Bearer key — no OAuth.
+ *
+ * Pinned `featuredModels` (not `featured("opencode-go")`) so the weekly
+ * LiteLLM-driven `featured-models.json` regen can never touch this
+ * non-LiteLLM provider. Costs in `data/pricing/opencode-go.json` are
+ * per-token approximations cribbed from the underlying vendors — Go bills
+ * by a dollar-equivalent cap, not per token, so ledger cost is indicative
+ * only.
+ */
+const opencodeGo: ModelProviderDefinition = {
+  providerId: "opencode-go",
+  displayName: "OpenCode Go",
+  iconUrl: "opencode-go",
+  description:
+    "One subscription, many open-source coding models (GLM, Kimi, DeepSeek, MiMo) via a single OpenCode Go key.",
+  docsUrl: "https://opencode.ai/docs/go/",
+  apiShape: "openai-completions",
+  defaultBaseUrl: "https://opencode.ai/zen/go/v1",
+  baseUrlOverridable: false,
+  authMode: "api_key",
+  featuredModels: [
+    "glm-5.2",
+    "glm-5.1",
+    "kimi-k2.7",
+    "kimi-k2.6",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+    "mimo-v2.5",
+    "mimo-v2.5-pro",
+  ],
+};
+
 const openaiCompatible: ModelProviderDefinition = {
   providerId: "openai-compatible",
   displayName: "OpenAI-compatible (custom)",
@@ -265,6 +308,7 @@ const coreProvidersModule: AppstrateModule = {
       togetherAi,
       xai,
       zai,
+      opencodeGo,
       openaiCompatible,
     ];
   },
