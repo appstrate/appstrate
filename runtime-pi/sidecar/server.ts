@@ -14,6 +14,7 @@ import {
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import { buildRuntimeToolDefs } from "@appstrate/core/runtime-tool-defs";
+import { RuntimeEventJournal, journalRuntimeToolDefs } from "./runtime-event-journal.ts";
 
 /** Parse the agent-selected runtime tools forwarded as `RUNTIME_TOOLS_JSON`. */
 function readRuntimeToolsFromEnv(): string[] {
@@ -39,12 +40,48 @@ function readOutputSchemaFromEnv(): Record<string, unknown> | null {
   }
 }
 
+/**
+ * Validate the parsed credential config crossing into the sidecar (the
+ * credential-handling process). A blind `as` cast would let union drift (a
+ * renamed `authMode`, a removed required field) parse cleanly and surface far
+ * later as a confusing 401/503 from `/llm`. We assert the discriminant + the
+ * per-mode required fields here so drift fails at boot, at the cause. No Zod:
+ * the sidecar deliberately
+ * carries no validation dependency; this is a focused shape guard.
+ */
+function assertLlmProxyConfig(value: unknown): LlmProxyConfig {
+  if (!value || typeof value !== "object") {
+    throw new Error("PI_LLM_OAUTH_CONFIG_JSON: expected an object");
+  }
+  const c = value as Record<string, unknown>;
+  const need = (field: string): void => {
+    if (typeof c[field] !== "string" || (c[field] as string).length === 0) {
+      throw new Error(`PI_LLM_OAUTH_CONFIG_JSON: ${String(c.authMode)} config missing "${field}"`);
+    }
+  };
+  switch (c.authMode) {
+    case "api_key":
+      need("baseUrl");
+      need("apiKey");
+      need("placeholder");
+      break;
+    case "oauth":
+      need("baseUrl");
+      need("credentialId");
+      break;
+    default:
+      throw new Error(`PI_LLM_OAUTH_CONFIG_JSON: unknown authMode "${String(c.authMode)}"`);
+  }
+  return value as LlmProxyConfig;
+}
+
 function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
   // OAuth credentials ship as a single JSON env var carrying the full
-  // LlmProxyOauthConfig. A malformed payload here is a launcher bug — let
-  // JSON.parse throw rather than fall through silently to the API-key path.
+  // LlmProxyConfig. A malformed payload here is a launcher bug — let JSON.parse
+  // throw (and assertLlmProxyConfig reject shape drift) rather than fall through
+  // silently to the API-key path.
   const oauthJson = process.env.PI_LLM_OAUTH_CONFIG_JSON;
-  if (oauthJson) return JSON.parse(oauthJson) as LlmProxyConfig;
+  if (oauthJson) return assertLlmProxyConfig(JSON.parse(oauthJson));
   if (process.env.PI_BASE_URL && process.env.PI_API_KEY) {
     return {
       authMode: "api_key",
@@ -202,15 +239,25 @@ const runtimeDeps = buildSidecarRuntimeDeps({
 // hosted in-process as MCP tools on the agent-facing `/mcp` surface — the
 // same transport every other tool uses, so they are no longer Pi-SDK
 // extensions. Static for the run's lifetime (selection + output schema are
-// fixed at boot). Re-emission of their canonical events happens agent-side.
-const runtimeToolDefs = buildRuntimeToolDefs({
-  runtimeTools: readRuntimeToolsFromEnv(),
-  outputSchema: readOutputSchemaFromEnv(),
-}) as unknown as AppstrateToolDefinition[];
+// fixed at boot).
+//
+// Each def is wrapped so its handler runs ONCE and its canonical events are
+// journaled (the events sub-key is then stripped from the tool result). The
+// runner drains `GET /runtime-events` and re-emits on its single sink — one
+// execution, transport-agnostic, no `_meta` reliance.
+const runtimeEventJournal = new RuntimeEventJournal();
+const runtimeToolDefs = journalRuntimeToolDefs(
+  buildRuntimeToolDefs({
+    runtimeTools: readRuntimeToolsFromEnv(),
+    outputSchema: readOutputSchemaFromEnv(),
+  }),
+  runtimeEventJournal,
+) as unknown as AppstrateToolDefinition[];
 
 let integrationTools: AppstrateToolDefinition[] = [];
 const specs = readIntegrationSpecsFromEnv();
 const declaredIntegrations = specs?.length ?? 0;
+
 // Boot report fetched by the agent via `GET /integrations/boot-report`. Starts
 // as a synthetic empty-OK report (covers the no-integrations run); the boot
 // `.then`/`.catch` below overwrite it with the real outcome.
@@ -271,6 +318,7 @@ const app = createApp({
   additionalMcpToolsProvider: () => [...runtimeToolDefs, ...integrationTools],
   integrationBootPromise,
   integrationBootReportProvider: () => integrationBootReport,
+  runtimeEventJournal,
 });
 
 logger.info("Sidecar proxy listening", { port, integrationsDeclared: specs?.length ?? 0 });

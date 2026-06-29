@@ -12,12 +12,23 @@
 import { db } from "@appstrate/db/client";
 import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
+import type { MiddlewareHandler } from "hono";
 import type { ModuleInitContext, PlatformServices } from "@appstrate/core/module";
+import type { ChatEngineHandler } from "@appstrate/core/chat-engine-contract";
 import { getEnv } from "@appstrate/env";
 
 // ---- Platform service imports (for buildPlatformServices) -----------------
 import { logger } from "../logger.ts";
+import { rateLimit } from "../../middleware/rate-limit.ts";
 import { listLlmUsageForRun } from "../../services/state/runs.ts";
+import { dispatchInProcess } from "../platform-app.ts";
+
+// Process-global chat-handler registry, populated by provider modules through
+// the platform contract (`ctx.services.registerChatHandler`) at init and read
+// by the chat module (`ctx.services.chatHandlerForProvider`). apps/api owns this
+// registry; the two modules never import each other — the handler crosses only
+// through `ctx.services`, preserving module isolation.
+const _chatHandlers = new Map<string, ChatEngineHandler>();
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
@@ -38,10 +49,10 @@ import { listLlmUsageForRun } from "../../services/state/runs.ts";
  * mutate `process.env.MODULES` must call `_resetCacheForTesting()` from
  * `@appstrate/env` to flush the cached snapshot.
  *
- * Defaults to the built-in OSS modules plus the two reference
- * OAuth-provider modules (`@appstrate/module-codex`,
- * `@appstrate/module-claude-code`) when the env var is unset. External
- * deployments extend the list by appending npm package specifiers, e.g.:
+ * Defaults to the built-in OSS modules ONLY
+ * (`oidc,webhooks,mcp,core-providers`) — the authoritative default lives
+ * in the `@appstrate/env` Zod schema (`packages/env/src/index.ts`).
+ * External deployments extend the list by appending specifiers, e.g.:
  *   MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-codex,@appstrate/module-claude-code,@scope/module
  *
  * `core-providers` ships the API-key model providers (openai, anthropic,
@@ -49,13 +60,12 @@ import { listLlmUsageForRun } from "../../services/state/runs.ts";
  * deployments that BYO their own provider catalog can opt out cleanly.
  *
  * `@appstrate/module-codex` (ChatGPT/Codex OAuth) and
- * `@appstrate/module-claude-code` (Claude Pro/Max/Team OAuth) ship as
- * the two reference external-provider modules. They are enabled by
- * default; operators who do not want to expose ChatGPT- or
- * Claude-subscription billing must remove them from `MODULES`
- * explicitly (cf. upstream ToS posture for each — OpenAI Consumer ToU
- * grey zone, Anthropic Consumer ToS forbids third-party use of OAuth
- * subscription tokens).
+ * `@appstrate/module-claude-code` (Claude Pro/Max/Team OAuth) are the two
+ * reference subscription-provider modules. They are OPT-IN — NOT in the
+ * default set — because each sits in a vendor-ToS grey zone (OpenAI
+ * Consumer ToU grey zone; Anthropic Consumer ToS forbids third-party use
+ * of OAuth subscription tokens). An operator enables them deliberately by
+ * appending them to `MODULES` (cf. `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`).
  *
  * All declared modules are required — if a module is in the list, it must
  * load and init successfully or the platform crashes.
@@ -82,14 +92,36 @@ export function getModuleRegistry(): string[] {
 /**
  * Wire concrete platform services into the structural `PlatformServices`
  * contract declared in `@appstrate/core/module`. The surface is intentionally
- * minimal — only `runs.listLlmUsage` (the cloud billing module's per-run
- * ledger read) is exposed. See the `PlatformServices` doc in core for the
- * razor and the history of the previous (chat-era) broad surface.
+ * minimal — `runs.listLlmUsage` (the cloud billing module's per-run ledger
+ * read), `inProcess.dispatch`, and the chat-handler channel
+ * (`registerChatHandler` + `chatHandlerForProvider`), the platform-contract seam
+ * by which a provider module contributes an interactive chat handler and the
+ * chat module resolves it by provider id — without either module importing the
+ * other. See the `PlatformServices` doc in core for the razor and the history of
+ * the previous (chat-era) broad surface.
  */
 function buildPlatformServices(): PlatformServices {
   return {
     logger,
-    runs: { listLlmUsage: listLlmUsageForRun },
+    http: {
+      // Same authenticated limiter every core route uses — modules get
+      // identical guard semantics (keying, headers, 429 shape).
+      rateLimit: (maxPerMinute) => rateLimit(maxPerMinute) as MiddlewareHandler,
+    },
+    runs: {
+      listLlmUsage: listLlmUsageForRun,
+    },
+    inProcess: {
+      // In-process self-dispatch through the full platform middleware chain.
+      dispatch: dispatchInProcess,
+    },
+    // Platform-contract chat-handler channel — a provider module registers its
+    // handler at init, the chat module resolves it by provider id. Neither
+    // module imports the other; both go through this shared registry.
+    registerChatHandler: (providerId, handler) => {
+      _chatHandlers.set(providerId, handler);
+    },
+    chatHandlerForProvider: (providerId) => _chatHandlers.get(providerId),
   };
 }
 

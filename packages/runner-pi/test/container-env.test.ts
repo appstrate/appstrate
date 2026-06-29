@@ -29,6 +29,14 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_API_KEY).toBeUndefined();
   });
 
+  it("omits RUN_ENGINE for Pi (byte-identical) and emits it only for claude", () => {
+    expect(buildRuntimePiEnv({ model, agentPrompt: "p" }).RUN_ENGINE).toBeUndefined();
+    expect(buildRuntimePiEnv({ model, agentPrompt: "p", engine: "pi" }).RUN_ENGINE).toBeUndefined();
+    expect(buildRuntimePiEnv({ model, agentPrompt: "p", engine: "claude" }).RUN_ENGINE).toBe(
+      "claude",
+    );
+  });
+
   it("routes LLM traffic through the sidecar when apiKey + proxy url are set", () => {
     const env = buildRuntimePiEnv({
       model: { ...model, apiKey: "sk-ant-secret", apiKeyPlaceholder: "sk-ant-placeholder" },

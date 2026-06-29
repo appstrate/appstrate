@@ -3,12 +3,13 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedApplication } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
+import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
-import { runs } from "@appstrate/db/schema";
+import { packages, runs } from "@appstrate/db/schema";
 import { addMemories, upsertPinned } from "../../../src/services/state/package-persistence.ts";
 
 const app = getTestApp();
@@ -209,6 +210,85 @@ describe("Agents API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.id).toBe("@myorg/custom-installed");
+    });
+
+    // #770 — the detail projection must follow `?version=`, not always the
+    // draft. Publish 1.0.0 from one manifest, then dirty the draft with a
+    // different input / skills / integrations set. `?version=1.0.0` must return
+    // the FROZEN definition (what the run executes); default + `?version=draft`
+    // return the live draft — otherwise the run-options modal renders the wrong
+    // config/input/skills for the selected version.
+    it("?version projects input/skills/integrations from that published manifest", async () => {
+      const VER = "@myorg/versioned-detail";
+      const publishedManifest = {
+        name: VER,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        display_name: "Versioned Detail",
+        input: { schema: { type: "object", properties: { alpha: { type: "string" } } } },
+        dependencies: {
+          skills: { "@myorg/skill-pub": "^1.0.0" },
+          integrations: { "@myorg/int-pub": "^1.0.0" },
+        },
+      };
+
+      // Seed draft = the to-be-published manifest, then freeze it as 1.0.0.
+      await seedInstalledAgent({
+        id: VER,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        applicationId: ctx.defaultAppId,
+        draftManifest: publishedManifest,
+      });
+      const published = await createVersionFromDraft({
+        packageId: VER,
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+      });
+      expect("version" in published && published.version).toBe("1.0.0");
+
+      // Dirty the draft: different input field, skills, and integrations.
+      await db
+        .update(packages)
+        .set({
+          draftManifest: {
+            ...publishedManifest,
+            input: { schema: { type: "object", properties: { beta: { type: "string" } } } },
+            dependencies: {
+              skills: { "@myorg/skill-draft": "^2.0.0" },
+              integrations: { "@myorg/int-draft": "^1.0.0" },
+            },
+          },
+          updatedAt: new Date(Date.now() + 5_000),
+        })
+        .where(eq(packages.id, VER));
+
+      const get = (suffix: string) =>
+        app.request(`/api/packages/agents/${VER}${suffix}`, { headers: authHeaders(ctx) });
+
+      // Default → draft projection. Input + integrations are manifest-derived
+      // on the draft path; skills there come from the resolved closure
+      // (`agent.skills`, empty for these unseeded skill packages), so the
+      // version-vs-draft contrast is asserted on input + integrations.
+      const draftBody = (await (await get("")).json()) as any;
+      expect(draftBody.input.schema.properties).toHaveProperty("beta");
+      expect(draftBody.dependencies.integrations.map((i: any) => i.id)).toEqual([
+        "@myorg/int-draft",
+      ]);
+
+      // ?version=1.0.0 → frozen published projection. Skills here are read
+      // straight from the version manifest's `dependencies.skills`.
+      const verRes = await get("?version=1.0.0");
+      expect(verRes.status).toBe(200);
+      const verBody = (await verRes.json()) as any;
+      expect(verBody.input.schema.properties).toHaveProperty("alpha");
+      expect(verBody.dependencies.skills.map((s: any) => s.id)).toEqual(["@myorg/skill-pub"]);
+      expect(verBody.dependencies.integrations.map((i: any) => i.id)).toEqual(["@myorg/int-pub"]);
+
+      // ?version=draft ≡ default.
+      const draftExplicit = (await (await get("?version=draft")).json()) as any;
+      expect(draftExplicit.input.schema.properties).toHaveProperty("beta");
     });
   });
 

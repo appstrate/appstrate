@@ -53,6 +53,9 @@ const WebhookDetailPage = lazy(() =>
 const AuthCallbackPage = lazy(() =>
   import("./modules/oidc/pages/auth-callback").then((m) => ({ default: m.AuthCallbackPage })),
 );
+const ChatModulePage = lazy(() =>
+  import("./modules/chat/chat-page").then((m) => ({ default: m.ChatModulePage })),
+);
 
 // Route-level code splitting — heavy authenticated pages are lazy-loaded so
 // the entry chunk only carries the login/dashboard shell. Same Suspense +
@@ -783,6 +786,26 @@ export function App() {
                   element={
                     <Suspense fallback={<LoadingState />}>
                       <WebhookDetailPage />
+                    </Suspense>
+                  }
+                />
+              </>
+            )}
+            {features.chat && (
+              <>
+                <Route
+                  path="/chat"
+                  element={
+                    <Suspense fallback={<LoadingState />}>
+                      <ChatModulePage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/chat/:conversationId"
+                  element={
+                    <Suspense fallback={<LoadingState />}>
+                      <ChatModulePage />
                     </Suspense>
                   }
                 />

@@ -35,6 +35,7 @@ import { z } from "zod";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "@appstrate/mcp-transport";
 import { getEnv } from "@appstrate/env";
+import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-engine-contract";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
@@ -43,9 +44,10 @@ import { registerAuthChallenge } from "../../lib/auth-challenges.ts";
 import { registerProtectedResourceFamily } from "../../lib/protected-resources.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
-import { getPlatformApp } from "../../lib/platform-app.ts";
+import { dispatchInProcess } from "../../lib/platform-app.ts";
 import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "./audiences.ts";
 import { buildMcpTools, FORWARDED_AUTH_HEADERS, type Dispatch, type McpObserver } from "./tools.ts";
+import { buildOperationIndex } from "./catalog.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 /** Path prefix owning the per-org sub-tree. `:org` is the organization id. */
@@ -110,14 +112,28 @@ const MCP_RATE_LIMIT_PER_MIN = 120;
 
 /**
  * Server `instructions` injected into the client's system prompt at
- * `initialize`. Deliberately meta and maintenance-free: it carries ONLY the
- * cross-cutting context the tool descriptions and per-operation OpenAPI
- * schemas can't (purpose, entity model, the `@` scope rule, async-run +
- * SSE-not-callable behaviour). It never lists tools, counts, tags, or
- * endpoints — those are discovered at runtime, so the surface can grow
- * without touching this text.
+ * `initialize`. Carries the cross-cutting context the tool descriptions and
+ * per-operation OpenAPI schemas can't (purpose, entity model, the `@` scope
+ * rule, async-run + SSE-not-callable behaviour), plus a GENERATED operation
+ * index (`buildOperationIndex()`) so a client can pick an operationId directly
+ * and skip a search_operations round-trip.
+ *
+ * Still maintenance-free: the index is derived from the live catalog, so the
+ * surface grows without editing this text. describe_operation (or
+ * search_operations' best_match) remains the source of truth for input schemas.
  */
-const SERVER_INSTRUCTIONS = `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you discover and call any operation of the Appstrate REST API — their own descriptions tell you how. Never guess an operationId or body shape; the describe step is the source of truth, and the surface is not fixed — if a capability might exist, search for it.
+function buildServerInstructions(
+  permissions?: ReadonlySet<string>,
+  contextInjected = false,
+): string {
+  // A `contextInjected` caller (the chat module) already injects the get_me
+  // payload into its own system prompt and we drop the get_me tool for it, so
+  // pushing "call get_me first" would point the model at a tool that isn't
+  // there. Tell it the context is already provided instead.
+  const grounding = contextInjected
+    ? "Your caller context — who you are acting for, your role in this organization, and which integrations are already connected (prefer those when building or configuring an agent) — is already provided to you; there is no get_me tool, do not look for one."
+    : "Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when building or configuring an agent).";
+  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you discover and call any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, then call describe_operation for its input schema and invoke_operation to run it. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema.
 
 ## Core model
 Organization → Applications (id \`app_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe_operation shows which; always keep the \`@\`, and the \`/\` when it's a single param.
@@ -128,7 +144,14 @@ This MCP server is scoped to ONE organization — the one this endpoint serves �
 ## Beyond the per-operation schemas
 - Runs are asynchronous: triggering one returns the created run resource (use its \`id\`), then it moves pending→running→success|failed|timeout|cancelled. To wait for completion, call the run get operation with \`query: { wait: true }\` — the server long-polls up to ~55 s and returns the run when it goes terminal; a still-non-terminal response just means call it again (no sleep needed).
 - Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
-- Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.`;
+- Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.
+- Integration tool selection — an agent's \`integrations_configuration[id].tools\` resolves as: omitted/undefined → inherits the integration's \`default_tools\`; \`[]\` → no tools (overrides the default, the integration is inert); \`["a","b"]\` → exactly those tools; \`"*"\` → all upstream tools (requires \`allow_undeclared_tools\`). An integration's \`default_tools\` and full \`tool_catalog\` are on its detail operation (\`GET /api/integrations/{packageId}\`); read it before selecting tools so you pick real tool names and know what the default already covers.
+- Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed in your caller context / get_me — connecting it was an explicit choice), then (2) one that is activated for this application but not yet connected, then (3) one that is neither. \`GET /api/integrations\` lists every integration with an \`active\` flag (activated for this app) and \`block_user_connections\`; use it to tell tiers 2 and 3 apart. Do not silently activate or connect an integration the caller did not ask for — surface that it would be needed and let them decide.
+- Connecting or reconnecting an integration before a run — an integration may be unconnected, expired, needs-reconnection, under-scoped, or otherwise unusable. Do NOT try to interpret connection state yourself. Instead, before running an inline manifest that uses integrations, CALL \`validateInlineRun\` (\`POST /api/runs/inline/validate\`) with your \`manifest\` (+ \`prompt\`/\`config\`). It returns field errors; any error whose \`field\` is \`integrations.<id>\` means that integration is not ready to run — whatever the \`code\` (\`not_connected\`, \`needs_reconnection\`, \`insufficient_scopes\`, \`auth_key_mismatch\`, …). For each such error you MUST start its OAuth (do not just describe it): CALL \`invoke_operation\` with \`operation_id: "initiateIntegrationOAuth"\`, \`path_params: { packageId: "<id>", authKey: "<key>" }\` (the auth key is in \`manifest.auths\` of the integration row from \`GET /api/integrations\` — usually the lone oauth2 entry), and — if the error carries a \`connection_id\` — also pass \`body: { connection_id: "<that id>" }\` so the existing connection is reconnected/upgraded in place instead of duplicated. This tool call is what renders the one-click connect button (from its result); without it there is NO button, so never claim a button will appear unless you just made this exact call this turn. Do NOT paste the returned \`auth_url\` as text. Then end your turn and tell the caller you'll continue once connected — do NOT poll, loop, wait, or run in the same turn. On a later turn, re-run \`validateInlineRun\`; when it returns no \`integrations.*\` errors, proceed with the run. (Non-interactive clients with no button can read \`auth_url\` from the tool result.)
+
+${OPERATION_INDEX_HEADING}
+${buildOperationIndex(permissions)}`;
+}
 
 function forwardAuthHeaders(src: Headers): Headers {
   const out = new Headers();
@@ -251,10 +274,16 @@ export function createMcpRouter(): Hono<AppEnv> {
       throw forbidden("This MCP endpoint serves a different organization than your credentials.");
     }
 
-    const origin = new URL(c.req.url).origin;
+    const reqUrl = new URL(c.req.url);
+    const origin = reqUrl.origin;
+    // A consumer that injects the get_me payload (`/api/me/context`) into its
+    // own system prompt tags the session `?context=injected` so the redundant
+    // get_me tool — and its "call get_me first" instruction — are dropped. Only
+    // the in-process chat sets it; external MCP clients omit it and keep get_me.
+    const contextInjected = reqUrl.searchParams.get("context") === "injected";
     const permissions = c.get("permissions") ?? new Set<string>();
     const authHeaders = forwardAuthHeaders(c.req.raw.headers);
-    const dispatch: Dispatch = async (req) => getPlatformApp().fetch(req);
+    const dispatch: Dispatch = dispatchInProcess;
 
     // Audit + telemetry sink. The tool layer emits plain data; here we decide
     // what to do with it: structured telemetry for every tool call, and a
@@ -299,15 +328,24 @@ export function createMcpRouter(): Hono<AppEnv> {
       }
     };
 
-    // The three disclosure tools are tenant-agnostic — the caller's org is
-    // fixed by the endpoint + token audience and pinned by the org-context
-    // middleware, and every in-process dispatch re-derives it the same way, so
-    // the tools need no actor context.
-    const tools = buildMcpTools({ origin, permissions, authHeaders, dispatch, observe });
+    // The disclosure tools are tenant-agnostic — the caller's org is fixed by
+    // the endpoint + token audience and pinned by the org-context middleware,
+    // and every in-process dispatch re-derives it the same way, so the tools
+    // need no actor context. get_me likewise carries no actor context: it
+    // dispatches in-process to /api/me/context, which resolves the caller from
+    // the forwarded auth headers. The index is scoped to the caller's role.
+    const tools = buildMcpTools({
+      origin,
+      permissions,
+      authHeaders,
+      dispatch,
+      observe,
+      contextInjected,
+    });
     const server = createMcpServer(
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
-      { instructions: SERVER_INSTRUCTIONS },
+      { instructions: buildServerInstructions(permissions, contextInjected) },
     );
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

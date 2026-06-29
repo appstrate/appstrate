@@ -42,8 +42,17 @@ import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
+  buildError,
+  buildMetric,
+  buildProgress,
+  buildToolResultProgress,
+  buildToolStartProgress,
   emptyRunResult,
+  finalizeThrownFailure,
   reduceEvents,
+  truncateToolResult,
+  toolResultByteLimit,
+  zeroTokenUsage,
   type RunError,
   type RunOptions,
   type Runner,
@@ -242,26 +251,31 @@ export class PiRunner implements Runner {
     try {
       await this.executeSession(context, internalSink, signal, captureBridge);
     } catch (err) {
-      if (signal?.aborted) {
-        // Cancellation: propagate without finalizing — the caller's
-        // finally block decides.
-        throw err;
-      }
-      const message = err instanceof Error ? err.message : String(err);
-      await emit({
-        type: "appstrate.error",
-        timestamp: Date.now(),
+      // Shared thrown-failure epilogue (abort-rethrow → emit appstrate.error →
+      // best-effort drain → reduce → stamp usage/cost → finalize). The Pi runner
+      // leaves `status` unset on this path (setFailedStatus: false, preserved
+      // verbatim) and sources usage + cost from the session bridge — both only
+      // when the bridge was captured (an early throw can predate it). The "drain"
+      // here converges the bridge's pending fire-and-forget emits
+      // (`drainPending`) before finalize closes the sink, not a runtime-event
+      // journal; it emits nothing new, so reducing before vs after it is
+      // equivalent.
+      const bridge = bridgeRef.current;
+      await finalizeThrownFailure({
+        events,
+        err,
+        signal,
         runId,
-        message,
+        now: Date.now,
+        emit,
+        drainAndEmit: () => bridge?.drainPending() ?? Promise.resolve(),
+        eventSink,
+        usage: bridge ? bridge.getUsage() : undefined,
+        setFailedStatus: false,
+        stamp: (result) => {
+          if (bridge) result.cost = bridge.getCost();
+        },
       });
-      const result = reduceEvents(events, {
-        error: { message, stack: err instanceof Error ? err.stack : undefined },
-      });
-      attachAccumulators(result);
-      if (bridgeRef.current) {
-        await bridgeRef.current.drainPending();
-      }
-      await eventSink.finalize(result);
       return;
     }
 
@@ -281,6 +295,11 @@ export class PiRunner implements Runner {
     if (terminalError) {
       result.status = "failed";
       result.error = terminalError;
+    } else {
+      // Set success explicitly (don't leave it for the ingestion layer to
+      // infer) so the runner is the single source of truth on BOTH branches —
+      // matching the Claude + Codex runners.
+      result.status = "success";
     }
     attachAccumulators(result);
     // Drain pending bridge fires BEFORE finalize. Finalize closes the
@@ -573,104 +592,11 @@ interface PiToolExecutionEndEvent {
 }
 type PiSubscribedEvent = { type: string } & Record<string, unknown>;
 
-/**
- * Hard ceiling on the byte size of a tool result payload forwarded as
- * `appstrate.progress.data.result`. Anything beyond this is replaced
- * with a `__truncated: true` marker so downstream sinks (HTTP POST to
- * the platform, JSONL stdout, web `run_logs` row) stay bounded —
- * filesystem/HTTP reads can produce MB-sized strings that have no
- * business sitting in a log row. Sinks render their own per-mode
- * preview length on top of this hard cap.
- *
- * Default sized for the typical "tail of a stack trace + a few JSON
- * blobs" — large enough to keep useful detail, small enough that 100
- * tool calls per run × 2KB = 200KB stays well below the platform's
- * `SIDECAR_MAX_MCP_ENVELOPE_BYTES` defaults and a single `run_logs`
- * row stays cheap.
- *
- * Operator-tunable via the `TOOL_RESULT_BYTE_LIMIT` env var (same
- * runtime-env contract as `MODEL_RETRY_ENABLED`, forwarded into the
- * agent container by `container-env.ts`). Tool results carrying the
- * run's actual output are truncated at WRITE time — no read-side knob
- * can recover them afterwards — so deployments whose consumers read
- * `getRunLogs` for results raise this cap here. Keep it comfortably
- * below the platform's 32 KB `run_logs.data` write-boundary cap
- * (`runLogDataSchema`): a `data` payload exceeding that is dropped
- * wholesale, which is strictly worse than truncation. Invalid or
- * non-positive values fall back to the compiled default.
- */
-const TOOL_RESULT_BYTE_LIMIT = 2048;
-
-/** Resolve the effective tool-result cap: env override or compiled default. */
-export function toolResultByteLimit(): number {
-  const raw = process.env.TOOL_RESULT_BYTE_LIMIT;
-  if (raw === undefined || raw === "") return TOOL_RESULT_BYTE_LIMIT;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed <= 0) return TOOL_RESULT_BYTE_LIMIT;
-  return parsed;
-}
-
-/**
- * Truncate an arbitrary tool result for safe transport on the event
- * sink. Strategy:
- *   - `string` payloads: byte-aware truncation with a single trailing
- *     "...(truncated, N bytes)" marker so the rendered output stays
- *     valid UTF-8 and self-documents the truncation.
- *   - everything else: serialise to JSON, apply the same cap; on
- *     overflow return a structured marker preserving the original type
- *     hint and original byte size so sinks can render "[truncated …]"
- *     without re-serialising.
- *
- * Exposed for tests; not part of the bridge's public surface.
- */
-export function truncateToolResult(
-  result: unknown,
-  limitBytes: number = toolResultByteLimit(),
-): unknown {
-  if (result === undefined || result === null) return result;
-  if (typeof result === "string") {
-    return truncateString(result, limitBytes);
-  }
-  // Booleans / numbers / bigint / symbols never trigger truncation.
-  if (typeof result !== "object") return result;
-  let serialised: string;
-  try {
-    serialised = JSON.stringify(result);
-  } catch {
-    // Circular / non-serialisable — replace with a structured marker.
-    return { __truncated: true, reason: "non_serialisable" };
-  }
-  if (serialised === undefined) return result;
-  const byteLength = Buffer.byteLength(serialised, "utf8");
-  if (byteLength <= limitBytes) return result;
-  // Re-parse so the sink still receives a structured payload (the
-  // canonical event validators only accept plain JSON values, never
-  // arbitrary class instances). Fallback to the marker on parse error.
-  return {
-    __truncated: true,
-    reason: "size",
-    bytes: byteLength,
-    limit: limitBytes,
-    preview: truncateString(serialised, Math.min(512, limitBytes)),
-  };
-}
-
-function truncateString(s: string, limitBytes: number): string {
-  const byteLength = Buffer.byteLength(s, "utf8");
-  if (byteLength <= limitBytes) return s;
-  // Walk back from the byte limit so the returned slice is a valid
-  // UTF-8 boundary (Buffer.toString handles partial code points but
-  // produces a replacement char — cheaper to land on a clean boundary).
-  let cut = limitBytes;
-  const buf = Buffer.from(s, "utf8");
-  // UTF-8 continuation bytes have the bit pattern 10xxxxxx — walk
-  // back until we land on a leading byte (or the start of the
-  // buffer). `buf[cut]` may be undefined if `cut === buf.length`,
-  // which is fine — `?? 0` short-circuits the loop in that case.
-  while (cut > 0 && ((buf[cut] ?? 0) & 0xc0) === 0x80) cut -= 1;
-  const head = buf.subarray(0, cut).toString("utf8");
-  return `${head}…(truncated, ${byteLength} bytes)`;
-}
+// Tool-result truncation (byte-aware, env-tunable via `TOOL_RESULT_BYTE_LIMIT`)
+// is shared with the Claude Agent SDK runner, so it lives in
+// `@appstrate/afps-runtime/runner` (imported above for the bridge's own use).
+// Re-exported here for this package's existing test imports + public surface.
+export { truncateToolResult, toolResultByteLimit };
 
 /**
  * True when a settled assistant turn's `stopReason` represents a terminal
@@ -702,14 +628,8 @@ export function installSessionBridge(
   sink: InternalSink,
   runId: string,
 ): SessionBridgeHandle {
-  // Token usage accumulator across all assistant turns. Snake-case to
-  // match the canonical `TokenUsage` shape — no remap at emit time.
-  const totalUsage: TokenUsage = {
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_creation_input_tokens: 0,
-    cache_read_input_tokens: 0,
-  };
+  // Token usage accumulator across all assistant turns (shared zero-shape).
+  const totalUsage: TokenUsage = zeroTokenUsage();
   let totalCost = 0;
 
   // Terminal verdict tracking. Updated on every assistant `message_end`,
@@ -782,13 +702,7 @@ export function installSessionBridge(
           // payload would be identical to the previous one and waste
           // a NOTIFY round-trip.
           if (inputDelta > 0 || outputDelta > 0) {
-            fire({
-              type: "appstrate.metric",
-              timestamp: Date.now(),
-              runId,
-              usage: { ...totalUsage },
-              cost: totalCost,
-            });
+            fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
           }
         }
 
@@ -800,12 +714,9 @@ export function installSessionBridge(
         // recovers from also logs here (harmless — the trail no longer
         // drives status).
         if (isTerminalErrorStop(last.stopReason)) {
-          fire({
-            type: "appstrate.error",
-            timestamp: Date.now(),
-            runId,
-            message: terminalErrorMessage(last.errorMessage),
-          });
+          fire(
+            buildError({ runId, timestamp: Date.now() }, terminalErrorMessage(last.errorMessage)),
+          );
         }
 
         // Full assistant text (for progress display)
@@ -816,12 +727,7 @@ export function installSessionBridge(
             .map((c) => c.text || "")
             .join("\n");
           if (text) {
-            fire({
-              type: "appstrate.progress",
-              timestamp: Date.now(),
-              runId,
-              message: text,
-            });
+            fire(buildProgress({ runId, timestamp: Date.now() }, text));
           }
         }
         break;
@@ -829,61 +735,49 @@ export function installSessionBridge(
 
       case "tool_execution_start": {
         const e = event as PiToolExecutionStartEvent;
-        fire({
-          type: "appstrate.progress",
-          timestamp: Date.now(),
-          runId,
-          message: `Tool: ${e.toolName ?? "unknown"}`,
-          // `toolCallId` is the Pi SDK's per-call identifier; forwarding
-          // it lets sinks correlate start/end events when multiple
-          // tools run concurrently (the LLM can dispatch a parallel
-          // batch and the results land out-of-order). Optional —
-          // omitted from `data` when the SDK didn't provide one.
-          data: {
-            tool: e.toolName,
-            args: e.args,
-            ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
-          },
-        });
+        // `toolCallId` is the Pi SDK's per-call identifier; forwarding it lets
+        // sinks correlate start/end events when multiple tools run concurrently
+        // (the LLM can dispatch a parallel batch and the results land
+        // out-of-order). Optional — omitted from `data` when the SDK gave none.
+        fire(
+          buildToolStartProgress(
+            { runId, timestamp: Date.now() },
+            {
+              tool: e.toolName,
+              args: e.args,
+              ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
+            },
+          ),
+        );
         break;
       }
 
       case "tool_execution_end": {
-        // Symmetric counterpart of `tool_execution_start`. Forwards the
-        // tool's result (truncated to TOOL_RESULT_BYTE_LIMIT) and an
-        // explicit `isError` flag so sinks can colour-code success vs
-        // error paths without re-parsing the result. Same `appstrate.
-        // progress` envelope as the start event — adding a new canonical
-        // type would force a migration on every consumer (web, run_logs,
-        // JSONL, HTTP sink) for marginal gain over the discriminator
-        // `data.result !== undefined`.
+        // Symmetric counterpart of `tool_execution_start`. Forwards the tool's
+        // result (truncated to TOOL_RESULT_BYTE_LIMIT) and an explicit `isError`
+        // flag so sinks can colour-code success vs error paths without
+        // re-parsing the result. Same `appstrate.progress` envelope as the start
+        // event (shared builder) — adding a new canonical type would force a
+        // migration on every consumer (web, run_logs, JSONL, HTTP sink) for
+        // marginal gain over the discriminator `data.result !== undefined`.
         const e = event as PiToolExecutionEndEvent;
         const tool = e.toolName ?? "unknown";
-        const isError = e.isError === true;
-        const truncatedResult = truncateToolResult(e.result);
-        fire({
-          type: "appstrate.progress",
-          timestamp: Date.now(),
-          runId,
-          message: `${isError ? "Tool error" : "Tool result"}: ${tool}`,
-          data: {
-            tool: e.toolName,
-            result: truncatedResult,
-            isError,
-            ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
-          },
-        });
+        fire(
+          buildToolResultProgress(
+            { runId, timestamp: Date.now() },
+            {
+              tool,
+              result: truncateToolResult(e.result),
+              isError: e.isError === true,
+              ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
+            },
+          ),
+        );
         break;
       }
 
       case "agent_end": {
-        fire({
-          type: "appstrate.metric",
-          timestamp: Date.now(),
-          runId,
-          usage: { ...totalUsage },
-          cost: totalCost,
-        });
+        fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
         break;
       }
 

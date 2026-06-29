@@ -13,7 +13,7 @@ WORKDIR /app
 
 # Copy workspace structure for dependency resolution.
 # Every workspace member referenced by the lockfile must have its
-# manifest on disk — `bun install --frozen-lockfile` walks the full
+# manifest on disk — `bun install` walks the full
 # graph even when only a subset is needed at runtime.
 #
 # `COPY --parents` (stable since dockerfile 1.20) copies each match while
@@ -27,7 +27,8 @@ COPY package.json bun.lock turbo.json ./
 COPY --parents */package.json */*/package.json ./
 COPY patches/ patches/
 
-RUN bun install --frozen-lockfile
+# rationale: see .github/actions/bun-setup/action.yml
+RUN bun install
 
 # ── Stage 2: Build ────────────────────────────────────────────────
 FROM oven/bun:1.3.14-alpine AS build
@@ -48,7 +49,7 @@ COPY . .
 # Re-link workspace packages after COPY overwrites symlinks. Without this,
 # Rolldown (Vite 8) can't resolve transitive deps like i18next via the broken
 # apps/web/node_modules/i18next → /app/node_modules/.bun/i18next@X symlink.
-RUN bun install --frozen-lockfile
+RUN bun install
 
 RUN bun run build
 

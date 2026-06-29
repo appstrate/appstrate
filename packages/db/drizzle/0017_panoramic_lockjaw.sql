@@ -1,0 +1,1 @@
+ALTER TABLE "chat_sessions" ADD COLUMN "active_stream_id" text;

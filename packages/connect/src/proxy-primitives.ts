@@ -197,6 +197,29 @@ export const HOP_BY_HOP_HEADERS = new Set<string>([
 ]);
 
 /**
+ * Clone an UPSTREAM RESPONSE's headers for relay downstream, dropping the
+ * headers a proxy must not forward: RFC 7230 hop-by-hop headers plus
+ * `content-encoding`/`content-length`. Bun's `fetch` auto-decompresses the
+ * body, so a forwarded `content-encoding: gzip` would tell the caller to
+ * inflate plaintext (ZlibError / opaque connection error), and the original
+ * `content-length` described the now-stale compressed payload — the re-wrapped
+ * `Response` recomputes length from the decompressed body. `extraSkip` drops
+ * additional entrypoint-specific transport headers (e.g. `x-stream-*`).
+ * Preserves the original header casing.
+ */
+export function stripUpstreamResponseHeaders(src: Headers, extraSkip?: Set<string>): Headers {
+  const out = new Headers();
+  src.forEach((value, key) => {
+    const lower = key.toLowerCase();
+    if (HOP_BY_HOP_HEADERS.has(lower)) return;
+    if (lower === "content-encoding" || lower === "content-length") return;
+    if (extraSkip?.has(lower)) return;
+    out.set(key, value);
+  });
+  return out;
+}
+
+/**
  * Strip host, content-length, and RFC 7230 hop-by-hop headers. `extraSkip`
  * provides a hook for entrypoint-specific control headers (e.g.
  * `x-integration`, `x-target`) that must also be kept out of the upstream

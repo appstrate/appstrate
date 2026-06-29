@@ -24,6 +24,7 @@ function status(over: Partial<IntegrationAuthStatus>): IntegrationAuthStatus {
     scopes: [],
     resource: null,
     connections: [],
+    ready: false,
     has_oauth_client: false,
     has_system_client: false,
     client_auto_provisioned: false,

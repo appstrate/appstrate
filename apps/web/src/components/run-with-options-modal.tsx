@@ -98,18 +98,22 @@ function RunWithOptionsForm({
   isPending?: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const deps = useScheduleFormDeps(agent.id);
-  const labels = useSchemaFormLabels();
   const [inputData, setInputData] = useState<Record<string, unknown>>({});
   const [version, setVersion] = useState<string>(DEFAULT_VERSION);
   const [overrides, setOverrides] = useState<RunOverridesValue>({});
   const [dependencyOverrides, setDependencyOverrides] = useState<Record<string, string>>({});
   const inputFormRef = useRef<RjsfForm>(null);
+  // Deps follow the selected version (#770): the config / input / integrations /
+  // skills the modal renders match what the run will execute, not the draft.
+  const deps = useScheduleFormDeps(agent.id, version);
+  const labels = useSchemaFormLabels();
 
-  const inputWrapper: SchemaWrapper = agent.input ?? { schema: EMPTY_SCHEMA };
+  // Version-pinned input wrapper / skills (fall back to the draft props the
+  // parent passed while the version-aware detail is still loading).
+  const inputWrapper: SchemaWrapper = deps?.inputWrapper ?? agent.input ?? { schema: EMPTY_SCHEMA };
   const hasInputFields =
     !!inputWrapper.schema?.properties && Object.keys(inputWrapper.schema.properties).length > 0;
-  const skills = agent.dependencies?.skills ?? [];
+  const skills = deps?.skills ?? agent.dependencies?.skills ?? [];
 
   const fire = (input: Record<string, unknown>) =>
     onSubmit({ input, version, overrides, dependencyOverrides });
@@ -162,6 +166,7 @@ function RunWithOptionsForm({
           agentIntegrations={deps.agentIntegrations}
           value={overrides}
           onChange={setOverrides}
+          version={version}
         />
       )}
 

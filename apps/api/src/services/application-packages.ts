@@ -7,7 +7,13 @@
 
 import { eq, and, or, sql, isNotNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { applicationPackages, packages, applications, packageVersions } from "@appstrate/db/schema";
+import {
+  applicationPackages,
+  packages,
+  applications,
+  packageVersions,
+  packageDistTags,
+} from "@appstrate/db/schema";
 import { notFound, conflict } from "../lib/errors.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
@@ -173,6 +179,10 @@ export async function listAccessiblePackages(scope: AppScope, type: PackageType)
       appProxyId: applicationPackages.proxyId,
       appVersionId: applicationPackages.versionId,
       appEnabled: applicationPackages.enabled,
+      // `latest` dist-tag version id — non-null iff the package has a published
+      // version. Lets callers tell published agents from draft-only ones without
+      // an N+1 (a draft-only agent must be run with `version=draft`).
+      latestVersionId: packageDistTags.versionId,
     })
     .from(packages)
     .leftJoin(
@@ -181,6 +191,10 @@ export async function listAccessiblePackages(scope: AppScope, type: PackageType)
         eq(applicationPackages.packageId, packages.id),
         eq(applicationPackages.applicationId, scope.applicationId),
       ),
+    )
+    .leftJoin(
+      packageDistTags,
+      and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
     )
     .where(
       and(
@@ -192,6 +206,145 @@ export async function listAccessiblePackages(scope: AppScope, type: PackageType)
       ),
     )
     .orderBy(sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`);
+}
+
+// ---------------------------------------------------------------------------
+// Installed-package hints — caller-context for the chat / get_me payload
+// ---------------------------------------------------------------------------
+
+/**
+ * Fields shared by every installed-package hint (agents, skills, …). Per-type
+ * extras (an agent's `takes_input`, a skill's `version`) are layered on top by
+ * the projection passed to `listInstalledPackageHints`.
+ */
+export interface PackageHint {
+  /** Package identifier, e.g. "@appstrate/triage" / "@appstrate/web-research". */
+  package_id: string;
+  display_name: string;
+  description: string;
+  source: string;
+  /**
+   * True when the package has a published version (a `latest` dist-tag) or is a
+   * system package. A draft-only package is `false` — callers must run it with
+   * `version=draft` (omitting `version` would 404 `no_published_version`).
+   */
+  published: boolean;
+}
+
+const DEFAULT_PACKAGE_HINT_LIMIT = 15;
+
+/**
+ * List the packages of one `type` an actor in this application could use, as a
+ * bounded hint for the get_me / chat-prompt caller context. "Installed" =
+ * visible in the app (`listAccessiblePackages`) AND not disabled per-app. System
+ * packages are always enabled. The list is capped (`limit`) so a large catalog
+ * doesn't bloat the system prompt — the long tail stays reachable via
+ * `search_operations`.
+ *
+ * The base hint (id/name/description/source) is uniform across package types;
+ * `project` layers on the type-specific extras from the manifest. Access gating
+ * is NOT enforced here — the caller decides whether to surface the hint, and the
+ * run / inline-run route re-validates at invoke time.
+ */
+async function listInstalledPackageHints<T extends PackageHint>(
+  scope: AppScope,
+  type: PackageType,
+  project: (base: PackageHint, manifest: Record<string, unknown>) => T,
+  opts?: { limit?: number },
+): Promise<{ items: T[]; truncated: boolean; total: number }> {
+  const limit = opts?.limit ?? DEFAULT_PACKAGE_HINT_LIMIT;
+  const rows = await listAccessiblePackages(scope, type);
+
+  // `enabled` is null for system packages (no application_packages row) — treat
+  // null as enabled; only an explicit `false` disables a local install.
+  const enabled = rows.filter((r) => r.appEnabled !== false);
+  const total = enabled.length;
+
+  const items = enabled.slice(0, limit).map((row) => {
+    const manifest = asRecord(row.draftManifest) as Record<string, unknown>;
+    const base: PackageHint = {
+      package_id: typeof manifest.name === "string" ? manifest.name : row.id,
+      display_name: typeof manifest.display_name === "string" ? manifest.display_name : "",
+      description: typeof manifest.description === "string" ? manifest.description : "",
+      source: row.source ?? "local",
+      published: row.source === "system" || row.latestVersionId != null,
+    };
+    return project(base, manifest);
+  });
+
+  return { items, truncated: total > items.length, total };
+}
+
+/** One entry in the runnable-agent hint exposed via get_me / the chat prompt. */
+export interface RunnableAgent extends PackageHint {
+  /** Whether the agent declares an input schema with at least one property. */
+  takes_input: boolean;
+}
+
+export interface RunnableAgentsResult {
+  agents: RunnableAgent[];
+  /** True when the catalog was capped by `limit` (more reachable via search). */
+  truncated: boolean;
+  /** Total runnable agents before the cap. */
+  total: number;
+}
+
+/**
+ * Runnable-agent hint for the caller context. "Runnable" is a hint only — the
+ * caller gates on the `agents:run` permission and the run route re-checks RBAC
+ * at invoke time. See {@link listInstalledPackageHints}.
+ */
+export async function listRunnableAgents(
+  scope: AppScope,
+  opts?: { limit?: number },
+): Promise<RunnableAgentsResult> {
+  const { items, truncated, total } = await listInstalledPackageHints(
+    scope,
+    "agent",
+    (base, manifest) => {
+      const properties = asRecord(asRecord(asRecord(manifest.input).schema).properties);
+      return { ...base, takes_input: Object.keys(properties).length > 0 };
+    },
+    opts,
+  );
+  return { agents: items, truncated, total };
+}
+
+/** One entry in the installed-skill hint exposed via get_me / the chat prompt. */
+export interface InstalledSkill extends PackageHint {
+  /** The skill package's own manifest version, when known — pin a satisfiable
+   * `dependencies.skills` range from it. */
+  version: string | null;
+}
+
+export interface InstalledSkillsResult {
+  skills: InstalledSkill[];
+  /** True when the catalog was capped by `limit` (more reachable via search). */
+  truncated: boolean;
+  /** Total installed skills before the cap. */
+  total: number;
+}
+
+/**
+ * Installed-skill hint for the caller context. Skills are not run directly: the
+ * model declares them under an agent manifest's `dependencies.skills`, and the
+ * inline-run preflight validates they exist at invoke time. Same `agents:run`
+ * caller gate as agents. See {@link listInstalledPackageHints}.
+ */
+export async function listInstalledSkills(
+  scope: AppScope,
+  opts?: { limit?: number },
+): Promise<InstalledSkillsResult> {
+  const { items, truncated, total } = await listInstalledPackageHints(
+    scope,
+    "skill",
+    (base, manifest) => ({
+      ...base,
+      version: typeof manifest.version === "string" ? manifest.version : null,
+    }),
+    opts,
+  );
+  return { skills: items, truncated, total };
 }
 
 /**

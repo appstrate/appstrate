@@ -11,11 +11,13 @@
  */
 
 import { z } from "zod";
-import type { Hono } from "hono";
+import type { Hono, MiddlewareHandler } from "hono";
 import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
-import type { ModelApiShape, OAuthWireFormat } from "./sidecar-types.ts";
+import type { ModelApiShape } from "./sidecar-types.ts";
+import type { ChatEngineHandler } from "./chat-engine-contract.ts";
+import type { SubscriptionEngineBinding } from "./subscription-engines.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -485,9 +487,9 @@ export interface ModelProviderProxyPatch {
  * internal claim vocabulary.
  *
  * `accountId` is the stable account/tenant identifier the provider uses
- * for routing (echoed back to the upstream via the configured
- * `accountIdHeader`). `email` is the user identity associated with the
- * credential.
+ * for routing (echoed back to the upstream by the sidecar's identity
+ * layer, which decides the routing header from the boot config). `email`
+ * is the user identity associated with the credential.
  */
 export interface ModelProviderIdentity {
   accountId?: string;
@@ -495,40 +497,60 @@ export interface ModelProviderIdentity {
 }
 
 /**
- * Pure-data inference probe request — used by the platform's connection
- * test to verify that a stored credential can actually serve traffic
- * against the provider's backend. Factored out so the wire format can be
- * unit-tested without standing up an HTTP listener.
+ * Context passed to {@link ModelProviderHooks.validateCredential}. The
+ * platform supplies the decrypted credential material it already holds —
+ * the module validates it OFFLINE (no network), so the platform never
+ * issues a subscription API call to test a token.
  */
-export interface InferenceProbeRequest {
-  url: string;
-  method: "POST";
-  headers: Record<string, string>;
-  body: string;
-}
-
-/**
- * Input passed to {@link ModelProviderHooks.buildInferenceProbe}. The
- * platform supplies the resolved model + credential material; the module
- * builds the wire-shape its backend will actually accept.
- */
-export interface InferenceProbeContext {
-  baseUrl: string;
-  modelId: string;
+export interface CredentialValidationContext {
+  /** OAuth access token or API key the credential carries. */
   apiKey: string;
-  /** Populated from the credential row's identity slots when present. */
+  /** Abstract account/tenant id surfaced by `extractTokenIdentity`, when present. */
   accountId?: string;
+  /** Token expiry in epoch ms, when known (`null`/unset = unknown). */
+  expiresAt?: number | null;
 }
 
 /**
- * Pure-data error result a module may return from
- * {@link ModelProviderHooks.buildInferenceProbe} when it knows the probe
- * cannot succeed (e.g. a required identity slot is missing). The platform
- * surfaces it as a `TestResult` without ever sending the request.
+ * Pure-data result of an OFFLINE credential validation. Returned by
+ * {@link ModelProviderHooks.validateCredential}. `ok: true` means the
+ * credential is structurally valid and unexpired; `ok: false` carries a
+ * stable error code + message the platform surfaces as a `TestResult`
+ * (latency 0 — no request was made). Defined in core (not shared-types)
+ * to keep the module contract dependency-free.
  */
-export interface InferenceProbeBuildError {
-  error: string;
-  message: string;
+export type CredentialValidationResult =
+  | { ok: true }
+  | { ok: false; error: string; message: string };
+
+/**
+ * Shared OFFLINE expiry gate for subscription-credential `validateCredential`
+ * hooks. Rejects when no expiry source is known (a dead token with no expiry
+ * metadata must not pass) and when the expiry is in the past. The caller owns
+ * the provider-specific pre-conditions (bearer well-formedness, required JWT
+ * claims) and resolves `expiresAtMs` from whatever sources it trusts (the
+ * credential row's `expiresAt`, a token `exp` claim, …); this helper carries
+ * only the expiry rule + its stable error code/messages so the two
+ * subscription modules can't drift on wording or behavior.
+ */
+export function validateOfflineExpiry(
+  expiresAtMs: number | null | undefined,
+): CredentialValidationResult {
+  if (expiresAtMs === undefined || expiresAtMs === null) {
+    return {
+      ok: false,
+      error: "AUTH_FAILED",
+      message: "credential expiry could not be verified",
+    };
+  }
+  if (expiresAtMs <= Date.now()) {
+    return {
+      ok: false,
+      error: "AUTH_FAILED",
+      message: "subscription token has expired — reconnect the subscription",
+    };
+  }
+  return { ok: true };
 }
 
 /**
@@ -579,23 +601,18 @@ export interface ModelProviderHooks {
   buildApiKeyPlaceholder?: (accessToken: string) => string | null;
 
   /**
-   * Build the inference probe the platform sends to verify the credential
-   * can serve traffic. Modules whose backend doesn't accept the generic
-   * `GET ${baseUrl}/models` discovery probe implement this hook to
-   * provide the real wire format.
+   * Validate a credential OFFLINE — with NO network call. Subscription
+   * providers (`claude-code`, `codex`) implement this so the platform can
+   * confirm a token is structurally valid and unexpired by decoding it
+   * locally, instead of spending a subscription request against the
+   * vendor's backend. Real per-model availability is validated at first
+   * official-binary run.
    *
-   * Returns:
-   *  - {@link InferenceProbeRequest} → the platform sends it and reports
-   *    the result.
-   *  - {@link InferenceProbeBuildError} → the platform surfaces it as a
-   *    failed `TestResult` without ever sending the request (e.g. when a
-   *    required identity slot is missing).
-   *  - `null` → fall back to the platform's generic `/models` discovery
-   *    probe.
+   * When present, the platform's connection test calls this hook and
+   * NEVER issues a subscription API request. API-key providers omit it
+   * and fall back to the generic `GET ${baseUrl}/models` discovery probe.
    */
-  buildInferenceProbe?: (
-    ctx: InferenceProbeContext,
-  ) => InferenceProbeRequest | InferenceProbeBuildError | null;
+  validateCredential?: (ctx: CredentialValidationContext) => CredentialValidationResult;
 }
 
 /**
@@ -641,18 +658,6 @@ export interface ModelProviderDefinition {
   authMode: "api_key" | "oauth2";
   /** Required iff `authMode === "oauth2"`. */
   oauth?: ModelProviderOAuthConfig;
-  /**
-   * Declarative wire-format quirks the sidecar must apply on this
-   * provider's behalf — static identity headers, accountId routing
-   * header, system-prompt prepend, body coercions (`forceStream`/
-   * `forceStore`), URL path rewriting, adaptive header retries.
-   *
-   * Only meaningful for OAuth providers. The platform forwards this
-   * struct verbatim into the sidecar's `LlmProxyOauthConfig.wireFormat`
-   * at boot, so the sidecar runtime never branches on `providerId` —
-   * adding a new OAuth provider is a pure declarative change.
-   */
-  oauthWireFormat?: OAuthWireFormat;
 
   // — Catalog —
   /**
@@ -680,19 +685,35 @@ export interface ModelProviderDefinition {
   featuredModels: readonly string[];
 
   /**
-   * Candidate model ids for **empirical discovery** — the platform
-   * probes each one against the connected credential (1-token inference
-   * request) and persists the ids that respond 2xx as the credential's
-   * `availableModelIds`. Lets subscription-backed OAuth providers
-   * (codex, claude-code) surface the models a *specific account/plan*
-   * actually serves, which no static catalog can know.
-   *
-   * Unlike {@link featuredModels}, ids here do NOT have to exist in the
-   * resolved catalog — the probe is the validation. When omitted, the
-   * platform probes `featuredModels` only. Irrelevant for api_key
-   * providers whose full catalog is exposed.
+   * Candidate model ids for discovery — the source list for whichever
+   * {@link modelDiscovery} strategy applies. For the default (probe) strategy
+   * the platform probes each one against the connected credential (1-token
+   * inference request) and persists the ids that respond 2xx; for the static
+   * strategy it persists these directly (∩ catalog). Unlike
+   * {@link featuredModels}, ids here do NOT have to exist in the resolved
+   * catalog. When omitted, the platform uses `featuredModels`. Irrelevant for
+   * api_key providers whose full catalog is exposed.
    */
   modelDiscoveryCandidates?: readonly string[];
+
+  /**
+   * Model-discovery strategy. When omitted, discovery is **empirical** (probe):
+   * the platform issues a 1-token inference request per candidate and persists
+   * the ids that respond 2xx as the credential's `availableModelIds`.
+   *
+   * `{ mode: "static" }` declares that the platform must issue ZERO API calls to
+   * discover models: it persists the static {@link modelDiscoveryCandidates}
+   * (∩ catalog) WITHOUT per-model live probing. Set by subscription providers
+   * (`claude-code`, `codex`) so a user's subscription token is never spent
+   * enumerating models — real per-model availability is validated at first
+   * official-binary run.
+   *
+   * Offline credential VALIDATION (no upstream probe to test a token) is a
+   * separate, orthogonal concern inferred from the PRESENCE of
+   * {@link ModelProviderHooks.validateCredential} — it is NOT keyed off this
+   * field.
+   */
+  modelDiscovery?: { mode: "static" };
 
   // — Behavior —
   /** Provider-scoped hooks (header injection, identity extraction). */
@@ -706,6 +727,19 @@ export interface ModelProviderDefinition {
    * returned (or nothing if the hook is absent).
    */
   requiredIdentityClaims?: readonly (keyof ModelProviderIdentity)[];
+
+  /**
+   * Subscription-engine binding — set ONLY by OAuth-subscription providers
+   * whose runs execute on a vendor's OFFICIAL binary instead of the generic
+   * `pi` loop (e.g. `claude-code` → Claude Agent SDK, `codex` → Codex CLI).
+   * This binding IS the single source of truth for the provider's engine: the
+   * platform's model-provider registry reads it directly (no copied registry),
+   * so the run-launcher + the llm-proxy gateways resolve this provider's engine
+   * by id. API-key providers omit it (they run on `pi`). Keeping the binding on
+   * the provider definition is what lets core ship zero hardcoded subscription
+   * machinery — disable the module and the engine vanishes with it.
+   */
+  subscriptionEngine?: SubscriptionEngineBinding;
 }
 
 // ---------------------------------------------------------------------------
@@ -784,6 +818,16 @@ export interface AuthResolution {
   endUser?: EndUserContext;
   /** Strategy-specific metadata to attach via `c.set` under `extra` namespace. */
   extra?: Record<string, unknown>;
+  /**
+   * Declares this caller a first-party, server-minted loopback bearer: a request
+   * the server constructed for itself (process-local secret, never persisted or
+   * transmitted, not reachable from a browser). The bearer-only proxy surfaces
+   * gate on THIS capability rather than on a specific module id, so a strategy
+   * opts into the trusted-loopback path by declaring it here. Only set it on a
+   * strategy whose token never leaves the process. Propagated to
+   * `c.get("firstPartyLoopback")`.
+   */
+  firstPartyLoopback?: boolean;
   /**
    * When true, the auth pipeline defers org resolution to the `X-Org-Id`
    * middleware (same path as session auth) and derives permissions from
@@ -950,6 +994,19 @@ export interface ModuleInitContext {
 export interface PlatformServices {
   /** Structured JSON logger (pino). */
   logger: Logger;
+  /**
+   * HTTP middleware factories for module routes.
+   *
+   * `rateLimit(maxPerMinute)` returns the platform's authenticated
+   * per-route limiter (keyed on user id / API key + method + path,
+   * Redis-backed under Redis, in-memory otherwise, IETF RateLimit
+   * headers, 429 with Retry-After). Modules capture `services` at init
+   * and wire the factory into their routers — same guard semantics as
+   * every core route, no parallel implementation.
+   */
+  http: {
+    rateLimit(maxPerMinute: number): MiddlewareHandler;
+  };
   /** Run-ledger read surface. */
   runs: {
     /**
@@ -966,4 +1023,34 @@ export interface PlatformServices {
       sources: readonly string[];
     }): Promise<Array<{ id: number; costUsd: number; source: string }>>;
   };
+  /**
+   * In-process dispatch into the fully-wired platform Hono app — the same
+   * request the loopback `fetch("http://127.0.0.1:<port>/api/…")` would make,
+   * but without the socket round-trip and HTTP (de)serialization. The auth
+   * pipeline + RBAC still run on every dispatched request (it goes through the
+   * whole middleware chain), so a caller can never exceed what the forwarded
+   * credential could do over REST. Callers MUST set the caller's auth/scoping
+   * headers on the `Request` exactly as they would for the loopback fetch.
+   */
+  inProcess: {
+    dispatch(request: Request): Promise<Response>;
+  };
+  /**
+   * Register a provider module's interactive chat-turn handler, keyed by
+   * provider id. Called from the provider module's `init(ctx)` (e.g.
+   * `@appstrate/module-claude-code`). This is the platform-contract channel that
+   * keeps the chat handler OFF the run-engine binding and lets a provider module
+   * contribute chat without any other module importing it — module isolation is
+   * preserved because the handler crosses through `ctx.services`, not a
+   * module-to-module import. Re-registering replaces the handler.
+   */
+  registerChatHandler(providerId: string, handler: ChatEngineHandler): void;
+  /**
+   * Resolve a provider's registered chat-turn handler, or `undefined` for an
+   * API-key / unknown provider OR a subscription engine with no chat surface
+   * (codex). The `chat` module reads this to dispatch a vendor chat turn by
+   * provider id WITHOUT importing the provider module or any vendor SDK; only
+   * the `ChatEngineInput` contract (defined in core) is cross-cutting.
+   */
+  chatHandlerForProvider(providerId: string): ChatEngineHandler | undefined;
 }

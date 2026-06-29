@@ -917,16 +917,22 @@ describe("MITM listener — SSRF floor", () => {
       await listener.ready;
       try {
         const addr = listener.address();
-        // The link-local cloud metadata address — `isBlockedHost` blocks
-        // 169.254.0.0/16. The listener must destroy the socket right after
+        // The canonical cloud-metadata hostname — `isBlockedHost` blocks it
+        // by literal match. The listener must destroy the socket right after
         // SNI extraction, so the TLS handshake never completes.
+        //
+        // We send a *hostname* SNI (not an IP literal): TLS SNI carries
+        // host_name only (RFC 6066), and `node:tls` refuses to put an IP in
+        // the SNI extension, so an IP-literal `servername` would never reach
+        // the server's SNI block path at all. A real attacker controls the
+        // hostname, so this exercises the SSRF floor faithfully.
         await expect(
           drivenFetch({
             listenerPort: addr.port,
-            sni: "169.254.169.254",
+            sni: "metadata.google.internal",
             caCertPem: bundle.pems.caCertPem,
             method: "GET",
-            path: "/latest/meta-data/iam/security-credentials/",
+            path: "/computeMetadata/v1/instance/service-accounts/default/token",
             headers: {},
           }),
         ).rejects.toThrow();

@@ -9,6 +9,7 @@ import {
   registerModelProvider,
   registerModelProviders,
   resetModelProviders,
+  subscriptionEngineForProvider,
 } from "../../src/services/model-providers/registry.ts";
 import { seedTestModelProviders } from "../helpers/model-providers.ts";
 
@@ -107,6 +108,42 @@ describe("model-providers runtime registry", () => {
         }),
       );
       expect(isOAuthModelProvider("oauth-test")).toBe(true);
+    });
+  });
+
+  // The provider→engine resolution reads the `subscriptionEngine` binding off
+  // the registered definition directly (no separate copied map). These helpers
+  // moved here from @appstrate/core/subscription-engines when the global engine
+  // registry was removed.
+  describe("subscription-engine read helpers", () => {
+    beforeEach(() => {
+      registerModelProvider(
+        fakeDef("claude-code", {
+          authMode: "oauth2",
+          subscriptionEngine: { engine: "claude" },
+        }),
+      );
+      // codex is registered as a model provider (inference / model-listing) but
+      // contributes NO subscription engine — agent runs on a ChatGPT/Codex
+      // subscription are deferred to a follow-up PR.
+      registerModelProvider(fakeDef("codex", { authMode: "oauth2" }));
+      registerModelProvider(fakeDef("openai", { authMode: "api_key" }));
+    });
+
+    describe("subscriptionEngineForProvider", () => {
+      it("returns the binding with the provider's id + label", () => {
+        const claude = subscriptionEngineForProvider("claude-code");
+        expect(claude).toMatchObject({
+          providerId: "claude-code",
+          label: "claude-code",
+          engine: "claude",
+        });
+      });
+      it("returns undefined for a non-subscription / unknown provider", () => {
+        expect(subscriptionEngineForProvider("codex")).toBeUndefined();
+        expect(subscriptionEngineForProvider("openai")).toBeUndefined();
+        expect(subscriptionEngineForProvider("not-here")).toBeUndefined();
+      });
     });
   });
 

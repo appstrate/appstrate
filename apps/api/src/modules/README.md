@@ -8,7 +8,7 @@ At boot, `apps/api/src/lib/modules/module-loader.ts` scans this directory and re
 
 Only modules listed in the `MODULES` environment variable are actually initialized. Everything else is inert: no tables, no routes, no workers, no hook handlers.
 
-The default value is `oidc,webhooks` — these are built-in OSS modules that ship with the platform and are loaded out of the box. Override `MODULES` to extend (by appending external npm specifiers) or to remove a built-in.
+The default value is `oidc,webhooks,mcp,core-providers` — these are built-in OSS modules that ship with the platform and are loaded out of the box. Override `MODULES` to extend (by appending external npm specifiers) or to remove a built-in.
 
 ## Directory layout
 
@@ -169,7 +169,7 @@ Provider hooks (`ModelProviderHooks`):
 - **`beforeLlmProxyRequest(ctx) → patch`** — runs at every LLM call, returns extra headers / URL rewrites to merge into the outbound request. Use it to inject provider-specific routing headers.
 - **`extractTokenIdentity(accessToken) → ModelProviderIdentity | null`** — runs once at credential import + after every refresh. Maps the provider's claim vocabulary (e.g. a JWT payload) into the platform's well-known abstract slots: `{ accountId?, email? }`. The platform persists the result and never re-decodes.
 - **`buildApiKeyPlaceholder(accessToken) → string | null`** — builds the `MODEL_API_KEY` value the agent container sees, when the in-container LLM client expects a structurally meaningful shape (e.g. a JWT it will decode). Return `null` to fall back to the platform's generic dash-stripped placeholder. The real upstream credential never leaves the platform/sidecar boundary.
-- **`buildInferenceProbe(ctx) → InferenceProbeRequest | InferenceProbeBuildError | null`** — builds the connection-test probe (used by `POST /api/model-provider-credentials/:id/test`). Return a probe request when the generic `GET ${baseUrl}/models` discovery probe doesn't work, a structured error to fail fast (e.g. missing required identity slot), or `null` to fall back to discovery.
+- **`validateCredential(ctx) → CredentialValidationResult`** — validates a credential **offline** (no network), used by the connection test (`POST /api/models/test`). Implement it together with `credentialValidation: "offline"` on the provider definition: the platform then runs this local check instead of issuing any API call (subscription providers decode the token to confirm it is well-formed + unexpired). Return `{ ok: true }` for a valid credential or `{ ok: false, error, message }` otherwise. API-key providers omit it and fall back to the generic `GET ${baseUrl}/models` probe.
 
 Declarative gate: `requiredIdentityClaims: readonly (keyof ModelProviderIdentity)[]` on the provider definition makes the platform refuse to import a credential whose mandatory slots can't be resolved — fail-loud at import time instead of silently persisting a dead credential.
 

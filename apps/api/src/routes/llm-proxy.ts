@@ -18,17 +18,19 @@
  * spec explicitly resists premature abstraction so each route keeps its
  * own adapter binding instead of sharing a single dispatch table.
  *
- * Run-only shapes (no proxy route, by design):
- *   - `openai-codex-responses` (the `codex` OAuth subscription provider) and
- *     the `claude-code` subscription provider are **run-only**. Their
- *     credentials are short-lived OAuth subscription tokens the sidecar
- *     injects per-request inside the run sandbox; there is deliberately no
- *     `/api/llm-proxy/...` route that would hand a third-party caller a path
- *     to spend a user's personal subscription. A remote/CLI runner using one
- *     of these providers calls the upstream itself with its own token — it
- *     does not route through this proxy. (Note `claude-code` rides the
- *     `anthropic-messages` shape, which DOES have a route for API-key
- *     Anthropic; the subscription provider still never proxies.)
+ * Subscription shapes (FIRST-PARTY-ONLY):
+ *   - The Claude Pro/Max/Team subscription (`claude-code`) is served by the
+ *     `/claude-code-sdk/:presetId/*` gateway, which injects the token WITHOUT
+ *     forging any client identity — the chat's official Claude Agent SDK signs
+ *     the legit Claude Code fingerprint itself. See
+ *     services/llm-proxy/claude-code-sdk-gateway.ts.
+ *   - The Codex (ChatGPT) subscription (`codex`) is NOT served here: it remains
+ *     an inference/model provider only — its agent-run engine is deferred to a
+ *     follow-up, so it has no chat surface and no agent gateway. See
+ *     docs/architecture/SUBSCRIPTION_COMPLIANCE.md.
+ *   - The generic gateway (`proxyLlmCall`) forges nothing, so an
+ *     OAuth-subscription model with no dedicated CLI gateway is refused with
+ *     `LlmProxyUnsupportedSubscriptionError`. Connect an API-key provider.
  *
  * Security:
  *   - Bearer auth only — API keys with `llm-proxy:call` (headless) OR
@@ -53,17 +55,31 @@ import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest } from "../lib/errors.ts";
-import { assertBearerOnly } from "../lib/bearer-only.ts";
+import { assertBearerOnly, assertLoopbackOnly } from "../lib/bearer-only.ts";
 import { recordLlmLatency } from "../observability/index.ts";
 import {
   proxyLlmCall,
   LlmProxyModelApiMismatchError,
   LlmProxyUnsupportedModelError,
+  LlmProxyUnsupportedSubscriptionError,
 } from "../services/llm-proxy/core.ts";
 import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
-import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/types.ts";
+// The Claude Code subscription SDK gateway handler. It lives in apps/api (not in
+// the opt-in `module-claude-code`, unlike the engine binding + chat driver, which
+// DO live in the module) because it is wired to api-internal llm-proxy infra —
+// `metering`, credential resolution, `buildLlmProxyPrincipal`, `credentials` — and
+// a module must not depend on the API package. Runtime footprint is still zero
+// when the module is off: the subscription-engine registry stays empty, so the
+// guard below mounts nothing and this handler is never reached.
+import {
+  handleClaudeCodeSdkGateway,
+  CLAUDE_CODE_PROVIDER_ID,
+} from "../services/llm-proxy/claude-code-sdk-gateway.ts";
+import { subscriptionEngineForProvider } from "../services/model-providers/registry.ts";
+import type { LlmProxyAdapter } from "../services/llm-proxy/types.ts";
+import { buildLlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
 
@@ -114,6 +130,43 @@ export function createLlmProxyRouter() {
     );
   }
 
+  // Claude Code subscription SDK gateway — the credential-injection proxy the
+  // chat points the official Claude Agent SDK at (`ANTHROPIC_BASE_URL`). Unlike
+  // the protocol adapters above it forges nothing — the binary signs its own
+  // client identity; we only swap the placeholder bearer for the real
+  // subscription token, server-side.
+  //
+  // Mounted only when the `claude-code` subscription engine is registered — i.e.
+  // `module-claude-code` is loaded. With no subscription module the registry is
+  // empty, the guard is false, and NO gateway route exists (zero footprint). The
+  // gate is the registry presence, so the route can't drift from the engine
+  // binding; the one vendor literal here is appropriate now there is a single
+  // chat-capable subscription gateway (a second one is a router edit, by design).
+  // LOOPBACK ONLY — driven only by the chat loopback bearer (not API keys /
+  // dashboard tokens), so a subscription can't be spent as a bare proxy.
+  const claudeCodeEngine = subscriptionEngineForProvider(CLAUDE_CODE_PROVIDER_ID);
+  if (claudeCodeEngine) {
+    const gateway = async (c: Context<AppEnv>): Promise<Response> => {
+      assertLoopbackOnly(c.get("authMethod"), `${claudeCodeEngine.label} SDK gateway`, {
+        firstPartyLoopback: c.get("firstPartyLoopback"),
+      });
+      return handleClaudeCodeSdkGateway(c, limits.max_request_bytes);
+    };
+    // Wildcard forwards whatever upstream subpath the SDK appends (`/v1/messages`,
+    // …); the bare-preset route catches the SDK's connectivity probe.
+    for (const path of [
+      `/${CLAUDE_CODE_PROVIDER_ID}-sdk/:presetId/*`,
+      `/${CLAUDE_CODE_PROVIDER_ID}-sdk/:presetId`,
+    ]) {
+      router.all(
+        path,
+        rateLimit(limits.rate_per_min),
+        requirePermission("llm-proxy", "call"),
+        gateway,
+      );
+    }
+  }
+
   return router;
 }
 
@@ -124,14 +177,12 @@ async function handleProxy(
   limits: LlmProxyLimits,
 ): Promise<Response> {
   const authMethod = c.get("authMethod");
-  assertBearerOnly(authMethod, "LLM proxy");
+  assertBearerOnly(authMethod, "LLM proxy", { firstPartyLoopback: c.get("firstPartyLoopback") });
 
   const apiKeyId = c.get("apiKeyId");
   const orgId = c.get("orgId");
   const userId = c.get("user").id;
-  const principal: LlmProxyPrincipal = apiKeyId
-    ? { kind: "api_key", apiKeyId, orgId, userId }
-    : { kind: "jwt_user", userId, orgId };
+  const principal = buildLlmProxyPrincipal({ apiKeyId, orgId, userId });
 
   const runIdHeader = c.req.header("X-Run-Id");
   const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
@@ -181,6 +232,9 @@ async function handleProxy(
     // only for errors from an actual upstream attempt.
     if (err instanceof LlmProxyUnsupportedModelError) {
       throw invalidRequest(err.message);
+    }
+    if (err instanceof LlmProxyUnsupportedSubscriptionError) {
+      throw invalidRequest(err.message, "model");
     }
     if (err instanceof LlmProxyModelApiMismatchError) {
       throw invalidRequest(err.message, "model");

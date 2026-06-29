@@ -2,7 +2,8 @@
 
 import { Hono, type Context } from "hono";
 import pLimit, { type LimitFunction } from "p-limit";
-import { mountMcp } from "./mcp.ts";
+import { mountMcp, validateMcpHostHeader } from "./mcp.ts";
+import { RuntimeEventJournal } from "./runtime-event-journal.ts";
 import type { ApiCallDeps } from "./credential-proxy.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { BlobStore } from "./blob-store.ts";
@@ -10,9 +11,11 @@ import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import {
   DEFAULT_API_CALL_CONCURRENCY,
   LLM_PROXY_TIMEOUT_MS,
+  MAX_REQUEST_BODY_SIZE,
   filterHeaders,
   isBlockedUrl,
   readPositiveIntEnv,
+  readRequestBodyBounded,
   type SidecarConfig,
   type CredentialsResponse,
   type LlmProxyOauthConfig,
@@ -24,6 +27,7 @@ import {
   createSseModelSwapStream,
   scrubModelText,
 } from "./model-swap.ts";
+import { applyClaudeOauthGatewayHeaders } from "@appstrate/core/claude-oauth-gateway";
 import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
   DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
@@ -31,12 +35,6 @@ import {
   readPositiveTokenEnv,
 } from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
-import {
-  buildIdentityHeaders,
-  transformBody,
-  adaptHeaderForRetry,
-  TransformBodyTooLargeError,
-} from "./oauth-identity.ts";
 import { logger } from "./logger.ts";
 import { filterSensitiveHeaders } from "./redact.ts";
 
@@ -105,6 +103,14 @@ export interface AppDeps {
    * tests / sidecars launched without integrations.
    */
   integrationBootReportProvider?: () => IntegrationBootReport;
+  /**
+   * Per-run runtime-event journal. The runtime-tool defs (`server.ts`) are
+   * wrapped to journal their canonical events on a single handler execution;
+   * the `GET /runtime-events` endpoint serves them to whichever runner is
+   * draining. Omitted by tests / sidecars without runtime tools → the endpoint
+   * answers an empty batch.
+   */
+  runtimeEventJournal?: RuntimeEventJournal;
 }
 
 /**
@@ -305,12 +311,13 @@ async function logOauthLlmResponse(
     // body unreadable — log what we have
   }
   // Drop credential-bearing headers (set-cookie, www-authenticate, …)
-  // before the response hits the operator log. We don't regex-scrub the
-  // body sample — upstream JSON error payloads never echo bearer tokens
-  // back, and a 200-char preview is enough to diagnose without amplifying
-  // log noise.
+  // before the response hits the operator log. A 200-char preview is enough
+  // to diagnose. Upstream JSON error payloads don't echo bearer tokens, but
+  // we still scrub bearer/api-key patterns from the sample so the no-leak
+  // guarantee holds independent of upstream behavior.
   const responseHeaders = filterSensitiveHeaders(upstream.headers);
-  const truncated = bodySample.length > 200 ? bodySample.slice(0, 200) + "…" : bodySample;
+  const scrubbed = bodySample.replace(/(sk-ant-[a-z0-9-]+|Bearer\s+[\w.~+/=-]+)/gi, "[redacted]");
+  const truncated = scrubbed.length > 200 ? scrubbed.slice(0, 200) + "…" : scrubbed;
   logger.warn("oauth llm: upstream response non-2xx", {
     credentialId,
     targetUrl,
@@ -322,12 +329,7 @@ async function logOauthLlmResponse(
   return upstream;
 }
 
-function llmFetchErrorResponse(
-  // Hono context — typed loosely to avoid coupling to its internal generics.
-  c: { json: (body: unknown, status: number) => Response },
-  targetUrl: string,
-  err: unknown,
-): Response {
+function llmFetchErrorResponse(c: Context, targetUrl: string, err: unknown): Response {
   const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
   let domain: string | undefined;
   try {
@@ -341,6 +343,81 @@ function llmFetchErrorResponse(
 function stringifyError(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+/**
+ * The `/llm` 413 envelope. Mirrors the mcp.ts oversize-error shape so a
+ * caller sees a consistent `PAYLOAD_TOO_LARGE` discriminator on both the
+ * MCP envelope cap and this request-body cap.
+ */
+function llmBodyOversizeError(actual: number | null) {
+  return {
+    error:
+      actual !== null
+        ? `Request body exceeds ${MAX_REQUEST_BODY_SIZE} bytes (declared ${actual}).`
+        : `Request body exceeds ${MAX_REQUEST_BODY_SIZE} bytes.`,
+    reason: "PAYLOAD_TOO_LARGE" as const,
+    limit: MAX_REQUEST_BODY_SIZE,
+    ...(actual !== null ? { actual } : {}),
+    envVar: "SIDECAR_MAX_REQUEST_BODY_BYTES",
+  };
+}
+
+/**
+ * Buffer an inbound `/llm` request body as text under a hard byte cap.
+ * Enforces a `Content-Length` precheck when declared AND the actual
+ * buffered byte length (a missing/spoofed Content-Length is still
+ * bounded by the streaming read). Returns the decoded text, or a 413
+ * `Response` the caller returns verbatim.
+ *
+ * Replaces a bare `await c.req.raw.text()` — that path was uncapped after
+ * `oauth-identity.ts` (which carried the `MAX_REQUEST_BODY_SIZE` →
+ * `TransformBodyTooLargeError` → 413 guard) was deleted.
+ */
+async function bufferLlmBodyBounded(c: Context, maxBytes: number): Promise<string | Response> {
+  const declared = c.req.header("content-length");
+  if (declared !== undefined) {
+    const declaredLength = Number(declared);
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      return c.json(llmBodyOversizeError(declaredLength), 413);
+    }
+  }
+  const bytes = await readRequestBodyBounded(c.req.raw, maxBytes);
+  if (bytes === "exceeded") {
+    return c.json(llmBodyOversizeError(null), 413);
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Derive the upstream `/llm/*` target from the inbound request: strip the
+ * `/llm` mount prefix, re-append the query string onto the configured base URL,
+ * and surface the method. Shared by both `/llm` branches (api_key + oauth);
+ * each keeps its own `isBlockedUrl` SSRF check and credential handling.
+ */
+function deriveLlmTarget(c: Context, baseUrl: string): { targetUrl: string; method: string } {
+  const path = c.req.path.slice("/llm".length) || "/";
+  const qs = new URL(c.req.url).search;
+  return { targetUrl: `${baseUrl}${path}${qs}`, method: c.req.method };
+}
+
+/**
+ * Buffer an inbound `/llm` request body under the hard byte cap and apply the
+ * model-alias swap when one is configured; otherwise return the buffered text
+ * verbatim. Returns a 413 `Response` (the caller returns it verbatim) when the
+ * body exceeds the cap, or `undefined` for an empty body. Used by both branches
+ * that must materialise the body: oauth always (so a 401 can be replayed),
+ * api_key only when an alias requires the rewrite (the no-swap api_key path
+ * keeps its zero-copy stream).
+ */
+async function bufferAndSwapRequestBody(
+  c: Context,
+  modelSwap: ModelSwap | undefined,
+): Promise<string | undefined | Response> {
+  const buffered = await bufferLlmBodyBounded(c, MAX_REQUEST_BODY_SIZE);
+  if (buffered instanceof Response) return buffered;
+  const text = buffered;
+  return text && modelSwap ? swapRequestModel(text, modelSwap) : text || undefined;
 }
 
 /**
@@ -485,14 +562,12 @@ export function createApp(deps: AppDeps): Hono {
   //     for the real key and forward directly to the upstream provider.
   //     Request/response bodies stream through zero-copy. The Pi SDK
   //     handles retry on 429/5xx natively (Retry-After honoring + jitter).
-  //   - oauth: the sidecar resolves a fresh access token from the
-  //     platform (`/internal/oauth-token/:id`), injects bearer +
-  //     provider identity headers, applies the declarative body
-  //     transforms read from `wireFormat` (system-prepend, force-stream,
-  //     force-store). Bodies are buffered (transform requirement) but
-  //     the response still streams. On 401 we refresh + retry once; on
-  //     the wireFormat-configured adaptive-retry trigger we strip the
-  //     designated header token and retry once.
+  //   - oauth: the no-forge path for a driver that signs its OWN provider
+  //     fingerprint (the official Claude Agent SDK binary). The sidecar
+  //     resolves a fresh access token from the platform
+  //     (`/internal/oauth-token/:id`), swaps the request bearer for it, and
+  //     ensures the OAuth beta header — forging nothing. On 401 we refresh +
+  //     retry once. There is no fingerprint-forging mode.
   app.all("/llm/*", async (c) => {
     if (!config.llm) {
       return c.json({ error: "LLM proxy not configured" }, 503);
@@ -507,11 +582,7 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     const apiKeyConfig = config.llm; // discriminated narrowing
-    const baseUrl = apiKeyConfig.baseUrl;
-
-    const path = c.req.path.slice("/llm".length) || "/";
-    const qs = new URL(c.req.url).search;
-    const targetUrl = `${baseUrl}${path}${qs}`;
+    const { targetUrl, method } = deriveLlmTarget(c, apiKeyConfig.baseUrl);
 
     const filtered = filterHeaders(c.req.header());
     const forwardedHeaders: Record<string, string> = {};
@@ -521,7 +592,6 @@ export function createApp(deps: AppDeps): Hono {
         : value;
     }
 
-    const method = c.req.method;
     // Model-alias swap (request alias→real). The body is normally forwarded as
     // a zero-copy ReadableStream; for an alias we must buffer it to rewrite the
     // `model` field. Only aliases pay that cost — every other model stays
@@ -529,8 +599,12 @@ export function createApp(deps: AppDeps): Hono {
     let body: string | ReadableStream<Uint8Array> | undefined;
     if (method !== "GET" && method !== "HEAD") {
       if (apiKeyConfig.modelSwap) {
-        const text = await c.req.raw.text();
-        body = text ? swapRequestModel(text, apiKeyConfig.modelSwap) : undefined;
+        // Buffer under a hard byte cap (Content-Length precheck + bounded
+        // streaming read → 413) before the model-alias rewrite. A bare
+        // `.text()` here would buffer an unbounded body into memory.
+        const swapped = await bufferAndSwapRequestBody(c, apiKeyConfig.modelSwap);
+        if (swapped instanceof Response) return swapped;
+        body = swapped;
       } else {
         body = c.req.raw.body ?? undefined;
       }
@@ -563,6 +637,11 @@ export function createApp(deps: AppDeps): Hono {
     return passUpstream(upstream, { targetUrl, authMode: "api_key" }, apiKeyConfig.modelSwap);
   });
 
+  // OAuth: resolve the real bearer and ensure the OAuth beta is present, but
+  // DO NOT forge — no identity headers, no body transform. The driver (the
+  // official Claude Agent SDK binary) signs its own fingerprint; we forward its
+  // user-agent / x-app / anthropic-beta untouched. This is the no-forge runner
+  // path and the in-container twin of the chat's `claude-code-sdk-gateway`.
   async function handleOauthLlmRequest(
     c: Context,
     llmConfig: LlmProxyOauthConfig,
@@ -582,7 +661,13 @@ export function createApp(deps: AppDeps): Hono {
           401,
         );
       }
-      return c.json({ error: `OAuth token resolution failed: ${stringifyError(err)}` }, 502);
+      // Log the detail server-side; return a generic message to the in-container
+      // agent so platform-side error internals never cross the sidecar boundary.
+      logger.warn("oauth llm: token resolution failed", {
+        credentialId: llmConfig.credentialId,
+        error: stringifyError(err),
+      });
+      return c.json({ error: "OAuth token resolution failed" }, 502);
     }
 
     const baseUrl = llmConfig.baseUrl;
@@ -590,80 +675,41 @@ export function createApp(deps: AppDeps): Hono {
       return c.json({ error: "Resolved OAuth base URL targets a blocked network range" }, 403);
     }
 
-    const incomingPath = c.req.path.slice("/llm".length) || "/";
-    const qs = new URL(c.req.url).search;
-    const rewrite = llmConfig.wireFormat?.rewriteUrlPath;
-    const rewrittenPath = rewrite ? incomingPath.replace(rewrite.from, rewrite.to) : incomingPath;
-    const targetUrl = `${baseUrl}${rewrittenPath}${qs}`;
+    const { targetUrl, method } = deriveLlmTarget(c, baseUrl);
 
-    const method = c.req.method;
-    const filtered = filterHeaders(c.req.header());
-    const baseHeaders: Record<string, string> = { ...filtered };
+    // Forward the driver's headers verbatim except for the shared no-forge
+    // gateway policy: drop any x-api-key (bearer-only), force the real bearer,
+    // and merge the OAuth beta. The driver's own fingerprint (user-agent,
+    // x-app, anthropic-beta) is preserved — the whole point of pass-through.
+    // `filterHeaders` first drops host/content-length/hop-by-hop; wrapping the
+    // result in a Headers normalises casing so the policy needs no manual
+    // anthropic-beta/authorization variant hunt.
+    const buildHeaders = (accessToken: string): Headers =>
+      applyClaudeOauthGatewayHeaders(new Headers(filterHeaders(c.req.header())), accessToken);
 
-    // Strip any auth/api-key/UA/accept the agent SDK may have set — the
-    // OAuth path forces all four (real bearer + provider-mandated fingerprint
-    // headers). Case-insensitive removal: filterHeaders preserves the caller's
-    // original casing, so we delete every variant before re-injecting our own.
-    const STRIP_HEADERS = ["authorization", "x-api-key", "user-agent", "accept"];
-    for (const key of Object.keys(baseHeaders)) {
-      if (STRIP_HEADERS.includes(key.toLowerCase())) {
-        delete baseHeaders[key];
-      }
-    }
-
-    const identityHeaders = buildIdentityHeaders(llmConfig.wireFormat, token);
-    let forwardedHeaders: Record<string, string> = {
-      ...baseHeaders,
-      ...identityHeaders,
-      authorization: `Bearer ${token.accessToken}`,
-    };
-
-    let bodyText: string | undefined;
+    // Buffer the request body (inference JSON, bounded by
+    // SIDECAR_MAX_REQUEST_BODY_BYTES via the Content-Length precheck +
+    // bounded streaming read → 413) so a 401 can be replayed after a token
+    // refresh — a consumed stream can't be. Apply the model-alias swap here
+    // when configured; otherwise forward the body verbatim.
+    let body: string | undefined;
     if (method !== "GET" && method !== "HEAD") {
-      bodyText = await c.req.raw.text();
-      if (bodyText) {
-        try {
-          bodyText = transformBody(llmConfig.wireFormat, bodyText);
-        } catch (err) {
-          if (err instanceof TransformBodyTooLargeError) {
-            return c.json(
-              {
-                error: err.message,
-                limit: err.limitBytes,
-                actual: err.actualBytes,
-                envVar: "SIDECAR_MAX_REQUEST_BODY_BYTES",
-              },
-              413,
-            );
-          }
-          throw err;
-        }
-        // Model-alias swap (request alias→real) — after the wire-format
-        // transform, before content-length is recomputed.
-        if (llmConfig.modelSwap) {
-          bodyText = swapRequestModel(bodyText, llmConfig.modelSwap);
-        }
-        // Refresh content-length to match the transformed body so the
-        // upstream doesn't read a stale value forwarded from the agent.
-        forwardedHeaders["content-length"] = String(new TextEncoder().encode(bodyText).byteLength);
-      }
+      const swapped = await bufferAndSwapRequestBody(c, llmConfig.modelSwap);
+      if (swapped instanceof Response) return swapped;
+      body = swapped;
     }
 
-    const doFetch = async (
-      headers: Record<string, string>,
-      body: string | undefined,
-    ): Promise<Response> => {
-      return fetchFn(targetUrl, {
+    const doFetch = (headers: Headers): Promise<Response> =>
+      fetchFn(targetUrl, {
         method,
         headers,
         body,
         signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
       } as RequestInit);
-    };
 
     let upstream: Response;
     try {
-      upstream = await doFetch(forwardedHeaders, bodyText);
+      upstream = await doFetch(buildHeaders(token.accessToken));
     } catch (err) {
       logger.error("oauth llm: upstream fetch threw", {
         credentialId: llmConfig.credentialId,
@@ -675,12 +721,13 @@ export function createApp(deps: AppDeps): Hono {
 
     upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
 
-    // 401 retry: invalidate cache, force-refresh token, replay once.
+    // 401 retry: invalidate + force-refresh the token, replay once.
     if (upstream.status === 401) {
       tokenCache.invalidate(llmConfig.credentialId);
-      let refreshed: CachedToken;
       try {
-        refreshed = await tokenCache.forceRefresh(llmConfig.credentialId);
+        const refreshed = await tokenCache.forceRefresh(llmConfig.credentialId);
+        upstream = await doFetch(buildHeaders(refreshed.accessToken));
+        upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
       } catch (err) {
         if (err instanceof NeedsReconnectionError) {
           return c.json(
@@ -688,45 +735,14 @@ export function createApp(deps: AppDeps): Hono {
             401,
           );
         }
-        // Fall through with the original 401 — best-effort.
-        return passUpstream(
-          upstream,
-          {
-            targetUrl,
-            credentialId: llmConfig.credentialId,
-            authMode: "oauth",
-          },
-          llmConfig.modelSwap,
-        );
-      }
-      forwardedHeaders = {
-        ...forwardedHeaders,
-        ...buildIdentityHeaders(llmConfig.wireFormat, refreshed),
-        authorization: `Bearer ${refreshed.accessToken}`,
-      };
-      try {
-        upstream = await doFetch(forwardedHeaders, bodyText);
-      } catch (err) {
-        return llmFetchErrorResponse(c, targetUrl, err);
-      }
-      upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
-      // No second-level retry on the retry — propagate whatever we got.
-    }
-
-    // Adaptive header retry: provider declares the policy (status +
-    // body pattern → header-token strip) via `wireFormat.adaptiveRetry`.
-    // Best-effort, replays the request once.
-    const adaptivePolicy = llmConfig.wireFormat?.adaptiveRetry;
-    if (adaptivePolicy && upstream.status === adaptivePolicy.status) {
-      const text = await upstream.clone().text();
-      const adapted = adaptHeaderForRetry(adaptivePolicy, upstream.status, text, forwardedHeaders);
-      if (adapted) {
-        try {
-          upstream = await doFetch(adapted.headers, bodyText);
-          forwardedHeaders = adapted.headers;
-        } catch (err) {
-          return llmFetchErrorResponse(c, targetUrl, err);
-        }
+        // Refresh/replay failed for another reason (network, parse) — log it
+        // so a recurring 401 isn't silently masked as a plain upstream 401,
+        // then fall through and return the original response best-effort.
+        logger.warn("oauth llm: token refresh/replay failed after 401", {
+          credentialId: llmConfig.credentialId,
+          targetUrl,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
@@ -748,6 +764,21 @@ export function createApp(deps: AppDeps): Hono {
   // `bootIntegrations` (when `server.ts` pre-builds them) so the
   // in-process api_call server and the outer resource provider use the
   // same blob store.
+  // Runtime-event drain surface — the runner (pi/claude/codex) pulls the
+  // canonical events the sidecar journaled while executing runtime tools, and
+  // re-emits them on its single run-event sink. Same `Host: sidecar` posture as
+  // `/mcp` (the per-run Docker network is the boundary; no token). An empty
+  // journal (no runtime tools selected) answers an empty batch.
+  app.get("/runtime-events", (c) => {
+    const denied = validateMcpHostHeader(c.req.raw);
+    if (denied) return denied;
+    const journal = deps.runtimeEventJournal;
+    if (!journal) return c.json({ events: [], cursor: 0, firstSeq: 1 });
+    const after = Number.parseInt(c.req.query("after") ?? "0", 10);
+    const cursor = Number.isFinite(after) && after >= 0 ? after : 0;
+    return c.json(journal.after(cursor));
+  });
+
   const { blobStore, tokenBudget, apiCallLimit, proxyDeps } =
     deps.runtimeDeps ?? buildSidecarRuntimeDeps(deps);
   mountMcp(app, {

@@ -27,6 +27,13 @@ import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
 import { buildRuntimePiEnv } from "@appstrate/runner-pi";
 import {
+  assertRunnableOnEngine,
+  assertSubscriptionEngineIsolation,
+  buildOauthSidecarLlm,
+  resolveCredentialDelivery,
+} from "./subscription-run-policy.ts";
+import { getExecutionMode } from "../../infra/mode.ts";
+import {
   getOrchestrator,
   type ContainerOrchestrator,
   type WorkloadHandle,
@@ -43,12 +50,8 @@ import {
 } from "../../observability/index.ts";
 
 import { getEnv } from "@appstrate/env";
-import { isOAuthModelProvider, getModelProvider } from "../model-providers/registry.ts";
-import type {
-  LlmProxyConfig,
-  LlmProxyOauthConfig,
-  SidecarLaunchSpec,
-} from "@appstrate/core/sidecar-types";
+import { getModelProvider } from "../model-providers/registry.ts";
+import type { LlmProxyConfig, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 
 /** Terminal state reported back to the caller once the container has exited. */
 export interface PlatformContainerResult {
@@ -135,6 +138,29 @@ async function runPlatformContainerImpl(
   // is NOT a spawn failure) must not also emit a spawn data point.
   let spawnRecorded = false;
   try {
+    // Single source of truth for "what kind of credential is this and how is it
+    // delivered". Reads the provider→engine registry ONCE (plus the oauth-class
+    // flag for the engine-less refuse path); the delivery mode, the oauth-class
+    // boolean, and the resolved engine all flow from here, replacing the former
+    // parallel `isOAuthModelProvider` axis. Resolved up front so the fail-closed
+    // isolation guard below consumes the same struct instead of re-reading the
+    // registry.
+    const delivery = resolveCredentialDelivery({
+      providerId: llmConfig.providerId,
+      hasCredentialId: !!llmConfig.credentialId,
+    });
+
+    // Fail-closed BEFORE provisioning any isolation boundary: a subscription
+    // AGENT run (claude-code → Claude Agent SDK) must execute under the docker
+    // orchestrator. The process orchestrator runs in-host and would expose the
+    // subscription credential to the API process. API-key providers are
+    // unaffected. Consumes the engine already resolved above.
+    assertSubscriptionEngineIsolation({
+      engine: delivery.engine,
+      providerId: llmConfig.providerId,
+      orchestratorMode: getExecutionMode(),
+    });
+
     boundary = await orch.createIsolationBoundary(runId);
 
     const llmApiKey = llmConfig.apiKey;
@@ -142,8 +168,7 @@ async function runPlatformContainerImpl(
     // OAuth credentials must take the sidecar's OAuth branch — the API-key
     // path can't refresh tokens or inject the provider's identity routing
     // headers at request time.
-    const isOauthCredential =
-      !!llmConfig.credentialId && isOAuthModelProvider(llmConfig.providerId);
+    const isOauthCredential = delivery.isOauthCredential;
 
     // The placeholder is what actually lands in MODEL_API_KEY inside the
     // agent container. Provider-specific shape (e.g. a structured JWT) is
@@ -179,19 +204,41 @@ async function runPlatformContainerImpl(
       ? { alias: llmConfig.aliasId, real: llmConfig.modelId }
       : undefined;
 
+    // Engine selection (Pi vs the official Claude Agent SDK). Resolved from the
+    // same single source as the credential delivery, reused for both the sidecar
+    // `/llm` mode and the container's RUN_ENGINE.
+    const engine = delivery.engine;
+    // No fingerprint-forging fallback: an OAuth subscription provider can only
+    // run on an engine whose driver signs its own fingerprint (claude-code →
+    // the Claude Agent SDK). A provider with no official engine (e.g. an oauth
+    // provider with no official engine) is rejected here.
+    assertRunnableOnEngine({
+      engine,
+      providerId: llmConfig.providerId,
+      isOauthCredential,
+    });
+
     let sidecarLlm: LlmProxyConfig | undefined;
+    // M4 — pre-flight: an oauth run dereferences `credentialId` below. Assert it
+    // HERE (before any boundary/container is provisioned) so a missing credential
+    // fails fast with a clear message instead of the non-null `!` shipping
+    // `undefined`, which would otherwise surface as an opaque sidecar boot crash
+    // AFTER both containers were already launched.
+    if (isOauthCredential && !llmConfig.credentialId) {
+      throw new Error(
+        `Run launcher: oauth-mode run for provider ` +
+          `"${llmConfig.providerId}" has no resolved credentialId — cannot deliver the credential.`,
+      );
+    }
     if (isOauthCredential) {
-      // Read `oauthWireFormat` straight from the registry at the sidecar-
-      // config boundary — the provider definition is the source of truth.
-      const providerCfg = getModelProvider(llmConfig.providerId);
-      const oauthCfg: LlmProxyOauthConfig = {
-        authMode: "oauth",
+      // An `"oauth"` subscription engine (e.g. Claude Agent SDK). The official
+      // binary signs its own fingerprint, so the sidecar just swaps the bearer
+      // + ensures the OAuth beta — no forging.
+      sidecarLlm = buildOauthSidecarLlm({
         baseUrl: llmConfig.baseUrl,
         credentialId: llmConfig.credentialId!,
-        ...(providerCfg?.oauthWireFormat ? { wireFormat: providerCfg.oauthWireFormat } : {}),
         ...(modelSwap ? { modelSwap } : {}),
-      };
-      sidecarLlm = oauthCfg;
+      });
     } else if (llmApiKey) {
       // API-key flow: the sidecar forwards directly to the upstream
       // provider. The Pi SDK's native retry (Retry-After honoring +
@@ -205,6 +252,13 @@ async function runPlatformContainerImpl(
         ...(modelSwap ? { modelSwap } : {}),
       };
     }
+
+    // The Claude engine materialises `output` natively (the SDK's
+    // `outputFormat` → `structured_output`) → strip the MCP `output` tool from
+    // what the sidecar serves so the model sees a single output path. Every Pi
+    // engine takes `output` through the MCP tool.
+    const sidecarRuntimeTools =
+      engine === "claude" ? plan.runtimeTools?.filter((t) => t !== "output") : plan.runtimeTools;
 
     const sidecarSpec: SidecarLaunchSpec = {
       runToken: plan.runToken ?? "",
@@ -228,8 +282,15 @@ async function runPlatformContainerImpl(
       // hosts as in-process MCP tools — unified with the integration tool
       // surface. The no-sidecar path reads the same selection from the
       // bundle manifest instead.
-      ...(plan.runtimeTools && plan.runtimeTools.length > 0
-        ? { runtimeTools: plan.runtimeTools }
+      //
+      // Claude takes the structured deliverable NATIVELY (SDK `outputFormat` →
+      // `structured_output`), so it must NOT also be offered an MCP `output`
+      // tool — two output mechanisms would be ambiguous for the model and the
+      // runner would drain a journaled `output.emitted` on top of the native
+      // one. Strip `output` from what the sidecar serves for claude runs; the
+      // schema still reaches the runner via OUTPUT_SCHEMA for the native path.
+      ...(sidecarRuntimeTools && sidecarRuntimeTools.length > 0
+        ? { runtimeTools: sidecarRuntimeTools }
         : {}),
     };
 
@@ -246,6 +307,7 @@ async function runPlatformContainerImpl(
     // platform/sidecar boundary. The sidecar overwrites Authorization with
     // a fresh upstream token at request time — see `runtime-pi/sidecar/`.
     const containerEnv = buildRuntimePiEnv({
+      engine,
       model: {
         api: llmConfig.apiShape,
         modelId,

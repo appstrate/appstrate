@@ -10,7 +10,12 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
-import { getCatalog, resetCatalog, type CatalogOperation } from "../../catalog.ts";
+import {
+  getCatalog,
+  resetCatalog,
+  buildOperationIndex,
+  type CatalogOperation,
+} from "../../catalog.ts";
 import { buildMcpTools, type Dispatch } from "../../tools.ts";
 import { internalDispatchHeader } from "../../../../lib/internal-dispatch.ts";
 
@@ -84,6 +89,38 @@ describe("search_operations", () => {
     const res = await byName.get("search_operations")!.handler({ limit: 3 }, noExtra);
     const body = parseResult(res);
     expect((body.operations as unknown[]).length).toBeLessThanOrEqual(3);
+  });
+
+  it("embeds the top match's full schema as best_match on a keyword search", async () => {
+    const { byName } = makeTools(["mcp:read"]);
+    const res = await byName.get("search_operations")!.handler({ query: "agent" }, noExtra);
+    const body = parseResult(res);
+    const best = body.best_match as Record<string, unknown> | undefined;
+    expect(best).toBeDefined();
+    // best_match is the FULL describe payload, not the compact list row.
+    const ops = body.operations as Array<Record<string, unknown>>;
+    expect(best!.operation_id).toBe(ops[0]!.operation_id);
+    expect(typeof best!.method).toBe("string");
+    expect(typeof best!.path).toBe("string");
+    expect("request_body" in best!).toBe(true);
+    expect("referenced_schemas" in best!).toBe(true);
+  });
+
+  it("omits best_match when there is no query (plain catalog listing)", async () => {
+    const { byName } = makeTools(["mcp:read"]);
+    const res = await byName.get("search_operations")!.handler({ limit: 5 }, noExtra);
+    const body = parseResult(res);
+    expect(body.best_match).toBeUndefined();
+  });
+
+  it("best_match is identical to what describe_operation returns for that id", async () => {
+    const { byName } = makeTools(["mcp:read"]);
+    const searchRes = await byName.get("search_operations")!.handler({ query: "agent" }, noExtra);
+    const best = parseResult(searchRes).best_match as Record<string, unknown>;
+    const describeRes = await byName
+      .get("describe_operation")!
+      .handler({ operation_id: best.operation_id }, noExtra);
+    expect(parseResult(describeRes)).toEqual(best);
   });
 });
 
@@ -354,5 +391,69 @@ describe("invoke_operation", () => {
     expect(req.method).toBe("GET");
     expect(req.headers.get("content-type")).toBeNull();
     expect(await req.text()).toBe("");
+  });
+});
+
+describe("buildOperationIndex", () => {
+  beforeEach(() => resetCatalog());
+
+  it("lists every catalog operationId, grouped under tag headers", () => {
+    const index = buildOperationIndex();
+    const { operations } = getCatalog();
+    // A tag section header is present.
+    expect(index).toMatch(/^## /m);
+    // Every operationId appears in a tag's comma-separated id line.
+    for (const op of operations.values()) {
+      expect(index).toContain(op.operationId);
+    }
+  });
+
+  it("carries no structured method+path columns (those come from describe / best_match)", () => {
+    const index = buildOperationIndex();
+    const { operations } = getCatalog();
+    const knownIds = new Set([...operations.values()].map((op) => op.operationId));
+    // Each tag section is `## Tag` followed by ONE comma-separated line of
+    // operationIds; the index must not reproduce the describe/list row shape
+    // (a METHOD followed by a path). Method words can still appear inside
+    // free-text summaries, so we match the structured `METHOD /path` form.
+    expect(index).not.toMatch(/(GET|POST|PUT|PATCH|DELETE) \//);
+    for (const line of index.split("\n")) {
+      if (line === "" || line.startsWith("## ")) continue;
+      // A non-header line is purely a list of known operationIds — no paths.
+      for (const id of line.split(", ")) {
+        expect(knownIds.has(id)).toBe(true);
+      }
+    }
+  });
+
+  it("is memoized — same string instance across calls", () => {
+    const a = buildOperationIndex();
+    const b = buildOperationIndex();
+    expect(b).toBe(a);
+  });
+});
+
+describe("buildMcpTools contextInjected", () => {
+  beforeEach(() => resetCatalog());
+
+  it("exposes get_me by default (external MCP clients have no injected context)", () => {
+    const { byName } = makeTools(["mcp:read"]);
+    expect(byName.has("get_me")).toBe(true);
+  });
+
+  it("drops get_me when the caller already injected its context, keeping the rest", () => {
+    const dispatch: Dispatch = async () =>
+      new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    const tools = buildMcpTools({
+      origin: "https://test.local",
+      authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
+      permissions: new Set(["mcp:read"]),
+      dispatch,
+      contextInjected: true,
+    });
+    const names = tools.map((t) => t.descriptor.name).sort();
+    // get_me is redundant for a context-injected caller; search_operations stays
+    // (its best_match schema is not covered by the injected operation index).
+    expect(names).toEqual(["describe_operation", "invoke_operation", "search_operations"]);
   });
 });

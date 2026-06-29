@@ -1,0 +1,236 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { describe, it, expect } from "bun:test";
+import {
+  createRuntimeEventDrainer,
+  drainAndEmitInto,
+  type DrainLogger,
+  type RuntimeEventDrainer,
+} from "../src/runtime-event-drain.ts";
+import type { RuntimeToolEvent } from "../src/runtime-tool-defs.ts";
+
+/** A scriptable fetch: each entry is the JSON body returned for the next call. */
+function scriptedFetch(
+  batches: Array<{ events: RuntimeToolEvent[]; cursor: number; firstSeq?: number } | "error">,
+) {
+  const urls: string[] = [];
+  let i = 0;
+  const fn = (async (url: string | URL) => {
+    urls.push(String(url));
+    const batch = batches[Math.min(i, batches.length - 1)];
+    i += 1;
+    if (batch === "error") throw new Error("network down");
+    return new Response(JSON.stringify(batch), { status: 200 });
+  }) as unknown as typeof fetch;
+  return { fn, urls };
+}
+
+function captureLogger() {
+  const lines: Array<{ level: string; msg: string; data?: Record<string, unknown> }> = [];
+  const logger: DrainLogger = {
+    warn: (msg, data) => lines.push({ level: "warn", msg, data }),
+    error: (msg, data) => lines.push({ level: "error", msg, data }),
+  };
+  return { logger, lines };
+}
+
+const ev = (message: string): RuntimeToolEvent =>
+  ({ type: "log.written", level: "info", message }) as unknown as RuntimeToolEvent;
+
+describe("createRuntimeEventDrainer — cursor advance", () => {
+  it("pulls events after the cursor and advances it on each drain", async () => {
+    const { fn, urls } = scriptedFetch([
+      { events: [ev("a"), ev("b")], cursor: 2 },
+      { events: [ev("c")], cursor: 3 },
+    ]);
+    const d = createRuntimeEventDrainer({ url: "http://sidecar:8088/runtime-events", fetch: fn });
+
+    expect((await d.drain()).map((e) => (e as Record<string, unknown>).message)).toEqual([
+      "a",
+      "b",
+    ]);
+    expect((await d.drain()).map((e) => (e as Record<string, unknown>).message)).toEqual(["c"]);
+
+    expect(urls[0]).toContain("after=0");
+    expect(urls[1]).toContain("after=2");
+  });
+
+  it("sends the configured Host header", async () => {
+    let seenHeaders: RequestInit["headers"];
+    const fn = (async (_url: string, init?: RequestInit) => {
+      seenHeaders = init?.headers;
+      return new Response(JSON.stringify({ events: [], cursor: 0 }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const d = createRuntimeEventDrainer({
+      url: "http://sidecar:8088/runtime-events",
+      headers: { Host: "sidecar" },
+      fetch: fn,
+    });
+    await d.drain();
+    expect((seenHeaders as Record<string, string>).Host).toBe("sidecar");
+  });
+});
+
+describe("createRuntimeEventDrainer — intermediate mode", () => {
+  it("returns [] and logs on a fetch error without throwing; cursor unchanged", async () => {
+    const { fn } = scriptedFetch(["error", { events: [ev("a")], cursor: 1 }]);
+    const { logger, lines } = captureLogger();
+    const d = createRuntimeEventDrainer({
+      url: "http://sidecar:8088/runtime-events",
+      fetch: fn,
+      logger,
+    });
+
+    expect(await d.drain()).toEqual([]);
+    expect(lines.some((l) => l.msg === "runtime_events_drain_fetch_failed")).toBe(true);
+    // Next drain still starts from cursor 0 (the failed pull did not advance it).
+    expect((await d.drain()).map((e) => (e as Record<string, unknown>).message)).toEqual(["a"]);
+  });
+});
+
+describe("createRuntimeEventDrainer — final mode", () => {
+  it("loops until the journal is empty, accumulating every batch", async () => {
+    const { fn } = scriptedFetch([
+      { events: [ev("a")], cursor: 1 },
+      { events: [ev("b"), ev("c")], cursor: 3 },
+      { events: [], cursor: 3 },
+    ]);
+    const d = createRuntimeEventDrainer({ url: "http://sidecar:8088/runtime-events", fetch: fn });
+    const out = await d.drain({ final: true });
+    expect(out.map((e) => (e as Record<string, unknown>).message)).toEqual(["a", "b", "c"]);
+  });
+
+  it("retries transient failures then gives up loud (runtime_events_incomplete), never throws", async () => {
+    const { fn } = scriptedFetch(["error", "error", "error"]);
+    const { logger, lines } = captureLogger();
+    const d = createRuntimeEventDrainer({
+      url: "http://sidecar:8088/runtime-events",
+      fetch: fn,
+      logger,
+    });
+    const out = await d.drain({ final: true });
+    expect(out).toEqual([]);
+    expect(lines.some((l) => l.msg === "runtime_events_incomplete")).toBe(true);
+  });
+});
+
+describe("createRuntimeEventDrainer — concurrent drains", () => {
+  it("serializes overlapping drains so no event is emitted twice", async () => {
+    // A slow fetch that resolves on the next microtask-ish tick, so two drains
+    // kicked off together would overlap if not serialized. The journal yields
+    // a, b on the first read after cursor 0, then nothing.
+    let calls = 0;
+    const fn = (async (url: string | URL) => {
+      const after = Number(new URL(String(url)).searchParams.get("after"));
+      calls += 1;
+      await sleep(5);
+      const body =
+        after === 0 ? { events: [ev("a"), ev("b")], cursor: 2 } : { events: [], cursor: 2 };
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof fetch;
+    const d = createRuntimeEventDrainer({ url: "http://sidecar:8088/runtime-events", fetch: fn });
+
+    const [first, second] = await Promise.all([d.drain(), d.drain()]);
+    const messages = [...first, ...second].map((e) => (e as Record<string, unknown>).message);
+    // a, b appear exactly once across both drains — the second saw the advanced
+    // cursor, not the same batch.
+    expect(messages.sort()).toEqual(["a", "b"]);
+    expect(calls).toBe(2);
+  });
+});
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+describe("createRuntimeEventDrainer — truncation signal", () => {
+  it("logs runtime_events_truncated when the journal evicted past the cursor", async () => {
+    const { fn } = scriptedFetch([{ events: [ev("late")], cursor: 12, firstSeq: 5 }]);
+    const { logger, lines } = captureLogger();
+    const d = createRuntimeEventDrainer({
+      url: "http://sidecar:8088/runtime-events",
+      fetch: fn,
+      logger,
+    });
+    await d.drain();
+    expect(lines.some((l) => l.level === "error" && l.msg === "runtime_events_truncated")).toBe(
+      true,
+    );
+  });
+});
+
+/** A drainer stub that yields fixed batches per call (one per `drain()`). */
+function stubDrainer(batches: RuntimeToolEvent[][]): RuntimeEventDrainer {
+  let i = 0;
+  return {
+    drain: async () => batches[i++] ?? [],
+  };
+}
+
+describe("drainAndEmitInto", () => {
+  it("is a no-op when no drainer is wired", async () => {
+    const emitted: RuntimeToolEvent[] = [];
+    await drainAndEmitInto({
+      drainer: undefined,
+      emit: (e) => {
+        emitted.push(e);
+      },
+      now: () => 999,
+      runId: "run_1",
+    });
+    expect(emitted).toEqual([]);
+  });
+
+  it("stamps runId and preserves the event's own (journaled) timestamp", async () => {
+    const emitted: RuntimeToolEvent[] = [];
+    await drainAndEmitInto({
+      drainer: stubDrainer([[{ type: "memory.added", timestamp: 111, text: "x" }]]),
+      emit: (e) => {
+        emitted.push(e);
+      },
+      now: () => 999,
+      runId: "run_1",
+    });
+    expect(emitted).toEqual([{ type: "memory.added", timestamp: 111, text: "x", runId: "run_1" }]);
+  });
+
+  it("falls back to now() only when the event carries no timestamp", async () => {
+    const emitted: RuntimeToolEvent[] = [];
+    await drainAndEmitInto({
+      drainer: stubDrainer([[{ type: "log.written" } as RuntimeToolEvent]]),
+      emit: (e) => {
+        emitted.push(e);
+      },
+      now: () => 999,
+      runId: "run_1",
+    });
+    expect(emitted[0]!.timestamp).toBe(999);
+  });
+
+  it("propagates an emit failure in intermediate mode (fails the run)", async () => {
+    await expect(
+      drainAndEmitInto({
+        drainer: stubDrainer([[{ type: "log.written", timestamp: 1 }]]),
+        emit: () => {
+          throw new Error("dead sink");
+        },
+        now: () => 0,
+        runId: "run_1",
+      }),
+    ).rejects.toThrow("dead sink");
+  });
+
+  it("swallows an emit failure in final mode (run verdict already decided)", async () => {
+    await expect(
+      drainAndEmitInto({
+        drainer: stubDrainer([[{ type: "memory.added", timestamp: 1 }]]),
+        emit: () => {
+          throw new Error("dead sink");
+        },
+        now: () => 0,
+        runId: "run_1",
+        final: true,
+      }),
+    ).resolves.toBeUndefined();
+  });
+});

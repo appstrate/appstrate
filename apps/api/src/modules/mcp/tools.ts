@@ -8,7 +8,10 @@
  * ≈ 72K tokens), so instead we expose a tiny fixed surface and let the model
  * discover on demand:
  *
- *   - `search_operations`   — keyword/tag search over the catalog
+ *   - `search_operations`   — keyword/tag search over the catalog; a keyword
+ *                             hit also returns the top match's full schema as
+ *                             `best_match`, so the common single-target case
+ *                             skips the separate describe step
  *   - `describe_operation`  — full input schema for one operation
  *   - `invoke_operation`    — execute one operation
  *
@@ -34,7 +37,11 @@ import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 export type Dispatch = (req: Request) => Promise<Response>;
 
 /** The tools, named for telemetry/audit. */
-export type McpToolName = "search_operations" | "describe_operation" | "invoke_operation";
+export type McpToolName =
+  | "search_operations"
+  | "describe_operation"
+  | "invoke_operation"
+  | "get_me";
 
 /** Outcome of an `invoke_operation` call, for audit + telemetry. */
 export type McpInvokeOutcome =
@@ -81,6 +88,13 @@ export interface McpToolContext {
    * tests and any non-HTTP caller need not provide one.
    */
   observe?: McpObserver;
+  /**
+   * The caller already injects the get_me payload (`GET /api/me/context`) into
+   * its own system prompt, so the redundant get_me tool is dropped. Only the
+   * in-process chat consumer sets this (it injects that block + carries the
+   * server instructions); external MCP clients leave it false and keep get_me.
+   */
+  contextInjected?: boolean;
 }
 
 /** Never let an observer error affect the tool result. */
@@ -156,13 +170,39 @@ function scoreOperation(op: CatalogOperation, tokens: string[]): number {
   return score;
 }
 
+/**
+ * The full, invoke-ready definition of one operation: parameters, request body,
+ * responses, and every referenced component schema inlined. This is the payload
+ * `describe_operation` returns, and it is also embedded as `search_operations`'
+ * `best_match` so a clear single-hit search needs no follow-up describe call.
+ */
+export function describePayload(
+  op: CatalogOperation,
+  componentSchemas: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    operation_id: op.operationId,
+    method: op.method,
+    path: op.pathTemplate,
+    path_params: op.pathParams,
+    summary: op.summary,
+    description: op.description,
+    parameters: op.operation.parameters ?? [],
+    request_body: op.operation.requestBody ?? null,
+    responses: op.operation.responses ?? {},
+    referenced_schemas: collectReferencedSchemas(op.operation, componentSchemas),
+  };
+}
+
 function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "search_operations",
     description:
       "Search the Appstrate API for operations by keyword and/or tag. Returns matching " +
       "operationIds with their HTTP method, path, and summary. Use this first to discover " +
-      "which operation to call, then describe_operation for its input schema.",
+      "which operation to call. For a keyword search, the response also includes a " +
+      "`best_match` carrying the top result's full input schema — when it matches your " +
+      "intent you can call invoke_operation directly, no describe_operation needed.",
     annotations: {
       title: "Search API operations",
       readOnlyHint: true,
@@ -189,7 +229,7 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
-    const { operations } = getCatalog();
+    const { operations, componentSchemas } = getCatalog();
     const query = asString(args.query)?.trim().toLowerCase() ?? "";
     const tag = asString(args.tag)?.toLowerCase();
     const rawLimit = typeof args.limit === "number" ? args.limit : DEFAULT_SEARCH_LIMIT;
@@ -211,6 +251,14 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
       resultCount: scored.length,
     });
 
+    // For a keyword search with at least one hit, embed the top match's full
+    // invoke-ready definition so the common single-target case needs no
+    // follow-up describe_operation call. Only the top result carries the
+    // schema, to keep the response bounded; the rest stay compact.
+    const top = scored[0];
+    const bestMatch =
+      tokens.length > 0 && top ? describePayload(top.op, componentSchemas) : undefined;
+
     return textResult({
       count: scored.length,
       total: matches.length,
@@ -221,6 +269,7 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
         summary: op.summary,
         tags: op.tags,
       })),
+      best_match: bestMatch,
     });
   };
 
@@ -243,7 +292,12 @@ function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
     inputSchema: {
       type: "object",
       properties: {
-        operation_id: { type: "string", description: "The operationId from search_operations." },
+        operation_id: {
+          type: "string",
+          description:
+            "The operationId, as returned by search_operations (or already known). Not " +
+            "needed when search_operations already returned a matching best_match.",
+        },
       },
       required: ["operation_id"],
     },
@@ -273,18 +327,7 @@ function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
       operationId,
     });
 
-    return textResult({
-      operation_id: op.operationId,
-      method: op.method,
-      path: op.pathTemplate,
-      path_params: op.pathParams,
-      summary: op.summary,
-      description: op.description,
-      parameters: op.operation.parameters ?? [],
-      request_body: op.operation.requestBody ?? null,
-      responses: op.operation.responses ?? {},
-      referenced_schemas: collectReferencedSchemas(op.operation, componentSchemas),
-    });
+    return textResult(describePayload(op, componentSchemas));
   };
 
   return { descriptor, handler };
@@ -593,7 +636,58 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
+function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
+  const descriptor: Tool = {
+    name: "get_me",
+    description:
+      "Return the caller's working context: identity (name, email), role in this organization, " +
+      "and the integrations the caller already has connected and could attach to an agent " +
+      "(their own or org-shared). Call this first to ground who you are acting for, what the " +
+      "caller's role allows (operations beyond it fail at invoke time), and which integrations " +
+      "to prefer when building or configuring an agent.",
+    annotations: {
+      title: "Get caller context",
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: { type: "object", properties: {} },
+  };
+
+  const handler = async (): Promise<CallToolResult> => {
+    const start = performance.now();
+    const headers = new Headers(ctx.authHeaders);
+    // Trusted in-process re-entry — same rationale as invoke_operation: lets the
+    // org-pinned MCP token reach an app-scoped route, and lets requireAppContext
+    // fall back to the org default application when no X-Application-Id is forwarded.
+    headers.set(...internalDispatchHeader());
+    const request = new Request(new URL("/api/me/context", ctx.origin).toString(), {
+      method: "GET",
+      headers,
+    });
+    const response = await ctx.dispatch(request);
+    emit(ctx, {
+      tool: "get_me",
+      durationMs: performance.now() - start,
+      method: "GET",
+      path: "/api/me/context",
+      status: response.status,
+      outcome: "invoked",
+    });
+    return readResponse(response);
+  };
+
+  return { descriptor, handler };
+}
+
 /** Build the per-request tool set. Handlers close over the caller's auth context. */
 export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
-  return [buildSearchTool(ctx), buildDescribeTool(ctx), buildInvokeTool(ctx)];
+  const tools = [buildSearchTool(ctx), buildDescribeTool(ctx), buildInvokeTool(ctx)];
+  // get_me dispatches to GET /api/me/context. A consumer that already injects
+  // that payload into its own system prompt (the chat module) drops the tool —
+  // it would only re-fetch what the model already has. search_operations is
+  // kept either way: the operation index is injected too, but its `best_match`
+  // schema still saves a describe_operation round-trip, so it is not redundant.
+  if (!ctx.contextInjected) tools.push(buildGetMeTool(ctx));
+  return tools;
 }

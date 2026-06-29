@@ -3,7 +3,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  createTestUser,
+  addOrgMember,
+  authHeaders,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import {
   seedOrgModelProviderKey,
   seedOrgModel,
@@ -14,6 +20,7 @@ import { orgModels, organizations } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
+import { mintLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
 
@@ -99,6 +106,45 @@ describe("Models API", () => {
       // Hard guarantee: the real upstream id never appears anywhere in the
       // user-facing list payload (mirrors the integration client-masking test).
       expect(JSON.stringify(listBody)).not.toContain(realModelId);
+    });
+
+    it("does NOT strip the alias backing for the first-party chat-loopback caller (chat routing)", async () => {
+      // The chat needs the real apiShape/modelId to route an aliased model to
+      // the right engine/proxy. The loopback is trusted server code — the
+      // backing it reads never reaches the browser. See models.ts GET handler.
+      const credentialId = await createProviderKey();
+      const realModelId = "secret-backing-loopback-9q";
+      const create = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Medium",
+          modelId: realModelId,
+          credentialId,
+          aliased: true,
+        }),
+      });
+      expect(create.status).toBe(201);
+      const created = (await create.json()) as any;
+
+      const loopback = mintLoopbackToken({
+        userId: ctx.user.id,
+        email: ctx.user.email ?? "u@test",
+        name: ctx.user.name ?? "U",
+        orgId: ctx.orgId,
+        orgRole: "owner",
+      });
+      const list = await app.request("/api/models", {
+        headers: { Authorization: `Bearer ${loopback}`, "X-Org-Id": ctx.orgId },
+      });
+      expect(list.status).toBe(200);
+      const row = ((await list.json()) as any).data.find((m: any) => m.id === created.id);
+      expect(row).toBeDefined();
+      expect(row.aliased).toBe(true);
+      // Real binding is present for the loopback (so the chat can route it).
+      expect(row.modelId).toBe(realModelId);
+      expect(row.apiShape).not.toBeNull();
+      expect(row.credentialId).toBe(credentialId);
     });
   });
 
@@ -651,6 +697,73 @@ describe("Models API", () => {
       const body = (await res.json()) as { created: number; promotedDefault: boolean };
       expect(body.created).toBe(1);
       expect(body.promotedDefault).toBe(false);
+    });
+  });
+
+  // FINDING B2: the connection-test routes load a credential and can spend a
+  // subscription credential, so they must require `models:write` like their
+  // siblings — not just be rate-limited. The `member` role has `models:read`
+  // but NOT `models:write`, so it is the right negative case.
+  describe("connection-test routes require models:write", () => {
+    /** Member-role headers in the owner's org (member lacks models:write). */
+    async function memberHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
+      const member = await createTestUser({});
+      await addOrgMember(ctx.orgId, member.id, "member");
+      return {
+        Cookie: member.cookie,
+        "X-Org-Id": ctx.orgId,
+        "X-Application-Id": ctx.defaultAppId,
+        ...extra,
+      };
+    }
+
+    it("POST /api/models/test → 403 for a member (no models:write)", async () => {
+      const key = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiShape: "openai",
+        baseUrl: "https://api.openai.com",
+      });
+      const res = await app.request("/api/models/test", {
+        method: "POST",
+        headers: await memberHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId: key.id, modelId: "gpt-4o", apiKey: "sk-test" }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("POST /api/models/:id/test → 403 for a member (no models:write)", async () => {
+      const key = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiShape: "openai",
+        baseUrl: "https://api.openai.com",
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: key.id,
+        modelId: "gpt-4o",
+        label: "Member test model",
+      });
+      const res = await app.request(`/api/models/${model.id}/test`, {
+        method: "POST",
+        headers: await memberHeaders(),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("POST /api/models/test → not 403 for an owner (has models:write)", async () => {
+      const key = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiShape: "openai",
+        baseUrl: "https://api.openai.com",
+      });
+      const res = await app.request("/api/models/test", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId: key.id, modelId: "gpt-4o", apiKey: "sk-test" }),
+      });
+      // The owner passes the permission guard; the body may then succeed or
+      // surface a provider error, but it is never an authorization failure.
+      expect(res.status).not.toBe(403);
     });
   });
 });

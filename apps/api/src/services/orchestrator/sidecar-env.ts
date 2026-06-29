@@ -12,7 +12,7 @@
  *     process conditionally falls back; moving it would change behavior.
  */
 
-import type { SidecarLaunchSpec } from "@appstrate/core/platform-types";
+import type { SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 
 /**
  * Apply the spec→env assignments common to both orchestrators onto
@@ -32,9 +32,9 @@ export function applySpecToSidecarEnv(
   }
   if (spec.llm) {
     if (spec.llm.authMode === "oauth") {
-      // OAuth wire format: ship the LlmProxyOauthConfig as JSON so
-      // server.ts parses it into config.llm at boot. Without this,
-      // /llm/* returns 503 "LLM proxy not configured".
+      // OAuth config (non-forging — the driver signs its own fingerprint): ship
+      // the full LlmProxyConfig as JSON so server.ts parses it into config.llm
+      // at boot. Without this, /llm/* returns 503 "LLM proxy not configured".
       target.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(spec.llm);
     } else {
       target.PI_BASE_URL = spec.llm.baseUrl;

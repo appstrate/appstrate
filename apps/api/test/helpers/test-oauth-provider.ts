@@ -48,7 +48,7 @@ const testOAuthProvider: ModelProviderDefinition = {
 /**
  * Second synthetic provider used to exercise the platform×module hook
  * contracts (`extractTokenIdentity`, `requiredIdentityClaims`, custom
- * `apiShape`, `forceStream`, …) without depending on any real module.
+ * `apiShape`) without depending on any real module.
  *
  * The token format this provider's `extractTokenIdentity` understands is
  * deliberately trivial — `accountId:<id>;email:<addr>` — so tests can mint
@@ -67,10 +67,6 @@ const testOAuthHooksProvider: ModelProviderDefinition = {
   defaultBaseUrl: TEST_OAUTH_HOOKS_BASE_URL,
   baseUrlOverridable: false,
   authMode: "oauth2",
-  oauthWireFormat: {
-    forceStream: true,
-    forceStore: false,
-  },
   oauth: {
     clientId: "test-hooks-client-id",
     authorizationUrl: "https://auth.example-hooks.test/authorize",

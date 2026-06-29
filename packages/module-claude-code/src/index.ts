@@ -20,82 +20,59 @@
  * is fully impossible end-to-end. Operators who want plain API-key
  * Anthropic stay on the `anthropic` provider in `core-providers`.
  *
- * Anthropic OAuth tokens are NOT JWTs — the CLI surfaces `email` /
- * `subscriptionType` from the token endpoint response body, not from a
- * self-describing access token, so this module ships no `hooks`. Every
- * Anthropic-specific wire-format quirk lives declaratively on the
- * provider's `oauthWireFormat` block (the sidecar applies it generically):
- *   - `identityHeaders` — reproduces the static
- *     `anthropic-dangerous-direct-browser-access: true` + `x-app: cli`
- *     pair the Claude Code CLI sends on every authenticated
- *     `/v1/messages` request.
- *   - `systemPrepend` — prepends the third-party-tier filter prelude
- *     ("You are Claude Code, …") to the request body's `system` field.
- *     Reproduced verbatim from `anthropic-ai/claude-code`'s
- *     `THIRD_PARTY_TIER_FILTER_PREFIX` — paraphrasing it (even
- *     capitalisation) trips Anthropic's third-party tier filter and
- *     silently 429s every request.
- *   - `adaptiveRetry` — when the upstream returns a 400 carrying "out of
- *     extra usage" or "long context beta not available", strip the
- *     `context-1m-2025-08-07` token from `anthropic-beta` and replay
- *     once. Lets the agent keep working when the long-context beta runs
- *     out without surfacing a fatal error to the user.
- *
- * The in-container Pi-AI runtime supplies its own `anthropic-beta`
- * (e.g. `claude-code-20250219,oauth-2025-04-20,…`) and `user-agent:
- * claude-cli/<v>`, so this module does NOT inject those.
+ * No fingerprint forging anywhere — and the platform issues ZERO Anthropic API
+ * calls to validate a credential or discover models. A `claude-code` run
+ * executes on the official Claude Agent SDK (the `claude` runner engine) and the
+ * chat on the same SDK — the official `claude` binary signs its own client
+ * fingerprint, and the sidecar / chat gateways only swap the bearer + ensure the
+ * `oauth-2025-04-20` beta. The provider declares no `oauthWireFormat`; the
+ * module's only `hooks` entry is `validateCredential`, an OFFLINE check (no
+ * network) that confirms the bearer is well-formed and unexpired — its
+ * presence is what makes credential validation offline. Model discovery
+ * persists the static `modelDiscoveryCandidates` (declared via `modelDiscovery:
+ * { mode: "static" }`) without probing — real per-model availability is
+ * validated at first official-binary run. See
+ * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`.
  */
 
 import type {
   AppstrateModule,
-  InferenceProbeRequest,
+  CredentialValidationContext,
+  CredentialValidationResult,
   ModelProviderDefinition,
   ModelProviderHooks,
 } from "@appstrate/core/module";
-
-/**
- * 1-token `/v1/messages` probe with the exact OAuth wire fingerprint
- * the sidecar uses at runtime: bearer token (NOT `x-api-key` — the
- * generic anthropic-messages test request would send the wrong header
- * for a subscription token), the static identity headers, the
- * third-party-tier `system` prelude, and the oauth beta token. Used by
- * the connection test AND per-model discovery (`available_model_ids`).
- */
-function buildClaudeCodeInferenceRequest(config: {
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-}): InferenceProbeRequest {
-  return {
-    url: `${config.baseUrl.replace(/\/+$/, "")}/v1/messages`,
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "anthropic-version": "2023-06-01",
-      "anthropic-beta": "oauth-2025-04-20",
-      "anthropic-dangerous-direct-browser-access": "true",
-      "x-app": "cli",
-      accept: "application/json",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: config.modelId,
-      max_tokens: 1,
-      // Same prelude as `oauthWireFormat.systemPrepend` — Anthropic's
-      // third-party tier filter requires it verbatim.
-      system: [{ type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." }],
-      messages: [{ role: "user", content: "ping" }],
-    }),
-  };
-}
+import { validateOfflineExpiry } from "@appstrate/core/module";
+import { runClaudeAgentChat } from "./claude-agent/engine.ts";
 
 const claudeCodeHooks: ModelProviderHooks = {
-  buildInferenceProbe(ctx) {
-    return buildClaudeCodeInferenceRequest({
-      baseUrl: ctx.baseUrl,
-      modelId: ctx.modelId,
-      apiKey: ctx.apiKey,
-    });
+  /**
+   * Validate a Claude subscription credential OFFLINE — NO request to
+   * api.anthropic.com. Anthropic OAuth tokens are NOT JWTs (no decodable
+   * identity/expiry claims), so the only expiry source is the credential
+   * row's `expiresAt`. Structural validation is: the bearer is a
+   * non-empty string AND the row carries an unexpired `expiresAt`. When
+   * `expiresAt` is absent, expiry is unverifiable offline and the
+   * credential is rejected — a dead token with no expiry metadata must
+   * not pass. This is a STRUCTURAL/offline check only, NOT a signature
+   * verification or a live backend call. The platform never spends a
+   * subscription request to test a token — real per-model availability
+   * and true credential liveness are established at first
+   * official-binary run.
+   */
+  validateCredential(ctx: CredentialValidationContext): CredentialValidationResult {
+    if (typeof ctx.apiKey !== "string" || ctx.apiKey.trim().length === 0) {
+      return {
+        ok: false,
+        error: "AUTH_FAILED",
+        message: "Missing or malformed Claude subscription bearer token",
+      };
+    }
+    // Anthropic OAuth tokens are opaque (not JWTs), so the credential row's
+    // `expiresAt` is the ONLY expiry source. The shared gate rejects an
+    // absent expiry (a dead token with no expiry metadata must not pass) and
+    // a past expiry.
+    return validateOfflineExpiry(ctx.expiresAt);
   },
 };
 
@@ -127,12 +104,17 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // the Anthropic catalog — metadata flows through anthropic.json.
   catalogProviderId: "anthropic",
   featuredModels: ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"],
-  // Probed against the live credential after import (and on manual
-  // refresh) — what THIS account's plan actually serves (Pro vs Max vs
-  // Team differ, e.g. Opus/Fable access) lands on the credential's
-  // `available_model_ids`. No machine-readable source describes the
-  // Claude subscription tiers, so this superset is curated from
-  // anthropic.json's current generation; the probe sorts out the rest.
+  // OFFLINE validation: the platform issues ZERO Anthropic API calls to test a
+  // credential or discover models. The connection test runs the
+  // `validateCredential` hook below (a non-empty/unexpired bearer check) — its
+  // mere presence is what tells the platform to validate offline. Static
+  // discovery persists the candidates below (∩ catalog) without per-model
+  // probing. Real availability is checked at first official-binary run.
+  // Persisted as-is (∩ catalog) — what THIS account's plan actually serves
+  // (Pro vs Max vs Team differ, e.g. Opus/Fable access) lands on the
+  // credential's `available_model_ids`. No machine-readable source describes
+  // the Claude subscription tiers, so this superset is curated from
+  // anthropic.json's current generation.
   modelDiscoveryCandidates: [
     "claude-fable-5",
     "claude-opus-4-8",
@@ -142,35 +124,29 @@ const claudeCodeProvider: ModelProviderDefinition = {
     "claude-sonnet-4-5",
     "claude-haiku-4-5",
   ],
-  // Anthropic OAuth tokens are not JWTs — no JWT identity decoding. The
-  // inference probe above carries the OAuth wire fingerprint (bearer +
-  // beta token + tier prelude); the sidecar's runtime fingerprint lives
-  // in `oauthWireFormat` below.
-  hooks: claudeCodeHooks,
-  oauthWireFormat: {
-    // Static identity headers Anthropic enforces on every OAuth-authenticated
-    // `/v1/messages` call. `accept`/`content-type` are NOT pinned — the agent
-    // picks the right pair per request.
-    identityHeaders: {
-      accept: "application/json",
-      "anthropic-dangerous-direct-browser-access": "true",
-      "x-app": "cli",
-    },
-    // System-prompt prelude Anthropic's third-party-tier filter requires.
-    // Reproduced verbatim from `anthropic-ai/claude-code`'s
-    // `THIRD_PARTY_TIER_FILTER_PREFIX`. Paraphrasing (even capitalisation)
-    // trips the filter and silently 429s every request.
-    systemPrepend: {
-      type: "text",
-      text: "You are Claude Code, Anthropic's official CLI for Claude.",
-    },
-    adaptiveRetry: {
-      status: 400,
-      bodyPatterns: ["out of extra usage", "long context beta not available"],
-      headerName: "anthropic-beta",
-      removeToken: "context-1m-2025-08-07",
-    },
+  // Static discovery: persist the candidates above (∩ catalog) without probing.
+  modelDiscovery: { mode: "static" },
+  // Anthropic OAuth tokens are not JWTs — no JWT identity decoding. There is no
+  // sidecar fingerprint forging: a `claude-code` run executes on the official
+  // Claude Agent SDK (the `claude` runner engine), whose binary signs its own
+  // client fingerprint. The sidecar's OAuth mode only swaps the bearer + ensures
+  // the OAuth beta — see `runtime-pi/sidecar/app.ts` and `subscription-run-policy.ts`.
+  //
+  // RUN-ONLY engine binding, read off this definition by the platform's
+  // model-provider registry helpers (run-launcher + gateways resolve the engine
+  // by provider id off this one registration). Runs execute on the Claude Agent
+  // SDK (official binary, no forging) — the sidecar `/llm` gateway swaps the
+  // bearer server-side, so the real token never enters the container. The
+  // `claude` engine emits the structured deliverable natively via `outputFormat`
+  // → `structured_output`, so the launcher does NOT offer it the MCP `output`
+  // tool. The interactive chat driver is registered separately, through the
+  // platform contract (`ctx.services.registerChatHandler` in `init()` below) —
+  // NOT on this binding — so the run-engine binding never carries a chat surface
+  // and no module imports another.
+  subscriptionEngine: {
+    engine: "claude",
   },
+  hooks: claudeCodeHooks,
 };
 
 // ---------------------------------------------------------------------------
@@ -184,8 +160,14 @@ const claudeCodeModule: AppstrateModule = {
     version: "1.0.0",
   },
 
-  async init() {
-    // Declarative — registry pulls from modelProviders() at boot.
+  async init(ctx) {
+    // The provider definition (engine routing) is declarative — the registry
+    // pulls it from modelProviders() at boot. The interactive chat driver is
+    // contributed here through the PLATFORM CONTRACT (`ctx.services`), keyed by
+    // provider id, so it lives entirely off the published-core run-engine
+    // binding, requires no import of the chat module (module isolation), and
+    // vanishes with this module when it is not loaded.
+    ctx.services.registerChatHandler("claude-code", runClaudeAgentChat);
   },
 
   modelProviders() {

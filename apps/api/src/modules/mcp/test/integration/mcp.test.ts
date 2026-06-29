@@ -251,7 +251,14 @@ describe("mcp tool round-trip", () => {
     });
     const tools = (envelope.result?.tools as Array<Record<string, unknown>>) ?? [];
     const names = tools.map((t) => t.name);
-    expect(names.sort()).toEqual(["describe_operation", "invoke_operation", "search_operations"]);
+    expect(names.sort()).toEqual([
+      "describe_operation",
+      "get_me",
+      "invoke_operation",
+      "search_operations",
+    ]);
+    const getMe = tools.find((t) => t.name === "get_me")!;
+    expect((getMe.annotations as Record<string, unknown>).readOnlyHint).toBe(true);
     const invoke = tools.find((t) => t.name === "invoke_operation")!;
     expect((invoke.annotations as Record<string, unknown>).destructiveHint).toBe(true);
     const search = tools.find((t) => t.name === "search_operations")!;
@@ -372,6 +379,24 @@ describe("mcp tool round-trip", () => {
     expect(typeof instructions).toBe("string");
     expect(instructions).toContain("Appstrate");
     expect(instructions).toContain("@appstrate");
+    // The integration preference order (connected > activated > inactive) is the
+    // single source of truth here — both chat engines and external MCP clients
+    // read it from these instructions, so the chat prompt no longer restates it.
+    expect(instructions).toContain("Integration preference");
+    // The generated operation index is appended under this exact heading; the
+    // chat splits on the same literal to strip it for uncached/no-tool
+    // providers (see applyOperationIndexPolicy in module-chat). Keep in sync.
+    expect(instructions).toContain("## Operation index");
+    // ...and the index actually lists operations under it (compact form:
+    // comma-separated operationIds per tag, no per-op summary).
+    const indexSection = instructions!.split("## Operation index")[1]!;
+    expect(indexSection).toContain("listAgents");
+    // Regression guard for the compact index (TTFT): operationIds only, never the
+    // old `- operationId — summary` form. The bullet+em-dash would re-bloat the
+    // index (~3.4k tokens) that every uncached turn re-sends. If summaries return,
+    // this fails — re-evaluate the token cost first.
+    expect(indexSection).not.toContain(" — ");
+    expect(indexSection).not.toMatch(/^- \w/m);
   });
 });
 

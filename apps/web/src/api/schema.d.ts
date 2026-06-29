@@ -1031,6 +1031,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/chat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a conversational turn (streaming)
+         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference goes through the org's configured models via the llm-proxy; tool calls dispatch through `/api/mcp` with the caller's own permissions. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
+         */
+        post: operations["streamChat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chat/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List chat sessions
+         * @description List the caller's chat sessions in the current organization (most recent first).
+         */
+        get: operations["listChatSessions"];
+        put?: never;
+        /** Create a chat session */
+        post: operations["createChatSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chat/sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a chat session with its messages */
+        get: operations["getChatSession"];
+        put?: never;
+        post?: never;
+        /** Delete a chat session */
+        delete: operations["deleteChatSession"];
+        options?: never;
+        head?: never;
+        /** Rename a chat session */
+        patch: operations["renameChatSession"];
+        trace?: never;
+    };
+    "/api/chat/sessions/{id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop an in-progress chat generation
+         * @description Explicitly aborts the session's in-flight generation (distinct from a client disconnect, which never cancels generation). The live stream id is resolved server-side from the session. No-op if no turn is generating.
+         */
+        post: operations["stopChatStream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chat/sessions/{id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resume an in-flight chat turn
+         * @description Reconnect to the session's in-flight generation (the client's native AI-SDK `useChat({ resume: true })` calls this on mount). Returns the live UIMessage stream when a turn is generating, otherwise `204`. Lets a mid-inference page reload continue tokens exactly where they were.
+         */
+        get: operations["resumeChatStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/credential-proxy/proxy": {
         parameters: {
             query?: never;
@@ -1664,6 +1764,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's working context for an AI agent
+         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current application (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). App context resolves from `X-Application-Id`, the API key's application, or the org default.
+         */
+        get: operations["getMyContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/integration-pins": {
         parameters: {
             query?: never;
@@ -1830,8 +1950,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Empirically discover the models this credential serves
-         * @description Probes every discovery-candidate model against the live credential (1-token inference requests on the account's own quota) and persists the ids that answered as `available_model_ids`. Designed for subscription-backed OAuth providers (codex, claude-code) whose served model set depends on the account's plan and has no discovery endpoint. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.
+         * Discover the models this credential serves
+         * @description Discovers the models a credential serves and persists them as `available_model_ids`. For `probe`-validation (API-key) providers this is empirical: each discovery candidate is probed against the live credential (1-token inference requests on the account's own quota) and the ids that answered are persisted. For `offline`-validation providers (subscription: codex, claude-code) NO upstream call is made — the provider's static candidate set (intersected with the catalog) is persisted instead; real per-model availability is validated at first run by the official binary. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.
          */
         post: operations["refreshModelProviderCredentialModels"];
         delete?: never;
@@ -4436,6 +4556,28 @@ export interface components {
             /** @description Raw draft manifest JSONB for the installed package. */
             draft_manifest: Record<string, never> | null;
         };
+        ChatMessage: {
+            /** @description Server-generated message id */
+            id: string;
+            parent_id: string | null;
+            /** @description Storage format adapter id (e.g. ai-sdk/v6) */
+            format: string;
+            /** @description Opaque encoded message */
+            content: unknown;
+        };
+        ChatSession: {
+            /** @enum {string} */
+            object: "chat_session";
+            /** @description Session ID (chs_ prefix) */
+            id: string;
+            title?: string | null;
+            /** @description Whether a turn is currently generating in this conversation. */
+            generating: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         EndUserObject: {
             /** @description End-user ID (eu_ prefix) */
             id: string;
@@ -4569,7 +4711,7 @@ export interface components {
             providerId?: string | null;
             oauth_email?: string | null;
             needs_reconnection?: boolean;
-            /** @description Model ids empirically verified against this credential by the discovery probe (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. Null = never probed. Per-credential because availability depends on the account's plan. */
+            /** @description Model ids this credential is authorized to seed, persisted by model discovery (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential; for `offline`-validation providers (subscription: codex, claude-code) these are the provider's static candidate set (∩ catalog), persisted with zero upstream calls. Null = discovery never ran. Per-credential because availability depends on the account's plan. */
             available_model_ids?: string[] | null;
             created_by: string | null;
             /** Format: date-time */
@@ -4616,7 +4758,7 @@ export interface components {
             updatedAt: string | null;
             clientSecret: string;
         };
-        /** @description Resolved access token returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Carries only the fields that change per refresh — provider invariants (baseUrl, wireFormat, …) live in the sidecar's boot-time `LlmProxyOauthConfig`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`. */
+        /** @description Resolved access token returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Carries only the fields that change per refresh — provider invariants (baseUrl, …) live in the sidecar's boot-time `LlmProxyOauthConfig`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`. */
         OAuthTokenResponse: {
             accessToken: string;
             /** @description Epoch milliseconds. null when expiry is unknown. */
@@ -4658,6 +4800,8 @@ export interface components {
             label: string;
             /** @description Protocol family. `null` for model aliases (`aliased: true`) — binding hidden. */
             apiShape: string | null;
+            /** @description The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for model aliases — binding hidden. */
+            providerId: string | null;
             /** @description Provider endpoint. `null` for model aliases — binding hidden. */
             baseUrl: string | null;
             /** @description Upstream model id. `null` for model aliases — the real backing is hidden. */
@@ -4670,6 +4814,8 @@ export interface components {
             is_default: boolean;
             /** @description Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a public alias and the real binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is stripped from this projection — render an alias badge; the backing model is hidden. */
             aliased: boolean;
+            /** @description Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the backing provider, so an aliased model can show an icon without exposing its hidden binding. `null` means resolve the icon from the (visible) `apiShape`/`baseUrl`, or fall back to a generic alias icon. */
+            iconUrl: string | null;
             /** @enum {string} */
             source: "built-in" | "custom";
             /** @description ID of the backing `model_provider_credentials` row. `null` for model aliases — binding hidden. */
@@ -4827,29 +4973,30 @@ export interface components {
             /** @description Seconds before retry (on 429) */
             retryAfter?: number;
             /** @description Field-level validation errors */
-            errors?: {
-                field?: string;
-                code?: string;
-                /** @description Human-readable title; preserved from the underlying error factory. */
-                title?: string;
-                message?: string;
-                /** @description Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run. */
-                candidate_connection_ids?: string[];
-                /** @description Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). */
-                connection_id?: string;
-                /** @description Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt. */
-                missing_scopes?: string[];
-                /** @description Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error). */
-                owned_by_actor?: boolean;
-                /** @description Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1. */
-                required_auth_key?: string;
-                /** @description Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method. */
-                available_auth_keys?: string[];
-            }[];
+            errors?: components["schemas"]["ResolutionFieldError"][];
         };
         ProfileBatchItem: {
             id: string;
             displayName?: string | null;
+        };
+        ResolutionFieldError: {
+            field: string;
+            code: string;
+            message: string;
+            /** @description Human-readable title; preserved from the underlying error factory. */
+            title?: string;
+            /** @description Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run. */
+            candidate_connection_ids?: string[];
+            /** @description Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). */
+            connection_id?: string;
+            /** @description Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt. */
+            missing_scopes?: string[];
+            /** @description Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error). */
+            owned_by_actor?: boolean;
+            /** @description Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1. */
+            required_auth_key?: string;
+            /** @description Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method. */
+            available_auth_keys?: string[];
         };
         Run: {
             id: string;
@@ -5661,6 +5808,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     deviceActivateSubmit: {
@@ -5693,6 +5841,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     deviceActivateApprove: {
@@ -5888,6 +6037,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     saveAgentConfig: {
@@ -5936,7 +6086,10 @@ export interface operations {
     };
     getAgentConnectionReadiness: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). **Omitting the parameter resolves the `draft`** — preserving the launch-badge default. Pass a concrete version to get the same run-blocking verdict the run would produce for that pinned version (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents. */
+                version?: string;
+            };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -7490,6 +7643,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     upsertApplicationSmtpConfig: {
@@ -7542,6 +7696,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     deleteApplicationSmtpConfig: {
@@ -7570,6 +7725,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     testApplicationSmtpConfig: {
@@ -7611,6 +7767,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getApplicationSocialProvider: {
@@ -7642,6 +7799,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     upsertApplicationSocialProvider: {
@@ -7688,6 +7846,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     deleteApplicationSocialProvider: {
@@ -7717,6 +7876,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     redeemBootstrapToken: {
@@ -8445,6 +8605,293 @@ export interface operations {
             };
         };
     };
+    streamChat: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Org model (preset id) override; defaults to the org default model. */
+                "X-Model-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    messages: Record<string, never>[];
+                    modelId?: string;
+                    /** @description Session id (the assistant-ui thread id) */
+                    id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description AI SDK UIMessage stream (text/event-stream) */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description No enabled model configured, or invalid body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Rate limited (20/min per caller) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listChatSessions: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sessions list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["ChatSession"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createChatSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    title?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Session created */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatSession"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            /** @description Rate limited (30/min per caller) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getChatSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session with full message tree */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatSession"] & {
+                        messages: components["schemas"]["ChatMessage"][];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteChatSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session deleted (messages cascade) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    renameChatSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    title: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Session renamed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    stopChatStream: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stop signal accepted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Rate limited (60/min per caller) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    resumeChatStream: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AI SDK UIMessage stream (text/event-stream) */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description No active stream to resume */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description Rate limited (120/min per caller) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     credentialProxyGet: {
         parameters: {
             query?: never;
@@ -8963,6 +9410,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createEndUser: {
@@ -9054,6 +9502,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["IdempotencyConflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getEndUser: {
@@ -9102,6 +9551,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     deleteEndUser: {
@@ -9131,6 +9581,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     updateEndUser: {
@@ -9217,6 +9668,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     listIntegrations: {
@@ -9361,6 +9813,8 @@ export interface operations {
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
+                            /** @description Server-authoritative usability: true when ≥1 connection here is not flagged for reconnection. Single source so clients never re-derive connection state. Agent-agnostic — a run's authoritative readiness still comes from validateInlineRun. */
+                            ready: boolean;
                             has_oauth_client: boolean;
                             /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
                             has_system_client: boolean;
@@ -9376,6 +9830,7 @@ export interface operations {
                                 };
                             };
                         }[];
+                        default_tools?: string[] | "*";
                         allow_undeclared_tools: boolean;
                         active: boolean;
                         block_user_connections: boolean;
@@ -9464,6 +9919,8 @@ export interface operations {
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
+                            /** @description Server-authoritative usability: true when ≥1 connection here is not flagged for reconnection. Single source so clients never re-derive connection state. Agent-agnostic — a run's authoritative readiness still comes from validateInlineRun. */
+                            ready: boolean;
                             has_oauth_client: boolean;
                             /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
                             has_system_client: boolean;
@@ -9479,6 +9936,7 @@ export interface operations {
                                 };
                             };
                         }[];
+                        default_tools?: string[] | "*";
                         allow_undeclared_tools: boolean;
                         active: boolean;
                         block_user_connections: boolean;
@@ -10404,6 +10862,8 @@ export interface operations {
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
+                            /** @description Server-authoritative usability: true when ≥1 connection here is not flagged for reconnection. Single source so clients never re-derive connection state. Agent-agnostic — a run's authoritative readiness still comes from validateInlineRun. */
+                            ready: boolean;
                             has_oauth_client: boolean;
                             /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
                             has_system_client: boolean;
@@ -10419,6 +10879,7 @@ export interface operations {
                                 };
                             };
                         }[];
+                        default_tools?: string[] | "*";
                         allow_undeclared_tools: boolean;
                         active: boolean;
                         block_user_connections: boolean;
@@ -10564,7 +11025,7 @@ export interface operations {
                     "text/event-stream": unknown;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10634,7 +11095,7 @@ export interface operations {
                     "text/event-stream": unknown;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10704,7 +11165,7 @@ export interface operations {
                     "text/event-stream": unknown;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10875,6 +11336,165 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    getMyContext: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Caller context */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "user": {
+                     *         "id": "user_abc",
+                     *         "name": "Ada Lovelace",
+                     *         "email": "ada@acme.com"
+                     *       },
+                     *       "org": {
+                     *         "id": "org_abc123",
+                     *         "role": "member",
+                     *         "name": "Acme",
+                     *         "slug": "acme"
+                     *       },
+                     *       "connections": [
+                     *         {
+                     *           "integration_id": "@appstrate/gmail",
+                     *           "name": "Gmail",
+                     *           "source": "own"
+                     *         },
+                     *         {
+                     *           "integration_id": "@appstrate/clickup",
+                     *           "name": "ClickUp",
+                     *           "source": "shared"
+                     *         }
+                     *       ],
+                     *       "recent_runs": [
+                     *         {
+                     *           "package_id": "@appstrate/triage",
+                     *           "status": "failed",
+                     *           "run_number": 7,
+                     *           "started_at": "2026-06-25T09:12:00.000Z",
+                     *           "error": "Gmail token expired"
+                     *         }
+                     *       ],
+                     *       "agents": [
+                     *         {
+                     *           "package_id": "@appstrate/triage",
+                     *           "display_name": "Inbox Triage",
+                     *           "description": "Sorts and labels incoming email.",
+                     *           "takes_input": false,
+                     *           "published": true,
+                     *           "source": "system"
+                     *         }
+                     *       ],
+                     *       "agents_truncated": false,
+                     *       "agents_total": 1,
+                     *       "skills": [
+                     *         {
+                     *           "package_id": "@appstrate/web-research",
+                     *           "display_name": "Web Research",
+                     *           "description": "Multi-source web search and synthesis.",
+                     *           "version": "1.2.0",
+                     *           "published": true,
+                     *           "source": "system"
+                     *         }
+                     *       ],
+                     *       "skills_truncated": false,
+                     *       "skills_total": 1
+                     *     }
+                     */
+                    "application/json": {
+                        user: {
+                            id: string;
+                            name: string | null;
+                            email: string | null;
+                        };
+                        org: {
+                            id: string;
+                            /** @enum {string} */
+                            role: "owner" | "admin" | "member" | "viewer" | "end_user";
+                            /** @description Human-readable organization name. */
+                            name?: string | null;
+                            /** @description Organization slug. */
+                            slug?: string | null;
+                        };
+                        /** @description The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip. */
+                        recent_runs: {
+                            package_id: string;
+                            status: string;
+                            run_number?: number | null;
+                            /** Format: date-time */
+                            started_at?: string | null;
+                            /** @description Failure message for non-success runs, when available. */
+                            error?: string | null;
+                        }[];
+                        /** @description Integrations the caller could attach to an agent. */
+                        connections: {
+                            integration_id: string;
+                            name: string;
+                            /** @enum {string} */
+                            source: "own" | "shared" | "both";
+                            /** @description The integration package's own manifest version, when known. Use it to pin a satisfiable dependencies.integrations range. */
+                            version?: string;
+                            /** @description AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent when none declared; `[]` means the integration is inert. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}. */
+                            default_tools?: string[] | "*";
+                        }[];
+                        /** @description Agents the caller can run in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the long tail is reachable via the MCP `search_operations` tool. */
+                        agents: {
+                            /** @description Invokable identifier, e.g. "@appstrate/triage". */
+                            package_id: string;
+                            display_name: string;
+                            description: string;
+                            /** @description Whether the agent declares an input schema with properties. */
+                            takes_input: boolean;
+                            /** @description True when the agent has a published version (or is a system agent). Run it via `runAgent` with `version` omitted. When false the agent is draft-only — run it with `version=draft` (omitting `version` would 404 `no_published_version`). */
+                            published: boolean;
+                            /** @enum {string} */
+                            source: "system" | "local";
+                        }[];
+                        /** @description True when the agent list was capped (more via search_operations). */
+                        agents_truncated: boolean;
+                        /** @description Total runnable agents before the cap. */
+                        agents_total: number;
+                        /** @description Skills the caller could attach to an agent in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the long tail is reachable via the MCP `search_operations` tool. */
+                        skills: {
+                            /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
+                            package_id: string;
+                            display_name: string;
+                            description: string;
+                            /** @description The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range. */
+                            version: string | null;
+                            /** @description True when the skill has a published version (or is a system skill). When false the skill is draft-only — pin it for a run via `dependency_overrides` with `draft`. */
+                            published: boolean;
+                            /** @enum {string} */
+                            source: "system" | "local";
+                        }[];
+                        /** @description True when the skill list was capped (more via search_operations). */
+                        skills_truncated: boolean;
+                        /** @description Total installed skills before the cap. */
+                        skills_total: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listMyIntegrationPins: {
@@ -11429,6 +12049,7 @@ export interface operations {
                          * @enum {string}
                          */
                         outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates";
+                        /** @description Number of candidates considered, not necessarily models live-probed. For `offline`-validation providers (codex, claude-code) candidates are considered with zero upstream calls. */
                         probed_count: number;
                         available_model_ids: string[] | null;
                     };
@@ -11653,7 +12274,10 @@ export interface operations {
     };
     listModels: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description When true, resolve each model's protocol family and base URL from the provider registry WITHOUT decrypting its credential. Faster for callers that only need to pick a model (e.g. the chat model picker); a model whose secret is unusable is not filtered and surfaces an error only at inference time. */
+                metadata_only?: boolean;
+            };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -11679,6 +12303,7 @@ export interface operations {
                      *         {
                      *           "id": "gpt-4o",
                      *           "label": "GPT-4o",
+                     *           "providerId": "openai",
                      *           "apiShape": "openai-responses",
                      *           "baseUrl": "https://api.openai.com/v1",
                      *           "modelId": "gpt-4o",
@@ -12413,6 +13038,7 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createOAuthClient: {
@@ -12478,6 +13104,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getOAuthClient: {
@@ -12515,6 +13142,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     deleteOAuthClient: {
@@ -12546,6 +13174,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     updateOAuthClient: {
@@ -12603,6 +13232,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     rotateOAuthClientSecret: {
@@ -12640,6 +13270,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     oauthLogout: {
@@ -12668,6 +13299,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     listOAuthScopes: {
@@ -12698,6 +13330,7 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getOpenApiSpec: {
@@ -12992,6 +13625,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     revokeOrgCliSession: {
@@ -13034,6 +13668,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     changeInvitationRole: {
@@ -13489,7 +14124,10 @@ export interface operations {
     };
     getAgentPackage: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns config / input / integrations / skills from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents. */
+                version?: string;
+            };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -17388,6 +18026,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     fetchRunWorkspace: {
@@ -17851,6 +18490,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createWebhook: {
@@ -17942,6 +18582,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["IdempotencyInProgress"];
             422: components["responses"]["IdempotencyConflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getWebhook: {
@@ -17990,6 +18631,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     updateWebhook: {
@@ -18051,6 +18693,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     deleteWebhook: {
@@ -18078,6 +18721,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listWebhookDeliveries: {
@@ -18147,6 +18791,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     rotateWebhookSecret: {
@@ -18202,6 +18847,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     testWebhook: {
@@ -18244,6 +18890,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     welcomeSetup: {

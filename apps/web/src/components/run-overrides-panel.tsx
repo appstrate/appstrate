@@ -17,8 +17,7 @@ import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { useModels } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
 import { useProvidersRegistry } from "../hooks/use-model-provider-credentials";
-import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpers";
-import { getProviderIcon } from "./icons";
+import { getModelIcon } from "./icons";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
@@ -70,6 +69,12 @@ export interface RunOverridesPanelProps {
   /** Current value (controlled). */
   value: RunOverridesValue;
   onChange: (next: RunOverridesValue) => void;
+  /**
+   * Version selector (#770) forwarded to the integration connection pickers so
+   * their per-integration readiness verdict matches the run for a pinned
+   * version. Omitted → draft (the schedule editor passes nothing).
+   */
+  version?: string;
 }
 
 /**
@@ -97,6 +102,7 @@ export function RunOverridesPanel({
   agentIntegrations,
   value,
   onChange,
+  version,
 }: RunOverridesPanelProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: orgModels } = useModels();
@@ -177,8 +183,7 @@ export function RunOverridesPanel({
                   : t("run.overrides.modelInherit", { ns: "agents" })}
               </SelectItem>
               {orgModels.map((m) => {
-                const mp = findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl, registry ?? []);
-                const MIcon = getProviderIcon(mp);
+                const MIcon = getModelIcon(m, registry ?? []);
                 return (
                   <SelectItem key={m.id} value={m.id}>
                     <span className="inline-flex items-center gap-1.5">
@@ -242,6 +247,7 @@ export function RunOverridesPanel({
         <ScheduleConnectionOverridesSection
           agentPackageId={packageId}
           integrations={agentIntegrations}
+          version={version}
           value={value.connection_overrides ?? {}}
           onChange={(next) => {
             // Drop falsy entries — empty string === "Inherit", which is
@@ -280,11 +286,13 @@ export function RunOverridesPanel({
 function ScheduleConnectionOverridesSection({
   agentPackageId,
   integrations,
+  version,
   value,
   onChange,
 }: {
   agentPackageId: string;
   integrations: AgentIntegrationRef[];
+  version?: string;
   value: Record<string, string>;
   onChange: (next: Record<string, string>) => void;
 }) {
@@ -299,6 +307,7 @@ function ScheduleConnectionOverridesSection({
             key={integ.id}
             agentPackageId={agentPackageId}
             integration={integ}
+            version={version}
             value={value[integ.id] ?? ""}
             onChange={(connId) => {
               const next = { ...value };
@@ -316,11 +325,13 @@ function ScheduleConnectionOverridesSection({
 function IntegrationOverrideRow({
   agentPackageId,
   integration,
+  version,
   value,
   onChange,
 }: {
   agentPackageId: string;
   integration: AgentIntegrationRef;
+  version?: string;
   /** Currently-picked connection id; empty = inherit. */
   value: string;
   onChange: (next: string) => void;
@@ -347,6 +358,7 @@ function IntegrationOverrideRow({
         agentTools={integration.tools}
         agentScopes={undefined}
         persistence={{ mode: "override", value, onChange }}
+        version={version}
       />
     </div>
   );

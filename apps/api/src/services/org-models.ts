@@ -14,8 +14,15 @@ import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import {
   loadInferenceCredentials,
-  type DecryptedModelProviderCredentials,
+  loadCredentialRow,
+  loadCredentialMetadata,
 } from "./model-providers/credentials.ts";
+import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import {
+  getResolvedModel,
+  setResolvedModel,
+  invalidateResolvedModel,
+} from "./resolved-model-cache.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import {
   mergeSystemAndDb,
@@ -26,7 +33,6 @@ import {
 } from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
-import type { InferenceProbeRequest } from "@appstrate/core/module";
 
 // --- Metadata projection ---
 
@@ -108,12 +114,16 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
     enabled: model.enabled,
     is_default: model.is_default,
     aliased: model.aliased,
+    // Deliberate public display icon — chosen on the alias, decoupled from the
+    // backing provider, so it carries no fingerprint. Safe to surface.
+    iconUrl: model.iconUrl,
     source: model.source,
     created_by: model.created_by,
     createdAt: model.createdAt,
     updatedAt: model.updatedAt,
     // Backing — always null for an alias.
     apiShape: null,
+    providerId: null,
     baseUrl: null,
     modelId: null,
     credentialId: null,
@@ -129,7 +139,10 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
 
 // --- List (system + DB) ---
 
-export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
+export async function listOrgModels(
+  orgId: string,
+  opts?: { metadataOnly?: boolean },
+): Promise<OrgModelInfo[]> {
   const system = getSystemModels();
   const rows = await db.select().from(orgModels).where(scopedWhere(orgModels, { orgId }));
   // The default is an org-level pointer: when set, exactly that id is the
@@ -137,15 +150,26 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   const pointer = await defaultModel.getDefaultId(orgId);
   const now = toISORequired(new Date());
 
-  // Resolve apiShape/baseUrl from the registry via the credential's providerId.
-  // The DB row no longer stores these — they're derivatives of `providerId`.
-  // Rows whose credential is unreachable (deleted upstream, decryption failed,
-  // dead OAuth) are skipped silently — they can't be loaded for inference
-  // anyway, so surfacing them in the list would only confuse the UI.
-  const credByRow = new Map<string, DecryptedModelProviderCredentials>();
+  // Resolve apiShape/providerId/baseUrl per row (the DB row no longer stores
+  // them — they derive from the credential's `providerId`). Two modes:
+  //   - default: decrypt each credential (`loadInferenceCredentials`); a row
+  //     with an unreachable credential (deleted upstream, dead OAuth, decrypt
+  //     failure) is dropped — surfacing it would confuse the UI.
+  //   - metadataOnly: resolve from the registry WITHOUT touching the secret
+  //     (`loadCredentialMetadata`). Skips the decrypt for callers that only need
+  //     the protocol family (e.g. the chat model picker); the real secret is
+  //     resolved later at inference time. A row whose credential/provider is
+  //     gone is still dropped. mapRow below reads only providerId/apiShape/
+  //     baseUrl, so both resolvers feed it the same shape.
+  const credByRow = new Map<
+    string,
+    { providerId: string; apiShape: ModelApiShape; baseUrl: string }
+  >();
   await Promise.all(
     rows.map(async (r) => {
-      const creds = await loadInferenceCredentials(orgId, r.credentialId);
+      const creds = opts?.metadataOnly
+        ? await loadCredentialMetadata(r.credentialId, orgId)
+        : await loadInferenceCredentials(orgId, r.credentialId);
       if (creds) credByRow.set(r.id, creds);
     }),
   );
@@ -162,11 +186,13 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         resolveCatalogDefaults(def.providerId, def.modelId),
       ),
       apiShape: def.apiShape,
+      providerId: def.providerId,
       baseUrl: def.baseUrl,
       modelId: def.modelId,
       enabled: def.enabled !== false,
       is_default: pointer !== null ? id === pointer : def.isDefault === true,
       aliased: def.aliased === true,
+      iconUrl: def.iconUrl ?? null,
       source: "built-in",
       credentialId: def.credentialId,
       created_by: null,
@@ -183,11 +209,15 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
           resolveCatalogDefaults(creds.providerId, row.modelId),
         ),
         apiShape: creds.apiShape,
+        providerId: creds.providerId,
         baseUrl: creds.baseUrl,
         modelId: row.modelId,
         enabled: row.enabled,
         is_default: pointer !== null && row.id === pointer,
         aliased: row.aliased,
+        // DB custom models declare no icon — the client resolves it from the
+        // (visible) apiShape/baseUrl. Aliases live in env, never this table.
+        iconUrl: null,
         source: row.source as "custom" | "built-in",
         credentialId: row.credentialId,
         created_by: row.createdBy,
@@ -305,6 +335,8 @@ export async function updateOrgModel(
     .update(orgModels)
     .set(updates)
     .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
+  // Drop the cached resolution (modelId/enabled/credential/cost may have changed).
+  invalidateResolvedModel(orgId, modelDbId);
 }
 
 export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<void> {
@@ -314,6 +346,7 @@ export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<
   await db
     .delete(orgModels)
     .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
+  invalidateResolvedModel(orgId, modelDbId);
   // If the deleted model was the org default, clear the now-dangling pointer so
   // the resolver falls cleanly to the system cascade (no stale-id badge).
   await defaultModel.clearDanglingPointer(orgId, modelDbId);
@@ -467,8 +500,8 @@ export interface ResolvedModel extends Pick<
   aliasId: string;
   /**
    * Abstract account/tenant identifier surfaced by the credential's
-   * `extractTokenIdentity` hook — passed to the provider's
-   * `buildInferenceProbe` hook so it can be echoed as a routing header.
+   * `extractTokenIdentity` hook — echoed by the sidecar as a routing
+   * header at request time (e.g. `chatgpt-account-id` for Codex).
    */
   accountId?: string;
   /** `model_provider_credentials` row id — passed to the sidecar so it can pull fresh OAuth tokens at request time. Unset for system (env-driven) keys. */
@@ -619,6 +652,12 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     return buildSystemResolvedModel(systemDef);
   }
 
+  // Short-TTL cache (see resolved-model-cache.ts). Only the successful (non-null)
+  // DB result is cached; system models are already in-memory. Invalidated
+  // eagerly by model + credential mutators, so the TTL is a backstop.
+  const cached = getResolvedModel(orgId, modelDbId);
+  if (cached) return cached;
+
   // Check DB. `orgModels.id` is a `uuid` column — a `modelDbId` that isn't a
   // valid UUID (e.g. a human-readable model name like `gpt-5.5`) makes Postgres
   // raise `invalid input syntax for type uuid` rather than returning no rows.
@@ -656,7 +695,40 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   const creds = await loadInferenceCredentials(orgId, row.credentialId);
   if (!creds) return null;
 
-  return buildDbResolvedModel(row, creds);
+  const resolved = buildDbResolvedModel(row, creds);
+  setResolvedModel(orgId, modelDbId, resolved);
+  return resolved;
+}
+
+/**
+ * Disambiguate the `loadModel(...) === null` result for an org (DB) model: is it
+ * null because the model is missing/disabled, or because its OAuth credential is
+ * flagged `needsReconnection` (which `loadInferenceCredentials` treats as dead)?
+ *
+ * Returns `true` only for the second case — an enabled DB model whose OAuth
+ * credential needs reconnection — so a caller can surface an actionable
+ * "reconnect" instead of a misleading "not found / not enabled". System models
+ * and non-UUID ids are never reconnection cases (`false`).
+ */
+export async function modelNeedsReconnection(orgId: string, modelDbId: string): Promise<boolean> {
+  if (isSystemModel(modelDbId)) return false;
+
+  let row: { credentialId: string; enabled: boolean } | undefined;
+  try {
+    [row] = await db
+      .select({ credentialId: orgModels.credentialId, enabled: orgModels.enabled })
+      .from(orgModels)
+      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
+      .limit(1);
+  } catch (err) {
+    // Same non-UUID cast hazard `loadModel` guards against → treat as "no".
+    if (isInvalidTextRepresentation(err)) return false;
+    throw err;
+  }
+  if (!row || !row.enabled || !row.credentialId) return false;
+
+  const cred = await loadCredentialRow(row.credentialId, orgId);
+  return !!cred && cred.blob.kind === "oauth" && !!cred.blob.needsReconnection;
 }
 
 /**
@@ -742,7 +814,28 @@ export async function testModelConfig(config: {
   apiKey: string;
   providerId?: string;
   accountId?: string;
+  /** OAuth only — token expiry (epoch ms). Used by the offline credential check. */
+  expiresAt?: number | null;
 }): Promise<TestResult> {
+  // Provider-agnostic OFFLINE credential validation — a provider that ships a
+  // `validateCredential` hook (subscription providers: codex, claude-code) is
+  // validated locally, so the platform NEVER issues an API call to test its
+  // tokens. The mere PRESENCE of the hook is the signal — there is no separate
+  // flag to keep in sync. The module decodes the token locally; we map its
+  // pure-data result to a TestResult (latency 0 — no request was made). Returns
+  // BEFORE the SSRF/network branch.
+  const provider = config.providerId ? getModelProvider(config.providerId) : null;
+  if (provider?.hooks?.validateCredential) {
+    const result = provider.hooks.validateCredential({
+      apiKey: config.apiKey,
+      accountId: config.accountId,
+      expiresAt: config.expiresAt,
+    });
+    return result.ok
+      ? { ok: true, latency: 0 }
+      : { ok: false, latency: 0, error: result.error, message: result.message };
+  }
+
   if (isBlockedUrl(config.baseUrl)) {
     return {
       ok: false,
@@ -750,24 +843,6 @@ export async function testModelConfig(config: {
       error: "BLOCKED_URL",
       message: "URL targets a blocked network",
     };
-  }
-
-  // Provider-agnostic inference-probe override — modules whose backend
-  // doesn't accept the generic `/models` discovery probe implement
-  // `buildInferenceProbe` to provide the real wire format. The platform
-  // sends whatever the module builds without inspecting the contents.
-  const provider = config.providerId ? getModelProvider(config.providerId) : null;
-  const probe = provider?.hooks?.buildInferenceProbe?.({
-    baseUrl: config.baseUrl,
-    modelId: config.modelId,
-    apiKey: config.apiKey,
-    accountId: config.accountId,
-  });
-  if (probe) {
-    if ("error" in probe) {
-      return { ok: false, latency: 0, error: probe.error, message: probe.message };
-    }
-    return runInferenceProbe(probe);
   }
 
   const { url, headers } = buildModelTestRequest(config);
@@ -809,52 +884,6 @@ export async function testModelConnection(orgId: string, modelDbId: string): Pro
     return { ok: false, latency: 0, error: "MODEL_NOT_FOUND", message: "Model not found" };
 
   return testModelConfig(model);
-}
-
-// --- OAuth inference probes ---
-
-const PROBE_TIMEOUT_MS = 15_000;
-
-/**
- * Send a module-supplied {@link InferenceProbeRequest} and map the response
- * to a {@link TestResult}. The platform is provider-agnostic here — the
- * module's `buildInferenceProbe` hook owns the wire format; this helper
- * only knows how to send it and classify the outcome.
- *
- * Streaming bodies are aborted immediately — we only care about the
- * response status.
- */
-async function runInferenceProbe(req: InferenceProbeRequest): Promise<TestResult> {
-  const start = performance.now();
-  try {
-    const res = await fetch(req.url, {
-      method: req.method,
-      headers: req.headers,
-      body: req.body,
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    });
-    const latency = Math.round(performance.now() - start);
-    void res.body?.cancel().catch(() => {});
-    if (res.ok) return { ok: true, latency, status: res.status };
-    if (res.status === 401 || res.status === 403) {
-      return {
-        ok: false,
-        latency,
-        error: "AUTH_FAILED",
-        message: "Provider rejected the token (auth failed or subscription inactive)",
-        status: res.status,
-      };
-    }
-    return {
-      ok: false,
-      latency,
-      error: "PROVIDER_ERROR",
-      message: `Provider returned ${res.status}`,
-      status: res.status,
-    };
-  } catch (err) {
-    return mapFetchErrorToTestResult(err, Math.round(performance.now() - start));
-  }
 }
 
 // OSS supports only the API-key flow for Anthropic, via the `anthropic`

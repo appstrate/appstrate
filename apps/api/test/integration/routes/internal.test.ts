@@ -464,7 +464,7 @@ describe("Internal API", () => {
       });
       expect(res.status).toBe(200);
       // The response wire shape (OAuthTokenResponse) deliberately omits
-      // provider invariants (providerId, baseUrl, wireFormat) — those live
+      // provider invariants (providerId, baseUrl) — those live
       // in the LlmProxyOauthConfig delivered to the sidecar via env at
       // boot and never change per refresh. See packages/core/src/sidecar-types.ts.
       const body = (await res.json()) as { accessToken: string };

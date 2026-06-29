@@ -7,7 +7,17 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "List organization models",
       description: "Returns all models (built-in + custom) for the current organization.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        {
+          name: "metadata_only",
+          in: "query",
+          required: false,
+          description:
+            "When true, resolve each model's protocol family and base URL from the provider registry WITHOUT decrypting its credential. Faster for callers that only need to pick a model (e.g. the chat model picker); a model whose secret is unusable is not filtered and surfaces an error only at inference time.",
+          schema: { type: "boolean" },
+        },
+      ],
       responses: {
         "200": {
           description: "Model list",
@@ -36,6 +46,7 @@ export const modelsPaths = {
                   {
                     id: "gpt-4o",
                     label: "GPT-4o",
+                    providerId: "openai",
                     apiShape: "openai-responses",
                     baseUrl: "https://api.openai.com/v1",
                     modelId: "gpt-4o",

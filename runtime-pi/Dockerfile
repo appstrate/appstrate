@@ -38,17 +38,26 @@ COPY --parents */package.json */*/package.json ./
 COPY patches/ patches/
 
 # `--filter=appstrate-pi-runtime` restricts the install to runtime-pi's
-# subgraph (Pi SDK pair + @appstrate/afps-runtime + @appstrate/runner-pi
-# + their transitive deps). Pulls the same versions as the root lock
-# (`--frozen-lockfile`) without installing apps/api / apps/web / dev
-# toolchain — the runtime image ships ~190 MB of node_modules instead
-# of the full ~860 MB workspace tree.
+# subgraph (Pi + Claude SDKs, @appstrate/afps-runtime, the @appstrate/runner-*
+# packages + their transitive deps), excluding apps/api, apps/web, and the
+# workspace dev toolchain — the runtime image ships only the runtime subgraph,
+# not the full workspace tree. runtime-pi has no devDeps of its own and
+# `--filter` does not pull transitive workspace pkgs' devDeps, so `--production`
+# would be a no-op for what's installed here — we omit it.
+#
+# Kill-switch build arg (ToS): the subscription engine's vendor SDK
+# (@anthropic-ai/claude-agent-sdk) and the runner-claude package are
+# `optionalDependencies`. `--build-arg INCLUDE_SUBSCRIPTION_ENGINES=false` omits
+# them, producing a pi-only image with zero vendor executable surface (the
+# runtime already gates the runners by RUN_ENGINE, so a pi run never loads them).
+# Default `true` keeps the full image. NOTE: the slim (`false`) path is
+# UNVERIFIED here — must be docker-built + booted in CI before relying on it.
+ARG INCLUDE_SUBSCRIPTION_ENGINES=true
 RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
     bun install \
-        --frozen-lockfile \
-        --production \
         --filter=appstrate-pi-runtime \
-        --no-progress
+        --no-progress \
+        $([ "$INCLUDE_SUBSCRIPTION_ENGINES" = "false" ] && echo "--omit=optional")
 
 # Pre-bundle the entrypoint to a single .js file. This collapses the
 # 522-module ESM resolution graph (workspace symlinks + nested
@@ -73,14 +82,23 @@ COPY packages/connect/src         packages/connect/src
 COPY packages/core/src            packages/core/src
 COPY packages/mcp-transport/src   packages/mcp-transport/src
 COPY packages/runner-pi/src       packages/runner-pi/src
+COPY packages/runner-claude/src   packages/runner-claude/src
 COPY runtime-pi/extensions/       runtime-pi/extensions/
 COPY runtime-pi/mcp/              runtime-pi/mcp/
 COPY runtime-pi/*.ts              runtime-pi/
 
+# `@anthropic-ai/claude-agent-sdk` is kept `--external` (like the Pi SDK pair):
+# the ClaudeAgentRunner `await import`s it lazily (only for `claude-code` runs),
+# it ships its own prebuilt per-arch binary resolved at runtime from node_modules
+# via `pathToClaudeCodeExecutable`, and bundling its dynamic provider dispatch
+# inlines transient modules that hurt cold-start. The symlinked package + its
+# musl binary sibling remain on disk in the runtime stage so the lazy import +
+# `resolveClaudeCodeBinary` resolve at runtime.
 RUN bun build runtime-pi/entrypoint.ts \
         --target=bun \
         --external='@mariozechner/pi-ai' \
         --external='@mariozechner/pi-coding-agent' \
+        --external='@anthropic-ai/claude-agent-sdk' \
         --outfile=runtime-pi/dist/entrypoint.js
 
 # ── Stage 2 — runtime ─────────────────────────────────────────────
@@ -91,6 +109,11 @@ ARG BUILD_VERSION=unknown
 ARG BUILD_REVISION=unknown
 ARG BUILD_CREATED
 
+# Re-declared in this stage (ARGs are stage-scoped) so the vendor-SDK symlink
+# steps below can be skipped for a pi-only slim image. Default `true` → full
+# image, every step below runs exactly as before.
+ARG INCLUDE_SUBSCRIPTION_ENGINES=true
+
 LABEL org.opencontainers.image.title="Appstrate Pi" \
       org.opencontainers.image.description="AI agent runtime for ephemeral agent runs" \
       org.opencontainers.image.source="https://github.com/appstrate/appstrate" \
@@ -99,6 +122,9 @@ LABEL org.opencontainers.image.title="Appstrate Pi" \
       org.opencontainers.image.version="${BUILD_VERSION}" \
       org.opencontainers.image.revision="${BUILD_REVISION}" \
       org.opencontainers.image.created="${BUILD_CREATED}"
+
+# Pin the production environment (standard tooling hygiene).
+ENV NODE_ENV=production
 
 # Runtime-only packages:
 #   - bash             Pi coding-agent's bash tool
@@ -183,6 +209,11 @@ COPY --chown=pi:pi packages/mcp-transport/src           ./packages/mcp-transport
 COPY --chown=pi:pi packages/mcp-transport/package.json  ./packages/mcp-transport/
 COPY --chown=pi:pi packages/runner-pi/src               ./packages/runner-pi/src
 COPY --chown=pi:pi packages/runner-pi/package.json      ./packages/runner-pi/
+# runner-claude is source-only with no extra runtime deps of its own (its
+# imports are workspace packages already present + the external Agent SDK), so
+# only its src + manifest + workspace symlink are needed.
+COPY --chown=pi:pi packages/runner-claude/src           ./packages/runner-claude/src
+COPY --chown=pi:pi packages/runner-claude/package.json  ./packages/runner-claude/
 COPY --chown=pi:pi packages/core/src                    ./packages/core/src
 COPY --chown=pi:pi packages/core/package.json           ./packages/core/
 COPY --chown=pi:pi packages/afps-shared/src             ./packages/afps-shared/src
@@ -191,11 +222,12 @@ COPY --chown=pi:pi packages/afps-shared/package.json    ./packages/afps-shared/
 # Restore the `@appstrate/*` workspace symlinks materialised by
 # `bun install` (docker COPY dereferences them into real directories).
 RUN mkdir -p node_modules/@appstrate \
- && rm -rf  node_modules/@appstrate/afps-runtime node_modules/@appstrate/afps-shared node_modules/@appstrate/mcp-transport node_modules/@appstrate/runner-pi node_modules/@appstrate/core \
+ && rm -rf  node_modules/@appstrate/afps-runtime node_modules/@appstrate/afps-shared node_modules/@appstrate/mcp-transport node_modules/@appstrate/runner-pi node_modules/@appstrate/runner-claude node_modules/@appstrate/core \
  && ln -s   /runtime/packages/afps-runtime  node_modules/@appstrate/afps-runtime \
  && ln -s   /runtime/packages/afps-shared   node_modules/@appstrate/afps-shared \
  && ln -s   /runtime/packages/mcp-transport node_modules/@appstrate/mcp-transport \
  && ln -s   /runtime/packages/runner-pi     node_modules/@appstrate/runner-pi \
+ && ln -s   /runtime/packages/runner-claude node_modules/@appstrate/runner-claude \
  && ln -s   /runtime/packages/core          node_modules/@appstrate/core \
  && chown -h pi:pi \
         node_modules/@appstrate \
@@ -203,6 +235,7 @@ RUN mkdir -p node_modules/@appstrate \
         node_modules/@appstrate/afps-shared \
         node_modules/@appstrate/mcp-transport \
         node_modules/@appstrate/runner-pi \
+        node_modules/@appstrate/runner-claude \
         node_modules/@appstrate/core
 
 # Pi SDK pair (@mariozechner/pi-ai, @mariozechner/pi-coding-agent) lands
@@ -217,6 +250,23 @@ RUN mkdir -p node_modules/@mariozechner \
         node_modules/@mariozechner \
         node_modules/@mariozechner/pi-ai \
         node_modules/@mariozechner/pi-coding-agent
+
+# The Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) is a direct dep of
+# `appstrate-pi-runtime`, so bun symlinks it into runtime-pi/node_modules. The
+# bundled entrypoint resolves from /runtime/node_modules, so surface it there
+# (same fix as the Pi pair above). The SDK's per-arch `claude` binary lives
+# beside it in the shared .bun store and `resolveClaudeCodeBinary` hops to it
+# through the SDK's own scope — no separate symlink needed for the binary.
+# Skipped on a slim (`INCLUDE_SUBSCRIPTION_ENGINES=false`) build — the SDK is not
+# installed then, so there is nothing to surface.
+RUN if [ "$INCLUDE_SUBSCRIPTION_ENGINES" = "true" ]; then \
+      mkdir -p node_modules/@anthropic-ai \
+   && ln -s /runtime/runtime-pi/node_modules/@anthropic-ai/claude-agent-sdk node_modules/@anthropic-ai/claude-agent-sdk \
+   && chown -h pi:pi \
+          node_modules/@anthropic-ai \
+          node_modules/@anthropic-ai/claude-agent-sdk; \
+    fi
+
 
 # Bootstrap sources. Glob is single-level (no recursion into `sidecar/`
 # or `test/`), so adding a new `.ts` file at `runtime-pi/*.ts` is picked

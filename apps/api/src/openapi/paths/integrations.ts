@@ -201,6 +201,7 @@ const authStatusSchema = {
     "scopes",
     "resource",
     "connections",
+    "ready",
     "has_oauth_client",
     "has_system_client",
     "client_auto_provisioned",
@@ -221,6 +222,11 @@ const authStatusSchema = {
         "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC.",
     },
     connections: { type: "array", items: integrationConnectionSchema },
+    ready: {
+      type: "boolean",
+      description:
+        "Server-authoritative usability: true when ≥1 connection here is not flagged for reconnection. Single source so clients never re-derive connection state. Agent-agnostic — a run's authoritative readiness still comes from validateInlineRun.",
+    },
     has_oauth_client: { type: "boolean" },
     has_system_client: {
       type: "boolean",
@@ -271,6 +277,18 @@ const integrationDetailSchema = {
     // `hidden_tools` and auto-hidden connect.tool primitives. Falls back
     // to `manifest.tools_policy` keys when the mcp-server is absent.
     tool_catalog: { type: "array", items: toolCatalogEntrySchema },
+    // AFPS §4.4 — the tool(s) an agent inherits when it declares this
+    // integration without an `integrations_configuration.<id>.tools`
+    // selection. Pairs with `tool_catalog` so a builder sees what is on by
+    // default vs what must be selected explicitly. Absent when the
+    // integration declares no default. Resolution: omitted → inherits this;
+    // `[]` → none; `[..]` → exactly those; `"*"` → all upstream tools.
+    default_tools: {
+      oneOf: [
+        { type: "array", items: { type: "string" } },
+        { type: "string", enum: ["*"] },
+      ],
+    },
     // AFPS §7.8 — opt-in surfaced verbatim from the manifest. When `true`,
     // the agent editor MAY offer the "all upstream tools" toggle that sets
     // `integrations_configuration.<id>.tools = "*"`. Default `false`.

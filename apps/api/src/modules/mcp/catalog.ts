@@ -60,6 +60,7 @@ export interface OperationCatalog {
 }
 
 let cached: OperationCatalog | null = null;
+let cachedIndex: string | null = null;
 
 const PATH_PARAM_RE = /\{([^}]+)\}/g;
 
@@ -151,6 +152,83 @@ export function getCatalog(): OperationCatalog {
 /** Reset the cached catalog. Tests only. */
 export function resetCatalog(): void {
   cached = null;
+  cachedIndex = null;
+}
+
+/**
+ * A compact, generated index of every operation, grouped by tag — one
+ * comma-separated line of operationIds per tag (the per-op summary is dropped
+ * to keep the index small, see below):
+ *
+ *   ## Agents
+ *   listAgents, runAgent
+ *
+ * Method/path are deliberately omitted (they come from describe_operation or
+ * search_operations' best_match); this is a discovery aid that lets a client
+ * pick an operationId directly, skipping a search_operations round-trip. It is
+ * fully derived from the live catalog and memoized, so it grows with the API
+ * surface without any hand maintenance.
+ */
+/**
+ * OpenAPI tag → RBAC resource, for permission-scoped index filtering. Coarse
+ * by design: the index is grouped by tag, and there is no per-operation
+ * permission metadata, so we drop a whole tag section when the caller's role
+ * has no permission on the mapped resource. Tags with no clear single resource
+ * (auth, health, profile, uploads, library, packages, proxies-as-call, …) are
+ * intentionally absent and always shown — this is a context-reduction heuristic,
+ * NOT a security boundary (invoke_operation re-enforces RBAC per call).
+ */
+const TAG_TO_RESOURCE: Record<string, string> = {
+  Agents: "agents",
+  Runs: "runs",
+  Schedules: "schedules",
+  Integrations: "integrations",
+  Applications: "applications",
+  "Application Packages": "applications",
+  "End Users": "end-users",
+  "API Keys": "api-keys",
+  Models: "models",
+  "Model Provider Credentials": "model-provider-credentials",
+  Organizations: "org",
+};
+
+/** Whether a tag's section is shown to a caller holding `permissions`. */
+function tagVisible(tag: string, permissions: ReadonlySet<string>): boolean {
+  const resource = TAG_TO_RESOURCE[tag];
+  if (!resource) return true; // unmapped tag → always shown (conservative)
+  const prefix = `${resource}:`;
+  for (const p of permissions) if (p.startsWith(prefix)) return true;
+  return false;
+}
+
+export function buildOperationIndex(permissions?: ReadonlySet<string>): string {
+  // The unfiltered index is memoized; a permission-scoped index is built fresh
+  // (it varies per caller role and is cheap relative to a full request).
+  if (!permissions && cachedIndex !== null) return cachedIndex;
+
+  const { operations } = getCatalog();
+  const byTag = new Map<string, string[]>();
+  for (const op of operations.values()) {
+    const tag = op.tags[0] ?? "Other";
+    // operationId ONLY — the per-op summary is dropped from the index to keep it
+    // compact (it's several KB across ~230 ops, re-sent every uncached turn).
+    // describe_operation remains the source of truth for what each op does + its
+    // schema, so the model gets the full detail when it picks an id from here.
+    (byTag.get(tag) ?? byTag.set(tag, []).get(tag)!).push(op.operationId);
+  }
+
+  const sections = [...byTag.keys()]
+    .sort()
+    .filter((tag) => !permissions || tagVisible(tag, permissions))
+    .map((tag) => {
+      // One compact, comma-separated line of operationIds per tag.
+      const ids = byTag.get(tag)!.sort();
+      return `## ${tag}\n${ids.join(", ")}`;
+    });
+
+  const result = sections.join("\n\n");
+  if (!permissions) cachedIndex = result;
+  return result;
 }
 
 const SCHEMA_REF_PREFIX = "#/components/schemas/";

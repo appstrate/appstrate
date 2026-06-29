@@ -621,7 +621,15 @@ function topoSort(modules: AppstrateModule[]): AppstrateModule[] {
     if (!adj.has(id)) adj.set(id, []);
 
     for (const dep of m.manifest.dependencies ?? []) {
-      if (!byId.has(dep)) continue;
+      // A declared dependency is a hard peer requirement, not a soft ordering
+      // hint: if it isn't among the loaded modules the dependent cannot work
+      // (e.g. `chat` without `mcp` is a no-tools shadow product). Fail boot with
+      // a clear config error instead of silently degrading.
+      if (!byId.has(dep)) {
+        throw new Error(
+          `Module "${id}" requires module "${dep}", which is not loaded. Add "${dep}" to MODULES.`,
+        );
+      }
       if (!adj.has(dep)) adj.set(dep, []);
       adj.get(dep)!.push(id);
       inDegree.set(id, (inDegree.get(id) ?? 0) + 1);

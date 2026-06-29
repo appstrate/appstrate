@@ -500,6 +500,28 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       expect(rows[0]!.recipientType).toBe("end_user");
       expect(rows[0]!.recipientId).toBe(eu.id);
     });
+
+    it("creates no notification for an inline/ephemeral run (foreground, relayed to trigger)", async () => {
+      const inlineId = `@inline/r-${crypto.randomUUID()}`;
+      await seedAgent({ id: inlineId, orgId: ctx.orgId, createdBy: ctx.user.id, ephemeral: true });
+      const run = await seedRun({
+        packageId: inlineId,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        status: "success",
+        userId: ctx.user.id,
+      });
+
+      const n = await createRunNotifications(scope(), run.id);
+      expect(n).toBe(0);
+
+      const rows = await db
+        .select({ id: notifications.id })
+        .from(notifications)
+        .where(eq(notifications.runId, run.id));
+      expect(rows).toHaveLength(0);
+      expect(await unreadCount(authHeaders(ctx))).toBe(0);
+    });
   });
 
   // ─── end-user recipient mark path (polymorphic actorMatch) ──

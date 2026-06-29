@@ -5,7 +5,7 @@ import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 import { loadSystemRegistry } from "../lib/system-registry.ts";
 import { modelCostSchema } from "@appstrate/core/module";
-import { isAliasableApiShape } from "@appstrate/core/model-swap";
+import { checkAliasInvariants } from "@appstrate/core/model-swap";
 import type { ModelMetadata } from "@appstrate/shared-types";
 import { getModelProvider } from "./model-providers/registry.ts";
 
@@ -55,6 +55,12 @@ export interface ModelDefinition extends ModelMetadata {
    * user-facing surfaces — resolved server-side only. See {@link rawModelSchema}.
    */
   aliased?: boolean;
+  /**
+   * Optional display-icon key (a client `PROVIDER_ICONS` key). Deliberate public
+   * choice, decoupled from the backing provider — lets an aliased model show an
+   * icon without leaking its hidden binding. See {@link rawModelSchema}.
+   */
+  iconUrl?: string;
 }
 
 // --- State ---
@@ -86,6 +92,13 @@ const rawModelSchema = z.object({
    * stays server-side (resolution + private `llm_usage` ledger).
    */
   aliased: z.boolean().optional(),
+  /**
+   * Optional display-icon key (a client `PROVIDER_ICONS` key, e.g. `anthropic`,
+   * `openai`). Deliberate public choice — decoupled from the backing provider,
+   * so an aliased model can show an icon without leaking its hidden binding.
+   * Unset → client falls back to a generic alias icon.
+   */
+  iconUrl: z.string().min(1).optional(),
 });
 
 const rawModelProviderCredentialSchema = z.object({
@@ -206,14 +219,15 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
           // alias would leak its backing rather than hide it, so skip it
           // (loud) instead of registering a half-working alias.
           if (validM.aliased === true) {
-            if (!validM.label) {
+            const violation = checkAliasInvariants({ label: validM.label, apiShape });
+            if (violation === "missing_label") {
               logger.error(
                 "[model-registry] SYSTEM_PROVIDER_KEYS: skipping aliased model without an explicit label (the derived label would name the backing)",
                 { modelProviderCredentialId: validCredential.id, model: m },
               );
               continue;
             }
-            if (!isAliasableApiShape(apiShape)) {
+            if (violation === "non_aliasable_shape") {
               logger.error(
                 "[model-registry] SYSTEM_PROVIDER_KEYS: skipping aliased model — protocol carries the model id in the URL, not the body, so the swap can't hide it",
                 { modelProviderCredentialId: validCredential.id, apiShape, model: m },
@@ -242,6 +256,7 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
             isDefault: validM.isDefault,
             enabled: validM.enabled,
             aliased: validM.aliased === true,
+            ...(validM.iconUrl ? { iconUrl: validM.iconUrl } : {}),
           });
         }
       }

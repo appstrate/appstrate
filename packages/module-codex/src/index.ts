@@ -15,21 +15,30 @@
  *   - `extractTokenIdentity` decodes the RS256 access JWT to surface
  *     `chatgpt_account_id` (required as `chatgpt-account-id` header by
  *     the chatgpt.com Codex backend) and `email`.
+ *   - `validateCredential` decodes the same JWT OFFLINE (no network) to
+ *     confirm the token is unexpired and carries `chatgpt_account_id`.
  *   - `beforeLlmProxyRequest` is not currently needed — the sidecar
  *     reads the persisted `accountId` from the credential row before
- *     each request, and `forceStream` / `forceStore` are pinned in the
- *     declarative wire-format fields.
+ *     each request.
+ *
+ * The platform issues ZERO Codex API calls to validate a credential or
+ * discover models: validation is the local JWT decode below (inferred from the
+ * presence of the `validateCredential` hook), and model discovery persists the
+ * static `modelDiscoveryCandidates` (declared via `modelDiscovery: { mode:
+ * "static" }`). The user's subscription token is only ever spent through the
+ * official Codex CLI at run time. See
+ * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`.
  */
 
 import type {
   AppstrateModule,
-  InferenceProbeBuildError,
-  InferenceProbeContext,
-  InferenceProbeRequest,
+  CredentialValidationContext,
+  CredentialValidationResult,
   ModelProviderDefinition,
   ModelProviderHooks,
   ModelProviderIdentity,
 } from "@appstrate/core/module";
+import { validateOfflineExpiry } from "@appstrate/core/module";
 import { base64UrlEncode, decodeJwtPayload } from "@appstrate/core/jwt";
 
 // ---------------------------------------------------------------------------
@@ -55,6 +64,8 @@ import { base64UrlEncode, decodeJwtPayload } from "@appstrate/core/jwt";
 function decodeCodexJwtPayload(accessToken: string): {
   chatgpt_account_id?: string;
   email?: string;
+  /** Standard `exp` claim — seconds since epoch, when present. */
+  exp?: number;
 } | null {
   const claims = decodeJwtPayload(accessToken);
   if (!claims) return null;
@@ -64,50 +75,13 @@ function decodeCodexJwtPayload(accessToken: string): {
       ? (auth["chatgpt_account_id"] as string)
       : undefined;
   const email = typeof claims["email"] === "string" ? (claims["email"] as string) : undefined;
-  return { chatgpt_account_id: accountId, email };
+  const exp = typeof claims["exp"] === "number" ? (claims["exp"] as number) : undefined;
+  return { chatgpt_account_id: accountId, email, exp };
 }
 
 // ---------------------------------------------------------------------------
 // Provider hooks
 // ---------------------------------------------------------------------------
-
-/**
- * Build the Codex inference probe request. Mirrors pi-ai's openai-codex-
- * responses provider exactly (cf. node_modules/@mariozechner/pi-ai/dist/
- * providers/openai-codex-responses.js). The wire format is the
- * regression-prone part — Codex rejects requests that drop any of the
- * load-bearing headers (`chatgpt-account-id`, `originator`, `OpenAI-Beta`).
- *
- * Module-private — the wire shape is pinned via `buildInferenceProbe`
- * on the provider's `hooks`.
- */
-function buildCodexInferenceRequest(config: {
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-  accountId: string;
-}): InferenceProbeRequest {
-  return {
-    url: `${config.baseUrl.replace(/\/+$/, "")}/codex/responses`,
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "chatgpt-account-id": config.accountId,
-      originator: "pi",
-      "OpenAI-Beta": "responses=experimental",
-      accept: "text/event-stream",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: config.modelId,
-      store: false,
-      stream: true,
-      instructions: "ping",
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "ping" }] }],
-      include: [],
-    }),
-  };
-}
 
 const codexHooks: ModelProviderHooks = {
   /**
@@ -154,31 +128,35 @@ const codexHooks: ModelProviderHooks = {
   },
 
   /**
-   * Build the inference probe sent by the platform's connection test.
-   * Codex's chatgpt.com backend exposes no `/models` endpoint, so the
-   * generic discovery probe is useless — we issue a real single-token
-   * `${baseUrl}/codex/responses` request instead. On 200 the connection
-   * works end-to-end (oauth + chatgpt backend + subscription + model).
-   *
-   * Returns a structured error when the `accountId` slot is missing so
-   * the platform fails the test loudly instead of sending a request the
-   * backend will 401.
+   * Validate a Codex credential OFFLINE — NO request to chatgpt.com. The
+   * platform never spends a subscription request to test a token: we
+   * decode the access JWT locally and confirm it (a) is a well-formed
+   * Codex JWT carrying `chatgpt_account_id` (required as the
+   * `chatgpt-account-id` routing header at run time) and (b) has a
+   * verifiable, unexpired expiry (the row's `expiresAt` or the token's
+   * `exp` claim). When NO expiry source is present, expiry is
+   * unverifiable offline and the credential is rejected — a dead token
+   * with no expiry metadata must not pass. This is a STRUCTURAL/offline
+   * check only (decode + required claims + expiry), NOT a signature
+   * verification or a live backend call. Real per-model availability —
+   * and true credential liveness — is established at first
+   * official-binary run.
    */
-  buildInferenceProbe(
-    ctx: InferenceProbeContext,
-  ): InferenceProbeRequest | InferenceProbeBuildError | null {
-    if (!ctx.accountId) {
+  validateCredential(ctx: CredentialValidationContext): CredentialValidationResult {
+    const claims = decodeCodexJwtPayload(ctx.apiKey);
+    if (!claims?.chatgpt_account_id) {
       return {
+        ok: false,
         error: "AUTH_FAILED",
         message: "Missing chatgpt-account-id (token may not be a valid Codex JWT)",
       };
     }
-    return buildCodexInferenceRequest({
-      baseUrl: ctx.baseUrl,
-      modelId: ctx.modelId,
-      apiKey: ctx.apiKey,
-      accountId: ctx.accountId,
-    });
+    // Prefer the credential row's `expiresAt` (the platform's source of
+    // truth, kept fresh by the refresh worker); fall back to the token's
+    // own `exp` claim (seconds → ms) when the row carries none. The shared
+    // gate rejects an absent expiry (unverifiable offline) and a past one.
+    const expiresAtMs = ctx.expiresAt ?? (claims.exp !== undefined ? claims.exp * 1000 : undefined);
+    return validateOfflineExpiry(expiresAtMs);
   },
 };
 
@@ -225,14 +203,19 @@ const codexProvider: ModelProviderDefinition = {
   // can't be listed here (boot check). gpt-5.2 / gpt-5.3-codex are
   // deprecated on ChatGPT sign-in.
   featuredModels: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
-  // Probed against the live credential after import (and on manual
-  // refresh) — what THIS account's plan serves lands on the credential's
-  // `available_model_ids`. Superset of `featuredModels`: includes
-  // Pro-only previews and recently-deprecated ids so plans that still
-  // serve them keep them selectable. Source: featured ∪ LiteLLM's
+  // OFFLINE validation: the platform issues ZERO Codex API calls to test
+  // a credential or discover models. The connection test runs the
+  // `validateCredential` hook below (local JWT decode) — its mere presence is
+  // what tells the platform to validate offline. Static discovery persists the
+  // candidates below (∩ catalog) without per-model probing. Real availability
+  // is checked at first official-binary run.
+  // Persisted as-is (∩ catalog) — what THIS account's plan serves lands on
+  // the credential's `available_model_ids`. Superset of `featuredModels`:
+  // includes Pro-only previews and recently-deprecated ids so plans that
+  // still serve them keep them selectable. Source: featured ∪ LiteLLM's
   // `chatgpt` provider snapshot
-  // (apps/api/src/data/subscription-watch/chatgpt.json) — review when
-  // the weekly drift PR flags that snapshot.
+  // (apps/api/src/data/subscription-watch/chatgpt.json) — review when the
+  // weekly drift PR flags that snapshot.
   modelDiscoveryCandidates: [
     "gpt-5.5",
     "gpt-5.4",
@@ -247,33 +230,20 @@ const codexProvider: ModelProviderDefinition = {
     "gpt-5.1-codex-max",
     "gpt-5.1-codex-mini",
   ],
+  // Static discovery: persist the candidates above (∩ catalog) without probing.
+  modelDiscovery: { mode: "static" },
   hooks: codexHooks,
   // The chatgpt.com Codex backend rejects requests without a
   // `chatgpt-account-id` header. The platform refuses to persist a
   // credential whose token doesn't carry this claim — failing at import
   // time is louder than silently persisting a dead credential.
   requiredIdentityClaims: ["accountId"],
-  // Sidecar wire-format quirks the chatgpt.com Codex backend enforces:
-  //  - `originator: pi` — the only client identifier its allowlist accepts
-  //  - `openai-beta: responses=experimental` — gates the Responses surface
-  //  - `user-agent: pi (linux x86_64)` — Codex is fronted by Cloudflare,
-  //    which bot-mitigates any UA that doesn't look like an approved CLI.
-  //    The OpenAI SDK's `OpenAI/JS …` UA triggers `cf-mitigated: challenge`
-  //    → HTML 403; pi-ai's `openai-codex-responses` provider sends this
-  //    exact string and is verified to pass.
-  //  - `accept: text/event-stream` — Codex's `/codex/responses` only
-  //    streams; non-SSE requests are rejected.
-  oauthWireFormat: {
-    identityHeaders: {
-      originator: "pi",
-      "openai-beta": "responses=experimental",
-      "user-agent": "pi (linux x86_64)",
-      accept: "text/event-stream",
-    },
-    accountIdHeader: "chatgpt-account-id",
-    forceStream: true,
-    forceStore: false,
-  },
+  // Codex is an inference / model provider only: operators can connect a
+  // ChatGPT subscription, list models, and validate the credential offline.
+  // The agent-run engine binding (a docker-isolated official-binary runner) is
+  // deferred to a follow-up — codex has no `subscriptionEngine`, so a codex
+  // agent run is refused by `assertRunnableOnEngine` (oauth-class credential
+  // with no official engine). See docs/architecture/SUBSCRIPTION_COMPLIANCE.md.
 };
 
 // ---------------------------------------------------------------------------

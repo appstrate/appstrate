@@ -237,10 +237,10 @@ export function createIntegrationsRouter() {
     const error = c.req.query("error");
     if (error) {
       logger.warn("Integration OAuth callback received error", { error });
-      return c.html(popupHtmlError(`OAuth error: ${error}`, 3000));
+      return c.html(popupHtmlError(`OAuth error: ${error}`, { state }, 3000));
     }
     if (!code || !state) {
-      return c.html(popupHtmlError("Missing required parameters", 3000));
+      return c.html(popupHtmlError("Missing required parameters", { state }, 3000));
     }
     let result: IntegrationOAuthCallbackResult;
     try {
@@ -258,11 +258,11 @@ export function createIntegrationsRouter() {
           oauthError: err.oauthError,
           oauthErrorDescription: err.oauthErrorDescription,
         });
-        return c.html(popupHtmlError(userMessage));
+        return c.html(popupHtmlError(userMessage, { state }));
       }
       const msg = err instanceof Error ? err.message : "OAuth callback failed";
       logger.error("Integration OAuth callback failed", { msg });
-      return c.html(popupHtmlError(`Error: ${msg}`));
+      return c.html(popupHtmlError(`Error: ${msg}`, { state }));
     }
 
     // Persist via the OAuth2 strategy. The exchange above reconstructed the
@@ -295,11 +295,13 @@ export function createIntegrationsRouter() {
       // Surface the actionable identity-mismatch message verbatim (reconnect
       // authenticated a different account) instead of the generic fallback.
       if (err instanceof ApiError && err.code === "identity_mismatch") {
-        return c.html(popupHtmlError(err.message));
+        return c.html(popupHtmlError(err.message, { state, packageId: result.packageId }));
       }
-      return c.html(popupHtmlError("Could not save the connection."));
+      return c.html(
+        popupHtmlError("Could not save the connection.", { state, packageId: result.packageId }),
+      );
     }
-    return c.html(popupHtmlClose());
+    return c.html(popupHtmlClose({ state, packageId: result.packageId }));
   });
 
   router.get("/:packageId{@[^/]+/[^/]+}", requirePermission("integrations", "read"), async (c) => {

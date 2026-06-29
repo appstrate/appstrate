@@ -31,6 +31,7 @@ import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { getSystemModelProviderCredentials, getSystemModels } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
+import { clearResolvedModelCache } from "../resolved-model-cache.ts";
 
 // ─── Blob shapes (encrypted at rest) ───────────────────────────────────────
 
@@ -63,9 +64,7 @@ export type CredentialsBlob = ApiKeyBlob | OAuthBlob;
  * Single decrypted credential shape exposed by `loadInferenceCredentials`
  * (the only public read path). Carries the registry-derived `apiShape` and
  * `baseUrl` inline so downstream consumers don't have to re-look-up
- * `getModelProvider`. The declarative `oauthWireFormat` quirks are NOT
- * ferried here — consumers (pi.ts) read them straight from the registry
- * by `providerId` at the sidecar-config boundary.
+ * `getModelProvider`.
  */
 export interface DecryptedModelProviderCredentials {
   /** Canonical registry id ("anthropic", "openai", …). */
@@ -74,7 +73,14 @@ export interface DecryptedModelProviderCredentials {
   baseUrl: string;
   /** Either the API key OR the current OAuth access token. */
   apiKey: string;
-  /** OAuth only — abstract account/tenant identifier (echoed by the sidecar as `wireFormat.accountIdHeader`). */
+  /**
+   * OAuth only — abstract account/tenant identifier (used at connect time for
+   * required-claim validation). The platform does NOT forward this generic
+   * `accountId` as an upstream request header. (The codex vend path is a
+   * distinct, provider-specific mechanism: sidecar-side it writes the real
+   * `chatgpt_account_id` into the CLI's local auth state, used by the official
+   * binary — not an HTTP header set by the platform.)
+   */
   accountId?: string;
   /** OAuth only — if true, the connection is dead and apiKey may be stale. */
   needsReconnection?: boolean;
@@ -184,6 +190,40 @@ export async function loadCredentialRow(
     blob,
     config,
   };
+}
+
+/**
+ * Registry-derived credential metadata WITHOUT decrypting the secret blob.
+ * `providerId` is a plaintext column; `apiShape`/`baseUrl` come from the
+ * provider registry. Used by metadata-only listings (e.g. the chat model
+ * picker) that need to resolve the protocol family + base URL but never the
+ * key itself — the real secret is decrypted later, at inference time.
+ */
+export interface CredentialMetadata {
+  providerId: string;
+  apiShape: ModelApiShape;
+  baseUrl: string;
+}
+
+export async function loadCredentialMetadata(
+  id: string,
+  orgId: string,
+): Promise<CredentialMetadata | null> {
+  const [row] = await db
+    .select({
+      orgId: modelProviderCredentials.orgId,
+      providerId: modelProviderCredentials.providerId,
+      baseUrlOverride: modelProviderCredentials.baseUrlOverride,
+    })
+    .from(modelProviderCredentials)
+    .where(eq(modelProviderCredentials.id, id))
+    .limit(1);
+  if (!row || row.orgId !== orgId) return null;
+  const cfg = getModelProvider(row.providerId);
+  if (!cfg) return null;
+  const baseUrl =
+    row.baseUrlOverride && cfg.baseUrlOverridable ? row.baseUrlOverride : cfg.defaultBaseUrl;
+  return { providerId: row.providerId, apiShape: cfg.apiShape, baseUrl };
 }
 
 // ─── Create ────────────────────────────────────────────────────────────────
@@ -329,6 +369,9 @@ export async function updateModelProviderCredential(
         extra: [eq(modelProviderCredentials.id, id)],
       }),
     );
+  // Models backed by this credential may have a cached resolution carrying the
+  // old key/baseUrl — drop it so the rotation takes effect immediately.
+  clearResolvedModelCache();
 }
 
 // ─── Label derivation ──────────────────────────────────────────────────────
@@ -417,6 +460,10 @@ async function updateOAuthBlob(
         extra: [eq(modelProviderCredentials.id, id)],
       }),
     );
+  // Chokepoint for every OAuth blob write (token refresh + needsReconnection):
+  // bust the resolved-model cache so a rotated token or a freshly-dead credential
+  // stops being served immediately, not after the TTL.
+  clearResolvedModelCache();
 }
 
 export async function updateOAuthCredentialTokens(
@@ -520,6 +567,9 @@ export async function deleteModelProviderCredential(orgId: string, id: string): 
       extra: [eq(modelProviderCredentials.id, id)],
     }),
   );
+  // Any model backed by the deleted credential is now unresolvable — drop cached
+  // resolutions so they don't serve a stale (now-deleted) secret.
+  clearResolvedModelCache();
 }
 
 // ─── Aggregated UI surface (system env-driven + DB) ────────────────────────
@@ -633,8 +683,8 @@ export async function getOrgModelProviderCredential(
  * DB-stored credentials (api-key or OAuth, decrypted on demand) — and
  * gates dead OAuth rows (`needsReconnection`).
  *
- * The returned shape carries the registry overlay (apiShape, baseUrl,
- * wireFormat) inline so downstream consumers (pi.ts, llm-proxy) don't
+ * The returned shape carries the registry overlay (apiShape, baseUrl)
+ * inline so downstream consumers (pi.ts, llm-proxy) don't
  * have to re-look-up `getModelProvider(providerId)`.
  *
  * Returns `null` when the id is unknown to either source, or when the

@@ -61,8 +61,13 @@ describe("PiRunner.run — event forwarding", () => {
     // relies on to flip the run to "failed" with the LLM-unreachable
     // message. Cost=0 also tells finalize there is nothing to write to
     // the runner ledger from the body.
+    // The runner now stamps success explicitly (no terminal error); the
+    // platform's `runHadZeroTokens` heuristic still flips this to "failed"
+    // downstream at ingestion (mapTerminalStatus honours the status, then the
+    // zero-token guard fires on success) — unchanged.
     expect(sink.finalized).toEqual({
       ...emptyRunResult(),
+      status: "success",
       usage: {
         input_tokens: 0,
         output_tokens: 0,
@@ -123,7 +128,7 @@ describe("PiRunner.run — terminal verdict (bridge-captured)", () => {
     expect(sink.finalized?.error?.message).toBe("Codex error: server_error");
   });
 
-  it("leaves status unset (success) when a transient error was recovered", async () => {
+  it("stamps status=success explicitly when a transient error was recovered", async () => {
     const sink = createCaptureSink();
     const runner = new ScriptedPiRunner(async (session) => {
       // Transient error turn…
@@ -145,7 +150,7 @@ describe("PiRunner.run — terminal verdict (bridge-captured)", () => {
 
     await runner.run({ bundle: STUB_BUNDLE, context: makeContext(), eventSink: sink });
 
-    expect(sink.finalized?.status).toBeUndefined();
+    expect(sink.finalized?.status).toBe("success");
     expect(sink.finalized?.error).toBeUndefined();
   });
 });

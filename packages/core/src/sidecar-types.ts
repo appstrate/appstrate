@@ -476,11 +476,14 @@ export interface IntegrationSpawnSpec {
  *
  *   - `api_key`: the agent SDK builds the auth header with a placeholder and
  *     the sidecar swaps the placeholder for the real key.
- *   - `oauth`: the sidecar fetches a fresh access token from the platform
- *     (`GET /internal/oauth-token/:connectionId`) and injects it as the
- *     bearer + the per-provider identity headers + applies the declarative
- *     body transforms read from `wireFormat` (system-prepend, force-stream,
- *     force-store).
+ *   - `oauth`: the no-forging OAuth path for an agent driver that signs its OWN
+ *     provider fingerprint (the official Claude Agent SDK binary). The sidecar
+ *     fetches a fresh access token from the platform
+ *     (`GET /internal/oauth-token/:credentialId`), swaps the request bearer for
+ *     it, and ensures the OAuth beta flag — but forges nothing (no identity
+ *     headers, no body transforms). There is deliberately no fingerprint-forging
+ *     mode: a subscription provider whose driver can't sign its own fingerprint
+ *     cannot execute.
  */
 export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
 
@@ -532,6 +535,18 @@ export interface LlmProxyApiKeyConfig {
   modelSwap?: ModelSwap;
 }
 
+/**
+ * OAuth mode — the no-forging path for an agent driver that signs its OWN
+ * provider fingerprint (the official Claude Agent SDK binary).
+ *
+ * The sidecar forges nothing. It only resolves a fresh access token from the
+ * platform, swaps the request bearer for it, and ensures the documented OAuth
+ * beta flag (`oauth-2025-04-20`) is present — leaving the driver's own
+ * user-agent / `x-app` / `anthropic-beta` fingerprint, request headers, and body
+ * untouched. This is the runner-side counterpart of the chat's
+ * `claude-code-sdk-gateway`. There is no forging fallback: a subscription
+ * provider whose driver can't sign its own fingerprint has no execution path.
+ */
 export interface LlmProxyOauthConfig {
   authMode: "oauth";
   /** Fallback base URL — the sidecar prefers `baseUrl` returned by the platform's token endpoint. */
@@ -540,78 +555,12 @@ export interface LlmProxyOauthConfig {
   credentialId: string;
   /** Set for model aliases — rewrite `model` alias↔real in req/resp. See {@link ModelSwap}. */
   modelSwap?: ModelSwap;
-  /**
-   * Declarative wire-format contract contributed by the provider module
-   * (`ModelProviderDefinition.oauthWireFormat`). Drives identity-header
-   * injection, body transforms (system prepend, `forceStream`, `forceStore`),
-   * URL path rewriting, and adaptive header retries without the sidecar
-   * needing to know any provider name. When absent, no identity headers or
-   * transforms apply.
-   */
-  wireFormat?: OAuthWireFormat;
-}
-
-/**
- * Declarative wire-format quirks an OAuth model provider needs the sidecar
- * to apply on its behalf. Lives in {@link LlmProxyOauthConfig} (carried at
- * boot via env), so the sidecar runtime stays provider-agnostic — there is
- * no provider-name switch anywhere; every behavior is data-driven from this
- * struct.
- *
- * All fields optional. An empty `OAuthWireFormat` is equivalent to "pass
- * the agent's request through with just the bearer attached."
- */
-export interface OAuthWireFormat {
-  /**
-   * Static headers injected on every OAuth-authenticated upstream call.
-   * Lower-cased keys recommended; the sidecar forwards verbatim. Used for
-   * provider fingerprinting (a fixed client-identity header the upstream
-   * expects to see on subscription-bearing calls).
-   */
-  identityHeaders?: Record<string, string>;
-  /**
-   * Header name to echo the resolved `accountId` as (when the token endpoint
-   * surfaced one). Skipped when the cached token carries no `accountId`.
-   */
-  accountIdHeader?: string;
-  /**
-   * Anthropic-style system-prompt prelude prepended to outbound JSON
-   * bodies. Applied only when the request body is a JSON object with a
-   * `system` field — otherwise pass-through.
-   */
-  systemPrepend?: { type: "text"; text: string };
-  /** Force `stream: true` on outbound JSON bodies (required by some subscription-flavoured providers). */
-  forceStream?: boolean;
-  /** Force `store: false` on outbound JSON bodies (required by some subscription-flavoured providers). */
-  forceStore?: boolean;
-  /** Path rewriting applied at the proxy boundary. */
-  rewriteUrlPath?: { from: string; to: string };
-  /**
-   * Single adaptive retry policy: when an upstream returns `status` and
-   * the response body matches any of `bodyPatterns` (case-insensitive
-   * regex), strip `removeToken` from the comma-separated header named
-   * `headerName` and replay the request once. Used by Anthropic to fall
-   * back when the long-context beta isn't available on the account.
-   */
-  adaptiveRetry?: OAuthAdaptiveRetryPolicy;
-}
-
-/** See {@link OAuthWireFormat.adaptiveRetry}. */
-export interface OAuthAdaptiveRetryPolicy {
-  /** HTTP status code triggering the retry (typically 400). */
-  status: number;
-  /** Body-text patterns (case-insensitive regex strings). Any match triggers retry. */
-  bodyPatterns: readonly string[];
-  /** Header name to mutate (case-insensitive lookup). */
-  headerName: string;
-  /** Comma-separated token to remove from the header value before retry. */
-  removeToken: string;
 }
 
 /**
  * Wire-format response from the platform's `GET /internal/oauth-token/:credentialId`
  * (and `POST .../refresh`) endpoint. Carries only the fields that change per
- * refresh — provider invariants (baseUrl, providerId, wireFormat) live in
+ * refresh — provider invariants (baseUrl, providerId) live in
  * {@link LlmProxyOauthConfig}, which the sidecar already received at boot.
  */
 export interface OAuthTokenResponse {
@@ -620,8 +569,9 @@ export interface OAuthTokenResponse {
   expiresAt: number | null;
   /**
    * Abstract account/tenant identifier surfaced by the integration's
-   * `extractTokenIdentity` hook. Echoed by the sidecar as the header
-   * named by {@link OAuthWireFormat.accountIdHeader} (when both are set).
+   * `extractTokenIdentity` hook (used at connect time for required-claim
+   * validation). This generic OAuth `accountId` metadata is NOT forwarded as an
+   * upstream header by the platform.
    */
   accountId?: string;
 }

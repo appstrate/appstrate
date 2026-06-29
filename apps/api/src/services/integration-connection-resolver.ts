@@ -46,7 +46,7 @@ import {
   type ResolvedConnection,
   type ResolvedConnectionMap,
 } from "@appstrate/core/integration";
-import type { ValidationFieldError } from "../lib/errors.ts";
+import type { ResolutionFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import { actorFilter } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
@@ -596,7 +596,7 @@ export interface MissingConnectionError {
   code: "missing_integration_connection";
   title: "Missing Integration Connection";
   detail: string;
-  errors: ValidationFieldError[];
+  errors: ResolutionFieldError[];
 }
 
 export type ResolveRunConnectionsOutcome =
@@ -634,14 +634,15 @@ export async function resolveRunConnectionsOrError(
 }
 
 /**
- * Map a `ConnectionResolutionError` to the wire-format ValidationFieldError
- * the upstream 412 envelope expects.
+ * Map a `ConnectionResolutionError` to the wire-format `ResolutionFieldError`
+ * (a `ValidationFieldError` plus the resolution smuggle fields) the upstream
+ * 412 envelope expects.
  *
  * Field path: `integrations.{packageId}` — one error per integration in
  * the flat model. The dashboard's MissingConnectionsModal parses on the
  * same prefix so existing UI plumbing still works.
  */
-export function translateResolutionError(e: ConnectionResolutionError): ValidationFieldError {
+export function translateResolutionError(e: ConnectionResolutionError): ResolutionFieldError {
   const title = TITLE_BY_CODE[e.code];
   return {
     field: `integrations.${e.integrationId}`,
@@ -680,7 +681,7 @@ export function translateResolutionError(e: ConnectionResolutionError): Validati
             : {}),
         }
       : {}),
-  } as ValidationFieldError;
+  };
 }
 
 const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {

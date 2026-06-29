@@ -1,0 +1,46 @@
+{
+  "name": "@appstrate/module-chat",
+  "version": "0.1.0",
+  "description": "Appstrate module — conversational chat over the platform (sessions, message tree, full-page ChatPage UI). Opt-in: append `@appstrate/module-chat` to MODULES to enable.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": null,
+  "module": null,
+  "exports": {
+    ".": "./src/index.ts",
+    "./ui": "./src/ui/index.tsx",
+    "./unread": "./src/ui/use-sessions.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test test/"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^2",
+    "@ai-sdk/mcp": "^1.0.46",
+    "@ai-sdk/openai-compatible": "^1",
+    "@ai-sdk/react": "^3",
+    "@appstrate/core": "workspace:*",
+    "@appstrate/db": "workspace:*",
+    "@assistant-ui/react": "^0.14.16",
+    "@assistant-ui/react-ai-sdk": "^1",
+    "@iconify/react": "^6.0.2",
+    "@assistant-ui/react-markdown": "^0.14.2",
+    "ai": "^6",
+    "assistant-stream": "^0.3.21",
+    "drizzle-orm": "^0.45.2",
+    "ioredis": "^5.11.1",
+    "remark-gfm": "^4.0.1",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "hono": "*",
+    "react": "*",
+    "lucide-react": "*",
+    "@tanstack/react-query": "^5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "lucide-react": "^1.14.0"
+  }
+}

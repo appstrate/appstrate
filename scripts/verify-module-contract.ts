@@ -80,6 +80,7 @@ const MODULE_TENANT: Record<string, Tenant> = {
   "core-providers": "oss",
   "module-codex": "oss",
   "module-claude-code": "oss",
+  "module-chat": "oss",
   cloud: "cloud",
 };
 
@@ -96,6 +97,7 @@ const DECLARER_ROOTS: Record<string, string> = {
   "core-providers": "appstrate/apps/api/src/modules/core-providers",
   "module-codex": "appstrate/packages/module-codex/src",
   "module-claude-code": "appstrate/packages/module-claude-code/src",
+  "module-chat": "appstrate/packages/module-chat/src",
   cloud: "cloud/src",
 };
 
@@ -104,34 +106,39 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   shutdown: { kind: "lifecycle", owners: [] },
 
   // ── extension — generic, must have >= 2 owners ──────────────────────────
-  createRouter: { kind: "extension", owners: ["oidc", "webhooks", "cloud"] },
+  createRouter: { kind: "extension", owners: ["oidc", "webhooks", "cloud", "module-chat"] },
   publicPaths: { kind: "extension", owners: ["oidc", "cloud"] },
   permissionsContribution: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "cloud"],
+    owners: ["oidc", "webhooks", "cloud", "module-chat"],
     justification: "RBAC — the open-core boundary; cloud cannot migrate it into core (#488).",
   },
   hooks: {
     kind: "extension",
-    owners: ["oidc", "cloud", "module-codex"],
+    owners: ["oidc", "cloud", "module-codex", "module-claude-code"],
   },
   events: { kind: "extension", owners: ["webhooks", "cloud"] },
-  features: { kind: "extension", owners: ["oidc", "webhooks", "cloud"] },
+  features: { kind: "extension", owners: ["oidc", "webhooks", "cloud", "module-chat"] },
   modelProviders: {
     kind: "extension",
     owners: ["core-providers", "module-codex", "module-claude-code"],
   },
-  openApiPaths: { kind: "extension", owners: ["oidc", "webhooks", "cloud"] },
-  openApiComponentSchemas: { kind: "extension", owners: ["oidc", "webhooks", "cloud"] },
-  openApiTags: { kind: "extension", owners: ["oidc", "webhooks", "cloud"] },
-  openApiSchemas: { kind: "extension", owners: ["oidc", "webhooks"] },
+  openApiPaths: { kind: "extension", owners: ["oidc", "webhooks", "cloud", "module-chat"] },
+  openApiComponentSchemas: {
+    kind: "extension",
+    owners: ["oidc", "webhooks", "cloud", "module-chat"],
+  },
+  openApiTags: { kind: "extension", owners: ["oidc", "webhooks", "cloud", "module-chat"] },
+  openApiSchemas: { kind: "extension", owners: ["oidc", "webhooks", "module-chat"] },
 
-  // ── seam — single-owner is legal; removing forces a layering violation ──
+  // Generic extension: two independent owners (oidc's end-user JWT + module-chat's
+  // process-local loopback bearer) prove the auth pipeline stays module-agnostic.
   authStrategies: {
-    kind: "seam",
-    owners: ["oidc"],
+    kind: "extension",
+    owners: ["oidc", "module-chat"],
     justification:
-      "Auth pipeline (lib/auth-pipeline.ts) must stay module-agnostic; direct import would name oidc.",
+      "Auth pipeline (lib/auth-pipeline.ts) must stay module-agnostic; direct import would name oidc. " +
+      "module-chat adds its process-local loopback bearer strategy through the same seam.",
   },
   betterAuthPlugins: {
     kind: "seam",

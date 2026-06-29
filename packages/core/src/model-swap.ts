@@ -58,6 +58,31 @@ export function isAliasableApiShape(shape: ModelApiShape): boolean {
 }
 
 /**
+ * Reason an aliased model fails its configuration invariants (issue #727,
+ * Threat A), or `null` when it is well-formed:
+ *   - `missing_label` — no explicit label; the derived label would name the
+ *     real backing and leak it on `/api/models` and `run.model_label`.
+ *   - `non_aliasable_shape` — the protocol carries the model id in the URL, not
+ *     the request body, so the swap can't hide the backing.
+ */
+export type AliasInvariantViolation = "missing_label" | "non_aliasable_shape";
+
+/**
+ * Single source of truth for the model-alias invariants, shared by both trust
+ * boundaries that accept an alias: the env-seeded registry (`model-registry`,
+ * skips on violation) and the DB `POST /api/models` route (rejects on
+ * violation). Each caller maps the returned reason to its own outcome/message.
+ */
+export function checkAliasInvariants(input: {
+  label?: string | null;
+  apiShape: ModelApiShape;
+}): AliasInvariantViolation | null {
+  if (!input.label) return "missing_label";
+  if (!isAliasableApiShape(input.apiShape)) return "non_aliasable_shape";
+  return null;
+}
+
+/**
  * Rewrite the request body's top-level `model` alias→real. Returns the input
  * unchanged when it isn't JSON or the field isn't the alias (defensive: a
  * mismatch means the caller sent something unexpected — forward it verbatim

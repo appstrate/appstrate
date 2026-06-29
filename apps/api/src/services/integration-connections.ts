@@ -53,9 +53,11 @@ import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { actorInsert, actorFilter } from "../lib/actor.ts";
+import { getPackageDisplayName } from "../lib/package-helpers.ts";
 import type { Actor } from "@appstrate/connect";
 import {
   resolveIntegrationToolCatalog,
+  readDefaultTools,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
@@ -1943,6 +1945,108 @@ export async function listIntegrationConnections(
   return rows.map(serializeIntegrationConnection);
 }
 
+/** One integration the actor could attach to an agent (own and/or org-shared). */
+export interface UsableIntegration {
+  integration_id: string;
+  name: string;
+  source: "own" | "shared" | "both";
+  /**
+   * The integration package's own manifest version (e.g. "1.1.0"), when known.
+   * Lets a caller building an agent (or an inline run) pin a satisfiable
+   * `dependencies.integrations` range without guessing.
+   */
+  version?: string;
+  /**
+   * The integration's declared `default_tools` (AFPS §4.4) — the tool(s) an
+   * agent inherits when it declares the integration without an
+   * `integrations_configuration.<id>.tools` selection. Read straight off the
+   * manifest (no mcp-server resolution). Lets an agent-builder see what it
+   * gets for free and whether it must select tools explicitly for anything
+   * else. `undefined` when the integration declares no default.
+   */
+  default_tools?: readonly string[] | "*";
+}
+
+/**
+ * Integrations the actor could use when building an agent manually in the
+ * current application: any integration for which a connection exists that is
+ * either the actor's own (`actorFilter`) OR opted into org-wide sharing
+ * (`sharedWithOrg`). Mirrors the resolver predicate in `loadActorConnection`.
+ *
+ * Deduped to the integration level (the agent picks an integration; the
+ * connection itself is resolved at run time by `resolveAgentIntegrationPick`).
+ * `source` reflects whether the actor owns a connection, only inherits a
+ * shared one, or both.
+ */
+export async function listUsableIntegrationsForActor(
+  scope: AppScope,
+  actor: Actor,
+): Promise<UsableIntegration[]> {
+  await assertAppBelongsToOrg(scope);
+  const ownerPredicate = actorFilter(actor, integrationConnections);
+  const rows = await db
+    .select({
+      integrationId: integrationConnections.integrationId,
+      userId: integrationConnections.userId,
+      endUserId: integrationConnections.endUserId,
+      sharedWithOrg: integrationConnections.sharedWithOrg,
+    })
+    .from(integrationConnections)
+    .where(
+      and(
+        eq(integrationConnections.applicationId, scope.applicationId),
+        or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
+      ),
+    );
+  if (rows.length === 0) return [];
+
+  // own = row owned by this actor; shared = row opted into org-wide sharing.
+  // A single integration can have both kinds across multiple connection rows.
+  const acc = new Map<string, { own: boolean; shared: boolean }>();
+  for (const row of rows) {
+    const own = actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
+    const entry = acc.get(row.integrationId) ?? { own: false, shared: false };
+    entry.own ||= own;
+    entry.shared ||= row.sharedWithOrg;
+    acc.set(row.integrationId, entry);
+  }
+
+  const ids = [...acc.keys()];
+  const pkgRows = await db
+    .select({ id: packages.id, draftManifest: packages.draftManifest })
+    .from(packages)
+    .where(inArray(packages.id, ids));
+  const nameMap = new Map(pkgRows.map((p) => [p.id, getPackageDisplayName(p)]));
+  // The integration package's own version, read straight off the draft manifest
+  // (already selected — no extra query). Surfaced so a caller pinning a
+  // `dependencies.integrations` range doesn't have to guess it.
+  const versionMap = new Map(
+    pkgRows.map((p) => {
+      const m = p.draftManifest as { version?: unknown } | null;
+      return [p.id, typeof m?.version === "string" ? m.version : undefined] as const;
+    }),
+  );
+  // The integration's declared `default_tools` (AFPS §4.4), read straight off
+  // the same already-selected draft manifest — no extra query, no mcp-server
+  // resolution. Surfaced so an agent-builder sees what tools it inherits for
+  // free and whether it must select tools explicitly for anything else.
+  const defaultToolsMap = new Map(
+    pkgRows.map((p) => [p.id, readDefaultTools(p.draftManifest as IntegrationManifest)] as const),
+  );
+
+  return ids.map((integrationId) => {
+    const { own, shared } = acc.get(integrationId)!;
+    const source: UsableIntegration["source"] = own && shared ? "both" : own ? "own" : "shared";
+    return {
+      integration_id: integrationId,
+      name: nameMap.get(integrationId) ?? integrationId,
+      source,
+      version: versionMap.get(integrationId),
+      default_tools: defaultToolsMap.get(integrationId),
+    };
+  });
+}
+
 /**
  * Delete one connection row. Used by the "disconnect" button per auth
  * (or per account, when multi-account).
@@ -2034,6 +2138,15 @@ export async function getIntegrationAuthStatuses(
    */
   tool_catalog: IntegrationToolCatalogEntry[];
   /**
+   * AFPS §4.4 — the tool(s) an agent inherits when it declares the
+   * integration without an `integrations_configuration.<id>.tools`
+   * selection. Read straight off the manifest (no mcp-server resolution).
+   * Pairs with `tool_catalog`: it tells an agent-builder which catalog
+   * entries are on by default vs which must be selected explicitly.
+   * `undefined` when the integration declares no default.
+   */
+  default_tools: readonly string[] | "*" | undefined;
+  /**
    * AFPS §7.8 — surfaced verbatim from the manifest so the agent editor
    * can gate its "Include all upstream tools" advanced toggle. `false`
    * (default) keeps the picker in per-tool mode; `true` lets the agent
@@ -2110,6 +2223,7 @@ export async function getIntegrationAuthStatuses(
       | { required?: boolean }
       | undefined;
     const resource = auth.resource ?? null;
+    const keyConnections = allConnections.filter((c) => c.auth_key === key);
     return {
       auth_key: key,
       type: auth.type,
@@ -2117,7 +2231,14 @@ export async function getIntegrationAuthStatuses(
       scopes: auth.default_scopes ?? [],
       // AFPS §7.3 (RFC 8707) names this field `resource`.
       resource,
-      connections: allConnections.filter((c) => c.auth_key === key),
+      connections: keyConnections,
+      // Server-authoritative usability for this auth: at least one connection
+      // that isn't flagged for reconnection. The single per-connection validity
+      // signal (`needs_reconnection`, set by the resolver/refresh path) — so
+      // consumers (chat connect card, …) never re-derive connection state and
+      // stay correct as that logic evolves. Agent-agnostic (no scope/pin gate);
+      // a run's authoritative readiness still comes from `validateInlineRun`.
+      ready: keyConnections.some((c) => !c.needs_reconnection),
       has_oauth_client: oauthClientKeys.has(key),
       // Shared platform client (SYSTEM_INTEGRATIONS): when one serves this
       // (integration, auth), connect falls back to it, so the UI is connectable
@@ -2134,6 +2255,7 @@ export async function getIntegrationAuthStatuses(
     manifest,
     auths,
     tool_catalog: toolCatalog,
+    default_tools: readDefaultTools(manifest),
     allow_undeclared_tools:
       (manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools === true,
     active: activation.active,

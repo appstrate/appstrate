@@ -196,6 +196,7 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   UIHintsMap: "AFPS schema-wrapper sub-schema (structural map)",
   // Error + auth/credential wire with no SPA shared-type consumer.
   ProblemDetail: "RFC 9457 error envelope; never read through a shared-type",
+  ResolutionFieldError: "ProblemDetail.errors[] item; never read through a shared-type",
   AgentConnectionReadiness:
     "bulk agent connection-readiness envelope; SPA uses the generated spec type (integrations[].resolution is the registered IntegrationAgentResolution)",
   OAuthClientObject: "OIDC oauth-admin wire; no shared-type (SPA uses the generated spec type)",
@@ -213,6 +214,13 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "shared-type is the Drizzle profiles row (Date, displayName); wire is the joined {id,language,email,name} resource",
   RunLog:
     "shared-type RunLog has createdAt:Date; wire is an ISO string — SPA consumes the generated spec type",
+  // @appstrate/module-chat wire DTOs. The module owns no tables of its own as a
+  // shared-type export (chat_sessions/chat_messages are core schema), and these
+  // are hand-shaped wire envelopes (ISO timestamps, opaque message content) the
+  // chat UI consumes via the generated spec type — not a Drizzle shared-type.
+  ChatSession:
+    "module-chat wire DTO; ISO timestamps, no shared-type (UI uses the generated spec type)",
+  ChatMessage: "module-chat opaque history-node wire DTO; no shared-type",
 };
 
 /**

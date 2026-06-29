@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@appstrate/core": "workspace:*",
+    "@appstrate/module-chat": "workspace:*",
     "@appstrate/shared-types": "workspace:*",
     "@appstrate/ui": "workspace:*",
     "@dnd-kit/core": "^6.3.1",

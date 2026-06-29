@@ -33,6 +33,7 @@ export type AppEnv = {
     package: LoadedPackage;
     orgId: string;
     orgSlug: string;
+    orgName: string;
     orgRole: import("@appstrate/shared-types").OrgRole;
     permissions?: Set<string>;
     /**
@@ -71,6 +72,14 @@ export type AppEnv = {
      * Bearer; route handlers cast to the shape they expect.
      */
     authExtra?: Record<string, unknown>;
+    /**
+     * Set by an auth strategy that declared `AuthResolution.firstPartyLoopback`
+     * — a server-minted, process-local loopback bearer. The bearer-only proxy
+     * gates (`assertBearerOnly`/`assertLoopbackOnly`) and the models route read
+     * this declared capability instead of special-casing a module's auth-method
+     * id. See `apps/api/src/lib/bearer-only.ts`.
+     */
+    firstPartyLoopback?: boolean;
     /**
      * Realm captured from the BA session row (or user row) at auth time.
      * `"platform"` for platform audiences (default, dashboard, org/instance

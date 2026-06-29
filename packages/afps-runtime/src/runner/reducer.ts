@@ -11,13 +11,13 @@
  * contribute to the aggregated result.
  *
  * `foldEvent` is the single switch that knows how each canonical event
- * contributes to the aggregate. Both the batch reducer `reduceEvents`
- * and the incremental `createReducerSink` consume it.
+ * contributes to the aggregate; the batch reducer `reduceEvents` folds the
+ * whole event list through it.
  */
 
 import type { RunEvent } from "@afps-spec/types";
 import { narrowCanonicalEvent } from "../types/canonical-events.ts";
-import type { RunError, RunResult } from "../types/run-result.ts";
+import type { RunError, RunResult, TokenUsage } from "../types/run-result.ts";
 
 export interface ReduceOptions {
   /** Optional error to attach after reduction (populated by the runner). */
@@ -29,6 +29,17 @@ export function emptyRunResult(): RunResult {
     memories: [],
     output: null,
     logs: [],
+  };
+}
+
+/** A fresh all-zero {@link TokenUsage} accumulator — shared by the runner
+ * event mappers so the empty-usage shape has one definition. */
+export function zeroTokenUsage(): TokenUsage {
+  return {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
   };
 }
 

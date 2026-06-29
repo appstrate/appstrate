@@ -118,6 +118,7 @@ export const endUsersPaths = {
           },
         },
         "422": { $ref: "#/components/responses/IdempotencyConflict" },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
     get: {
@@ -224,6 +225,7 @@ export const endUsersPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },
@@ -265,6 +267,7 @@ export const endUsersPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
     patch: {
@@ -354,6 +357,7 @@ export const endUsersPaths = {
             },
           },
         },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
     delete: {
@@ -376,6 +380,7 @@ export const endUsersPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },

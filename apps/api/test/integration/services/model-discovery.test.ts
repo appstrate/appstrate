@@ -25,6 +25,38 @@ import { getOrgModelProviderCredential } from "../../../src/services/model-provi
 import type { TestResult } from "@appstrate/shared-types";
 
 const PROVIDER_ID = "test-oauth-discovery";
+const OFFLINE_PROVIDER_ID = "test-offline-discovery";
+
+/**
+ * Synthetic provider declaring `modelDiscovery: { mode: "static" }` — exercises
+ * the no-network discovery path (subscription providers codex/claude-code).
+ * Reuses the same catalog as the probe provider. Candidate "m-uncatalogued"
+ * is intentionally absent from the catalog to pin the ∩-catalog filter.
+ */
+function registerOfflineDiscoveryProvider(): void {
+  registerModelProvider({
+    providerId: OFFLINE_PROVIDER_ID,
+    displayName: "Test Offline Discovery",
+    iconUrl: "anthropic",
+    description: "Synthetic offline-validation provider.",
+    apiShape: "anthropic-messages",
+    defaultBaseUrl: "https://offline.example.test",
+    baseUrlOverridable: false,
+    authMode: "oauth2",
+    oauth: {
+      clientId: "test-offline-client",
+      authorizationUrl: "https://auth.example.test/authorize",
+      tokenUrl: "https://auth.example.test/token",
+      refreshUrl: "https://auth.example.test/token",
+      scopes: ["openid"],
+      pkce: "S256",
+    },
+    catalogProviderId: "test-discovery-catalog",
+    featuredModels: ["m-featured"],
+    modelDiscoveryCandidates: ["m-featured", "m-extra", "m-uncatalogued"],
+    modelDiscovery: { mode: "static" },
+  });
+}
 
 function registerDiscoveryProvider(): void {
   // Catalog first — registerModelProvider validates featured ids against it.
@@ -112,6 +144,7 @@ describe("discoverAvailableModels", () => {
 
   beforeAll(() => {
     registerDiscoveryProvider();
+    registerOfflineDiscoveryProvider();
   });
   afterAll(() => {
     seedTestModelProviders();
@@ -125,6 +158,7 @@ describe("discoverAvailableModels", () => {
     // helper resets the registry wholesale, never partially.
     try {
       registerDiscoveryProvider();
+      registerOfflineDiscoveryProvider();
     } catch {
       // already registered in this process — fine.
     }
@@ -193,5 +227,35 @@ describe("discoverAvailableModels", () => {
       tableProber({}).deps,
     );
     expect(result.outcome).toBe("credential_not_found");
+  });
+
+  // --- Offline providers (subscription: codex, claude-code) ---
+
+  it("offline provider: persists static candidates (∩ catalog) with NO probe call", async () => {
+    const cred = await seedOrgModelProviderOAuth({
+      orgId: ctx.org.id,
+      providerId: OFFLINE_PROVIDER_ID,
+    });
+    // A probe dep that MUST NOT be invoked — proves the platform issues
+    // zero network calls validating a subscription credential's models.
+    let probeCalls = 0;
+    const deps: ModelDiscoveryDeps = {
+      sleep: async () => {},
+      probe: async () => {
+        probeCalls++;
+        throw new Error("offline discovery must not probe the network");
+      },
+    };
+
+    const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
+
+    expect(probeCalls).toBe(0);
+    expect(result.outcome).toBe("ok");
+    expect(result.persisted).toBe(true);
+    // "m-uncatalogued" is filtered out (not in the catalog); the rest persist
+    // in declaration order.
+    expect(result.verifiedModelIds).toEqual(["m-featured", "m-extra"]);
+    const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
+    expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
   });
 });

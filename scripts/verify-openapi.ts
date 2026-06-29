@@ -36,7 +36,7 @@ import {
   KNOWN_DRIFT,
   EXEMPT_SCHEMAS,
 } from "../apps/api/src/openapi/response-type-registry.ts";
-import { collectModuleOpenApi } from "./lib/module-openapi.ts";
+import { collectModuleOpenApi, discoverWorkspaceModuleDirs } from "./lib/module-openapi.ts";
 import { getTypeShape, type TypeShape } from "./lib/ts-interface-required-keys.ts";
 
 // ---------------------------------------------------------------------------
@@ -261,6 +261,7 @@ const expectedEndpoints = [
   "PATCH /api/profile",
   "POST /api/profiles/batch",
   "GET /api/me/orgs",
+  "GET /api/me/context",
   "GET /api/me/models",
   "GET /api/me/connections",
   "DELETE /api/me/connections/{connectionId}",
@@ -1003,6 +1004,13 @@ function inferRequiredStatuses(callText: string): Set<string> {
   const out = new Set<string>();
   if (/\brequire(?:Core|Module)?Permission\s*\(/.test(code)) out.add("403");
   if (/\bparseBody\s*\(/.test(code)) out.add("400");
+  // A per-route rate limiter at the registration site always 429s a caller over
+  // the limit — same registration-site evidence as the 403/400 guards above, so
+  // it is inferable just as soundly. Matches the whole family: `rateLimit(`,
+  // `rateLimitByIp/ByRunId/ByBearer(`, `rateLimitMcp(`, and the chat module's
+  // `rateLimited(` wrapper. (404, by contrast, comes from `notFound` throws deep
+  // in the service layer — invisible here — so it stays un-inferred.)
+  if (/\brateLimit(?:ed|By[A-Za-z]+|Mcp)?\s*\(/.test(code)) out.add("429");
   return out;
 }
 
@@ -1388,6 +1396,26 @@ if (existsSync(modulesDir)) {
   }
 }
 
+// 4d. Workspace-package module routes (`packages/module-<name>/src/**`). These
+//     are modules too (e.g. module-chat mounts /api/chat) and their openApiPaths
+//     are now collected into the validated spec (see lib/module-openapi.ts), so
+//     their code routes must be scanned here to keep Code ⊆ Spec balanced.
+const workspaceModulesDir = join(REPO_ROOT, "packages");
+for (const { name, srcDir } of discoverWorkspaceModuleDirs(workspaceModulesDir)) {
+  for (const filePath of collectModuleRouteFiles(srcDir)) {
+    const src = readFileSync(filePath, "utf8");
+    if (!src.includes("new Hono")) continue; // only files that define a router
+    const rel = name + "/src/" + filePath.slice(srcDir.length + 1);
+    for (const reg of extractRouterRegistrations(src, src, rel)) {
+      const fullPath = normaliseHonoPath(reg.path);
+      for (const ep of expandRegistration(reg.verb, fullPath)) {
+        codeEndpoints.add(ep);
+        recordRouteStatuses(ep, reg.statuses);
+      }
+    }
+  }
+}
+
 // 5. Allowlist — endpoints that exist in code by design but are intentionally
 //    NOT documented in the OpenAPI spec.
 const CODE_TO_SPEC_ALLOWLIST = new Set<string>([
@@ -1513,7 +1541,7 @@ errorStatusGaps.sort();
 
 console.log(`  Endpoints with inferred error statuses: ${codeRouteStatuses.size}`);
 if (errorStatusGaps.length === 0) {
-  console.log(`  OK — every guaranteed 400/403 is documented in the spec.`);
+  console.log(`  OK — every guaranteed 400/403/429 is documented in the spec.`);
 } else {
   exitCode = 1;
   console.log(

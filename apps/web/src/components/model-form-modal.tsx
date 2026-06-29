@@ -236,7 +236,14 @@ function ModelFormBody({
    */
   const [costEdited, setCostEdited] = useState(false);
 
-  const providerId = providerOverride ?? (model ? resolveProviderId(model, registry) : "");
+  // Prefer the persisted `providerId` — it distinguishes subscription
+  // providers (claude-code, codex) that share an `apiShape` with their
+  // API-key sibling (anthropic, openai). `resolveProviderId` heuristically
+  // matches on apiShape+modelId and returns the first registry hit (the base
+  // provider), so it would mis-select "Anthropic" for a "Claude Code" model.
+  // Fall back to the heuristic only when the binding is hidden (aliases).
+  const providerId =
+    providerOverride ?? model?.providerId ?? (model ? resolveProviderId(model, registry) : "");
   const selectedModelId = modelOverride ?? resolveModelEntryId(model, registry);
   const setProviderId = (id: string) => setProviderOverride(id);
   const setSelectedModelId = (id: string) => setModelOverride(id);

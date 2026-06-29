@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Flatten an assistant-ui `UIMessage[]` thread into a single prompt string —
+ * used by the Claude Agent SDK chat engine, which takes a prompt rather than a
+ * structured message array.
+ *
+ * A single user turn is sent verbatim; multiple turns become a labelled
+ * `User:`/`Assistant:` transcript so a stateless driver gets the full
+ * conversational context. Non-text parts (tool calls, files) are dropped — only
+ * text survives into the transcript. The system persona is NOT prepended here:
+ * the caller (the Claude Agent SDK chat engine) passes system through the SDK's
+ * own system arg.
+ *
+ * KNOWN LIMITATION (lossy vs the ai-sdk path): the ai-sdk chat path feeds the
+ * model `convertToModelMessages(messages)` — a structured array preserving tool
+ * calls, tool results, and file parts. This flattening keeps only text, so a
+ * multi-turn, tool-rich session is degraded on the SDK-driven engine. Acceptable
+ * for the current chat surface (the SDK takes a prompt, not a message array);
+ * revisit with a structured adapter if/when the SDK accepts richer multi-part
+ * input.
+ */
+
+import type { UIMessage } from "ai";
+import { uiMessageText } from "./message-text.ts";
+
+export function buildTranscriptPrompt(messages: UIMessage[]): string {
+  const turns = messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({ role: m.role, text: uiMessageText(m.parts) }))
+    .filter((t) => t.text.length > 0);
+
+  const transcript =
+    turns.length === 0
+      ? ""
+      : turns.length === 1
+        ? turns[0]!.text
+        : turns.map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.text}`).join("\n\n");
+
+  return transcript;
+}

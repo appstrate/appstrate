@@ -31,4 +31,17 @@ describe("ModuleInitContext.services — platform service wiring", () => {
   it("wires the run-ledger read (runs.listLlmUsage — sole cross-tenant consumer: cloud)", () => {
     expect(typeof services.runs.listLlmUsage).toBe("function");
   });
+
+  it("wires the per-route rate limiter (http.rateLimit)", () => {
+    expect(typeof services.http.rateLimit).toBe("function");
+  });
+
+  it("wires in-process dispatch (inProcess.dispatch — chat caller-context + model reads)", () => {
+    expect(typeof services.inProcess.dispatch).toBe("function");
+  });
+
+  it("wires the chat-handler channel (registerChatHandler + chatHandlerForProvider)", () => {
+    expect(typeof services.registerChatHandler).toBe("function");
+    expect(typeof services.chatHandlerForProvider).toBe("function");
+  });
 });

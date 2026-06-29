@@ -42,7 +42,13 @@ import {
   deleteMemberPin,
   listMemberPinsForAgent,
 } from "../services/integration-pins-service.ts";
-import { deleteIntegrationConnection } from "../services/integration-connections.ts";
+import {
+  deleteIntegrationConnection,
+  listUsableIntegrationsForActor,
+} from "../services/integration-connections.ts";
+import { listRunnableAgents, listInstalledSkills } from "../services/application-packages.ts";
+import { listRecentForActor } from "../services/state/runs.ts";
+import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { parseBody, unauthorized, invalidRequest } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
@@ -292,6 +298,75 @@ router.delete("/connections/:connectionId", async (c) => {
     resourceId: connectionId,
   });
   return c.body(null, 204);
+});
+
+/**
+ * GET /api/me/context — the caller's working context for an AI agent.
+ *
+ * One payload, three consumers: the chat module injects it into the system
+ * prompt, the platform MCP server exposes it as the `get_me` tool, and
+ * external REST/MCP clients call it directly. Returns the caller's identity,
+ * their role in the pinned org, and the integrations they could attach when
+ * building an agent in the current application (own or org-shared) — so the
+ * agent can prefer already-connected integrations and respect the caller's
+ * role (operations beyond it will 403 at invoke time).
+ *
+ * App context resolves from `X-Application-Id`, the API key's application, or
+ * (for the in-process MCP sub-dispatch) the org's default application.
+ */
+router.get("/context", requireAppContext(), async (c) => {
+  const actor = getActor(c);
+  const scope = getAppScope(c);
+
+  let identity: { id: string; name: string | null; email: string | null };
+  if (actor.type === "end_user") {
+    const eu = await getEndUser(scope, actor.id);
+    identity = { id: eu.id, name: eu.name ?? null, email: eu.email ?? null };
+  } else {
+    const user = c.get("user");
+    if (!user) throw unauthorized("Authentication required");
+    identity = { id: user.id, name: user.name ?? null, email: user.email ?? null };
+  }
+
+  const role = (c.get("orgRole") as string | undefined) ?? "end_user";
+
+  // Agents are a runnable-hint: only surface them when the caller actually holds
+  // `agents:run` (otherwise the model would propose agents that 403 at invoke).
+  // The list is app-scoped (same for every actor in the app), capped for prompt
+  // size, and authoritative execution still re-checks RBAC at the run route.
+  // Skills, like agents, are only useful for building/configuring an agent run,
+  // so they share the `agents:run` gate. They aren't run directly — the model
+  // declares them under an agent manifest's `dependencies.skills`.
+  const canRun = (c.get("permissions") as Set<string> | undefined)?.has("agents:run") ?? false;
+  const [connections, runnable, installedSkills, recentRuns] = await Promise.all([
+    listUsableIntegrationsForActor(scope, actor),
+    canRun
+      ? listRunnableAgents(scope)
+      : Promise.resolve({ agents: [], truncated: false, total: 0 }),
+    canRun
+      ? listInstalledSkills(scope)
+      : Promise.resolve({ skills: [], truncated: false, total: 0 }),
+    // The caller's own recent runs (actor-scoped) — no extra permission needed.
+    listRecentForActor(scope, actor),
+  ]);
+
+  return c.json({
+    user: identity,
+    org: {
+      id: scope.orgId,
+      role,
+      name: (c.get("orgName") as string | undefined) ?? null,
+      slug: (c.get("orgSlug") as string | undefined) ?? null,
+    },
+    connections,
+    recent_runs: recentRuns,
+    agents: runnable.agents,
+    agents_truncated: runnable.truncated,
+    agents_total: runnable.total,
+    skills: installedSkills.skills,
+    skills_truncated: installedSkills.truncated,
+    skills_total: installedSkills.total,
+  });
 });
 
 export default router;

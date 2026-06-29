@@ -123,6 +123,12 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         if (resolution.deferOrgResolution) {
           c.set("deferOrgResolution", true);
         }
+        if (resolution.firstPartyLoopback) {
+          // Declared first-party loopback capability (server-minted, process-local
+          // bearer). The bearer-only proxy gates read this instead of matching a
+          // module's auth-method id. See apps/api/src/lib/bearer-only.ts.
+          c.set("firstPartyLoopback", true);
+        }
         if (resolution.extra && Object.keys(resolution.extra).length > 0) {
           // Strategy-specific opaque metadata. Consumers cast to the
           // shape they expect — keeping it untyped here avoids dragging

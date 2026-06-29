@@ -34,6 +34,43 @@ export interface CollectedModuleOpenApi {
   ownedTagNames: Set<string>;
 }
 
+/** A discovered workspace-package module under `packages/module-*`. */
+export interface WorkspaceModuleDir {
+  /** Package directory name, e.g. "module-chat". */
+  name: string;
+  /** Absolute path to the package's `src` directory. */
+  srcDir: string;
+  /** Absolute path to the package's `src/index.ts` module entry. */
+  entryFile: string;
+}
+
+/**
+ * Discover workspace-package modules — `packages/module-*` dirs that expose a
+ * `src/index.ts` entry. SINGLE SOURCE OF TRUTH shared by `collectModuleOpenApi`
+ * (below) and the Code ⊆ Spec route scan in `scripts/verify-openapi.ts`, so the
+ * two scripts can never drift on which modules they consider. Sorted by name
+ * for deterministic ordering (readdir order is filesystem-dependent and shapes
+ * the merged spec's key order, which generate-api-types.ts byte-compares).
+ */
+export function discoverWorkspaceModuleDirs(packagesDir: string): WorkspaceModuleDir[] {
+  if (!existsSync(packagesDir)) return [];
+  return readdirSync(packagesDir)
+    .filter((name) => {
+      if (!name.startsWith("module-")) return false;
+      try {
+        return existsSync(join(packagesDir, name, "src/index.ts"));
+      } catch {
+        return false;
+      }
+    })
+    .sort()
+    .map((name) => ({
+      name,
+      srcDir: join(packagesDir, name, "src"),
+      entryFile: join(packagesDir, name, "src/index.ts"),
+    }));
+}
+
 /**
  * Scan `apps/api/src/modules/*​/index.ts` and return the merged OpenAPI
  * contributions of every discovered module.
@@ -41,12 +78,18 @@ export interface CollectedModuleOpenApi {
 export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
   const scriptDir = dirname(fileURLToPath(import.meta.url));
   const modulesDir = resolve(scriptDir, "../../apps/api/src/modules");
+  // Workspace-package modules (`packages/module-<name>/src/index.ts`) are
+  // first-class modules too — they contribute routes/openApiPaths exactly like
+  // the built-in dirs (e.g. module-chat). They must be scanned here so their
+  // contributions land in the validated spec; the code-route scan in
+  // verify-openapi.ts §4c mirrors this set so Code ⊆ Spec stays balanced.
+  const workspaceModulesDir = resolve(scriptDir, "../../packages");
 
   // Sorted for determinism: readdir order is filesystem-dependent (ext4
   // returns hash order, APFS roughly lexicographic), and the contribution
   // order shapes the merged spec's key order — which generate-api-types.ts
   // byte-compares across machines.
-  const discoveredModules: string[] = existsSync(modulesDir)
+  const builtIn: Array<{ name: string; entry: string }> = existsSync(modulesDir)
     ? readdirSync(modulesDir)
         .filter((name) => {
           const subdir = join(modulesDir, name);
@@ -57,7 +100,16 @@ export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
           }
         })
         .sort()
+        .map((name) => ({ name, entry: join(modulesDir, name, "index.ts") }))
     : [];
+
+  const workspace: Array<{ name: string; entry: string }> = discoverWorkspaceModuleDirs(
+    workspaceModulesDir,
+  ).map(({ name, entryFile }) => ({ name, entry: entryFile }));
+
+  // Built-ins first, then workspace modules — both groups internally sorted, so
+  // the merged key order is stable across machines.
+  const discoveredModules = [...builtIn, ...workspace];
 
   const paths: Record<string, unknown> = {};
   const componentSchemas: Record<string, unknown> = {};
@@ -67,8 +119,7 @@ export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
   const ownedSchemaNames = new Set<string>();
   const ownedTagNames = new Set<string>();
 
-  for (const name of discoveredModules) {
-    const entry = join(modulesDir, name, "index.ts");
+  for (const { entry } of discoveredModules) {
     const mod: AppstrateModule = (await import(entry)).default;
     const modPaths = mod.openApiPaths?.();
     if (modPaths) {

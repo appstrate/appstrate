@@ -35,3 +35,12 @@ export function getPlatformApp(): Hono<AppEnv> {
   }
   return platformApp;
 }
+
+/**
+ * Re-enter the fully-wired platform app in-process (no socket hop). `app.fetch`
+ * returns `Response | Promise<Response>`; the async wrapper normalizes it to the
+ * `Promise<Response>` callers (the `inProcess` service, the MCP router) expect.
+ */
+export function dispatchInProcess(request: Request): Promise<Response> {
+  return Promise.resolve(getPlatformApp().fetch(request));
+}

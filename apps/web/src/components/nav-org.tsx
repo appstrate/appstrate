@@ -13,12 +13,16 @@ import {
   Loader2,
   Users,
   Boxes,
+  MessageSquare,
+  type LucideIcon,
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
 import { useAppConfig } from "../hooks/use-app-config";
+import { useChatUnreadCount } from "@appstrate/module-chat/unread";
+import { buildScopingHeaders } from "../lib/scoping-headers";
 import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
@@ -47,9 +51,15 @@ export function NavOrg() {
   const hasRunning =
     (agents?.some((f) => f.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0;
   const unread = unreadCount ?? 0;
+  // Unread chat replies — drives the Chat nav badge, aligned with the Runs badge.
+  const chatUnread = useChatUnreadCount(buildScopingHeaders, features.chat);
 
   const beforeRunsItems = [
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
+    // Module-contributed product surfaces (absent flag = entry hidden)
+    ...(features.chat
+      ? [{ path: "/chat", label: t("nav.chat"), icon: MessageSquare, badge: chatUnread }]
+      : []),
     { path: "/agents", label: t("nav.agents"), icon: Layers },
     { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
   ];
@@ -64,7 +74,9 @@ export function NavOrg() {
     ...(isAdmin ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }] : []),
   ];
 
-  const renderItems = (items: typeof beforeRunsItems) =>
+  const renderItems = (
+    items: Array<{ path: string; label: string; icon: LucideIcon; badge?: number }>,
+  ) =>
     items.map((item) => (
       <SidebarNavLink
         key={item.path}
@@ -74,7 +86,15 @@ export function NavOrg() {
         isActive={
           item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path)
         }
-      />
+      >
+        {item.badge && item.badge > 0 ? (
+          <SidebarMenuBadge>
+            <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
+              {item.badge > 99 ? "99+" : item.badge}
+            </span>
+          </SidebarMenuBadge>
+        ) : null}
+      </SidebarNavLink>
     ));
 
   return (

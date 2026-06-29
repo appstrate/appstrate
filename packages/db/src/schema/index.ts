@@ -15,4 +15,5 @@ export * from "./uploads.ts";
 export * from "./audit.ts";
 export * from "./webhooks.ts";
 export * from "./oidc.ts";
+export * from "./chat.ts";
 export * from "./types.ts";

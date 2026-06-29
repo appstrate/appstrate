@@ -449,9 +449,9 @@ export const modelProviderCredentialsPaths = {
     post: {
       operationId: "refreshModelProviderCredentialModels",
       tags: ["Model Provider Credentials"],
-      summary: "Empirically discover the models this credential serves",
+      summary: "Discover the models this credential serves",
       description:
-        "Probes every discovery-candidate model against the live credential (1-token inference requests on the account's own quota) and persists the ids that answered as `available_model_ids`. Designed for subscription-backed OAuth providers (codex, claude-code) whose served model set depends on the account's plan and has no discovery endpoint. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.",
+        "Discovers the models a credential serves and persists them as `available_model_ids`. For `probe`-validation (API-key) providers this is empirical: each discovery candidate is probed against the live credential (1-token inference requests on the account's own quota) and the ids that answered are persisted. For `offline`-validation providers (subscription: codex, claude-code) NO upstream call is made — the provider's static candidate set (intersected with the catalog) is persisted instead; real per-model availability is validated at first run by the official binary. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -475,7 +475,11 @@ export const modelProviderCredentialsPaths = {
                     description:
                       "`ok` — list persisted. `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — every probe failed (network incident or none served), previous list kept. `no_candidates` — provider declares no discovery candidates.",
                   },
-                  probed_count: { type: "integer" },
+                  probed_count: {
+                    type: "integer",
+                    description:
+                      "Number of candidates considered, not necessarily models live-probed. For `offline`-validation providers (codex, claude-code) candidates are considered with zero upstream calls.",
+                  },
                   available_model_ids: {
                     type: ["array", "null"],
                     items: { type: "string" },

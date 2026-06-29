@@ -171,6 +171,7 @@ export function createAgentsRouter() {
           agentPackageId: agent.id,
           actor: getActor(c),
           isAdmin: role === "owner" || role === "admin",
+          version: c.req.query("version"),
         }),
       );
     },

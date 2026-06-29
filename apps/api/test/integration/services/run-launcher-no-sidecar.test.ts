@@ -206,8 +206,9 @@ describe("run-launcher — sidecar skip decision", () => {
 
     // The sidecar receives the alias→real swap descriptor.
     const llm = counts.capturedSidecarSpec?.llm;
-    expect(llm?.authMode).toBe("api_key");
-    expect(llm?.modelSwap).toEqual({ alias: "appstrate-medium", real: "deepseek-chat" });
+    // Narrow the discriminated union (vend variant carries no modelSwap).
+    if (llm?.authMode !== "api_key") throw new Error(`expected api_key llm, got ${llm?.authMode}`);
+    expect(llm.modelSwap).toEqual({ alias: "appstrate-medium", real: "deepseek-chat" });
 
     // The container is handed the ALIAS as MODEL_ID; the real backing id and
     // the real endpoint never enter the agent env.

@@ -141,6 +141,48 @@ export const STREAMING_THRESHOLD = 1 * 1024 * 1024; // 1 MB
  */
 export const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
 
+/**
+ * Stream-read a Request body into a Uint8Array, refusing the read if
+ * the cumulative size crosses `maxBytes`. Returns `"exceeded"` if the
+ * cap was hit, the bytes otherwise. We never materialise an
+ * over-budget body — the read is cancelled the moment the limit is
+ * crossed.
+ *
+ * Shared by the `/mcp` envelope cap (`mcp.ts`) and the `/llm`
+ * request-body cap (`app.ts` via `bufferLlmBodyBounded`).
+ */
+export async function readRequestBodyBounded(
+  req: Request,
+  maxBytes: number,
+): Promise<Uint8Array | "exceeded"> {
+  if (!req.body) return new Uint8Array(0);
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      if (total + value.byteLength > maxBytes) {
+        await reader.cancel();
+        return "exceeded";
+      }
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged;
+}
+
 export type {
   SidecarConfig,
   LlmProxyConfig,

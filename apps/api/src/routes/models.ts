@@ -23,7 +23,7 @@ import {
   projectAliasedModel,
 } from "../services/org-models.ts";
 import { getModelProvider } from "../services/model-providers/registry.ts";
-import { isAliasableApiShape } from "@appstrate/core/model-swap";
+import { checkAliasInvariants } from "@appstrate/core/model-swap";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
@@ -130,10 +130,26 @@ export function createModelsRouter() {
   // GET /api/models — list all models (system + DB)
   router.get("/", requirePermission("models", "read"), async (c) => {
     const orgId = c.get("orgId");
-    const models = await listOrgModels(orgId);
+    // `metadata_only`: resolve protocol family/baseUrl from the registry without
+    // decrypting each model's credential. For callers that only need to pick a
+    // model row (e.g. the chat picker), not to call inference. Rows with a gone
+    // credential/provider are still dropped, but a model whose secret is unusable
+    // (dead OAuth) is NOT filtered here — it surfaces and errors at inference.
+    const metadataOnly = c.req.query("metadata_only") === "true";
+    const models = await listOrgModels(orgId, { metadataOnly });
     // Strip the backing of any model alias before it reaches the dashboard user
     // (Threat A) — see projectAliasedModel. Non-aliased models pass through.
-    return c.json(listResponse(models.map(projectAliasedModel)));
+    //
+    // EXCEPTION: a first-party loopback caller (server-minted, process-local —
+    // the chat inference path today) needs the real `apiShape`/`providerId` to
+    // route an aliased model to the right engine/proxy — otherwise aliases are
+    // unusable in chat. We gate on the declared `firstPartyLoopback` capability,
+    // NOT on a specific module's auth-method id. Trusted server code (same trust
+    // boundary as `loadModel`); the backing it reads never reaches the browser
+    // (chat streams AI output, not the model list). The dashboard's own picker
+    // calls this with a cookie and still gets the stripped view.
+    const firstPartyLoopback = c.get("firstPartyLoopback") === true;
+    return c.json(listResponse(firstPartyLoopback ? models : models.map(projectAliasedModel)));
   });
 
   // POST /api/models — create a custom model
@@ -175,13 +191,14 @@ export function createModelsRouter() {
           "credentialId",
         );
       }
-      // Model-alias guards (issue #727, Threat A):
+      // Model-alias guards (issue #727, Threat A) — shared invariant rule:
       if (aliased) {
+        const violation = checkAliasInvariants({ label: data.label, apiShape: creds.apiShape });
         // 1. Require an explicit label. The derive-from-catalog fallback below
         //    would name the alias after its REAL backing ("DeepSeek Chat"),
         //    and `label` survives the projection — leaking the backing on
         //    /api/models and run.model_label.
-        if (!data.label) {
+        if (violation === "missing_label") {
           throw invalidRequest(
             "An aliased model requires an explicit label — the derived label would name the backing model.",
             "label",
@@ -191,7 +208,7 @@ export function createModelsRouter() {
         //    openai/anthropic/mistral shapes; google/azure/bedrock carry the
         //    model id in the URL path, so an alias there forwards verbatim and
         //    404s upstream (and never gets swapped). Reject up front.
-        if (!isAliasableApiShape(creds.apiShape)) {
+        if (violation === "non_aliasable_shape") {
           throw invalidRequest(
             `Model aliases are not supported for the "${creds.apiShape}" protocol (the model id is carried in the URL, not the request body).`,
             "aliased",
@@ -447,7 +464,7 @@ export function createModelsRouter() {
 
   // POST /api/models/test — test model config inline (before saving)
   // MUST be registered before /:id/test
-  router.post("/test", rateLimit(5), async (c) => {
+  router.post("/test", rateLimit(5), requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
     const data = parseBody(testInlineSchema, body);
@@ -480,6 +497,7 @@ export function createModelsRouter() {
         apiKey,
         providerId: creds.providerId,
         accountId: creds.accountId,
+        expiresAt: creds.expiresAt,
       });
       return c.json(result);
     } catch (err) {
@@ -491,7 +509,7 @@ export function createModelsRouter() {
   });
 
   // POST /api/models/:id/test — test model connection
-  router.post("/:id/test", rateLimit(5), async (c) => {
+  router.post("/:id/test", rateLimit(5), requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const modelId = c.req.param("id")!;
     try {

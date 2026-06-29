@@ -63,6 +63,7 @@
     "./system-packages": "./src/system-packages.ts",
     "./runtime-tools-catalog": "./src/runtime-tools-catalog.ts",
     "./runtime-tool-defs": "./src/runtime-tool-defs.ts",
+    "./runtime-event-drain": "./src/runtime-event-drain.ts",
     "./ssrf": "./src/ssrf.ts",
     "./html": "./src/html.ts",
     "./schemas": "./src/schemas.ts",
@@ -79,7 +80,11 @@
     "./pairing-token": "./src/pairing-token.ts",
     "./jwt": "./src/jwt.ts",
     "./credential-template": "./src/credential-template.ts",
-    "./dedupe-label": "./src/dedupe-label.ts"
+    "./dedupe-label": "./src/dedupe-label.ts",
+    "./subscription-engines": "./src/subscription-engines.ts",
+    "./chat-engine-contract": "./src/chat-engine-contract.ts",
+    "./claude-oauth-gateway": "./src/claude-oauth-gateway.ts",
+    "./subprocess-env": "./src/subprocess-env.ts"
   },
   "dependencies": {
     "@afps-spec/schema": "^0.6.1",

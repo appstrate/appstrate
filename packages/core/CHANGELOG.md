@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`@appstrate/core/subscription-engines`** — the provider→execution-engine
+  binding registry contract: the `"claude"|"codex"` engine vocabulary, the
+  binding shape (credential-delivery mode, egress allowlist, native-output
+  capability, chat handler), and the read/write accessors. Ships zero bindings —
+  the `claude` / `codex` bindings are contributed at boot by their opt-in
+  provider modules.
+- **`@appstrate/core/subprocess-env`** — `buildIsolatedSubprocessEnv()`, a
+  curated, no-secret-leak environment for spawned subprocesses.
+- **`@appstrate/core/runtime-event-drain`** — runtime-tool event drain helpers
+  that relay sidecar runtime-tool events into the run-event pipeline.
+- **`@appstrate/core/sidecar-types`** — `LlmProxyOauthConfig`
+  (`authMode: "oauth"`) is now the single, **non-forging** OAuth `/llm` mode: the
+  sidecar swaps the bearer + ensures the OAuth beta only, leaving the driver's own
+  fingerprint untouched (the official Claude Agent SDK binary signs its own). The
+  `LlmProxyConfig` union is `LlmProxyApiKeyConfig | LlmProxyOauthConfig`.
+
+### Removed — OAuth subscription fingerprint forging (BREAKING)
+
+- **`OAuthWireFormat` interface + `OAuthAdaptiveRetryPolicy` removed** from
+  `@appstrate/core/sidecar-types`, and **`ModelProviderDefinition.oauthWireFormat`
+  removed** from `@appstrate/core/module`. Provider modules no longer declare
+  identity headers / system-prepend / body coercions / adaptive retries.
+- The previous (forging) `LlmProxyOauthConfig` and the transitional
+  `LlmProxyOauthPassthroughConfig` are gone — folded into the single non-forging
+  `LlmProxyOauthConfig` above.
+
 - **`@appstrate/core/model-swap`** — the model-alias swap (LLM-gateway alias
   pattern, appstrate#727). Exports `swapRequestModel`, `swapResponseModelJson`,
   `createSseModelSwapStream`, `scrubModelText`, `isAliasableApiShape`, and

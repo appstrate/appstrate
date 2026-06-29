@@ -34,8 +34,7 @@ import {
   spillResourcesToWorkspace,
   type RuntimeEventEmitter,
 } from "@appstrate/runner-pi";
-import { reEmitRuntimeToolEvents } from "@appstrate/core/runtime-tool-defs";
-import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
+import { drainAndEmitInto, type RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { buildApiUploadToolFactory } from "./api-upload-extension.ts";
 import { resolveApiCallBody, ApiCallBodyResolveError } from "./api-call-body-resolver.ts";
 import { shapeApiCallResponse } from "./api-call-response-resolver.ts";
@@ -63,6 +62,16 @@ interface BuildMcpDirectFactoriesOptions {
    * credential-isolated sidecar.
    */
   workspace: string;
+  /**
+   * Runtime-event drainer (`@appstrate/core/runtime-event-drain`). The sidecar
+   * executes each runtime tool (log/note/pin/report/output) ONCE and journals
+   * its canonical events; after every forwarded tool call this drains the
+   * journal and re-emits on the run's sink. Pi's MCP transport preserves the
+   * result `_meta`, but the runner drains the journal anyway — uniform with the
+   * Claude + Codex runners, single source of truth, no `_meta` trust. Absent →
+   * no runtime tools (nothing to drain).
+   */
+  drainer?: RuntimeEventDrainer;
 }
 
 /**
@@ -228,17 +237,21 @@ function buildIntegrationToolFactories(
             isError: result.isError === true,
             timestamp: Date.now(),
           });
-          // Trust boundary: re-emit canonical runtime-tool events ONLY for the
-          // first-party platform runtime tools (output/log/note/pin/report),
-          // which the sidecar hosts in-process and advertises under their bare
-          // names. Every third-party integration tool is namespaced
-          // `{ns}__{tool}` (so its name can never satisfy
-          // `isSelectableRuntimeTool`); forwarding its `_meta` would let a
-          // malicious/compromised integration forge run events
-          // (output.emitted, pinned.set, …). For those, the meta is ignored.
-          if (isSelectableRuntimeTool(tool.name)) {
-            reEmitRuntimeToolEvents(result._meta, opts.emit);
-          }
+          // First-party runtime tools (output/log/note/pin/report) are executed
+          // ONCE by the sidecar, which journals their canonical events. Drain
+          // the journal after every forwarded call and re-emit on the run's
+          // sink — uniform with the Claude + Codex runners, single source of
+          // truth, no trust in the result `_meta`. A drain is a cheap localhost
+          // round-trip and a no-op when the journal is empty (e.g. integration
+          // tools, which journal nothing). The shared helper preserves each
+          // event's journaled `timestamp` (it no longer gets overwritten with
+          // the drain-time wall clock, matching the Claude + Codex runners).
+          await drainAndEmitInto({
+            drainer: opts.drainer,
+            emit: (ev) => opts.emit(ev as Parameters<RuntimeEventEmitter>[0]),
+            now: Date.now,
+            runId: opts.runId,
+          });
           // api_call: surface the upstream HTTP status (otherwise dropped
           // with `_meta`) and honour `responseMode.toFile` — writing the body
           // to the agent-chosen workspace path and returning a file

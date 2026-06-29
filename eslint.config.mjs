@@ -192,7 +192,14 @@ export default tseslint.config(
     },
   },
   {
-    files: ["apps/web/src/**/*.{ts,tsx}", "packages/ui/src/**/*.{ts,tsx}"],
+    files: [
+      "apps/web/src/**/*.{ts,tsx}",
+      "packages/ui/src/**/*.{ts,tsx}",
+      // The chat module ships its frontend under `ui/` — gate it with the same
+      // React Compiler / hooks rules as the app (its backend `.ts` stays under
+      // the general TS config, no browser globals).
+      "packages/module-chat/src/ui/**/*.{ts,tsx}",
+    ],
     languageOptions: {
       globals: globals.browser,
     },
@@ -213,7 +220,18 @@ export default tseslint.config(
       // and fragile components — a static cleanliness/robustness gate that
       // runs in `bun run check` (local + CI), no runtime harness needed.
       ...reactHooks.configs["recommended-latest"].rules,
-      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      "react-refresh/only-export-components": [
+        "warn",
+        {
+          allowConstantExport: true,
+          // `makeAssistantToolUI(...)` is assistant-ui's documented HOC factory
+          // for registering a tool's render UI (chat module, tool-uis.tsx). Its
+          // result is a component wrapped by an HOC, not a plain value — declare
+          // the factory so Fast Refresh treats those exports as components, the
+          // sanctioned mechanism the rule offers for HOC factories.
+          extraHOCs: ["makeAssistantToolUI"],
+        },
+      ],
       // Re-render robustness: the React Compiler rules above check Rules-of-React
       // correctness but NOT re-render efficiency. These three catch the structural
       // causes of avoidable re-renders / remounts that a runtime tool (react-scan)

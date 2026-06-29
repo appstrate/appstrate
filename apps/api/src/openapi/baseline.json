@@ -7051,6 +7051,15 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "metadata_only",
+            "in": "query",
+            "required": false,
+            "description": "When true, resolve each model's protocol family and base URL from the provider registry WITHOUT decrypting its credential. Faster for callers that only need to pick a model (e.g. the chat model picker); a model whose secret is unusable is not filtered and surfaces an error only at inference time.",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -8465,8 +8474,8 @@
       "post": {
         "operationId": "refreshModelProviderCredentialModels",
         "tags": ["Model Provider Credentials"],
-        "summary": "Empirically discover the models this credential serves",
-        "description": "Probes every discovery-candidate model against the live credential (1-token inference requests on the account's own quota) and persists the ids that answered as `available_model_ids`. Designed for subscription-backed OAuth providers (codex, claude-code) whose served model set depends on the account's plan and has no discovery endpoint. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.",
+        "summary": "Discover the models this credential serves",
+        "description": "Discovers the models a credential serves and persists them as `available_model_ids`. For `probe`-validation (API-key) providers this is empirical: each discovery candidate is probed against the live credential (1-token inference requests on the account's own quota) and the ids that answered are persisted. For `offline`-validation providers (subscription: codex, claude-code) NO upstream call is made — the provider's static candidate set (intersected with the catalog) is persisted instead; real per-model availability is validated at first run by the official binary. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8503,7 +8512,8 @@
                       "description": "`ok` — list persisted. `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — every probe failed (network incident or none served), previous list kept. `no_candidates` — provider declares no discovery candidates."
                     },
                     "probed_count": {
-                      "type": "integer"
+                      "type": "integer",
+                      "description": "Number of candidates considered, not necessarily models live-probed. For `offline`-validation providers (codex, claude-code) candidates are considered with zero upstream calls."
                     },
                     "available_model_ids": {
                       "type": ["array", "null"],
@@ -10985,6 +10995,186 @@
                       "type": "boolean"
                     }
                   }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/me/context": {
+      "get": {
+        "operationId": "getMyContext",
+        "tags": ["Profile"],
+        "summary": "The caller's working context for an AI agent",
+        "description": "Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current application (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). App context resolves from `X-Application-Id`, the API key's application, or the org default.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Caller context",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "user",
+                    "org",
+                    "connections",
+                    "agents",
+                    "agents_truncated",
+                    "agents_total"
+                  ],
+                  "properties": {
+                    "user": {
+                      "type": "object",
+                      "required": ["id", "name", "email"],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": ["string", "null"]
+                        },
+                        "email": {
+                          "type": ["string", "null"]
+                        }
+                      }
+                    },
+                    "org": {
+                      "type": "object",
+                      "required": ["id", "role"],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string",
+                          "enum": ["owner", "admin", "member", "viewer", "end_user"]
+                        }
+                      }
+                    },
+                    "connections": {
+                      "type": "array",
+                      "description": "Integrations the caller could attach to an agent.",
+                      "items": {
+                        "type": "object",
+                        "required": ["integration_id", "name", "source"],
+                        "properties": {
+                          "integration_id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": ["own", "shared", "both"]
+                          },
+                          "version": {
+                            "type": "string",
+                            "description": "The integration package's own manifest version, when known. Use it to pin a satisfiable dependencies.integrations range."
+                          }
+                        }
+                      }
+                    },
+                    "agents": {
+                      "type": "array",
+                      "description": "Agents the caller can run in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the long tail is reachable via the MCP `search_operations` tool.",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "package_id",
+                          "display_name",
+                          "description",
+                          "takes_input",
+                          "source"
+                        ],
+                        "properties": {
+                          "package_id": {
+                            "type": "string",
+                            "description": "Invokable identifier, e.g. \"@appstrate/triage\"."
+                          },
+                          "display_name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "takes_input": {
+                            "type": "boolean",
+                            "description": "Whether the agent declares an input schema with properties."
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": ["system", "local"]
+                          }
+                        }
+                      }
+                    },
+                    "agents_truncated": {
+                      "type": "boolean",
+                      "description": "True when the agent list was capped (more via search_operations)."
+                    },
+                    "agents_total": {
+                      "type": "integer",
+                      "description": "Total runnable agents before the cap."
+                    }
+                  }
+                },
+                "example": {
+                  "user": {
+                    "id": "user_abc",
+                    "name": "Ada Lovelace",
+                    "email": "ada@acme.com"
+                  },
+                  "org": {
+                    "id": "org_abc123",
+                    "role": "member"
+                  },
+                  "connections": [
+                    {
+                      "integration_id": "@appstrate/gmail",
+                      "name": "Gmail",
+                      "source": "own"
+                    },
+                    {
+                      "integration_id": "@appstrate/clickup",
+                      "name": "ClickUp",
+                      "source": "shared"
+                    }
+                  ],
+                  "agents": [
+                    {
+                      "package_id": "@appstrate/triage",
+                      "display_name": "Inbox Triage",
+                      "description": "Sorts and labels incoming email.",
+                      "takes_input": false,
+                      "source": "system"
+                    }
+                  ],
+                  "agents_truncated": false,
+                  "agents_total": 1
                 }
               }
             }
@@ -19232,6 +19422,58 @@
       }
     },
     "schemas": {
+      "ResolutionFieldError": {
+        "type": "object",
+        "required": ["field", "code", "message"],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-readable title; preserved from the underlying error factory."
+          },
+          "candidate_connection_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run."
+          },
+          "connection_id": {
+            "type": "string",
+            "description": "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`)."
+          },
+          "missing_scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt."
+          },
+          "owned_by_actor": {
+            "type": "boolean",
+            "description": "Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error)."
+          },
+          "required_auth_key": {
+            "type": "string",
+            "description": "Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1."
+          },
+          "available_auth_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method."
+          }
+        }
+      },
       "ProblemDetail": {
         "type": "object",
         "description": "RFC 9457 Problem Details for HTTP APIs",
@@ -19278,55 +19520,7 @@
             "type": "array",
             "description": "Field-level validation errors",
             "items": {
-              "type": "object",
-              "properties": {
-                "field": {
-                  "type": "string"
-                },
-                "code": {
-                  "type": "string"
-                },
-                "title": {
-                  "type": "string",
-                  "description": "Human-readable title; preserved from the underlying error factory."
-                },
-                "message": {
-                  "type": "string"
-                },
-                "candidate_connection_ids": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "description": "Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run."
-                },
-                "connection_id": {
-                  "type": "string",
-                  "description": "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`)."
-                },
-                "missing_scopes": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "description": "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt."
-                },
-                "owned_by_actor": {
-                  "type": "boolean",
-                  "description": "Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error)."
-                },
-                "required_auth_key": {
-                  "type": "string",
-                  "description": "Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1."
-                },
-                "available_auth_keys": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "description": "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method."
-                }
-              }
+              "$ref": "#/components/schemas/ResolutionFieldError"
             }
           }
         }
@@ -20712,7 +20906,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Model ids empirically verified against this credential by the discovery probe (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. Null = never probed. Per-credential because availability depends on the account's plan."
+            "description": "Model ids this credential is authorized to seed, persisted by model discovery (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential; for `offline`-validation providers (subscription: codex, claude-code) these are the provider's static candidate set (∩ catalog), persisted with zero upstream calls. Null = discovery never ran. Per-credential because availability depends on the account's plan."
           },
           "created_by": {
             "type": ["string", "null"]
@@ -20733,6 +20927,7 @@
           "id",
           "label",
           "apiShape",
+          "providerId",
           "baseUrl",
           "modelId",
           "enabled",
@@ -20754,6 +20949,10 @@
           "apiShape": {
             "type": ["string", "null"],
             "description": "Protocol family. `null` for model aliases (`aliased: true`) — binding hidden."
+          },
+          "providerId": {
+            "type": ["string", "null"],
+            "description": "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for model aliases — binding hidden."
           },
           "baseUrl": {
             "type": ["string", "null"],
@@ -20854,7 +21053,7 @@
       },
       "OAuthTokenResponse": {
         "type": "object",
-        "description": "Resolved access token returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Carries only the fields that change per refresh — provider invariants (baseUrl, wireFormat, …) live in the sidecar's boot-time `LlmProxyOauthConfig`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`.",
+        "description": "Resolved access token returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Carries only the fields that change per refresh — provider invariants (baseUrl, …) live in the sidecar's boot-time `LlmProxyOauthConfig`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`.",
         "required": ["accessToken", "expiresAt"],
         "properties": {
           "accessToken": {

@@ -45,6 +45,9 @@ function gmailManifest(name = "@official/gmail"): IntegrationManifest {
     description: "Gmail integration",
     // AFPS: local server → mcp-server reference (separate package).
     source: { kind: "local", server: { name, version: "^0.1.0" } },
+    // AFPS §4.4 — the tool an agent inherits without an explicit selection.
+    // Surfaced by the detail endpoint so an agent-builder sees the default.
+    default_tools: ["api_call"],
     auths: {
       api: {
         type: "api_key",
@@ -274,10 +277,12 @@ describe("GET /api/integrations/:packageId", () => {
         auth_key: string;
         type: string;
         connections: unknown[];
+        ready: boolean;
         has_oauth_client: boolean;
         client_auto_provisioned: boolean;
       }>;
       tool_catalog: Array<{ name: string; description?: string; policy?: unknown }>;
+      default_tools?: string[] | "*";
     };
     expect(body.manifest.name).toBe("@myorg/gmail");
     expect(body.auths).toHaveLength(2);
@@ -285,6 +290,9 @@ describe("GET /api/integrations/:packageId", () => {
     const google = body.auths.find((a) => a.auth_key === "google");
     expect(api?.type).toBe("api_key");
     expect(api?.connections).toHaveLength(0);
+    // No connection → not ready (server-authoritative usability flag).
+    expect(api?.ready).toBe(false);
+    expect(google?.ready).toBe(false);
     expect(api?.has_oauth_client).toBe(false);
     expect(google?.type).toBe("oauth2");
     expect(google?.has_oauth_client).toBe(false);
@@ -295,6 +303,9 @@ describe("GET /api/integrations/:packageId", () => {
     // falls back to the integration's `tools` keys. Shape assertion keeps
     // the contract present without coupling to fixture catalog edits.
     expect(Array.isArray(body.tool_catalog)).toBe(true);
+    // AFPS §4.4 — the manifest's declared default_tools is surfaced verbatim
+    // so an agent-builder sees what tools it inherits without selecting any.
+    expect(body.default_tools).toEqual(["api_call"]);
   });
 
   it("flags has_system_client when a shared platform client serves the oauth2 auth", async () => {
@@ -1221,6 +1232,12 @@ describe("GET /api/integrations/callback (public — no session required)", () =
     // Sanity foil: a token-exchange success would have shown a clean
     // close with no error text.
     expect(body).not.toContain("access_denied");
+    // The page also signals waiting surfaces (chat auth card) so a full-tab
+    // failure doesn't leave them spinning: postMessage + BroadcastChannel with
+    // the shared message type. (Layer 1 of in-chat OAuth continuation.)
+    expect(body).toContain("BroadcastChannel");
+    expect(body).toContain("appstrate:integration_connection");
+    expect(body).toContain("window.opener");
   });
 
   it("rejects an empty state value (cannot bypass CSRF by omitting state)", async () => {
