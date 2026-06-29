@@ -66,6 +66,19 @@ describe("auth-conditional header guard (Appstrate-User)", () => {
     expect(body.code).not.toBe("header_not_allowed");
   });
 
+  it("does NOT reject unrecognized headers (HTTP robustness, RFC 9110 §5.1)", async () => {
+    // The guard rejects only KNOWN headers used under an auth method that cannot
+    // honor them. Unknown headers must pass through untouched — blanket-rejecting
+    // them would break proxies, tracing middleboxes, and forward-compat clients.
+    // This pins the design decision so a future "reject unknown headers" change
+    // can't land silently.
+    const res = await app.request("/api/runs", {
+      headers: { ...authHeaders(ctx), "X-Unrecognized-Header": "whatever" },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
   it("honors Appstrate-User impersonation under API-key auth (valid end-user → 200)", async () => {
     const endUser = await seedEndUser({
       applicationId: ctx.defaultAppId,
