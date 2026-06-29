@@ -4557,10 +4557,10 @@ export interface components {
             draft_manifest: Record<string, never> | null;
         };
         ChatMessage: {
-            /** @description Client-generated message id */
+            /** @description Server-generated message id */
             id: string;
             parent_id: string | null;
-            /** @description Format adapter id (e.g. aui/v0) */
+            /** @description Storage format adapter id (e.g. ai-sdk/v6) */
             format: string;
             /** @description Opaque encoded message */
             content: unknown;
@@ -5808,6 +5808,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     deviceActivateSubmit: {
@@ -5840,6 +5841,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     deviceActivateApprove: {
@@ -6035,6 +6037,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     saveAgentConfig: {
@@ -7640,6 +7643,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     upsertApplicationSmtpConfig: {
@@ -7692,6 +7696,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     deleteApplicationSmtpConfig: {
@@ -7720,6 +7725,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     testApplicationSmtpConfig: {
@@ -7761,6 +7767,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getApplicationSocialProvider: {
@@ -7792,6 +7799,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     upsertApplicationSocialProvider: {
@@ -7838,6 +7846,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     deleteApplicationSocialProvider: {
@@ -7867,6 +7876,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     redeemBootstrapToken: {
@@ -8601,6 +8611,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
                 /** @description Org model (preset id) override; defaults to the org default model. */
                 "X-Model-Id"?: string;
             };
@@ -8612,7 +8624,7 @@ export interface operations {
                 "application/json": {
                     messages: Record<string, never>[];
                     modelId?: string;
-                    /** @description Thread id (assistant-ui) */
+                    /** @description Session id (the assistant-ui thread id) */
                     id?: string;
                 };
             };
@@ -8637,6 +8649,7 @@ export interface operations {
                 content?: never;
             };
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             /** @description Rate limited (20/min per caller) */
             429: {
                 headers: {
@@ -8708,6 +8721,13 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
+            /** @description Rate limited (30/min per caller) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     getChatSession: {
@@ -8821,6 +8841,13 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description Rate limited (60/min per caller) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     resumeChatStream: {
@@ -8856,7 +8883,13 @@ export interface operations {
                 content?: never;
             };
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description Rate limited (120/min per caller) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     credentialProxyGet: {
@@ -9377,6 +9410,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createEndUser: {
@@ -9468,6 +9502,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["IdempotencyConflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getEndUser: {
@@ -9516,6 +9551,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     deleteEndUser: {
@@ -9545,6 +9581,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     updateEndUser: {
@@ -9631,6 +9668,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     listIntegrations: {
@@ -10987,7 +11025,7 @@ export interface operations {
                     "text/event-stream": unknown;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11057,7 +11095,7 @@ export interface operations {
                     "text/event-stream": unknown;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11127,7 +11165,7 @@ export interface operations {
                     "text/event-stream": unknown;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13000,6 +13038,7 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createOAuthClient: {
@@ -13065,6 +13104,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getOAuthClient: {
@@ -13102,6 +13142,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     deleteOAuthClient: {
@@ -13133,6 +13174,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     updateOAuthClient: {
@@ -13190,6 +13232,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     rotateOAuthClientSecret: {
@@ -13227,6 +13270,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     oauthLogout: {
@@ -13255,6 +13299,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     listOAuthScopes: {
@@ -13285,6 +13330,7 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getOpenApiSpec: {
@@ -13579,6 +13625,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     revokeOrgCliSession: {
@@ -13621,6 +13668,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     changeInvitationRole: {
@@ -17978,6 +18026,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     fetchRunWorkspace: {
@@ -18441,6 +18490,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createWebhook: {
@@ -18532,6 +18582,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["IdempotencyInProgress"];
             422: components["responses"]["IdempotencyConflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getWebhook: {
@@ -18580,6 +18631,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     updateWebhook: {
@@ -18641,6 +18693,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     deleteWebhook: {
@@ -18668,6 +18721,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listWebhookDeliveries: {
@@ -18737,6 +18791,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     rotateWebhookSecret: {
@@ -18792,6 +18847,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     testWebhook: {
@@ -18834,6 +18890,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     welcomeSetup: {

@@ -1004,6 +1004,13 @@ function inferRequiredStatuses(callText: string): Set<string> {
   const out = new Set<string>();
   if (/\brequire(?:Core|Module)?Permission\s*\(/.test(code)) out.add("403");
   if (/\bparseBody\s*\(/.test(code)) out.add("400");
+  // A per-route rate limiter at the registration site always 429s a caller over
+  // the limit — same registration-site evidence as the 403/400 guards above, so
+  // it is inferable just as soundly. Matches the whole family: `rateLimit(`,
+  // `rateLimitByIp/ByRunId/ByBearer(`, `rateLimitMcp(`, and the chat module's
+  // `rateLimited(` wrapper. (404, by contrast, comes from `notFound` throws deep
+  // in the service layer — invisible here — so it stays un-inferred.)
+  if (/\brateLimit(?:ed|By[A-Za-z]+|Mcp)?\s*\(/.test(code)) out.add("429");
   return out;
 }
 
@@ -1534,7 +1541,7 @@ errorStatusGaps.sort();
 
 console.log(`  Endpoints with inferred error statuses: ${codeRouteStatuses.size}`);
 if (errorStatusGaps.length === 0) {
-  console.log(`  OK — every guaranteed 400/403 is documented in the spec.`);
+  console.log(`  OK — every guaranteed 400/403/429 is documented in the spec.`);
 } else {
   exitCode = 1;
   console.log(

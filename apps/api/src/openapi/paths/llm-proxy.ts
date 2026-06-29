@@ -58,7 +58,9 @@ const baseResponses = {
       "Validation error — malformed body, missing/empty `model`, model " +
       "preset not enabled for this org, preset's protocol does not " +
       "match this endpoint (use the corresponding " +
-      "`/api/llm-proxy/<api>/…` route instead), or request body exceeds " +
+      "`/api/llm-proxy/<api>/…` route instead), the preset's provider is an " +
+      "OAuth subscription with no proxyable gateway (connect an API-key " +
+      "provider instead), or request body exceeds " +
       "the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB).",
   },
   "401": { $ref: "#/components/responses/Unauthorized" },
