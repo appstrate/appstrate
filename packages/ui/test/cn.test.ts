@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { cn } from "../src/schema-form/cn.ts";
+import { cn } from "../src/cn.ts";
 
 describe("cn", () => {
   it("joins truthy class names with a single space", () => {
