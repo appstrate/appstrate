@@ -170,6 +170,31 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     expect(res.status).toBe(200);
   });
 
+  it("rejects Appstrate-User under an OAuth (end-user token) auth method with 400", async () => {
+    const token = await mintToken({
+      sub: authUserId,
+      actor_type: "end_user",
+      end_user_id: endUserId,
+      application_id: applicationId,
+      email: "stage3@example.com",
+      name: "Stage Three",
+      scope: "openid runs:read",
+    });
+    const res = await app.request(`/api/end-users/${endUserId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Application-Id": applicationId,
+        "Appstrate-User": endUserId,
+      },
+    });
+    // Impersonation via Appstrate-User is API-key-only; under any OAuth method
+    // the central auth-conditional header guard rejects it (400) instead of
+    // silently ignoring it — the drift this guard exists to prevent.
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe("header_not_allowed");
+  });
+
   it("falls through when the end-user claim is unknown", async () => {
     const token = await mintToken({
       sub: authUserId,

@@ -56,6 +56,29 @@ export interface AuthPipelineOptions {
 }
 
 /**
+ * Headers honored only under specific auth methods. Enforced once, centrally,
+ * by the guard mounted in `applyAuthPipeline` — NOT per auth branch (the
+ * per-branch checks drifted: cookie auth rejected `Appstrate-User` while the
+ * module-strategy/OAuth branch silently ignored it).
+ *
+ * Headers NOT listed are deliberately left alone: per the HTTP robustness
+ * principle (RFC 9110 §5.1) servers ignore unrecognized headers, and
+ * blanket-rejecting unknown headers breaks proxies, tracing and middleboxes.
+ * This guard only rejects a KNOWN header used under an auth method that cannot
+ * honor it. Adding a new conditional header is one row here.
+ */
+const AUTH_CONDITIONAL_HEADERS: ReadonlyArray<{
+  header: string;
+  allowed: ReadonlySet<string>;
+  code: string;
+}> = [
+  // `Appstrate-User` end-user impersonation is resolved only in the API-key
+  // branch. Under any other auth method it has no effect, so reject it loudly
+  // instead of silently ignoring it.
+  { header: "Appstrate-User", allowed: new Set(["api_key"]), code: "header_not_allowed" },
+];
+
+/**
  * Mount the Better Auth handler and install the full auth middleware chain
  * on the given Hono app. Behavior must stay byte-identical between the
  * production and test harness callers — any change here must preserve the
@@ -207,16 +230,9 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       throw unauthorized("Invalid or missing session");
     }
 
-    // Appstrate-User header is NOT allowed with cookie auth
-    if (c.req.header("Appstrate-User")) {
-      throw new ApiError({
-        status: 400,
-        code: "header_not_allowed",
-        title: "Header Not Allowed",
-        detail: "Appstrate-User header is not allowed with cookie authentication",
-        param: "Appstrate-User",
-      });
-    }
+    // Appstrate-User rejection under cookie auth is enforced centrally by the
+    // auth-conditional header guard below (see AUTH_CONDITIONAL_HEADERS), so it
+    // cannot drift per-branch the way it previously did.
 
     c.set("user", {
       id: session.user.id,
@@ -248,6 +264,29 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       if (userRow) c.set("sessionRealm", userRow.realm);
     }
 
+    return next();
+  });
+
+  // Auth-conditional header policy (see AUTH_CONDITIONAL_HEADERS). A known
+  // header that is only meaningful under certain auth methods is rejected with
+  // 400 when presented under any other — replacing the previous per-branch
+  // checks that drifted. Runs after the auth middleware has resolved
+  // `authMethod`, only for authenticated requests. Unlisted headers untouched.
+  app.use("*", async (c, next) => {
+    if (skipAuth(c.req.path, publicPaths(), c.req.raw.headers)) return next();
+    if (!c.get("user")) return next();
+    const authMethod = c.get("authMethod");
+    for (const { header, allowed, code } of AUTH_CONDITIONAL_HEADERS) {
+      if (c.req.header(header) && (!authMethod || !allowed.has(authMethod))) {
+        throw new ApiError({
+          status: 400,
+          code,
+          title: "Header Not Allowed",
+          detail: `${header} is only supported with ${[...allowed].join(", ")} auth, not ${authMethod ?? "this"} authentication.`,
+          param: header,
+        });
+      }
+    }
     return next();
   });
 
