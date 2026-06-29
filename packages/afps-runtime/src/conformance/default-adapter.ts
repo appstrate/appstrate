@@ -15,7 +15,7 @@
  */
 
 import { extractRootFromAfps } from "../bundle/build.ts";
-import { bundleIntegrity, type RecordEntry } from "../bundle/integrity.ts";
+import { bundleIntegrity } from "../bundle/integrity.ts";
 import {
   BUNDLE_FORMAT_VERSION,
   parsePackageIdentity,
@@ -97,8 +97,3 @@ function bundleOfOne(root: BundlePackage): Bundle {
     integrity: bundleIntegrity(pkgIndex),
   };
 }
-
-// Silence unused import warning — RecordEntry is re-exported below as
-// a convenience for downstream adapters that want to introspect integrity
-// entries against their own implementation.
-export type { RecordEntry };

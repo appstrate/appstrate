@@ -44,13 +44,6 @@ export interface SinkRequest {
   ttlSeconds?: number;
 }
 
-// SinkCredentials + mintSinkCredentials live in
-// `../lib/mint-sink-credentials.ts` (pure, no db imports) so unit tests
-// can exercise the URL / secret derivation without spinning up the DB.
-// Re-exported here for callers already importing from this service.
-export { mintSinkCredentials };
-export type { SinkCredentials };
-
 export interface CreateRunInput {
   runId: string;
   orgId: string;

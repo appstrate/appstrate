@@ -140,28 +140,6 @@ async function resolveProfileOrThrow(profileName: string): Promise<Profile> {
   return profile;
 }
 
-/**
- * Return a usable access token for `profileName`, silently rotating via
- * the stored refresh token when the access token is missing or about to
- * expire. Exported (prefixed `_`) for unit testing.
- *
- * Failure modes:
- *   - No tokens stored → `AuthError` ("run appstrate login").
- *   - Access expired, refresh token also expired → clears local
- *     credentials, `AuthError`.
- *   - Refresh call returns `invalid_grant` (revoked, rotated, reused)
- *     → clears local credentials, `AuthError`.
- *   - Refresh call returns a transient error (network, 5xx) → the
- *     error bubbles as-is so the caller can report it without wiping
- *     the user's credentials for a server-side hiccup.
- */
-export async function _resolveAccessTokenForTesting(
-  profileName: string,
-  profile: Profile,
-): Promise<string> {
-  return resolveAccessToken(profileName, profile);
-}
-
 export interface AuthContext {
   instance: string;
   accessToken: string;
