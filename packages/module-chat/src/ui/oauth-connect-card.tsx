@@ -223,9 +223,7 @@ export function OAuthConnectCard({
     return (
       <div className="bg-card text-card-foreground my-3 flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm">
         <IntegrationIcon src={meta?.icon} className="size-4 shrink-0" />
-        <span className="flex-1 truncate">
-          {label} connectée{phase === "done" ? " — reprise…" : ""}
-        </span>
+        <span className="flex-1 truncate">{label} connectée</span>
         <CheckIcon className="text-primary size-4 shrink-0" />
       </div>
     );
