@@ -212,8 +212,8 @@ function MissingRow({
   // Connexions tab and the launch-readiness badge consume (the picker below
   // fetches it too; React Query dedupes the shared key). The header reflects it
   // live: the connect/renew flow invalidates the `["integrations", …]` prefix
-  // (OAuth popup close, fields-connect success, `connection_update` SSE), this
-  // query refetches, and the header flips to resolved without a manual Re-run.
+  // (hosted connect portal popup close, `connection_update` SSE), this query
+  // refetches, and the header flips to resolved without a manual Re-run.
   const { data: resolution } = useIntegrationAgentResolution(
     isStructural ? undefined : packageId,
     isStructural ? undefined : agentPackageId,
@@ -262,7 +262,6 @@ function MissingRow({
             agentPackageId={agentPackageId}
             manifest={detail.manifest}
             authStatuses={detail.auths}
-            displayName={displayName}
             agentTools={entry?.tools}
             agentScopes={entry?.scopes}
             persistence={{

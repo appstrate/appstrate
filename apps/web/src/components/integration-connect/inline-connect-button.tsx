@@ -130,15 +130,16 @@ export function InlineConnectButton({
   // OAuth screen or the hosted credential form server-side.
   const triggerConnect = (key: string) => {
     if (!auths[key]) return;
+    // openPopup never rejects — every failure path surfaces its own toast and
+    // resolves — so a fired-and-forgotten `.then` is enough; `onConnected` means
+    // "re-read the truth", not "connect succeeded".
     void openPopup({
       packageId,
       authKey: key,
       ...(scopes ? { scopes } : {}),
       ...(forceAccountSelect ? { forceAccountSelect: true } : {}),
       ...(connectionId ? { connectionId } : {}),
-    })
-      .then(() => onConnected?.())
-      .catch(() => {});
+    }).then(() => onConnected?.());
   };
 
   const text =

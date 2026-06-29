@@ -76,7 +76,7 @@ export type ConnectionPickerPersistence =
  * Single source of truth for "which connection?" UX — shared by the agent
  * page (member pins) and the schedule editor (per-schedule overrides) via the
  * `persistence` prop. The candidate list, scope/lock verdicts and the connect
- * orchestration (OAuth popup + fields modal) are identical across both; only
+ * orchestration (hosted connect portal popup) are identical across both; only
  * where the pick lands differs.
  */
 // Module-level constant so the default prop is a stable reference across
@@ -98,8 +98,6 @@ export function IntegrationConnectionPicker({
   agentPackageId: string;
   manifest: IntegrationManifestView;
   authStatuses: IntegrationAuthStatus[];
-  /** Kept for call-site compatibility; the hosted portal renders its own header. */
-  displayName?: string;
   agentTools: string[] | "*" | undefined;
   agentScopes: string[] | undefined;
   persistence?: ConnectionPickerPersistence;

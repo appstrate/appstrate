@@ -7,9 +7,9 @@ import type { IntegrationManifestAuth } from "../../hooks/use-integrations";
 
 /**
  * Presentational credential-field renderer for non-OAuth integration auths
- * (api_key / basic / mtls / custom). Shared by the inline `FieldsConnectModal`
- * (settings/agent surfaces) and the standalone hosted connect page (issue #769)
- * so there is exactly ONE credential renderer — no per-surface drift.
+ * (api_key / basic / mtls / custom). Rendered by the standalone hosted connect
+ * page (issue #769) — the single credential-entry surface, so there is exactly
+ * ONE credential renderer with no per-surface drift.
  */
 
 /** Derive the credential field names from an auth manifest. */
