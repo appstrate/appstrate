@@ -30,7 +30,7 @@ import type { GetHeaders, SelectConversation } from "./runtime-context.ts";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
-import { loadHistory, mintSessionId, SESSIONS_QUERY_KEY } from "./sessions.ts";
+import { loadHistory, mintSessionId, SESSIONS_QUERY_KEY, type SessionSummary } from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
 import { subscribeSeen, getSeen, markSeen, isUnread } from "./unread-store.ts";
 
@@ -292,13 +292,31 @@ function ConversationInner({
   // once the URL holds it), so the runtime key never flips under the in-flight
   // send. Seeded `true` for an already-persisted conversation so opening one
   // neither re-navigates nor refetches.
+  //
+  // We OPTIMISTICALLY prepend the new session to the list cache rather than
+  // invalidating: the server persists the session only after its inference
+  // preamble (model select + MCP boot), so a refetch fired here would race that
+  // write and return a list WITHOUT the new conversation — leaving it missing
+  // from the sidebar until the next idle poll (up to 8s). The optimistic entry
+  // is `generating: true` (drives the fast 2s poll) and reconciles to its
+  // server-derived title on the next poll / `onFinish` invalidate.
   const announced = useRef(isPersisted);
   useEffect(() => {
     if (announced.current) return;
     if (chat.messages.length > 0) {
       announced.current = true;
       onConversationChange?.(id);
-      void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
+      queryClient.setQueryData<SessionSummary[]>(SESSIONS_QUERY_KEY, (prev) => {
+        const list = prev ?? [];
+        if (list.some((s) => s.id === id)) return list;
+        const optimistic: SessionSummary = {
+          id,
+          title: null,
+          generating: true,
+          updatedAt: new Date().toISOString(),
+        };
+        return [optimistic, ...list];
+      });
     }
   }, [chat.messages.length, id, onConversationChange, queryClient]);
 

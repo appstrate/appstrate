@@ -419,6 +419,24 @@ export async function handleChatStream(
   const messages = body.messages as UIMessage[];
   logger.info("chat turn", { turns: messages.length });
 
+  const sessionId = body.id;
+  const lastMessage = messages[messages.length - 1] as UIMessage | undefined;
+
+  // Persist the session ROW up front, BEFORE the (potentially multi-second)
+  // inference preamble (model resolve + MCP boot). The client mints the id and
+  // creates conversations lazily, so the sidebar shows a new conversation
+  // optimistically on send; without an early `ensureSession` the row would not
+  // exist until after the preamble, and the sidebar's reconciling poll could
+  // fire first and clobber the optimistic entry (flicker). Creating the row here
+  // closes that window. Ownership is enforced inside `ensureSession` (404 on a
+  // foreign-tenant id collision). The user MESSAGE and the `active_stream_id`
+  // marker are still written later, just before generation — keeping the
+  // "generating" flag off until we're committed to a turn, so a preamble error
+  // can't strand the session as perpetually generating.
+  if (sessionId && lastMessage?.id) {
+    await ensureSession(sessionId, orgId, user.id);
+  }
+
   const origin = selfOrigin();
   const headers = forwardedHeaders(c);
   // Single platform-call seam: re-enter the platform app in-process (or loopback
@@ -576,11 +594,10 @@ export async function handleChatStream(
   // `active_stream_id` so a reloaded client's resume GET can find the live turn.
   const streamId = crypto.randomUUID();
 
-  const sessionId = body.id;
-  const lastMessage = messages[messages.length - 1] as UIMessage | undefined;
+  // The session row was already ensured up front (before the preamble). Persist
+  // the user turn and mark the in-flight stream now, just before generation.
   let userMessageId: string | undefined;
   if (sessionId && lastMessage?.id) {
-    await ensureSession(sessionId, orgId, user.id);
     userMessageId = await persistUserMessage(sessionId, lastMessage);
     // Mark the in-flight stream so a mid-inference reload can reconnect to it.
     await setActiveStream(sessionId, streamId);
