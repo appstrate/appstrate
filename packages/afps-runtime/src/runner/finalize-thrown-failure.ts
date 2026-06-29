@@ -4,8 +4,8 @@
 /**
  * Shared thrown-failure epilogue for AFPS runners.
  *
- * Every official-binary runner (`runner-claude`, `runner-pi`) wraps its
- * session loop in a `try/catch` whose catch arm
+ * Every official-binary runner (`runner-claude`, `runner-codex`,
+ * `runner-pi`) wraps its session loop in a `try/catch` whose catch arm
  * runs the same skeleton when the session throws (as opposed to ending
  * with an authoritative terminal verdict):
  *

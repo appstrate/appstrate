@@ -10,8 +10,9 @@ import { isSubscriptionEngine } from "../src/subscription-engines.ts";
 // engine registry in core anymore.
 
 describe("isSubscriptionEngine", () => {
-  it("is true for the vendor-binary engine, false for pi", () => {
+  it("is true for the vendor-binary engines, false for pi", () => {
     expect(isSubscriptionEngine("claude")).toBe(true);
+    expect(isSubscriptionEngine("codex")).toBe(true);
     expect(isSubscriptionEngine("pi")).toBe(false);
   });
 });

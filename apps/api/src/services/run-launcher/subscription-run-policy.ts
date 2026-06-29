@@ -17,15 +17,19 @@
  * client fingerprint (no forging). This is not a ToS certification: subscription
  * use is an operator opt-in grey-zone (see docs/architecture/SUBSCRIPTION_COMPLIANCE.md).
  *
- * There is deliberately no fingerprint-forging fallback. An OAuth-subscription
+ * There is deliberately no fingerprint-forging fallback. Each OAuth-subscription
  * provider runs on the engine that drives the vendor's OFFICIAL binary (which
- * signs its own fingerprint): `claude-code` → Claude Agent SDK. A subscription
- * with no such engine is rejected by {@link assertRunnableOnEngine} rather than
- * forged.
+ * signs its own fingerprint): `claude-code` → Claude Agent SDK, `codex` → Codex
+ * CLI. A subscription with no such engine is rejected by
+ * {@link assertRunnableOnEngine} rather than forged.
  */
 
 import type { LlmProxyOauthConfig, ModelSwap } from "@appstrate/core/sidecar-types";
-import { isSubscriptionEngine, type RunEngine } from "@appstrate/core/subscription-engines";
+import {
+  isSubscriptionEngine,
+  type RunEngine,
+  type SubscriptionEngineDef,
+} from "@appstrate/core/subscription-engines";
 import {
   isOAuthModelProvider,
   subscriptionEngineForProvider,
@@ -34,31 +38,65 @@ import {
 export type { RunEngine };
 
 /**
- * Single resolver for "what kind of credential is this and which engine runs it".
+ * Per-run egress allowlist for the Codex (vend) engine — the sole compensating
+ * control for a run that holds the REAL ChatGPT subscription token in-container
+ * (the CLI talks to chatgpt.com directly and can't be reverse-proxied). The
+ * launcher carries it onto the sidecar `/llm` vend config, where the sidecar
+ * forward-proxy ENFORCES it (suffix-matched). Suffix-matched, so it permits the
+ * token to egress to ANY `*.openai.com` / `*.chatgpt.com` host — broader than
+ * the few hosts the CLI needs, but an accepted threat-model decision (OpenAI
+ * owns every such subdomain, the vended token is non-renewable, the container is
+ * ephemeral, and the proxy pins allowlisted hosts to :443).
+ */
+export const CODEX_EGRESS_ALLOWLIST: readonly string[] = ["chatgpt.com", "openai.com"];
+
+/**
+ * The sidecar credential-delivery mode for a resolved run, derived from a SINGLE
+ * source of truth.
+ *
+ * - `"oauth"` — the credential's bearer is swapped server-side by the sidecar
+ *   `/llm` gateway (the official binary points at the gateway). Either an
+ *   `"oauth"`-mode subscription engine (e.g. claude-code → Claude Agent SDK) OR
+ *   an oauth-class credential with no subscription engine (which {@link
+ *   assertRunnableOnEngine} then hard-refuses — there is no forging fallback).
+ * - `"vend"` — a `"vend"`-mode subscription engine (e.g. codex → Codex CLI): the
+ *   real token is vended into the container and egress is locked to the vendor's
+ *   hosts (the sole compensating control).
+ * - `"api_key"` — a static API-key provider (Pi engine).
+ */
+export type CredentialDeliveryMode = "oauth" | "vend" | "api_key";
+
+/**
+ * Single resolver for "what kind of credential is this and how is it delivered".
  *
  * Reads the provider→engine registry ONCE (plus the oauth-class flag for the
  * no-subscription-engine refuse path) so the launcher no longer maintains a
- * parallel `isOAuthModelProvider` axis alongside `subscriptionEngineForProvider`.
- * The oauth-class boolean and the resolved engine both flow from this one value.
+ * parallel `isOAuthModelProvider` axis alongside `subscriptionEngineForProvider`. The
+ * delivery mode, the oauth-class boolean, the resolved engine, and the egress
+ * allowlist all flow from this one value.
  *
- * An oauth-class credential (one whose provider declares `authMode: "oauth2"`)
- * has its bearer swapped server-side by the sidecar `/llm` gateway — if it has
- * no subscription engine it is hard-refused downstream by {@link
- * assertRunnableOnEngine} (there is no forging fallback). Everything else is a
- * static API-key provider on the Pi engine.
+ * Precedence: the `codex` subscription engine routes to `"vend"` (the only
+ * engine that holds the real token in-container); any other subscription engine
+ * (e.g. claude-code) and any oauth-class credential (a provider declaring
+ * `authMode: "oauth2"` with NO subscription engine — hard-refused downstream by
+ * {@link assertRunnableOnEngine}) is `"oauth"`; everything else is a static
+ * `"api_key"` provider.
  */
 export function resolveCredentialDelivery(params: {
   providerId: string;
   /** Whether the resolved run actually carries a stored credential id. */
   hasCredentialId: boolean;
 }): {
+  mode: CredentialDeliveryMode;
   /** True for any oauth-class credential — subscription OR engine-less. */
   isOauthCredential: boolean;
   engine: RunEngine;
+  subscriptionEngine: SubscriptionEngineDef | undefined;
+  egressAllowlist: readonly string[] | undefined;
 } {
   const { providerId, hasCredentialId } = params;
   // One registry read: the resolved engine is the provider's subscription
-  // engine (claude) or `pi` for every API-key / unregistered provider.
+  // engine (claude / codex) or `pi` for every API-key / unregistered provider.
   const sub = subscriptionEngineForProvider(providerId);
   const engine = sub?.engine ?? "pi";
 
@@ -67,7 +105,31 @@ export function resolveCredentialDelivery(params: {
   // for an oauth provider with no official engine (the refuse path).
   const isOauthCredential = hasCredentialId && isOAuthModelProvider(providerId);
 
-  return { isOauthCredential, engine };
+  if (sub?.engine === "codex") {
+    return {
+      mode: "vend",
+      isOauthCredential,
+      engine,
+      subscriptionEngine: sub,
+      egressAllowlist: CODEX_EGRESS_ALLOWLIST,
+    };
+  }
+  if (isOauthCredential) {
+    return {
+      mode: "oauth",
+      isOauthCredential,
+      engine,
+      subscriptionEngine: sub,
+      egressAllowlist: undefined,
+    };
+  }
+  return {
+    mode: "api_key",
+    isOauthCredential,
+    engine,
+    subscriptionEngine: sub,
+    egressAllowlist: undefined,
+  };
 }
 
 /**
@@ -89,9 +151,9 @@ export class UnrunnableOauthProviderError extends Error {
 
 /**
  * Guard: an OAuth-subscription credential can only execute on an engine whose
- * driver signs its own client fingerprint — the `claude` (claude-code) engine.
- * Any other subscription resolves to the `pi` engine, which has no forging path
- * — so we refuse. Throws {@link UnrunnableOauthProviderError}.
+ * driver signs its own client fingerprint — the `claude` (claude-code) or
+ * `codex` engine. Any other subscription resolves to the `pi` engine, which has
+ * no forging path — so we refuse. Throws {@link UnrunnableOauthProviderError}.
  */
 export function assertRunnableOnEngine(params: {
   engine: RunEngine;
@@ -126,8 +188,8 @@ export class SubscriptionRequiresDockerError extends Error {
 
 /**
  * Fail-closed isolation guard for subscription AGENT runs. If the provider maps
- * to a subscription engine (claude-code → Claude Agent SDK) the run MUST execute
- * under the docker orchestrator — the only mode that puts
+ * to a subscription engine (claude-code → Claude Agent SDK, codex → Codex CLI)
+ * the run MUST execute under the docker orchestrator — the only mode that puts
  * the official binary + its credential inside the per-run boundary. The process
  * orchestrator runs in-host and would expose the subscription token to the API
  * process, so it is refused. API-key providers (no subscription engine def) are
@@ -148,6 +210,44 @@ export function assertSubscriptionEngineIsolation(params: {
   const { engine, providerId, orchestratorMode } = params;
   if (isSubscriptionEngine(engine) && orchestratorMode !== "docker") {
     throw new SubscriptionRequiresDockerError(providerId);
+  }
+}
+
+/** Thrown when a `vend`-mode (subscription) run declares integrations. */
+export class VendRunIntegrationsError extends Error {
+  constructor(public readonly providerId: string) {
+    super(
+      `Provider "${providerId}" is a subscription (vend) credential: the real token is ` +
+        `served to the in-container runner over the per-run network, which integration ` +
+        `runner containers also join. A vend run therefore cannot declare integrations ` +
+        `until per-integration network isolation exists. Use an API-key model provider ` +
+        `for integration-backed runs.`,
+    );
+    this.name = "VendRunIntegrationsError";
+  }
+}
+
+/**
+ * Fail-closed guard keeping all three runners (pi / claude / codex) on ONE trust
+ * model: the per-run Docker network IS the boundary and every sidecar-internal
+ * endpoint (`/mcp`, `/integrations/boot-report`, `/credential-vend`) is gated by
+ * network membership alone — no per-endpoint auth. That is sound only when the
+ * network carries no untrusted peers. The vend path is the single runner that
+ * hands the REAL subscription token into the container, so a sibling integration
+ * container on the same network could otherwise vend it from `/credential-vend`.
+ * Rather than diverge codex with a bespoke endpoint secret, we keep the trust
+ * model uniform and enforce its precondition here: a vend run must not place
+ * untrusted integration containers on the network. Throws
+ * {@link VendRunIntegrationsError}. (No-op for `oauth`/`api_key`/`pi` runs, which
+ * never put a real token in the container.)
+ */
+export function assertVendRunHasNoIntegrations(params: {
+  mode: CredentialDeliveryMode;
+  providerId: string;
+  integrationCount: number;
+}): void {
+  if (params.mode === "vend" && params.integrationCount > 0) {
+    throw new VendRunIntegrationsError(params.providerId);
   }
 }
 

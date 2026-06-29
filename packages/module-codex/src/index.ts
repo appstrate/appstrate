@@ -39,7 +39,7 @@ import type {
   ModelProviderIdentity,
 } from "@appstrate/core/module";
 import { validateOfflineExpiry } from "@appstrate/core/module";
-import { base64UrlEncode, decodeJwtPayload } from "@appstrate/core/jwt";
+import { buildCodexPlaceholderIdToken, decodeJwtPayload } from "@appstrate/core/jwt";
 
 // ---------------------------------------------------------------------------
 // Codex JWT decoder
@@ -107,24 +107,22 @@ const codexHooks: ModelProviderHooks = {
    * Build the `MODEL_API_KEY` placeholder the agent container sees. pi-ai's
    * `openai-codex-responses` provider decodes the apiKey as a JWT to read
    * `https://api.openai.com/auth.chatgpt_account_id`, so the placeholder
-   * must be a parseable JWT carrying only that claim — anything else
-   * either fails to parse or leaks signature material into the container.
+   * must be a parseable JWT carrying that claim — anything else either fails
+   * to parse or leaks signature material into the container.
    *
-   * Returns `null` when the access token has no decodable account id so
-   * the platform falls back to its generic dash-stripped placeholder.
+   * The synthetic `alg:none` JWT is built locally by {@link
+   * buildCodexPlaceholderIdToken} — a tiny module-private helper carrying only
+   * the `chatgpt_account_id` routing claim, `exp`, and a placeholder `email`;
+   * the real `access_token` is never spent here.
+   *
+   * Returns `null` when the access token has no decodable account id so the
+   * platform falls back to its generic dash-stripped placeholder.
    */
   buildApiKeyPlaceholder(accessToken: string): string | null {
     const claims = decodeCodexJwtPayload(accessToken);
     const accountId = claims?.chatgpt_account_id;
     if (!accountId) return null;
-    const headerB64 = base64UrlEncode(JSON.stringify({ alg: "none", typ: "JWT" }));
-    const payloadB64 = base64UrlEncode(
-      JSON.stringify({
-        "https://api.openai.com/auth": { chatgpt_account_id: accountId },
-      }),
-    );
-    // Fixed, recognisable fake signature — never derived from the real one.
-    return `${headerB64}.${payloadB64}.placeholder`;
+    return buildCodexPlaceholderIdToken(accountId, Date.now());
   },
 
   /**
@@ -238,12 +236,18 @@ const codexProvider: ModelProviderDefinition = {
   // credential whose token doesn't carry this claim — failing at import
   // time is louder than silently persisting a dead credential.
   requiredIdentityClaims: ["accountId"],
-  // Codex is an inference / model provider only: operators can connect a
-  // ChatGPT subscription, list models, and validate the credential offline.
-  // The agent-run engine binding (a docker-isolated official-binary runner) is
-  // deferred to a follow-up — codex has no `subscriptionEngine`, so a codex
-  // agent run is refused by `assertRunnableOnEngine` (oauth-class credential
-  // with no official engine). See docs/architecture/SUBSCRIPTION_COMPLIANCE.md.
+  // Engine binding contributed to the core subscription-engine registry at
+  // registration: agent runs execute on the Codex CLI (official binary, no
+  // forging). The `codex` engine is the routing signal the launcher reads to
+  // pick vend credential delivery: the CLI ignores `chatgpt_base_url` and talks
+  // to chatgpt.com directly, so the sidecar can't reverse-proxy it; the real
+  // token is vended into the container and its egress is locked to OpenAI's
+  // hosts (`CODEX_EGRESS_ALLOWLIST`, applied in the launcher + enforced at the
+  // sidecar) as the sole compensating control. Codex is agent-only — no chat
+  // surface.
+  subscriptionEngine: {
+    engine: "codex",
+  },
 };
 
 // ---------------------------------------------------------------------------
