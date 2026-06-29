@@ -23,12 +23,7 @@ export {
   finalizeThrownFailure,
   type FinalizeThrownFailureOptions,
 } from "./finalize-thrown-failure.ts";
-export {
-  runContainerLifecycle,
-  RunTimeoutError,
-  type WorkloadOrchestrator,
-  type ContainerLifecycleOptions,
-} from "./container-lifecycle.ts";
+export { RunTimeoutError } from "../errors.ts";
 // Re-exported for ergonomics: runners produce RunResult, so consumers
 // typically import it alongside the runner surface.
 export type { RunResult, RunError, LogEntry, LogLevel, TokenUsage } from "../types/run-result.ts";
