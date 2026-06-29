@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/gmail-mcp",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Gmail",
@@ -120,14 +120,14 @@
         "primary": ["https://www.googleapis.com/auth/gmail.labels"]
       }
     },
-    "update_label": {
+    "apply_sensitive_message_label": {
       "required_scopes": {
-        "primary": ["https://www.googleapis.com/auth/gmail.labels"]
+        "primary": ["https://www.googleapis.com/auth/gmail.modify"]
       }
     },
-    "delete_label": {
+    "apply_sensitive_thread_label": {
       "required_scopes": {
-        "primary": ["https://www.googleapis.com/auth/gmail.labels"]
+        "primary": ["https://www.googleapis.com/auth/gmail.modify"]
       }
     },
     "label_message": {
