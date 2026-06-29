@@ -5,7 +5,7 @@ import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 import { loadSystemRegistry } from "../lib/system-registry.ts";
 import { modelCostSchema } from "@appstrate/core/module";
-import { isAliasableApiShape } from "@appstrate/core/model-swap";
+import { checkAliasInvariants } from "@appstrate/core/model-swap";
 import type { ModelMetadata } from "@appstrate/shared-types";
 import { getModelProvider } from "./model-providers/registry.ts";
 
@@ -219,14 +219,15 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
           // alias would leak its backing rather than hide it, so skip it
           // (loud) instead of registering a half-working alias.
           if (validM.aliased === true) {
-            if (!validM.label) {
+            const violation = checkAliasInvariants({ label: validM.label, apiShape });
+            if (violation === "missing_label") {
               logger.error(
                 "[model-registry] SYSTEM_PROVIDER_KEYS: skipping aliased model without an explicit label (the derived label would name the backing)",
                 { modelProviderCredentialId: validCredential.id, model: m },
               );
               continue;
             }
-            if (!isAliasableApiShape(apiShape)) {
+            if (violation === "non_aliasable_shape") {
               logger.error(
                 "[model-registry] SYSTEM_PROVIDER_KEYS: skipping aliased model — protocol carries the model id in the URL, not the body, so the swap can't hide it",
                 { modelProviderCredentialId: validCredential.id, apiShape, model: m },

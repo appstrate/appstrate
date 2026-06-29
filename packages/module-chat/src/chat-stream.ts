@@ -19,8 +19,25 @@
 
 import type { Context } from "hono";
 import { streamText, convertToModelMessages, stepCountIs, type UIMessage } from "ai";
+
+/**
+ * Minimal Hono Env mirroring what the platform auth pipeline sets on the chat
+ * routes — the single typed view of the request context, shared with
+ * `routes.ts` (which mounts `Hono<ChatEnv>`) so handlers read `c.get(...)`
+ * without ad-hoc casts.
+ */
+export type ChatEnv = {
+  Variables: {
+    user: { id: string; email: string; name: string };
+    orgId: string;
+    orgRole?: string;
+    orgName?: string;
+    orgSlug?: string;
+  };
+};
 import { z } from "zod";
 import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
+import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-engine-contract";
 import { logger } from "./logger.ts";
 import { listModels, pickModel, modelFromFamily, resolveDefaultApplicationId } from "./llm.ts";
 import { openPlatformMcp, platformMcpUrl } from "./platform-mcp.ts";
@@ -37,12 +54,10 @@ const MAX_STEPS = 16;
 
 // Heading that fences the generated operation index at the tail of the platform
 // MCP server instructions (emitted by apps/api/src/modules/mcp/router.ts). We
-// split on this exact literal to drop the index — several KB re-sent on every
-// step — for providers without a prompt cache, where it would be re-sent
-// uncached every step: Mistral. Cached providers (Claude SDK, Anthropic via
-// cache_control, OpenAI auto-prefix) keep it. If this literal drifts from the
-// server's, the index simply stays — degraded cost, never a failure.
-const OPERATION_INDEX_HEADING = "## Operation index";
+// split on this shared literal to drop the index — several KB re-sent on every
+// step — for providers without a prompt cache (Mistral), where it would be
+// re-sent uncached every step. Cached providers (Claude SDK, Anthropic via
+// cache_control, OpenAI auto-prefix) keep it.
 
 /**
  * Strip the trailing operation index from the system prompt for providers
@@ -350,8 +365,7 @@ function clientErrorMessage(error: unknown): string {
  * holds even with no application context.
  */
 export async function buildCallerContextBlock(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  c: Context<any>,
+  c: Context<ChatEnv>,
   args: {
     origin: string;
     headers: Record<string, string>;
@@ -361,9 +375,9 @@ export async function buildCallerContextBlock(
   },
 ): Promise<string> {
   const { origin, headers, applicationId, user, deps } = args;
-  const role = (c.get("orgRole") as string | undefined) ?? undefined;
-  const orgName = (c.get("orgName") as string | undefined) ?? undefined;
-  const orgSlug = (c.get("orgSlug") as string | undefined) ?? undefined;
+  const role = c.get("orgRole");
+  const orgName = c.get("orgName");
+  const orgSlug = c.get("orgSlug");
 
   // Identity/role straight off the request context — the fallback when there is
   // no application context to fetch the app-scoped lists against.
@@ -395,13 +409,12 @@ export async function buildCallerContextBlock(
 }
 
 export async function handleChatStream(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  c: Context<any>,
+  c: Context<ChatEnv>,
   deps: ChatPlatformDeps,
 ): Promise<Response> {
-  const orgId = c.get("orgId") as string;
-  const user = c.get("user") as { id: string; email: string; name: string };
-  const orgRole = (c.get("orgRole") as string | undefined) ?? "member";
+  const orgId = c.get("orgId");
+  const user = c.get("user");
+  const orgRole = c.get("orgRole") ?? "member";
   const body = parseBody(chatStreamSchema, await c.req.json().catch(() => null));
   const messages = body.messages as UIMessage[];
   logger.info("chat turn", { turns: messages.length });

@@ -35,6 +35,7 @@ import { z } from "zod";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "@appstrate/mcp-transport";
 import { getEnv } from "@appstrate/env";
+import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-engine-contract";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
@@ -43,7 +44,7 @@ import { registerAuthChallenge } from "../../lib/auth-challenges.ts";
 import { registerProtectedResourceFamily } from "../../lib/protected-resources.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
-import { getPlatformApp } from "../../lib/platform-app.ts";
+import { dispatchInProcess } from "../../lib/platform-app.ts";
 import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "./audiences.ts";
 import { buildMcpTools, FORWARDED_AUTH_HEADERS, type Dispatch, type McpObserver } from "./tools.ts";
 import { buildOperationIndex } from "./catalog.ts";
@@ -151,13 +152,6 @@ This MCP server is scoped to ONE organization — the one this endpoint serves �
 ${OPERATION_INDEX_HEADING}
 ${buildOperationIndex(permissions)}`;
 }
-
-// The index is the LAST section of the instructions, fenced by this exact
-// heading. The chat (packages/module-chat/src/chat-stream.ts) splits on the
-// same literal to drop the index for providers where it isn't worth its tokens
-// (no prompt cache, or no platform tools). If the two ever drift, the chat just
-// stops stripping — the index stays in context, never a crash.
-const OPERATION_INDEX_HEADING = "## Operation index";
 
 function forwardAuthHeaders(src: Headers): Headers {
   const out = new Headers();
@@ -289,7 +283,7 @@ export function createMcpRouter(): Hono<AppEnv> {
     const contextInjected = reqUrl.searchParams.get("context") === "injected";
     const permissions = c.get("permissions") ?? new Set<string>();
     const authHeaders = forwardAuthHeaders(c.req.raw.headers);
-    const dispatch: Dispatch = async (req) => getPlatformApp().fetch(req);
+    const dispatch: Dispatch = dispatchInProcess;
 
     // Audit + telemetry sink. The tool layer emits plain data; here we decide
     // what to do with it: structured telemetry for every tool call, and a

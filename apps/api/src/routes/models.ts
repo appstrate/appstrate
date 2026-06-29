@@ -23,7 +23,7 @@ import {
   projectAliasedModel,
 } from "../services/org-models.ts";
 import { getModelProvider } from "../services/model-providers/registry.ts";
-import { isAliasableApiShape } from "@appstrate/core/model-swap";
+import { checkAliasInvariants } from "@appstrate/core/model-swap";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
@@ -191,13 +191,14 @@ export function createModelsRouter() {
           "credentialId",
         );
       }
-      // Model-alias guards (issue #727, Threat A):
+      // Model-alias guards (issue #727, Threat A) — shared invariant rule:
       if (aliased) {
+        const violation = checkAliasInvariants({ label: data.label, apiShape: creds.apiShape });
         // 1. Require an explicit label. The derive-from-catalog fallback below
         //    would name the alias after its REAL backing ("DeepSeek Chat"),
         //    and `label` survives the projection — leaking the backing on
         //    /api/models and run.model_label.
-        if (!data.label) {
+        if (violation === "missing_label") {
           throw invalidRequest(
             "An aliased model requires an explicit label — the derived label would name the backing model.",
             "label",
@@ -207,7 +208,7 @@ export function createModelsRouter() {
         //    openai/anthropic/mistral shapes; google/azure/bedrock carry the
         //    model id in the URL path, so an alias there forwards verbatim and
         //    404s upstream (and never gets swapped). Reject up front.
-        if (!isAliasableApiShape(creds.apiShape)) {
+        if (violation === "non_aliasable_shape") {
           throw invalidRequest(
             `Model aliases are not supported for the "${creds.apiShape}" protocol (the model id is carried in the URL, not the request body).`,
             "aliased",

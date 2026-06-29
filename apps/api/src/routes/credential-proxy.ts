@@ -41,7 +41,7 @@ const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
 
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
 export const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-import { filterHeaders } from "@appstrate/connect/proxy-primitives";
+import { filterHeaders, stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
 import { getActor } from "../lib/actor.ts";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -301,22 +301,13 @@ export function createCredentialProxyRouter() {
           requestId: c.get("requestId"),
         });
 
-        const responseHeaders = new Headers();
-        result.headers.forEach((value, key) => {
-          const lower = key.toLowerCase();
-          if (HOP_BY_HOP.has(lower)) return;
-          // Bun's upstream `fetch` auto-decodes `content-encoding`, so
-          // `result.body` is already plain bytes. Forwarding the original
-          // gzip header would make the caller's fetch double-decompress
-          // and surface as an opaque connection error on the agent side.
-          // `content-length` is dropped for the same reason — the body
-          // length changed after decompression.
-          if (lower === "content-encoding" || lower === "content-length") return;
-          // Strip X-Stream-* headers: these are transport hints between the
-          // runtime and this proxy; they must not be forwarded to the caller.
-          if (lower === "x-stream-request" || lower === "x-stream-response") return;
-          responseHeaders.set(key, value);
-        });
+        // Strip hop-by-hop + stale content-encoding/length (shared helper),
+        // plus the X-Stream-* transport hints between the runtime and this
+        // proxy, which must not reach the caller.
+        const responseHeaders = stripUpstreamResponseHeaders(
+          result.headers,
+          STREAM_CONTROL_HEADERS,
+        );
 
         // Streaming upload on a 401: credentials may be stale but the body
         // cannot be replayed. Signal the client to refresh and retry itself.
@@ -437,16 +428,8 @@ function safeTargetHost(target: string): string | null {
   }
 }
 
-const HOP_BY_HOP = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-]);
+/** Transport hints between the runtime and this proxy — never forwarded to the caller. */
+const STREAM_CONTROL_HEADERS = new Set(["x-stream-request", "x-stream-response"]);
 
 /** Context passed to {@link capStreamingBody} for structured warning logs. */
 interface StreamCapLogCtx {

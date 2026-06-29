@@ -45,3 +45,12 @@ export interface ChatEngineInput {
 
 /** A chat-turn handler a provider module contributes for its provider id. */
 export type ChatEngineHandler = (input: ChatEngineInput) => Response;
+
+/**
+ * Markdown heading the MCP server emits before the cached operation index in
+ * its server instructions, and the cut point the chat module slices on to drop
+ * the (uncacheable) index for engines that don't benefit from it. Shared so the
+ * emitter (`apps/api` MCP router) and the consumer (chat module) cut at the same
+ * literal — a drift would silently leave the index in place, costing cache.
+ */
+export const OPERATION_INDEX_HEADING = "## Operation index";

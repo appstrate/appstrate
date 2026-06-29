@@ -32,40 +32,13 @@ import {
   createSseModelSwapStream,
   scrubModelText,
 } from "@appstrate/core/model-swap";
+import { stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
 import type { ResolvedModel } from "../org-models.ts";
 import { storeResponse } from "./response-cache.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal, UpstreamUsage } from "./types.ts";
 
-const HOP_BY_HOP = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-]);
-
-// Bun's fetch auto-decompresses upstream responses, so the body holds
-// plaintext even when the upstream advertised `content-encoding: gzip`.
-// Forwarding the original encoding header would tell the caller to decompress
-// bytes that aren't compressed → ZlibError. We also drop `content-length`
-// because it described the compressed payload; the rewrapped Response
-// recomputes it from the uncompressed body.
-const STRIPPED_CONTENT_HEADERS = new Set(["content-encoding", "content-length"]);
-
 /** Clone upstream response headers, dropping hop-by-hop + stale content encoding/length. */
-export function cloneResponseHeaders(src: Headers): Headers {
-  const out = new Headers();
-  src.forEach((v, k) => {
-    const lower = k.toLowerCase();
-    if (HOP_BY_HOP.has(lower)) return;
-    if (STRIPPED_CONTENT_HEADERS.has(lower)) return;
-    out.set(k, v);
-  });
-  return out;
-}
+export const cloneResponseHeaders = stripUpstreamResponseHeaders;
 
 /**
  * Upper bound on usage-bearing frames retained by {@link tapSseUsage}.

@@ -32,12 +32,18 @@
 
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import {
+  buildError,
+  buildMetric,
+  buildProgress,
+  buildToolResultProgress,
+  buildToolStartProgress,
   truncateToolResult,
   zeroTokenUsage,
   type RunError,
   type RunResult,
   type TokenUsage,
 } from "@appstrate/afps-runtime/runner";
+import { accumulateTokenUsage } from "@appstrate/core/token-usage";
 import { parseToolResultBlocks } from "./claude-blocks.ts";
 
 // ─── Minimal structural view of the SDK messages we read ───────────────
@@ -114,16 +120,6 @@ function errorCodeForSubtype(subtype: string | undefined): string {
   }
 }
 
-function addUsage(into: TokenUsage, delta: TokenUsage | undefined): void {
-  if (!delta) return;
-  into.input_tokens = (into.input_tokens ?? 0) + (delta.input_tokens ?? 0);
-  into.output_tokens = (into.output_tokens ?? 0) + (delta.output_tokens ?? 0);
-  into.cache_creation_input_tokens =
-    (into.cache_creation_input_tokens ?? 0) + (delta.cache_creation_input_tokens ?? 0);
-  into.cache_read_input_tokens =
-    (into.cache_read_input_tokens ?? 0) + (delta.cache_read_input_tokens ?? 0);
-}
-
 function asContentBlocks(content: unknown): SdkContentBlock[] {
   return Array.isArray(content) ? (content as SdkContentBlock[]) : [];
 }
@@ -180,21 +176,14 @@ export class SdkRunEventMapper {
 
   private mapAssistant(msg: SdkAssistantMessage): RunEvent[] {
     const events: RunEvent[] = [];
-    const ts = this.now();
+    const base = { runId: this.runId, timestamp: this.now() };
 
     // Per-turn provider error. Logged as a breadcrumb only — it does NOT decide
     // the run's status (the agent may recover on a later turn); the terminal
     // verdict comes from the `result` message. Mirrors the Pi bridge's
     // transient-error logging.
     const errMessage = assistantErrorMessage(msg.error);
-    if (errMessage) {
-      events.push({
-        type: "appstrate.error",
-        timestamp: ts,
-        runId: this.runId,
-        message: errMessage,
-      });
-    }
+    if (errMessage) events.push(buildError(base, errMessage));
 
     const blocks = asContentBlocks(msg.message?.content);
     const text = blocks
@@ -202,24 +191,18 @@ export class SdkRunEventMapper {
       .map((b) => b.text ?? "")
       .join("\n")
       .trim();
-    if (text) {
-      events.push({ type: "appstrate.progress", timestamp: ts, runId: this.runId, message: text });
-    }
+    if (text) events.push(buildProgress(base, text));
 
     for (const b of blocks) {
       if (b.type !== "tool_use") continue;
       const tool = b as SdkToolUseBlock;
-      events.push({
-        type: "appstrate.progress",
-        timestamp: ts,
-        runId: this.runId,
-        message: `Tool: ${tool.name ?? "unknown"}`,
-        data: {
+      events.push(
+        buildToolStartProgress(base, {
           tool: tool.name,
           args: tool.input,
           ...(tool.id !== undefined ? { toolCallId: tool.id } : {}),
-        },
-      });
+        }),
+      );
     }
 
     // Accumulate usage and surface a live (usage-only) metric so the UI can
@@ -228,31 +211,23 @@ export class SdkRunEventMapper {
     // emit a misleading $0.
     const usage = msg.message?.usage;
     if (usage && ((usage.input_tokens ?? 0) > 0 || (usage.output_tokens ?? 0) > 0)) {
-      addUsage(this.liveUsage, usage);
-      events.push({
-        type: "appstrate.metric",
-        timestamp: ts,
-        runId: this.runId,
-        usage: { ...this.liveUsage },
-      });
+      accumulateTokenUsage(this.liveUsage, usage);
+      events.push(buildMetric(base, { ...this.liveUsage }));
     }
     return events;
   }
 
   private mapUser(msg: SdkUserMessage): RunEvent[] {
-    const ts = this.now();
+    const base = { runId: this.runId, timestamp: this.now() };
+    // No tool name: an Anthropic `tool_result` references only the `tool_use`
+    // id, so the shared builder omits the `: <tool>` suffix and `data.tool`.
     return parseToolResultBlocks(msg.message?.content).map(
-      (r): RunEvent => ({
-        type: "appstrate.progress",
-        timestamp: ts,
-        runId: this.runId,
-        message: r.isError ? "Tool error" : "Tool result",
-        data: {
+      (r): RunEvent =>
+        buildToolResultProgress(base, {
           result: truncateToolResult(r.content),
           isError: r.isError,
           ...(r.toolUseId !== undefined ? { toolCallId: r.toolUseId } : {}),
-        },
-      }),
+        }),
     );
   }
 
@@ -299,23 +274,14 @@ export class SdkRunEventMapper {
     // This does NOT change the terminal status (decided above) — it only adds the
     // missing error event.
     if (!isSuccess) {
-      events.push({
-        type: "appstrate.error",
-        timestamp: this.now(),
-        runId: this.runId,
-        message: terminalErrorMessage(msg),
-      });
+      events.push(
+        buildError({ runId: this.runId, timestamp: this.now() }, terminalErrorMessage(msg)),
+      );
     }
 
     // Final authoritative metric. The runner also stamps usage+cost onto the
     // RunResult at finalize, so this event is purely the live-UI signal.
-    events.push({
-      type: "appstrate.metric",
-      timestamp: this.now(),
-      runId: this.runId,
-      usage: { ...usage },
-      cost,
-    });
+    events.push(buildMetric({ runId: this.runId, timestamp: this.now() }, { ...usage }, cost));
     return events;
   }
 }

@@ -21,7 +21,7 @@ import { getEnv } from "@appstrate/env";
 import { logger } from "../logger.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { listLlmUsageForRun } from "../../services/state/runs.ts";
-import { getPlatformApp } from "../platform-app.ts";
+import { dispatchInProcess } from "../platform-app.ts";
 
 // Process-global chat-handler registry, populated by provider modules through
 // the platform contract (`ctx.services.registerChatHandler`) at init and read
@@ -112,12 +112,8 @@ function buildPlatformServices(): PlatformServices {
       listLlmUsage: listLlmUsageForRun,
     },
     inProcess: {
-      // Re-enter the fully-wired platform app in-process (no socket hop). The
-      // app is registered by `registerModuleRoutes`; this throws if called
-      // before that runs (a programming error, not a runtime condition).
-      // `app.fetch` is `Response | Promise<Response>`; the async wrapper
-      // normalizes it to the `Promise<Response>` the service contract declares.
-      dispatch: async (request) => getPlatformApp().fetch(request),
+      // In-process self-dispatch through the full platform middleware chain.
+      dispatch: dispatchInProcess,
     },
     // Platform-contract chat-handler channel — a provider module registers its
     // handler at init, the chat module resolves it by provider id. Neither

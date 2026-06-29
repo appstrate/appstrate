@@ -12,7 +12,7 @@
  *     process conditionally falls back; moving it would change behavior.
  */
 
-import type { SidecarLaunchSpec } from "@appstrate/core/platform-types";
+import type { SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 
 /**
  * Apply the spec→env assignments common to both orchestrators onto

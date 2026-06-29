@@ -395,13 +395,10 @@ async function bufferLlmBodyBounded(c: Context, maxBytes: number): Promise<strin
  * and surface the method. Shared by both `/llm` branches (api_key + oauth);
  * each keeps its own `isBlockedUrl` SSRF check and credential handling.
  */
-function deriveLlmTarget(
-  c: Context,
-  baseUrl: string,
-): { path: string; qs: string; targetUrl: string; method: string } {
+function deriveLlmTarget(c: Context, baseUrl: string): { targetUrl: string; method: string } {
   const path = c.req.path.slice("/llm".length) || "/";
   const qs = new URL(c.req.url).search;
-  return { path, qs, targetUrl: `${baseUrl}${path}${qs}`, method: c.req.method };
+  return { targetUrl: `${baseUrl}${path}${qs}`, method: c.req.method };
 }
 
 /**

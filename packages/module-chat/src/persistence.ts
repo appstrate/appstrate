@@ -55,7 +55,7 @@ export async function ensureSession(id: string, orgId: string, userId: string): 
     .where(eq(chatSessions.id, id))
     .limit(1);
   if (!row || row.orgId !== orgId || row.userId !== userId) {
-    throw notFound("Conversation not found");
+    throw notFound("Chat session not found");
   }
 }
 

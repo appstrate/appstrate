@@ -99,6 +99,27 @@ const defaultDeps: ModelDiscoveryDeps = {
  * so the persisted list is exactly the set a user can actually seed. An empty
  * candidate list is a no-op that leaves any previous list untouched.
  */
+/**
+ * Persist the verified ids onto the credential and return the standard `ok`
+ * result. Shared by both discovery paths (static candidate intersection and
+ * network probe) — the org-scoped UPDATE and the result shape are identical;
+ * only the surrounding log line differs, so each caller logs its own.
+ */
+async function persistVerifiedModels(
+  orgId: string,
+  credentialId: string,
+  verified: string[],
+  probedCount: number,
+): Promise<ModelDiscoveryResult> {
+  await db
+    .update(modelProviderCredentials)
+    .set({ availableModelIds: verified, updatedAt: new Date() })
+    .where(
+      and(eq(modelProviderCredentials.id, credentialId), eq(modelProviderCredentials.orgId, orgId)),
+    );
+  return { outcome: "ok", verifiedModelIds: verified, probedCount, persisted: true };
+}
+
 async function persistStaticCandidates(
   orgId: string,
   credentialId: string,
@@ -111,7 +132,7 @@ async function persistStaticCandidates(
   const verified = candidates.filter((id) => catalogIds.has(id));
 
   if (verified.length === 0) {
-    logger.warn("offline model discovery resolved no catalog-backed candidates — keeping list", {
+    logger.warn("static model discovery resolved no catalog-backed candidates — keeping list", {
       credentialId,
       providerId,
       candidateCount: candidates.length,
@@ -124,25 +145,13 @@ async function persistStaticCandidates(
     };
   }
 
-  await db
-    .update(modelProviderCredentials)
-    .set({ availableModelIds: verified, updatedAt: new Date() })
-    .where(
-      and(eq(modelProviderCredentials.id, credentialId), eq(modelProviderCredentials.orgId, orgId)),
-    );
-
-  logger.info("offline model discovery persisted static candidates", {
+  logger.info("static model discovery persisted catalog-backed candidates", {
     credentialId,
     providerId,
     verifiedCount: verified.length,
     candidateCount: candidates.length,
   });
-  return {
-    outcome: "ok",
-    verifiedModelIds: verified,
-    probedCount: candidates.length,
-    persisted: true,
-  };
+  return persistVerifiedModels(orgId, credentialId, verified, candidates.length);
 }
 
 /**
@@ -153,7 +162,7 @@ async function persistStaticCandidates(
  * burst — keeps it polite to the subscription backend's rate limits
  * while cutting wall-clock from O(n) sequential round-trips to ~O(n/4).
  *
- * `"offline"` providers skip probing entirely — see
+ * `mode: "static"` providers skip probing entirely — see
  * {@link persistStaticCandidates}.
  */
 export async function discoverAvailableModels(
@@ -256,23 +265,11 @@ export async function discoverAvailableModels(
     };
   }
 
-  await db
-    .update(modelProviderCredentials)
-    .set({ availableModelIds: verified, updatedAt: new Date() })
-    .where(
-      and(eq(modelProviderCredentials.id, credentialId), eq(modelProviderCredentials.orgId, orgId)),
-    );
-
   logger.info("model discovery persisted", {
     credentialId,
     providerId: creds.providerId,
     verifiedCount: verified.length,
     probedCount: candidates.length,
   });
-  return {
-    outcome: "ok",
-    verifiedModelIds: verified,
-    probedCount: candidates.length,
-    persisted: true,
-  };
+  return persistVerifiedModels(orgId, credentialId, verified, candidates.length);
 }

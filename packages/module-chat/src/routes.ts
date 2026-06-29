@@ -24,19 +24,11 @@ import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { notFound, parseBody } from "@appstrate/core/api-errors";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
-import { handleChatStream } from "./chat-stream.ts";
+import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
 import { stopStream } from "./stop-registry.ts";
 import { getResumableContext } from "./resumable.ts";
 import { mintSessionId } from "./session-id.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
-
-/** Minimal Hono Env mirroring what the platform auth pipeline sets. */
-type ChatEnv = {
-  Variables: {
-    user: { id: string; email: string; name: string };
-    orgId: string;
-  };
-};
 
 export const createSessionSchema = z.object({
   title: z.string().min(1).max(200).optional(),

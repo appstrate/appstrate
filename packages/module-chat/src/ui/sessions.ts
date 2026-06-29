@@ -9,7 +9,7 @@
 import type { UIMessage } from "ai";
 import type { GetHeaders } from "./runtime-context.ts";
 
-/** Fresh conversation id, minted client-side (`chs_` shape) — re-exported from the shared module. */
+/** Fresh session id, minted client-side (`chs_` shape) — re-exported from the shared module. */
 export { mintSessionId } from "../session-id.ts";
 
 export interface SessionSummary {
@@ -21,7 +21,7 @@ export interface SessionSummary {
   updatedAt: string;
 }
 
-/** React Query key for the conversation list (module-local, not the typed client). */
+/** React Query key for the session list (module-local, not the typed client). */
 export const SESSIONS_QUERY_KEY = ["chat", "sessions"] as const;
 
 function headers(getHeaders: GetHeaders | null | undefined, json = false): Record<string, string> {
@@ -35,7 +35,7 @@ export async function fetchSessions(
     credentials: "include",
     headers: headers(getHeaders),
   });
-  if (!res.ok) throw new Error(`Failed to load conversations (HTTP ${res.status})`);
+  if (!res.ok) throw new Error(`Failed to load sessions (HTTP ${res.status})`);
   return ((await res.json()) as { data?: SessionSummary[] }).data ?? [];
 }
 
@@ -50,7 +50,7 @@ export async function renameSession(
     headers: headers(getHeaders, true),
     body: JSON.stringify({ title }),
   });
-  if (!res.ok) throw new Error(`Failed to rename conversation (HTTP ${res.status})`);
+  if (!res.ok) throw new Error(`Failed to rename session (HTTP ${res.status})`);
 }
 
 export async function deleteSession(
@@ -62,7 +62,7 @@ export async function deleteSession(
     credentials: "include",
     headers: headers(getHeaders),
   });
-  if (!res.ok) throw new Error(`Failed to delete conversation (HTTP ${res.status})`);
+  if (!res.ok) throw new Error(`Failed to delete session (HTTP ${res.status})`);
 }
 
 /** A stored message node as returned by `GET /sessions/:id`. */
@@ -72,9 +72,9 @@ interface StoredMessage {
 }
 
 /**
- * Conversation history as `UIMessage[]`, ready to seed `useChat({ messages })`.
+ * Session history as `UIMessage[]`, ready to seed `useChat({ messages })`.
  * Stored `content` is the ai-sdk/v6 UIMessage minus its id (the id rides in the
- * row), so we reconstruct `{ id, ...content }`. A not-yet-persisted conversation
+ * row), so we reconstruct `{ id, ...content }`. A not-yet-persisted session
  * (a freshly-minted id whose first message hasn't been sent) 404s → empty.
  */
 export async function loadHistory(
@@ -86,7 +86,7 @@ export async function loadHistory(
     headers: headers(getHeaders),
   });
   if (res.status === 404) return [];
-  if (!res.ok) throw new Error(`Failed to load conversation (HTTP ${res.status})`);
+  if (!res.ok) throw new Error(`Failed to load session (HTTP ${res.status})`);
   const body = (await res.json()) as { messages?: StoredMessage[] };
   return (body.messages ?? []).map((e) => ({ id: e.id, ...e.content }) as UIMessage);
 }

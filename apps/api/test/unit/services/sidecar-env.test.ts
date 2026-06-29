@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import type { SidecarLaunchSpec } from "@appstrate/core/platform-types";
+import type { SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 import { applySpecToSidecarEnv } from "../../../src/services/orchestrator/sidecar-env.ts";
 
 describe("applySpecToSidecarEnv", () => {

@@ -42,6 +42,11 @@ import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
+  buildError,
+  buildMetric,
+  buildProgress,
+  buildToolResultProgress,
+  buildToolStartProgress,
   emptyRunResult,
   finalizeThrownFailure,
   reduceEvents,
@@ -697,13 +702,7 @@ export function installSessionBridge(
           // payload would be identical to the previous one and waste
           // a NOTIFY round-trip.
           if (inputDelta > 0 || outputDelta > 0) {
-            fire({
-              type: "appstrate.metric",
-              timestamp: Date.now(),
-              runId,
-              usage: { ...totalUsage },
-              cost: totalCost,
-            });
+            fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
           }
         }
 
@@ -715,12 +714,9 @@ export function installSessionBridge(
         // recovers from also logs here (harmless — the trail no longer
         // drives status).
         if (isTerminalErrorStop(last.stopReason)) {
-          fire({
-            type: "appstrate.error",
-            timestamp: Date.now(),
-            runId,
-            message: terminalErrorMessage(last.errorMessage),
-          });
+          fire(
+            buildError({ runId, timestamp: Date.now() }, terminalErrorMessage(last.errorMessage)),
+          );
         }
 
         // Full assistant text (for progress display)
@@ -731,12 +727,7 @@ export function installSessionBridge(
             .map((c) => c.text || "")
             .join("\n");
           if (text) {
-            fire({
-              type: "appstrate.progress",
-              timestamp: Date.now(),
-              runId,
-              message: text,
-            });
+            fire(buildProgress({ runId, timestamp: Date.now() }, text));
           }
         }
         break;
@@ -744,61 +735,49 @@ export function installSessionBridge(
 
       case "tool_execution_start": {
         const e = event as PiToolExecutionStartEvent;
-        fire({
-          type: "appstrate.progress",
-          timestamp: Date.now(),
-          runId,
-          message: `Tool: ${e.toolName ?? "unknown"}`,
-          // `toolCallId` is the Pi SDK's per-call identifier; forwarding
-          // it lets sinks correlate start/end events when multiple
-          // tools run concurrently (the LLM can dispatch a parallel
-          // batch and the results land out-of-order). Optional —
-          // omitted from `data` when the SDK didn't provide one.
-          data: {
-            tool: e.toolName,
-            args: e.args,
-            ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
-          },
-        });
+        // `toolCallId` is the Pi SDK's per-call identifier; forwarding it lets
+        // sinks correlate start/end events when multiple tools run concurrently
+        // (the LLM can dispatch a parallel batch and the results land
+        // out-of-order). Optional — omitted from `data` when the SDK gave none.
+        fire(
+          buildToolStartProgress(
+            { runId, timestamp: Date.now() },
+            {
+              tool: e.toolName,
+              args: e.args,
+              ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
+            },
+          ),
+        );
         break;
       }
 
       case "tool_execution_end": {
-        // Symmetric counterpart of `tool_execution_start`. Forwards the
-        // tool's result (truncated to TOOL_RESULT_BYTE_LIMIT) and an
-        // explicit `isError` flag so sinks can colour-code success vs
-        // error paths without re-parsing the result. Same `appstrate.
-        // progress` envelope as the start event — adding a new canonical
-        // type would force a migration on every consumer (web, run_logs,
-        // JSONL, HTTP sink) for marginal gain over the discriminator
-        // `data.result !== undefined`.
+        // Symmetric counterpart of `tool_execution_start`. Forwards the tool's
+        // result (truncated to TOOL_RESULT_BYTE_LIMIT) and an explicit `isError`
+        // flag so sinks can colour-code success vs error paths without
+        // re-parsing the result. Same `appstrate.progress` envelope as the start
+        // event (shared builder) — adding a new canonical type would force a
+        // migration on every consumer (web, run_logs, JSONL, HTTP sink) for
+        // marginal gain over the discriminator `data.result !== undefined`.
         const e = event as PiToolExecutionEndEvent;
         const tool = e.toolName ?? "unknown";
-        const isError = e.isError === true;
-        const truncatedResult = truncateToolResult(e.result);
-        fire({
-          type: "appstrate.progress",
-          timestamp: Date.now(),
-          runId,
-          message: `${isError ? "Tool error" : "Tool result"}: ${tool}`,
-          data: {
-            tool: e.toolName,
-            result: truncatedResult,
-            isError,
-            ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
-          },
-        });
+        fire(
+          buildToolResultProgress(
+            { runId, timestamp: Date.now() },
+            {
+              tool,
+              result: truncateToolResult(e.result),
+              isError: e.isError === true,
+              ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
+            },
+          ),
+        );
         break;
       }
 
       case "agent_end": {
-        fire({
-          type: "appstrate.metric",
-          timestamp: Date.now(),
-          runId,
-          usage: { ...totalUsage },
-          cost: totalCost,
-        });
+        fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
         break;
       }
 
