@@ -133,6 +133,16 @@ export function ZaiIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// Original terminal-prompt glyph (chevron + cursor bar) — OpenCode Go has no
+// single vendor logo (it aggregates many models), so we use a neutral mark.
+export function OpenCodeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <path d="M3.7 4.3 2.3 5.7 8.6 12l-6.3 6.3 1.4 1.4 7-7a1 1 0 0 0 0-1.4l-7-7zM12 18h9.5v2H12z" />
+    </svg>
+  );
+}
+
 // eslint-disable-next-line react-refresh/only-export-components
 export const PROVIDER_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   anthropic: AnthropicIcon,
@@ -148,6 +158,7 @@ export const PROVIDER_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement
   "together-ai": TogetherIcon,
   "fireworks-ai": FireworksIcon,
   zai: ZaiIcon,
+  "opencode-go": OpenCodeIcon,
 };
 
 /**

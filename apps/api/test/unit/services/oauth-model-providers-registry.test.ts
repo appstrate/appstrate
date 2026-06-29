@@ -44,6 +44,7 @@ const CORE_PROVIDER_IDS = [
   "moonshot",
   "openai",
   "openai-compatible",
+  "opencode-go",
   "openrouter",
   "together-ai",
   "xai",

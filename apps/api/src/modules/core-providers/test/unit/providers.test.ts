@@ -20,6 +20,7 @@ describe("core-providers module", () => {
       "moonshot",
       "openai",
       "openai-compatible",
+      "opencode-go",
       "openrouter",
       "together-ai",
       "xai",
