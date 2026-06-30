@@ -25,6 +25,7 @@ import {
   orgAppFromHeaders,
   parseLogListResponse,
   parseRunLogFrame,
+  parseRunTiming,
   parseRunUpdateFrame,
   type RunLogLine,
   type RunStatus,
@@ -80,6 +81,27 @@ export function useRunLogStream(runId: string | undefined, initialStatus?: strin
         apply(parseLogListResponse(await res.json()));
       } catch {
         // ignore — SSE remains the source of truth
+      }
+    })();
+
+    // 1b. Run-resource fetch — seeds status + execution time so a reopened or
+    //     refreshed conversation shows them for an already-finished run, which
+    //     emits no live `run_update`. Best-effort; the SSE below still overrides
+    //     with fresher values for an in-flight run.
+    void (async () => {
+      try {
+        const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`, {
+          headers,
+          credentials: "include",
+        });
+        if (!res.ok || cancelled) return;
+        const timing = parseRunTiming(await res.json());
+        if (!timing || cancelled) return;
+        if (isTerminalStatus(timing.status)) setStatus(timing.status);
+        if (timing.startedAt) setStartedAt(timing.startedAt);
+        if (timing.completedAt) setCompletedAt(timing.completedAt);
+      } catch {
+        // ignore — timing is non-essential; the badge falls back gracefully
       }
     })();
 

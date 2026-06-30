@@ -21,6 +21,7 @@ import {
   orgAppFromHeaders,
   parseLogListResponse,
   parseRunLogFrame,
+  parseRunTiming,
   parseRunUpdateFrame,
   safeJsonParse,
   visibleLogEntries,
@@ -346,6 +347,32 @@ describe("parseRunUpdateFrame", () => {
   });
   test("undefined when status missing", () => {
     expect(parseRunUpdateFrame(JSON.stringify({ id: "run_x" }))).toBeUndefined();
+  });
+});
+
+describe("parseRunTiming", () => {
+  test("reads snake_case REST timing, normalised to camelCase", () => {
+    expect(
+      parseRunTiming({ status: "success", started_at: "t0", completed_at: "t1", extra: 1 }),
+    ).toEqual({ status: "success", startedAt: "t0", completedAt: "t1" });
+  });
+  test("tolerates missing fields", () => {
+    expect(parseRunTiming({ status: "running" })).toEqual({
+      status: "running",
+      startedAt: null,
+      completedAt: null,
+    });
+  });
+  test("null timing fields stay null", () => {
+    expect(parseRunTiming({ started_at: null, completed_at: null })).toEqual({
+      status: undefined,
+      startedAt: null,
+      completedAt: null,
+    });
+  });
+  test("undefined for a non-object body", () => {
+    expect(parseRunTiming(null)).toBeUndefined();
+    expect(parseRunTiming("nope")).toBeUndefined();
   });
 });
 

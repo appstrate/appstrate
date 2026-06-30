@@ -86,6 +86,37 @@ export const runUpdateLiteSchema = z.object({
 export type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
 
 /**
+ * Minimal `GET /api/runs/:id` shape — the run's status + timing. Fetched once at
+ * mount so a reopened/refreshed conversation seeds the badge and execution time
+ * for a run that already finished (no live `run_update` ever arrives for it).
+ *
+ * Reads snake_case `started_at` / `completed_at`: that is the canonical run REST
+ * DTO shape the rest of the app already consumes (`run.started_at` everywhere).
+ * It differs from the camelCase `run_update` SSE frame (`parseRunUpdateFrame`) —
+ * a deliberate, pre-existing split (REST DTO = snake, realtime = camel), not a
+ * mix introduced here: each parser matches its own endpoint. We normalise to the
+ * camelCase shape used internally so the hook state stays one convention.
+ */
+export const runTimingSchema = z
+  .object({
+    status: z.string().optional(),
+    started_at: z.string().nullable().optional(),
+    completed_at: z.string().nullable().optional(),
+  })
+  .transform((d) => ({
+    status: d.status,
+    startedAt: d.started_at ?? null,
+    completedAt: d.completed_at ?? null,
+  }));
+export type RunTiming = z.infer<typeof runTimingSchema>;
+
+/** Parse a `GET /api/runs/:id` body into its status + timing, or undefined. */
+export function parseRunTiming(body: unknown): RunTiming | undefined {
+  const parsed = runTimingSchema.safeParse(body);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/**
  * `run_update` frame from the org-wide realtime stream, with the fields needed
  * to discover the run a blocking `run_and_wait` just launched (its id only
  * appears in the tool result once the call returns, which is after the run is
