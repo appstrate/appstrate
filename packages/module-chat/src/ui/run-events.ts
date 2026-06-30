@@ -328,16 +328,27 @@ export interface VisibleLogEntry {
 }
 
 /**
- * The ordered sequence of non-`debug` log lines that have displayable text —
- * the queue the run card tickers through one entry at a time. Keeps ascending
- * `id` order (same as `mergeLogs`), so the last element is the most recent line.
- * `id` doubles as the React key the line animation remounts on.
+ * The ordered sequence of the agent's own log-tool output — the queue the run
+ * card tickers through one entry at a time. ONLY `event === "log"` rows qualify:
+ * those come from the agent's explicit `log` runtime tool (sink tags them so),
+ * never the auto-emitted runtime lifecycle / tool-call breadcrumbs (which share
+ * `type='progress'` but keep `event='progress'`), nor `output`/`report`/system
+ * rows. Keeps ascending `id` order (same as `mergeLogs`), so the last element is
+ * the most recent line; `id` doubles as the React key the line animates on.
  */
 export function visibleLogEntries(logs: readonly RunLogLine[]): VisibleLogEntry[] {
   const out: VisibleLogEntry[] = [];
   for (const line of logs) {
-    if (line.level === "debug") continue;
-    const text = logLineText(line);
+    if (line.event !== "log") continue;
+    // Text from `message` (then `data`) only — NOT `logLineText`, whose `event`
+    // fallback would surface the literal "log" tag for a message-less row.
+    const text =
+      nonEmptyString(line.message) ??
+      (typeof line.data === "string"
+        ? line.data
+        : line.data && typeof line.data === "object"
+          ? JSON.stringify(line.data)
+          : undefined);
     if (text) out.push({ id: line.id, text });
   }
   return out;

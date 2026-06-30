@@ -61,9 +61,6 @@ describe("installSessionBridge — message_end", () => {
     const textEvent = sink.events.find((e) => e.type === "appstrate.progress");
     expect(textEvent).toBeDefined();
     expect((textEvent as unknown as { message: string }).message).toBe("Line one\nLine two");
-    // Assistant text is user-meaningful activity → `info`, not `debug` (so it
-    // clears the chat run card's debug filter).
-    expect((textEvent as unknown as { level?: string }).level).toBe("info");
   });
 
   it("emits appstrate.error when stopReason is error", () => {
@@ -185,12 +182,10 @@ describe("installSessionBridge — tool_execution_start", () => {
     const ev = sink.events[0] as unknown as {
       type: string;
       message: string;
-      level?: string;
       data: { tool: string; args: unknown };
     };
     expect(ev.type).toBe("appstrate.progress");
     expect(ev.message).toBe("Tool: read_file");
-    expect(ev.level).toBe("info");
     expect(ev.data).toEqual({ tool: "read_file", args: { path: "/tmp/x" } });
   });
 

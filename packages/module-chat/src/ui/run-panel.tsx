@@ -6,11 +6,13 @@
  * is even known — so the card keeps a constant two-line height with no
  * transient "Lancement…" placeholder swap.
  *
- * Line 1: the package name. Line 2: the non-debug log lines streamed live over
- * the run's SSE channel (`useRunLogStream`), paced one at a time (`useLogTicker`,
- * ≥500ms each) with a fade/slide animation so a burst reads as a sequence rather
- * than a flash. A live status badge and a link to the run's page sit on the
- * right. Clicking the card opens the raw input/output detail modal (`details`).
+ * Line 1: the package name. Line 2: the run's own log-tool output (rows the sink
+ * tags `event='log'`, i.e. the agent's explicit `log` runtime tool — NOT runtime
+ * lifecycle or tool-call breadcrumbs), streamed live over the run's SSE channel
+ * (`useRunLogStream`) and paced one at a time (`useLogTicker`, ≥500ms each) with
+ * a fade/slide animation so a burst reads as a sequence rather than a flash. A
+ * live status badge and a link to the run's page sit on the right. Clicking the
+ * card opens the raw input/output detail modal (`details`).
  *
  * Before the launch returns a `run_…` id (e.g. `run_and_wait` still blocking)
  * there is no SSE yet: the badge falls back to the tool-call phase and line 2
@@ -147,7 +149,7 @@ export function RunPanel({
               ) : null}
             </span>
           </div>
-          {/* Line 2: paced non-debug log line (constant height). Keyed by log id
+          {/* Line 2: paced log-tool line (constant height). Keyed by log id
               so each new line remounts and runs the fade/slide enter animation;
               `grid` keeps the row height fixed while the line swaps. */}
           <div className="grid font-mono text-xs">

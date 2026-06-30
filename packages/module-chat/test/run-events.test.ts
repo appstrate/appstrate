@@ -195,27 +195,39 @@ describe("lastVisibleLogText", () => {
 });
 
 describe("visibleLogEntries", () => {
-  test("keeps non-debug lines with text, in ascending id order", () => {
+  test("keeps only event=log rows with text, in ascending id order", () => {
     const logs: RunLogLine[] = [
-      { id: 1, level: "info", message: "a" },
-      { id: 2, level: "debug", message: "noise" },
-      { id: 3, level: "warn", message: "b" },
+      { id: 1, level: "info", event: "log", message: "a" },
+      { id: 2, level: "info", event: "progress", message: "Tool: read_file" },
+      { id: 3, level: "info", event: "progress", message: "runtime starting" },
+      { id: 4, level: "warn", event: "log", message: "b" },
     ];
     expect(visibleLogEntries(logs)).toEqual([
       { id: 1, text: "a" },
-      { id: 3, text: "b" },
+      { id: 4, text: "b" },
     ]);
   });
-  test("drops lines without displayable text", () => {
+  test("excludes output / report / system rows", () => {
     const logs: RunLogLine[] = [
-      { id: 1, level: "info", message: "a" },
-      { id: 2, level: "info", message: null, event: null, data: null },
+      { id: 1, level: "info", event: "log", message: "real log" },
+      { id: 2, level: "info", event: "output", message: null, data: { x: 1 } },
+      { id: 3, level: "info", event: "report", message: null, data: { content: "r" } },
+      { id: 4, level: "error", event: "adapter_error", message: "boom" },
+    ];
+    expect(visibleLogEntries(logs)).toEqual([{ id: 1, text: "real log" }]);
+  });
+  test("drops event=log rows without displayable text", () => {
+    const logs: RunLogLine[] = [
+      { id: 1, level: "info", event: "log", message: "a" },
+      { id: 2, level: "info", event: "log", message: null, data: null },
     ];
     expect(visibleLogEntries(logs)).toEqual([{ id: 1, text: "a" }]);
   });
-  test("empty for no logs / only debug", () => {
+  test("empty when no log-tool rows", () => {
     expect(visibleLogEntries([])).toEqual([]);
-    expect(visibleLogEntries([{ id: 1, level: "debug", message: "x" }])).toEqual([]);
+    expect(visibleLogEntries([{ id: 1, level: "info", event: "progress", message: "x" }])).toEqual(
+      [],
+    );
   });
 });
 

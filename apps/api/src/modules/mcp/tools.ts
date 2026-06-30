@@ -711,7 +711,11 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "until the run reaches a terminal status (success/failed/timeout/cancelled) and returns " +
       "`{ id, status, done, result?, error? }`. Read `result` for the run's deliverable — you do " +
       "NOT need a separate run-get call; this already waited. The chat shows the run's logs live " +
-      "while it runs. Prefer an existing agent over an inline manifest when one matches the intent. " +
+      "while it runs — but ONLY the lines the run emits through the `log` runtime tool. For an " +
+      'inline run (`kind:"inline"`) you MUST therefore (1) declare `"runtime_tools": ["log"]` in the ' +
+      "manifest AND (2) instruct the run, in its `prompt`, to call the `log` tool to report each " +
+      "meaningful step — otherwise the live panel stays empty. Prefer an existing agent over an " +
+      "inline manifest when one matches the intent. " +
       "(Only if it returns `done:false` — a run that outran the wait ceiling — keep following with " +
       "the run-get operation, `wait:true`.)",
     annotations: {
@@ -745,10 +749,18 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         },
         manifest: {
           type: "object",
-          description: "Inline agent manifest to run (kind:inline).",
+          description:
+            'Inline agent manifest to run (kind:inline). Include `"runtime_tools": ["log"]` so the ' +
+            "run can emit progress lines the chat shows live (the panel surfaces only `log`-tool " +
+            "output).",
           additionalProperties: true,
         },
-        prompt: { type: "string", description: "Prompt for the inline run (kind:inline)." },
+        prompt: {
+          type: "string",
+          description:
+            "Prompt for the inline run (kind:inline). Tell the run to call the `log` tool to report " +
+            "each meaningful step — those lines are what the chat shows live.",
+        },
         config: {
           type: "object",
           description: "Per-run config override (either kind).",

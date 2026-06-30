@@ -166,7 +166,13 @@ export async function persistRunEvent(
         (level === "info" || level === "warn" || level === "error") &&
         typeof message === "string"
       ) {
-        await appendRunLog(scope, runId, "progress", "progress", message, null, level, executor);
+        // `event='log'` (not the generic `'progress'`) tags rows that came from
+        // the agent's explicit `log` runtime tool, so consumers can isolate the
+        // agent's own narration from auto-emitted lifecycle/tool-call
+        // breadcrumbs (which share `type='progress'`). The chat run card shows
+        // ONLY these `log` rows. The dashboard log viewer treats unknown events
+        // generically, so it renders them unchanged.
+        await appendRunLog(scope, runId, "progress", "log", message, null, level, executor);
       }
       return null;
     }

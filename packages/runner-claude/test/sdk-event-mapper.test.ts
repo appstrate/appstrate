@@ -25,13 +25,7 @@ describe("SdkRunEventMapper — assistant messages", () => {
       },
     });
     expect(events).toEqual([
-      {
-        type: "appstrate.progress",
-        timestamp: fixedNow(),
-        runId: RUN_ID,
-        message: "Hello\nworld",
-        level: "info",
-      },
+      { type: "appstrate.progress", timestamp: fixedNow(), runId: RUN_ID, message: "Hello\nworld" },
     ]);
   });
 
@@ -49,7 +43,6 @@ describe("SdkRunEventMapper — assistant messages", () => {
         timestamp: fixedNow(),
         runId: RUN_ID,
         message: "Tool: search",
-        level: "info",
         data: { tool: "search", args: { q: "x" }, toolCallId: "t1" },
       },
     ]);
@@ -134,7 +127,6 @@ describe("SdkRunEventMapper — tool results (user messages)", () => {
         timestamp: fixedNow(),
         runId: RUN_ID,
         message: "Tool result",
-        level: "info",
         data: { result: "ok", isError: false, toolCallId: "t1" },
       },
     ]);
@@ -149,7 +141,6 @@ describe("SdkRunEventMapper — tool results (user messages)", () => {
       },
     }) as Array<Record<string, unknown>>;
     expect(events[0]!.message).toBe("Tool error");
-    expect(events[0]!.level).toBe("warn");
     expect(events[0]!.data).toMatchObject({ isError: true, toolCallId: "t2" });
   });
 });
