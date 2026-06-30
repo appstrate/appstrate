@@ -233,6 +233,24 @@ export function buildRunSseUrl(args: {
   return `/api/realtime/runs/${encodeURIComponent(runId)}?${qs.toString()}`;
 }
 
+/**
+ * Build the ORG-WIDE realtime run-stream URL (`GET /api/realtime/runs`) used to
+ * discover the run a blocking `run_and_wait` just launched. NOTE: the path is
+ * `/api/realtime/runs`, NOT `/api/realtime` — the latter is not a route (the
+ * realtime router only exposes `/runs`, `/runs/:id`, `/agents/:id/runs`), and
+ * only paths under `/api/realtime/` skip the auth middleware. Returns undefined
+ * without org/app context.
+ */
+export function buildOrgRunsSseUrl(args: {
+  orgId: string | undefined;
+  applicationId: string | undefined;
+}): string | undefined {
+  const { orgId, applicationId } = args;
+  if (!orgId || !applicationId) return undefined;
+  const qs = new URLSearchParams({ orgId, applicationId });
+  return `/api/realtime/runs?${qs.toString()}`;
+}
+
 /** Read org/app ids out of the chat host's forwarded headers (case-tolerant). */
 export function orgAppFromHeaders(headers: Record<string, string> | undefined): {
   orgId: string | undefined;

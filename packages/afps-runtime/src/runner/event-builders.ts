@@ -23,9 +23,21 @@ interface EventBase {
   timestamp: number;
 }
 
-/** Assistant text (or any lifecycle breadcrumb) as an `appstrate.progress` event. */
+/**
+ * Assistant text (or any lifecycle breadcrumb) as an `appstrate.progress` event.
+ * Emitted at `info` so it surfaces in level-filtered views (the chat run card
+ * hides `debug`): an assistant turn IS the run's user-meaningful activity, not
+ * debug noise. The sink defaults a level-less progress event to `debug`, so the
+ * explicit level here is what makes agent activity visible.
+ */
 export function buildProgress(base: EventBase, message: string): RunEvent {
-  return { type: "appstrate.progress", timestamp: base.timestamp, runId: base.runId, message };
+  return {
+    type: "appstrate.progress",
+    timestamp: base.timestamp,
+    runId: base.runId,
+    message,
+    level: "info",
+  };
 }
 
 /** Tool invocation start → `appstrate.progress` carrying `{ tool, args, toolCallId? }`. */
@@ -38,6 +50,7 @@ export function buildToolStartProgress(
     timestamp: base.timestamp,
     runId: base.runId,
     message: `Tool: ${input.tool ?? "unknown"}`,
+    level: "info",
     data: {
       tool: input.tool,
       args: input.args,
@@ -63,6 +76,9 @@ export function buildToolResultProgress(
     timestamp: base.timestamp,
     runId: base.runId,
     message: input.tool !== undefined ? `${label}: ${input.tool}` : label,
+    // A failed tool surfaces as `warn` (amber in the chat card); a normal result
+    // as `info`. Both clear the panel's `debug` filter.
+    level: input.isError ? "warn" : "info",
     data: {
       ...(input.tool !== undefined ? { tool: input.tool } : {}),
       result: input.result,

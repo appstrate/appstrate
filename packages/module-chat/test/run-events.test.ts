@@ -2,6 +2,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  buildOrgRunsSseUrl,
   buildRunSseUrl,
   extractAgentLabel,
   extractRunId,
@@ -383,6 +384,20 @@ describe("buildRunSseUrl", () => {
     expect(
       buildRunSseUrl({ runId: "run_x", orgId: "o", applicationId: undefined }),
     ).toBeUndefined();
+  });
+});
+
+describe("buildOrgRunsSseUrl", () => {
+  test("targets /api/realtime/runs (NOT bare /api/realtime, which is not a route)", () => {
+    const url = buildOrgRunsSseUrl({ orgId: "org_1", applicationId: "app_1" });
+    expect(url).toBe("/api/realtime/runs?orgId=org_1&applicationId=app_1");
+    // Guard against the regression Codex caught: the bare path 404s + isn't
+    // auth-skipped, so discovery silently never fires.
+    expect(url).not.toBe("/api/realtime?orgId=org_1&applicationId=app_1");
+  });
+  test("undefined when org or app missing", () => {
+    expect(buildOrgRunsSseUrl({ orgId: undefined, applicationId: "a" })).toBeUndefined();
+    expect(buildOrgRunsSseUrl({ orgId: "o", applicationId: undefined })).toBeUndefined();
   });
 });
 

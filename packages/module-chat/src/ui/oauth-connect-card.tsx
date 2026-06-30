@@ -63,7 +63,10 @@ function watchConnectionSse(
   let es: EventSource | null = null;
   try {
     es = new EventSource(
-      `/api/realtime?orgId=${encodeURIComponent(orgId)}&applicationId=${encodeURIComponent(appId)}`,
+      // `/api/realtime/runs` (the org-wide stream, which also carries
+      // `connection_update`) — NOT bare `/api/realtime`, which is not a route
+      // (it 404s and isn't auth-skipped), so this backstop never fired.
+      `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&applicationId=${encodeURIComponent(appId)}`,
       { withCredentials: true },
     );
     es.addEventListener("connection_update", (ev) => {

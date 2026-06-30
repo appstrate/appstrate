@@ -14,7 +14,12 @@
 
 import { useEffect, useState } from "react";
 import { useChatHeaders } from "./runtime-context.ts";
-import { matchesLaunchedRun, orgAppFromHeaders, parseRunUpdateDiscovery } from "./run-events.ts";
+import {
+  buildOrgRunsSseUrl,
+  matchesLaunchedRun,
+  orgAppFromHeaders,
+  parseRunUpdateDiscovery,
+} from "./run-events.ts";
 
 /**
  * @param active true while we still need to discover the id (the tool is
@@ -29,9 +34,9 @@ export function useDiscoverRunId(active: boolean, target: string | undefined): s
   useEffect(() => {
     if (!active || runId || typeof EventSource === "undefined") return;
     const { orgId, applicationId } = orgAppFromHeaders(getHeaders?.() ?? {});
-    if (!orgId || !applicationId) return;
+    const url = buildOrgRunsSseUrl({ orgId, applicationId });
+    if (!url) return;
 
-    const url = `/api/realtime?orgId=${encodeURIComponent(orgId)}&applicationId=${encodeURIComponent(applicationId)}`;
     const es = new EventSource(url, { withCredentials: true });
     let found = false;
 
