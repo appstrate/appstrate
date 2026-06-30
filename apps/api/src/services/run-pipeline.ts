@@ -71,6 +71,8 @@ export interface RunPipelineParams {
   input?: Record<string, unknown> | null;
   files?: FileReference[];
   config: Record<string, unknown>;
+  /** Opaque run metadata stamped at creation time. */
+  metadata?: Record<string, unknown> | null;
   /**
    * Per-run override delta — the raw object the caller sent in the request
    * body. `config` above is the resolved (deep-merged) snapshot. Persisted
@@ -482,6 +484,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       apiKeyId,
       agentScope: agentDenorm.scope,
       agentName: agentDenorm.name,
+      metadata: params.metadata ?? null,
       config,
       configOverride: params.configOverride ?? null,
       dependencyOverrides: params.dependencyOverrides ?? null,

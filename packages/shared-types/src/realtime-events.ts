@@ -21,7 +21,7 @@ import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import { runStatusEnum } from "@appstrate/db/schema";
 import type { RunWireDto } from "./index.ts";
 
-/** `run_update` — emitted by the `notify_run_change` trigger (13 fields). */
+/** `run_update` — emitted by the `notify_run_change` trigger. */
 export const runUpdateEventSchema = z.object({
   operation: z.enum(["INSERT", "UPDATE"]),
   id: z.string(),
@@ -32,6 +32,7 @@ export const runUpdateEventSchema = z.object({
   orgId: z.string(),
   applicationId: z.string(),
   scheduleId: z.string().nullable(),
+  mcpCorrelationId: z.string().nullable().optional(),
   error: z.string().nullable(),
   startedAt: z.string().nullable(),
   completedAt: z.string().nullable(),

@@ -5,6 +5,7 @@ import {
   buildOrgRunsSseUrl,
   buildRunSseUrl,
   extractAgentLabel,
+  extractRunCorrelationId,
   extractRunId,
   extractRunStatus,
   buildRunPageHref,
@@ -258,17 +259,16 @@ describe("buildRunPageHref", () => {
 });
 
 describe("parseRunUpdateDiscovery", () => {
-  test("parses an org-wide run_update frame", () => {
+  test("parses id + correlation id from an org-wide run_update frame", () => {
     const raw = JSON.stringify({
       operation: "INSERT",
       id: "run_x",
-      packageId: "@acme/writer",
+      mcpCorrelationId: "corr_1",
       status: "pending",
     });
     const u = parseRunUpdateDiscovery(raw);
     expect(u?.id).toBe("run_x");
-    expect(u?.packageId).toBe("@acme/writer");
-    expect(u?.operation).toBe("INSERT");
+    expect(u?.mcpCorrelationId).toBe("corr_1");
   });
   test("undefined when id missing or malformed", () => {
     expect(parseRunUpdateDiscovery(JSON.stringify({ status: "pending" }))).toBeUndefined();
@@ -277,21 +277,21 @@ describe("parseRunUpdateDiscovery", () => {
 });
 
 describe("matchesLaunchedRun", () => {
-  test("kind:agent — exact package id match (any operation)", () => {
-    expect(
-      matchesLaunchedRun({ operation: "UPDATE", id: "run_1", packageId: "@acme/w" }, "@acme/w"),
-    ).toBe(true);
-    expect(
-      matchesLaunchedRun({ operation: "INSERT", id: "run_1", packageId: "@other/x" }, "@acme/w"),
-    ).toBe(false);
-  });
-  test("inline (no target) — any freshly INSERTed run", () => {
-    expect(matchesLaunchedRun({ operation: "INSERT", id: "run_1" }, undefined)).toBe(true);
-    // an UPDATE to a pre-existing run is not a fresh launch
-    expect(matchesLaunchedRun({ operation: "UPDATE", id: "run_1" }, undefined)).toBe(false);
+  test("requires exact MCP correlation id", () => {
+    expect(matchesLaunchedRun({ id: "run_1", mcpCorrelationId: "corr_1" }, "corr_1")).toBe(true);
+    expect(matchesLaunchedRun({ id: "run_1", mcpCorrelationId: "other" }, "corr_1")).toBe(false);
+    expect(matchesLaunchedRun({ id: "run_1" }, undefined)).toBe(false);
   });
   test("ignores non-run ids", () => {
-    expect(matchesLaunchedRun({ operation: "INSERT", id: "conn_1" }, undefined)).toBe(false);
+    expect(matchesLaunchedRun({ id: "conn_1", mcpCorrelationId: "corr_1" }, "corr_1")).toBe(false);
+  });
+});
+
+describe("extractRunCorrelationId", () => {
+  test("reads run_and_wait correlation arg", () => {
+    expect(extractRunCorrelationId({ correlation_id: "corr_1" })).toBe("corr_1");
+    expect(extractRunCorrelationId({ correlation_id: "" })).toBeUndefined();
+    expect(extractRunCorrelationId(null)).toBeUndefined();
   });
 });
 

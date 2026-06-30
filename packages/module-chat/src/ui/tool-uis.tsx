@@ -40,6 +40,7 @@ import { useDiscoverRunId } from "./use-discover-run-id.ts";
 import {
   buildRunPageHref,
   extractAgentLabel,
+  extractRunCorrelationId,
   extractRunId,
   extractRunPackageId,
   extractRunStatus,
@@ -409,13 +410,9 @@ export const GetMeToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>
  */
 function RunAndWaitCard(props: AnyToolProps): React.ReactNode {
   const resultRunId = extractRunId(props.result);
-  const kind = stringArg(props.args, "kind");
-  const agentLabel = extractAgentLabel(props.args);
-  // For kind:agent the package id is the agent label (`@scope/name`) — an exact
-  // match target. For inline it's a server-minted shadow id we can't predict, so
-  // pass no target (match any freshly-started run; the chat runs one at a time).
-  const target = kind === "agent" && agentLabel?.startsWith("@") ? agentLabel : undefined;
-  const discoveredRunId = useDiscoverRunId(!resultRunId, target);
+  // The blocking tool stamps this id into run metadata, then the org-wide
+  // realtime stream echoes it back so discovery is exact.
+  const discoveredRunId = useDiscoverRunId(!resultRunId, extractRunCorrelationId(props.args));
   return buildRunLaunch(props, resultRunId ?? discoveredRunId);
 }
 

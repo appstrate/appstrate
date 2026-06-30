@@ -71,6 +71,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'org_id', NEW.org_id,
         'application_id', NEW.application_id,
         'schedule_id', NEW.schedule_id,
+        'mcp_correlation_id', NEW.metadata ->> 'appstrate.mcpRunAndWaitCorrelationId',
         'error', NEW.error,
         'started_at', to_char(NEW.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'completed_at', to_char(NEW.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),

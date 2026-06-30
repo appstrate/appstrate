@@ -24,15 +24,17 @@ import {
 /**
  * @param active true while we still need to discover the id (the tool is
  *               running and its result hasn't surfaced a run id yet).
- * @param target the agent package id (`@scope/name`) to match for `kind:agent`,
- *               or undefined for an inline run (match any freshly-started run).
+ * @param correlationId exact id stamped by `run_and_wait` into run metadata.
  */
-export function useDiscoverRunId(active: boolean, target: string | undefined): string | undefined {
+export function useDiscoverRunId(
+  active: boolean,
+  correlationId: string | undefined,
+): string | undefined {
   const getHeaders = useChatHeaders();
   const [runId, setRunId] = useState<string>();
 
   useEffect(() => {
-    if (!active || runId || typeof EventSource === "undefined") return;
+    if (!active || !correlationId || runId || typeof EventSource === "undefined") return;
     const { orgId, applicationId } = orgAppFromHeaders(getHeaders?.() ?? {});
     const url = buildOrgRunsSseUrl({ orgId, applicationId });
     if (!url) return;
@@ -43,7 +45,7 @@ export function useDiscoverRunId(active: boolean, target: string | undefined): s
     es.addEventListener("run_update", (e) => {
       if (found) return;
       const update = parseRunUpdateDiscovery((e as MessageEvent).data);
-      if (update && matchesLaunchedRun(update, target)) {
+      if (update && matchesLaunchedRun(update, correlationId)) {
         found = true;
         setRunId(update.id); // setState from an SSE callback — allowed by the rules-of-react gate
         es.close();
@@ -51,7 +53,7 @@ export function useDiscoverRunId(active: boolean, target: string | undefined): s
     });
 
     return () => es.close();
-  }, [active, target, runId, getHeaders]);
+  }, [active, correlationId, runId, getHeaders]);
 
   return runId;
 }

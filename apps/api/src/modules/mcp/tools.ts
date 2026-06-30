@@ -641,6 +641,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
 /** Terminal run statuses (mirrors `TERMINAL_RUN_STATUSES` in the runs schema). */
 const TERMINAL_RUN_STATUSES = new Set(["success", "failed", "timeout", "cancelled"]);
+const MCP_RUN_AND_WAIT_CORRELATION_METADATA_KEY = "appstrate.mcpRunAndWaitCorrelationId";
 /**
  * Total time `run_and_wait` blocks before giving up and returning a
  * still-running run. The default blocks until the run is TERMINAL (the tool's
@@ -734,6 +735,11 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
           description:
             "`agent` runs a published/draft agent by scope+name; `inline` runs a manifest.",
         },
+        correlation_id: {
+          type: "string",
+          description:
+            "Fresh unique id for this tool call. Required so chat can correlate the blocking run_and_wait call with the exact run on the realtime stream.",
+        },
         scope: { type: "string", description: "Agent scope, keep the leading `@` (kind:agent)." },
         name: { type: "string", description: "Agent name (kind:agent)." },
         version: {
@@ -775,7 +781,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
             `for roughly the run's duration.`,
         },
       },
-      required: ["kind"],
+      required: ["kind", "correlation_id"],
     },
   };
 
@@ -796,6 +802,16 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       throw new McpError(ErrorCode.InvalidParams, "`kind` must be 'agent' or 'inline'.");
     }
 
+    const correlationId = asString(args.correlation_id);
+    if (!correlationId) {
+      emit(ctx, {
+        tool: "run_and_wait",
+        durationMs: performance.now() - start,
+        outcome: "rejected",
+      });
+      return textResult({ error: "`correlation_id` required." }, true);
+    }
+
     // --- launch (fire-and-forget; the route returns the created run) ---
     let launchResponse: Response;
     if (kind === "agent") {
@@ -809,7 +825,9 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         });
         return textResult({ error: "`scope` and `name` are required for kind:'agent'." }, true);
       }
-      const body: Record<string, unknown> = {};
+      const body: Record<string, unknown> = {
+        metadata: { [MCP_RUN_AND_WAIT_CORRELATION_METADATA_KEY]: correlationId },
+      };
       if (asRecord(args.input)) body.input = args.input;
       if (asRecord(args.config)) body.config = args.config;
       const query: Record<string, unknown> = {};
@@ -830,7 +848,10 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         });
         return textResult({ error: "`manifest` is required for kind:'inline'." }, true);
       }
-      const body: Record<string, unknown> = { manifest };
+      const body: Record<string, unknown> = {
+        manifest,
+        metadata: { [MCP_RUN_AND_WAIT_CORRELATION_METADATA_KEY]: correlationId },
+      };
       const prompt = asString(args.prompt);
       if (prompt) body.prompt = prompt;
       if (asRecord(args.config)) body.config = args.config;

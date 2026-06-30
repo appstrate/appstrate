@@ -239,6 +239,7 @@ export interface InlineRunBody {
   prompt?: unknown;
   input?: Record<string, unknown>;
   config?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   modelId?: string | null;
   proxyId?: string | null;
 }

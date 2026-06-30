@@ -117,16 +117,15 @@ export function parseRunTiming(body: unknown): RunTiming | undefined {
 }
 
 /**
- * `run_update` frame from the org-wide realtime stream, with the fields needed
- * to discover the run a blocking `run_and_wait` just launched (its id only
- * appears in the tool result once the call returns, which is after the run is
- * already done — too late to stream live).
+ * `run_update` frame from the org-wide realtime stream, reduced to the two
+ * fields discovery needs: the run `id` and the `mcpCorrelationId` echoed back
+ * from `runs.metadata`. A blocking `run_and_wait` only learns its run id once
+ * the call returns — after the run is already done, too late to stream live — so
+ * the panel finds the run on the stream by matching this correlation id.
  */
 export const runUpdateDiscoverySchema = z.object({
-  operation: z.string().optional(),
   id: z.string(),
-  packageId: z.string().nullable().optional(),
-  status: z.string().optional(),
+  mcpCorrelationId: z.string().nullable().optional(),
 });
 export type RunUpdateDiscovery = z.infer<typeof runUpdateDiscoverySchema>;
 
@@ -137,18 +136,19 @@ export function parseRunUpdateDiscovery(raw: string): RunUpdateDiscovery | undef
 
 /**
  * Does this org-wide `run_update` correspond to the run a `run_and_wait` just
- * launched? `target` is the agent's package id (`@scope/name`) for `kind:agent`
- * — an exact match, robust. For an inline run the package id is a server-minted
- * shadow we can't predict, so `target` is undefined and we accept any freshly
- * INSERTed run (the chat launches one at a time, so the new row is ours).
+ * launched? Matched ONLY on an exact correlation id: `run_and_wait` mints a
+ * fresh `correlation_id`, stamps it into `runs.metadata`, and the realtime
+ * trigger echoes it back as `mcpCorrelationId` on every frame for that run. This
+ * is robust for both `kind:agent` and `kind:inline` and never misattributes a
+ * concurrent run. With no correlation id (or no match) we deliberately match
+ * nothing — better to show no live logs than the wrong run's.
  */
 export function matchesLaunchedRun(
   update: RunUpdateDiscovery,
-  target: string | undefined,
+  correlationId: string | undefined,
 ): boolean {
   if (!update.id.startsWith("run_")) return false;
-  if (target) return update.packageId === target;
-  return update.operation === "INSERT";
+  return !!correlationId && update.mcpCorrelationId === correlationId;
 }
 
 /**
@@ -391,6 +391,12 @@ export function extractRunPackageId(result: unknown): string | undefined {
   const unwrapped = asRecord(unwrapResult(result));
   if (!unwrapped) return undefined;
   return nonEmptyString(asRecord(unwrapped.body)?.packageId) ?? nonEmptyString(unwrapped.packageId);
+}
+
+/** Correlation id passed to `run_and_wait`, used only for live discovery. */
+export function extractRunCorrelationId(args: unknown): string | undefined {
+  const rec = asRecord(args);
+  return nonEmptyString(rec?.correlation_id);
 }
 
 /**

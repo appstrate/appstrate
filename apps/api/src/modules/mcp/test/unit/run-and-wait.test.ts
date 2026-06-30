@@ -16,6 +16,10 @@ import { buildMcpTools, type Dispatch } from "../../tools.ts";
 
 const noExtra = {} as unknown as AppstrateRequestExtra;
 
+function runArgs(args: Record<string, unknown>): Record<string, unknown> {
+  return { correlation_id: "corr_test", ...args };
+}
+
 function parseResult(result: CallToolResult): Record<string, unknown> {
   const first = result.content[0];
   if (!first || first.type !== "text") throw new Error("expected text content");
@@ -96,7 +100,7 @@ describe("run_and_wait", () => {
       getRun: jsonResponse({ id: "run_42", status: "success", result: { answer: 7 }, error: null }),
     });
     const res = await tool.handler(
-      { kind: "agent", scope: "@acme", name: "writer", input: { topic: "x" } },
+      runArgs({ kind: "agent", scope: "@acme", name: "writer", input: { topic: "x" } }),
       noExtra,
     );
     const body = parseResult(res);
@@ -108,7 +112,10 @@ describe("run_and_wait", () => {
     // Launch hit the agent run route with the scope/name path + input body.
     const launch = calls.find((c) => c.method === "POST");
     expect(launch?.path).toBe("/api/agents/@acme/writer/run");
-    expect(launch?.body).toEqual({ input: { topic: "x" } });
+    expect(launch?.body).toEqual({
+      input: { topic: "x" },
+      metadata: { "appstrate.mcpRunAndWaitCorrelationId": "corr_test" },
+    });
     // Followed with a long-poll on the returned id (blocks until terminal).
     const poll = calls.find((c) => c.method === "GET");
     expect(poll?.path).toBe("/api/runs/run_42");
@@ -120,7 +127,10 @@ describe("run_and_wait", () => {
       launch: () => jsonResponse({ id: "run_1", status: "pending" }),
       getRun: jsonResponse({ id: "run_1", status: "success" }),
     });
-    await tool.handler({ kind: "agent", scope: "@acme", name: "a", version: "draft" }, noExtra);
+    await tool.handler(
+      runArgs({ kind: "agent", scope: "@acme", name: "a", version: "draft" }),
+      noExtra,
+    );
     const launch = calls.find((c) => c.method === "POST");
     expect(launch?.search).toContain("version=draft");
   });
@@ -131,14 +141,18 @@ describe("run_and_wait", () => {
       getRun: jsonResponse({ id: "run_inline", status: "success", result: { ok: true } }),
     });
     const res = await tool.handler(
-      { kind: "inline", manifest: { name: "tmp" }, prompt: "do it" },
+      runArgs({ kind: "inline", manifest: { name: "tmp" }, prompt: "do it" }),
       noExtra,
     );
     const body = parseResult(res);
     expect(body.done).toBe(true);
     const launch = calls.find((c) => c.method === "POST");
     expect(launch?.path).toBe("/api/runs/inline");
-    expect(launch?.body).toEqual({ manifest: { name: "tmp" }, prompt: "do it" });
+    expect(launch?.body).toEqual({
+      manifest: { name: "tmp" },
+      prompt: "do it",
+      metadata: { "appstrate.mcpRunAndWaitCorrelationId": "corr_test" },
+    });
   });
 
   it("long-polls across multiple windows until terminal", async () => {
@@ -150,7 +164,7 @@ describe("run_and_wait", () => {
       ],
     });
     const res = await tool.handler(
-      { kind: "agent", scope: "@a", name: "b", max_wait_seconds: 110 },
+      runArgs({ kind: "agent", scope: "@a", name: "b", max_wait_seconds: 110 }),
       noExtra,
     );
     const body = parseResult(res);
@@ -165,7 +179,7 @@ describe("run_and_wait", () => {
       getRun: jsonResponse({ id: "run_1", status: "running" }),
     });
     const res = await tool.handler(
-      { kind: "agent", scope: "@a", name: "b", max_wait_seconds: 55 },
+      runArgs({ kind: "agent", scope: "@a", name: "b", max_wait_seconds: 55 }),
       noExtra,
     );
     const body = parseResult(res);
@@ -179,7 +193,7 @@ describe("run_and_wait", () => {
     const { tool, calls } = makeRunAndWait({
       launch: () => jsonResponse({ error: "no_published_version" }, 404),
     });
-    const res = await tool.handler({ kind: "agent", scope: "@a", name: "b" }, noExtra);
+    const res = await tool.handler(runArgs({ kind: "agent", scope: "@a", name: "b" }), noExtra);
     expect(res.isError).toBe(true);
     const body = parseResult(res);
     expect(body.status).toBe(404);
@@ -191,7 +205,7 @@ describe("run_and_wait", () => {
       launch: () => jsonResponse({ id: "run_1", status: "pending" }),
       getRun: jsonResponse({ error: "not_found" }, 404),
     });
-    const res = await tool.handler({ kind: "agent", scope: "@a", name: "b" }, noExtra);
+    const res = await tool.handler(runArgs({ kind: "agent", scope: "@a", name: "b" }), noExtra);
     expect(res.isError).toBe(true);
     expect(parseResult(res).status).toBe(404);
   });
@@ -200,36 +214,46 @@ describe("run_and_wait", () => {
     const { tool } = makeRunAndWait({
       launch: () => jsonResponse({ status: "pending" }),
     });
-    const res = await tool.handler({ kind: "agent", scope: "@a", name: "b" }, noExtra);
+    const res = await tool.handler(runArgs({ kind: "agent", scope: "@a", name: "b" }), noExtra);
     expect(res.isError).toBe(true);
     expect(String(parseResult(res).error)).toContain("no run id");
   });
 
   it("requires scope and name for kind:agent", async () => {
     const { tool } = makeRunAndWait({});
-    const res = await tool.handler({ kind: "agent", name: "b" }, noExtra);
+    const res = await tool.handler(runArgs({ kind: "agent", name: "b" }), noExtra);
     expect(res.isError).toBe(true);
     expect(String(parseResult(res).error)).toContain("scope");
   });
 
   it("requires a manifest for kind:inline", async () => {
     const { tool } = makeRunAndWait({});
-    const res = await tool.handler({ kind: "inline", prompt: "x" }, noExtra);
+    const res = await tool.handler(runArgs({ kind: "inline", prompt: "x" }), noExtra);
     expect(res.isError).toBe(true);
     expect(String(parseResult(res).error)).toContain("manifest");
   });
 
   it("rejects an invalid kind with InvalidParams", async () => {
     const { tool } = makeRunAndWait({});
-    await expect(tool.handler({ kind: "bogus" }, noExtra)).rejects.toBeInstanceOf(McpError);
-    await expect(tool.handler({ kind: "bogus" }, noExtra)).rejects.toMatchObject({
+    await expect(tool.handler(runArgs({ kind: "bogus" }), noExtra)).rejects.toBeInstanceOf(
+      McpError,
+    );
+    await expect(tool.handler(runArgs({ kind: "bogus" }), noExtra)).rejects.toMatchObject({
       code: ErrorCode.InvalidParams,
     });
   });
 
+  it("requires correlation_id before launching", async () => {
+    const { tool, calls } = makeRunAndWait({});
+    const res = await tool.handler({ kind: "agent", scope: "@a", name: "b" }, noExtra);
+    expect(res.isError).toBe(true);
+    expect(String(parseResult(res).error)).toContain("correlation_id");
+    expect(calls.length).toBe(0);
+  });
+
   it("denies the call without mcp:invoke", async () => {
     const { tool, calls } = makeRunAndWait({ permissions: ["mcp:read"] });
-    const res = await tool.handler({ kind: "agent", scope: "@a", name: "b" }, noExtra);
+    const res = await tool.handler(runArgs({ kind: "agent", scope: "@a", name: "b" }), noExtra);
     expect(res.isError).toBe(true);
     expect(String(parseResult(res).error)).toContain("mcp:invoke");
     expect(calls.length).toBe(0);
@@ -244,7 +268,7 @@ describe("run_and_wait", () => {
       getRun: jsonResponse({ id: "run_1", status: "success" }),
     });
     const res = await tool.handler(
-      { kind: "agent", scope: "@a", name: "b", max_wait_seconds: 99999 },
+      runArgs({ kind: "agent", scope: "@a", name: "b", max_wait_seconds: 99999 }),
       noExtra,
     );
     expect(parseResult(res).done).toBe(true);
