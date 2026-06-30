@@ -90,7 +90,7 @@ describe("run_and_wait", () => {
     expect(tool.descriptor.annotations?.readOnlyHint).toBe(false);
   });
 
-  it("launches an agent run and returns the terminal result", async () => {
+  it("waits until terminal and returns the result by default (no max_wait_seconds)", async () => {
     const { tool, calls } = makeRunAndWait({
       launch: () => jsonResponse({ id: "run_42", status: "pending" }),
       getRun: jsonResponse({ id: "run_42", status: "success", result: { answer: 7 }, error: null }),
@@ -109,7 +109,7 @@ describe("run_and_wait", () => {
     const launch = calls.find((c) => c.method === "POST");
     expect(launch?.path).toBe("/api/agents/@acme/writer/run");
     expect(launch?.body).toEqual({ input: { topic: "x" } });
-    // Followed with a long-poll on the returned id.
+    // Followed with a long-poll on the returned id (blocks until terminal).
     const poll = calls.find((c) => c.method === "GET");
     expect(poll?.path).toBe("/api/runs/run_42");
     expect(poll?.search).toContain("wait=");

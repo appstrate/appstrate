@@ -642,14 +642,18 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
 /** Terminal run statuses (mirrors `TERMINAL_RUN_STATUSES` in the runs schema). */
 const TERMINAL_RUN_STATUSES = new Set(["success", "failed", "timeout", "cancelled"]);
 /**
- * Default total time `run_and_wait` blocks before returning a still-running
- * run. One long-poll window (the run-get `?wait=` cap is 55s) — the SAME
- * proven-safe envelope `invoke_operation(getRun, {wait:true})` already blocks
- * for, so no MCP client times out at the default. Callers whose transport
- * tolerates longer may opt into more via `max_wait_seconds`.
+ * Total time `run_and_wait` blocks before giving up and returning a
+ * still-running run. The default blocks until the run is TERMINAL (the tool's
+ * whole contract is "launch AND wait"): the value is the safety ceiling, set
+ * just under the chat's per-turn MCP timeout (~30 min) so a pathologically long
+ * run can't wedge the call forever. The chat UI shows the run's logs live while
+ * this blocks (it discovers the run from the realtime run stream, independent of
+ * this call). Internally it long-polls the run-get operation in ~55 s windows
+ * (the server's `?wait=` cap) until terminal. `max_wait_seconds` lowers the
+ * ceiling for a caller that wants to bail out sooner.
  */
-const DEFAULT_RUN_WAIT_SECONDS = 55;
-const MAX_RUN_WAIT_SECONDS = 600;
+const MAX_RUN_WAIT_SECONDS = 1740;
+const DEFAULT_RUN_WAIT_SECONDS = MAX_RUN_WAIT_SECONDS;
 /** Per-iteration long-poll window — matches the run-get `?wait=` server cap. */
 const RUN_POLL_WINDOW_SECONDS = 55;
 
@@ -702,13 +706,14 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "run_and_wait",
     description:
-      'Launch a run and follow it in one call: starts an agent run (`kind:"agent"`, by ' +
-      '`scope`/`name`) or an inline run (`kind:"inline"`, by `manifest`+`prompt`), then ' +
-      "long-polls until it reaches a terminal status (success/failed/timeout/cancelled) or the " +
-      "wait budget elapses. Returns `{ id, status, done, result?, error? }`. When `done` is " +
-      "false the run is still going — its live logs stream in the chat; keep following with the " +
-      "run-get operation (`wait:true`) and read `result` when it finishes. Prefer an existing " +
-      "agent over an inline manifest when one matches the intent.",
+      'Launch a run AND wait for it to finish, in one call: starts an agent run (`kind:"agent"`, ' +
+      'by `scope`/`name`) or an inline run (`kind:"inline"`, by `manifest`+`prompt`), then blocks ' +
+      "until the run reaches a terminal status (success/failed/timeout/cancelled) and returns " +
+      "`{ id, status, done, result?, error? }`. Read `result` for the run's deliverable — you do " +
+      "NOT need a separate run-get call; this already waited. The chat shows the run's logs live " +
+      "while it runs. Prefer an existing agent over an inline manifest when one matches the intent. " +
+      "(Only if it returns `done:false` — a run that outran the wait ceiling — keep following with " +
+      "the run-get operation, `wait:true`.)",
     annotations: {
       title: "Run and wait",
       readOnlyHint: false,
@@ -752,9 +757,10 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         max_wait_seconds: {
           type: "number",
           description:
-            `Total seconds to wait for terminal status before returning a still-running run. ` +
-            `Default ${DEFAULT_RUN_WAIT_SECONDS}, max ${MAX_RUN_WAIT_SECONDS}. Larger values keep ` +
-            `the call blocked longer — only raise it if your transport tolerates a long response.`,
+            `Max seconds to wait for terminal status before returning a still-running run. ` +
+            `Defaults to ${DEFAULT_RUN_WAIT_SECONDS} (effectively "until the run finishes"); lower ` +
+            `it to bail out sooner. The wait long-polls in ~55 s windows, so the call stays open ` +
+            `for roughly the run's duration.`,
         },
       },
       required: ["kind"],

@@ -85,6 +85,41 @@ export const runUpdateLiteSchema = z.object({
 export type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
 
 /**
+ * `run_update` frame from the org-wide realtime stream, with the fields needed
+ * to discover the run a blocking `run_and_wait` just launched (its id only
+ * appears in the tool result once the call returns, which is after the run is
+ * already done — too late to stream live).
+ */
+export const runUpdateDiscoverySchema = z.object({
+  operation: z.string().optional(),
+  id: z.string(),
+  packageId: z.string().nullable().optional(),
+  status: z.string().optional(),
+});
+export type RunUpdateDiscovery = z.infer<typeof runUpdateDiscoverySchema>;
+
+export function parseRunUpdateDiscovery(raw: string): RunUpdateDiscovery | undefined {
+  const parsed = runUpdateDiscoverySchema.safeParse(safeJsonParse(raw));
+  return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * Does this org-wide `run_update` correspond to the run a `run_and_wait` just
+ * launched? `target` is the agent's package id (`@scope/name`) for `kind:agent`
+ * — an exact match, robust. For an inline run the package id is a server-minted
+ * shadow we can't predict, so `target` is undefined and we accept any freshly
+ * INSERTed run (the chat launches one at a time, so the new row is ours).
+ */
+export function matchesLaunchedRun(
+  update: RunUpdateDiscovery,
+  target: string | undefined,
+): boolean {
+  if (!update.id.startsWith("run_")) return false;
+  if (target) return update.packageId === target;
+  return update.operation === "INSERT";
+}
+
+/**
  * Pull the launched run id out of a tool-call result. The invoke-operation
  * envelope is `{ status, body }` (the run resource lives in `body`); the
  * bundled `run_and_wait` tool returns the run resource at the top level. Try

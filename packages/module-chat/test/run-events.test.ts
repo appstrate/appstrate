@@ -13,6 +13,8 @@ import {
   lastLogText,
   lastVisibleLogText,
   logLineText,
+  matchesLaunchedRun,
+  parseRunUpdateDiscovery,
   maxLogId,
   mergeLogs,
   orgAppFromHeaders,
@@ -212,6 +214,44 @@ describe("buildRunPageHref", () => {
   });
   test("undefined without a package id", () => {
     expect(buildRunPageHref(undefined, "run_42")).toBeUndefined();
+  });
+});
+
+describe("parseRunUpdateDiscovery", () => {
+  test("parses an org-wide run_update frame", () => {
+    const raw = JSON.stringify({
+      operation: "INSERT",
+      id: "run_x",
+      packageId: "@acme/writer",
+      status: "pending",
+    });
+    const u = parseRunUpdateDiscovery(raw);
+    expect(u?.id).toBe("run_x");
+    expect(u?.packageId).toBe("@acme/writer");
+    expect(u?.operation).toBe("INSERT");
+  });
+  test("undefined when id missing or malformed", () => {
+    expect(parseRunUpdateDiscovery(JSON.stringify({ status: "pending" }))).toBeUndefined();
+    expect(parseRunUpdateDiscovery("{bad")).toBeUndefined();
+  });
+});
+
+describe("matchesLaunchedRun", () => {
+  test("kind:agent — exact package id match (any operation)", () => {
+    expect(
+      matchesLaunchedRun({ operation: "UPDATE", id: "run_1", packageId: "@acme/w" }, "@acme/w"),
+    ).toBe(true);
+    expect(
+      matchesLaunchedRun({ operation: "INSERT", id: "run_1", packageId: "@other/x" }, "@acme/w"),
+    ).toBe(false);
+  });
+  test("inline (no target) — any freshly INSERTed run", () => {
+    expect(matchesLaunchedRun({ operation: "INSERT", id: "run_1" }, undefined)).toBe(true);
+    // an UPDATE to a pre-existing run is not a fresh launch
+    expect(matchesLaunchedRun({ operation: "UPDATE", id: "run_1" }, undefined)).toBe(false);
+  });
+  test("ignores non-run ids", () => {
+    expect(matchesLaunchedRun({ operation: "INSERT", id: "conn_1" }, undefined)).toBe(false);
   });
 });
 

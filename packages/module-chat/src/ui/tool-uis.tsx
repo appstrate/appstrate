@@ -36,6 +36,7 @@ import { Modal } from "./modal.tsx";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { RunPanel } from "./run-panel.tsx";
+import { useDiscoverRunId } from "./use-discover-run-id.ts";
 import {
   buildRunPageHref,
   extractAgentLabel,
@@ -241,9 +242,13 @@ type AnyToolProps = ToolCallMessagePartProps<Record<string, unknown>, unknown>;
  * the SSE log tail + live status kick in once the id is known. Builds the same
  * input/output/metadata detail body the generic card's modal shows, so clicking
  * the panel opens identical details.
+ *
+ * `runId` is passed in: `invoke_operation(runAgent|runInline)` reads it straight
+ * from the result (immediate), while `run_and_wait` blocks until terminal so its
+ * panel discovers the id from the realtime stream (`RunAndWaitCard`) and passes
+ * that.
  */
-function renderRunLaunch(props: AnyToolProps): React.ReactNode {
-  const runId = extractRunId(props.result);
+function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.ReactNode {
   const unwrapped = unwrapResult(props.result);
   const meta = definedEntries({
     tool_call_id: props.toolCallId,
@@ -267,12 +272,19 @@ function renderRunLaunch(props: AnyToolProps): React.ReactNode {
       <DetailSection title="Métadonnées" value={meta} />
     </div>
   );
+  // Run-page link needs the package id. The result carries it once known;
+  // during a blocking run_and_wait (id discovered, result not yet in) fall back
+  // to the agent label only when it IS a package id (`@scope/name`, kind:agent).
+  // An inline run's label is a manifest name, not a package id — no link until
+  // the result lands.
+  const packageId =
+    extractRunPackageId(props.result) ?? (agentLabel?.startsWith("@") ? agentLabel : undefined);
   return (
     <RunPanel
       runId={runId}
       initialStatus={extractRunStatus(props.result)}
       agentLabel={agentLabel}
-      runHref={runId ? buildRunPageHref(extractRunPackageId(props.result), runId) : undefined}
+      runHref={runId ? buildRunPageHref(packageId, runId) : undefined}
       phase={deriveToolPhase(props)}
       modalTitle={modalTitle}
       details={details}
@@ -321,9 +333,9 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       />
     );
 
-    // Run launch (runAgent / runInline) → rich live run panel (constant height,
-    // from launch through terminal).
-    if (isRunLaunchOp(opId)) return renderRunLaunch(props);
+    // Run launch (runAgent / runInline) → rich live run panel. These return the
+    // run id immediately in the result, so no discovery is needed.
+    if (isRunLaunchOp(opId)) return buildRunLaunch(props, extractRunId(result));
 
     return card;
   },
@@ -387,11 +399,29 @@ export const GetMeToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>
   ),
 });
 
-// `run_and_wait` is its own MCP tool (not invoke_operation), so it needs its
-// own UI. The rich RunPanel renders from the start (constant height): agent
-// name + live status, and the SSE log tail once the run id is known. A
-// still-running run (`done:false` early return) keeps streaming over SSE.
+/**
+ * `run_and_wait` card. The tool blocks until the run is terminal, so its result
+ * (with the run id) only lands after the run is already done — too late to
+ * stream. So while it's still running we DISCOVER the run id from the org-wide
+ * realtime stream (`useDiscoverRunId`) and feed it to the panel, which then
+ * streams the logs + live status throughout. Once the tool returns, the result's
+ * own id takes over (same value).
+ */
+function RunAndWaitCard(props: AnyToolProps): React.ReactNode {
+  const resultRunId = extractRunId(props.result);
+  const kind = stringArg(props.args, "kind");
+  const agentLabel = extractAgentLabel(props.args);
+  // For kind:agent the package id is the agent label (`@scope/name`) — an exact
+  // match target. For inline it's a server-minted shadow id we can't predict, so
+  // pass no target (match any freshly-started run; the chat runs one at a time).
+  const target = kind === "agent" && agentLabel?.startsWith("@") ? agentLabel : undefined;
+  const discoveredRunId = useDiscoverRunId(!resultRunId, target);
+  return buildRunLaunch(props, resultRunId ?? discoveredRunId);
+}
+
+// `run_and_wait` is its own MCP tool (not invoke_operation), so it needs its own
+// UI — a component (not a plain render fn) because it calls a discovery hook.
 export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "run_and_wait",
-  render: (props: AnyToolProps) => renderRunLaunch(props),
+  render: (props: AnyToolProps) => <RunAndWaitCard {...props} />,
 });
