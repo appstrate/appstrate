@@ -23,6 +23,7 @@ import {
   parseRunLogFrame,
   parseRunUpdateFrame,
   safeJsonParse,
+  visibleLogEntries,
   type RunLogLine,
 } from "../src/ui/run-events.ts";
 
@@ -190,6 +191,31 @@ describe("lastVisibleLogText", () => {
   });
   test("undefined when only debug lines", () => {
     expect(lastVisibleLogText([{ id: 1, level: "debug", message: "x" }])).toBeUndefined();
+  });
+});
+
+describe("visibleLogEntries", () => {
+  test("keeps non-debug lines with text, in ascending id order", () => {
+    const logs: RunLogLine[] = [
+      { id: 1, level: "info", message: "a" },
+      { id: 2, level: "debug", message: "noise" },
+      { id: 3, level: "warn", message: "b" },
+    ];
+    expect(visibleLogEntries(logs)).toEqual([
+      { id: 1, text: "a" },
+      { id: 3, text: "b" },
+    ]);
+  });
+  test("drops lines without displayable text", () => {
+    const logs: RunLogLine[] = [
+      { id: 1, level: "info", message: "a" },
+      { id: 2, level: "info", message: null, event: null, data: null },
+    ];
+    expect(visibleLogEntries(logs)).toEqual([{ id: 1, text: "a" }]);
+  });
+  test("empty for no logs / only debug", () => {
+    expect(visibleLogEntries([])).toEqual([]);
+    expect(visibleLogEntries([{ id: 1, level: "debug", message: "x" }])).toEqual([]);
   });
 });
 

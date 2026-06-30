@@ -6,10 +6,11 @@
  * is even known — so the card keeps a constant two-line height with no
  * transient "Lancement…" placeholder swap.
  *
- * Line 1: the package name. Line 2: the latest non-debug log line, updated in
- * real time over the run's SSE channel (`useRunLogStream`). A live status badge
- * and a link to the run's page sit on the right. Clicking the card opens the
- * raw input/output detail modal (`details`).
+ * Line 1: the package name. Line 2: the non-debug log lines streamed live over
+ * the run's SSE channel (`useRunLogStream`), paced one at a time (`useLogTicker`,
+ * ≥500ms each) with a fade/slide animation so a burst reads as a sequence rather
+ * than a flash. A live status badge and a link to the run's page sit on the
+ * right. Clicking the card opens the raw input/output detail modal (`details`).
  *
  * Before the launch returns a `run_…` id (e.g. `run_and_wait` still blocking)
  * there is no SSE yet: the badge falls back to the tool-call phase and line 2
@@ -26,7 +27,8 @@ import {
 } from "lucide-react";
 import { Modal } from "./modal.tsx";
 import { useRunLogStream } from "./use-run-log-stream.ts";
-import { isTerminalStatus, lastVisibleLogText, type RunStatus } from "./run-events.ts";
+import { useLogTicker } from "./use-log-ticker.ts";
+import { isTerminalStatus, visibleLogEntries, type RunStatus } from "./run-events.ts";
 import type { ToolPhase } from "./tool-result.ts";
 
 const STATUS_LABEL: Record<RunStatus, string> = {
@@ -108,9 +110,11 @@ export function RunPanel({
     status ?? (isTerminalStatus(initialStatus) ? (initialStatus as RunStatus) : undefined);
   const [open, setOpen] = React.useState(false);
 
-  const latest = lastVisibleLogText(logs);
-  const secondLine =
-    latest ?? (effectiveStatus === "pending" ? "Démarrage du run…" : "En attente des logs…");
+  // Pace the log line: a burst of lines plays back one at a time (≥500ms each)
+  // rather than flashing straight to the last one. `current` carries a stable
+  // `id` so the line element remounts on change and re-runs its enter animation.
+  const current = useLogTicker(visibleLogEntries(logs));
+  const placeholder = effectiveStatus === "pending" ? "Démarrage du run…" : "En attente des logs…";
 
   return (
     <div className="bg-card text-card-foreground relative my-3 w-full rounded-lg border">
@@ -143,8 +147,23 @@ export function RunPanel({
               ) : null}
             </span>
           </div>
-          {/* Line 2: latest non-debug log line (constant height) */}
-          <div className="text-muted-foreground truncate font-mono text-xs">{secondLine}</div>
+          {/* Line 2: paced non-debug log line (constant height). Keyed by log id
+              so each new line remounts and runs the fade/slide enter animation;
+              `grid` keeps the row height fixed while the line swaps. */}
+          <div className="grid font-mono text-xs">
+            {current ? (
+              <span
+                key={current.id}
+                className="text-muted-foreground animate-in fade-in slide-in-from-bottom-1 col-start-1 row-start-1 truncate duration-300"
+              >
+                {current.text}
+              </span>
+            ) : (
+              <span className="text-muted-foreground col-start-1 row-start-1 truncate">
+                {placeholder}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 

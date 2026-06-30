@@ -321,6 +321,28 @@ export function lastVisibleLogText(logs: readonly RunLogLine[]): string | undefi
   return undefined;
 }
 
+/** One displayable log line: its stable `id` (animation key) and rendered text. */
+export interface VisibleLogEntry {
+  id: number;
+  text: string;
+}
+
+/**
+ * The ordered sequence of non-`debug` log lines that have displayable text —
+ * the queue the run card tickers through one entry at a time. Keeps ascending
+ * `id` order (same as `mergeLogs`), so the last element is the most recent line.
+ * `id` doubles as the React key the line animation remounts on.
+ */
+export function visibleLogEntries(logs: readonly RunLogLine[]): VisibleLogEntry[] {
+  const out: VisibleLogEntry[] = [];
+  for (const line of logs) {
+    if (line.level === "debug") continue;
+    const text = logLineText(line);
+    if (text) out.push({ id: line.id, text });
+  }
+  return out;
+}
+
 /** Run package id from a launch result (`body.packageId`, then top-level). */
 export function extractRunPackageId(result: unknown): string | undefined {
   const unwrapped = asRecord(unwrapResult(result));
