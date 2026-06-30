@@ -10,7 +10,7 @@
 
 import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { PlusIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import { PlusIcon, PencilIcon, Trash2Icon, Loader2Icon } from "lucide-react";
 import { useChatHeaders, useSelectConversation } from "./runtime-context.ts";
 import {
   renameSession,
@@ -114,7 +114,14 @@ function ConversationRow({
 
   const onDelete = async () => {
     await deleteSession(getHeaders, session.id);
-    await queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
+    // Reflect the delete in the cached list. Cancel any in-flight poll first so
+    // its stale (pre-delete) response can't land afterwards and resurrect the
+    // row; then drop the row. The server is already updated and the periodic
+    // poll reconciles any later drift.
+    await queryClient.cancelQueries({ queryKey: SESSIONS_QUERY_KEY });
+    queryClient.setQueryData<SessionSummary[]>(SESSIONS_QUERY_KEY, (prev) =>
+      (prev ?? []).filter((s) => s.id !== session.id),
+    );
     if (active) select?.(null);
   };
 
@@ -136,39 +143,45 @@ function ConversationRow({
         onClick={() => select?.(session.id)}
         className="flex min-w-0 flex-1 items-center gap-1.5 rounded-none bg-transparent px-0 py-1 text-left text-inherit hover:bg-transparent"
       >
-        {unread && (
-          <span
-            className="bg-primary size-2 shrink-0 rounded-full"
-            aria-label="Réponse non lue"
-            title="Réponse non lue"
-          />
-        )}
         <span className={`block w-full truncate text-left ${unread ? "font-semibold" : ""}`}>
           {session.title ?? "Nouvelle conversation"}
         </span>
       </button>
       <div className="relative flex shrink-0 items-center">
-        <span className="text-muted-foreground text-xs transition-opacity group-hover:opacity-0">
-          {relativeTime(session.updatedAt)}
-        </span>
+        {session.generating ? (
+          <Loader2Icon
+            className="text-muted-foreground size-3.5 animate-spin"
+            aria-label="Opération en cours"
+          />
+        ) : unread ? (
+          <span
+            className="bg-primary size-2 rounded-full transition-opacity group-hover:opacity-0"
+            aria-label="Réponse non lue"
+            title="Réponse non lue"
+          />
+        ) : (
+          <span className="text-muted-foreground text-xs transition-opacity group-hover:opacity-0">
+            {relativeTime(session.updatedAt)}
+          </span>
+        )}
         <div className="bg-background absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100">
           <button
             type="button"
             aria-label="Renommer"
             title="Renommer"
             onClick={() => setEditing(true)}
-            className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-md p-1"
+            className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-md p-0.5"
           >
-            <PencilIcon className="size-4" />
+            <PencilIcon className="size-3.5" />
           </button>
           <button
             type="button"
             aria-label="Supprimer"
             title="Supprimer"
             onClick={() => void onDelete()}
-            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md p-1"
+            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md p-0.5"
           >
-            <Trash2Icon className="size-4" />
+            <Trash2Icon className="size-3.5" />
           </button>
         </div>
       </div>
