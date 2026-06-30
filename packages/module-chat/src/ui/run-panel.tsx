@@ -11,7 +11,8 @@
  * lifecycle or tool-call breadcrumbs), streamed live over the run's SSE channel
  * (`useRunLogStream`) and paced one at a time (`useLogTicker`, ≥500ms each) with
  * a fade/slide animation so a burst reads as a sequence rather than a flash.
- * Once the run is terminal the line settles on a fixed "Complété". A live status
+ * Before the first log the line reads "Lancement" (still starting), then
+ * "Exécution en cours" once running; once terminal it settles on "Complété". A live status
  * badge and a link to the run's page sit on the right. Clicking the card opens
  * the raw input/output detail modal (`details`).
  *
@@ -117,7 +118,10 @@ export function RunPanel({
   // rather than flashing straight to the last one. `current` carries a stable
   // `id` so the line element remounts on change and re-runs its enter animation.
   const current = useLogTicker(visibleLogEntries(logs));
-  const placeholder = effectiveStatus === "pending" ? "Démarrage du run…" : "En attente des logs…";
+  // Before any log line: "Lancement" while the run is still starting (no status
+  // yet, or pending), then "Exécution en cours" once it is running — up until the
+  // first log replaces it.
+  const placeholder = effectiveStatus === "running" ? "Exécution en cours" : "Lancement";
 
   // Once the run is terminal, the live log line is replaced by a fixed
   // "Complété" so the card settles on a clear end state instead of freezing on
