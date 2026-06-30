@@ -363,6 +363,88 @@ describe("PiRunner.run — cancellation", () => {
   });
 });
 
+describe("PiRunner.run — timeout watchdog", () => {
+  it("fires the budget → finalizes a first-class `timeout` terminal (status + message + duration)", async () => {
+    const sink = createCaptureSink();
+    // The scripted session waits on the COMBINED signal executeSession is
+    // handed (the watchdog drives it); on abort it throws like a cancelled
+    // prompt. `0.05`s → a 50ms watchdog (the field is seconds; runner × 1000).
+    const runner = new ScriptedPiRunner(async (_session, _ctx, signal) => {
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted) return resolve();
+        signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      throw signal?.reason ?? new Error("aborted");
+    });
+
+    await runner.run({
+      bundle: STUB_BUNDLE,
+      context: makeContext({ timeoutSeconds: 0.05 }),
+      eventSink: sink,
+    });
+
+    expect(sink.finalized?.status).toBe("timeout");
+    expect(sink.finalized?.error?.code).toBe("timeout");
+    expect(sink.finalized?.error?.message).toMatch(/timed out after/i);
+    expect(typeof sink.finalized?.durationMs).toBe("number");
+    expect(sink.finalized!.durationMs!).toBeGreaterThanOrEqual(0);
+  });
+
+  it("does not fire on a fast run even with a budget set (no false positive)", async () => {
+    const sink = createCaptureSink();
+    const runner = new ScriptedPiRunner(async (session) => {
+      session.emit({ type: "message_end" });
+      session.emit({ type: "agent_end" });
+    });
+
+    await runner.run({
+      bundle: STUB_BUNDLE,
+      context: makeContext({ timeoutSeconds: 100 }),
+      eventSink: sink,
+    });
+
+    expect(sink.finalized?.status).toBe("success");
+  });
+
+  it("a real cancel is NOT masked as a timeout (rethrows, no finalize)", async () => {
+    const sink = createCaptureSink();
+    const controller = new AbortController();
+    // Budget set generously so only the cancel fires.
+    const runner = new ScriptedPiRunner(async (_session, _ctx, signal) => {
+      controller.abort(new Error("user cancelled"));
+      await Promise.resolve();
+      if (signal?.aborted) throw signal.reason ?? new Error("cancelled");
+    });
+
+    await expect(
+      runner.run({
+        bundle: STUB_BUNDLE,
+        context: makeContext({ timeoutSeconds: 100 }),
+        eventSink: sink,
+        signal: controller.signal,
+      }),
+    ).rejects.toBeDefined();
+
+    expect(sink.finalizeCalls).toBe(0);
+  });
+
+  it("no budget set → watchdog never arms (a completed run still succeeds)", async () => {
+    const sink = createCaptureSink();
+    const runner = new ScriptedPiRunner(async (session) => {
+      session.emit({ type: "message_end" });
+      session.emit({ type: "agent_end" });
+    });
+
+    await runner.run({
+      bundle: STUB_BUNDLE,
+      context: makeContext(), // no timeoutSeconds
+      eventSink: sink,
+    });
+
+    expect(sink.finalized?.status).toBe("success");
+  });
+});
+
 describe("PiRunner.run — Runner contract", () => {
   it("implements Runner.name", () => {
     const runner = new ScriptedPiRunner(async () => {});

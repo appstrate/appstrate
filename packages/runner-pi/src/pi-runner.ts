@@ -248,9 +248,72 @@ export class PiRunner implements Runner {
       }
     };
 
+    // Hard timeout watchdog. An internal controller fires on EITHER the AFPS
+    // `signal` (cancellation, forwarded below) OR this run's wall-clock budget,
+    // measured from `runStart` (boot/cold-start already excluded — the platform
+    // arms a longer safety net that folds it in). `executeSession` races the
+    // prompt against THIS combined signal, but `finalizeThrownFailure` still
+    // inspects the ORIGINAL `signal`: a real cancel (signal.aborted) takes the
+    // abort-rethrow arm; a timeout (signal.aborted === false) finalizes a
+    // first-class `timeout` terminal in the catch below.
+    const runStart = Date.now();
+    const timeoutSeconds = context.timeoutSeconds ?? 0;
+    let timedOut = false;
+    const runController = new AbortController();
+    const forwardAbort = (): void => runController.abort(signal?.reason);
+    if (signal) {
+      if (signal.aborted) runController.abort(signal.reason);
+      else signal.addEventListener("abort", forwardAbort, { once: true });
+    }
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+    if (timeoutSeconds > 0) {
+      timeoutTimer = setTimeout(() => {
+        timedOut = true;
+        runController.abort(new Error("pi-runner: run timeout watchdog"));
+      }, timeoutSeconds * 1000);
+    }
+    const clearRunTimeout = (): void => {
+      if (timeoutTimer !== undefined) {
+        clearTimeout(timeoutTimer);
+        timeoutTimer = undefined;
+      }
+      if (signal) signal.removeEventListener("abort", forwardAbort);
+    };
+
     try {
-      await this.executeSession(context, internalSink, signal, captureBridge);
+      await this.executeSession(context, internalSink, runController.signal, captureBridge);
     } catch (err) {
+      clearRunTimeout();
+
+      // Runner-enforced timeout: a first-class `timeout` terminal (explicit
+      // status + `Run timed out after Ns` message + an execution-window
+      // duration), distinct from the generic failure epilogue below. Gated on
+      // `!signal.aborted` so a real cancellation racing the watchdog still
+      // takes `finalizeThrownFailure`'s abort-rethrow arm.
+      if (timedOut && !signal?.aborted) {
+        const bridge = bridgeRef.current;
+        await finalizeThrownFailure({
+          events,
+          err,
+          signal,
+          runId,
+          now: Date.now,
+          emit,
+          drainAndEmit: () => bridge?.drainPending() ?? Promise.resolve(),
+          eventSink,
+          usage: bridge ? bridge.getUsage() : undefined,
+          terminalStatus: "timeout",
+          buildError: () => ({
+            code: "timeout",
+            message: `Run timed out after ${timeoutSeconds}s`,
+          }),
+          stamp: (result) => {
+            if (bridge) result.cost = bridge.getCost();
+            result.durationMs = Date.now() - runStart;
+          },
+        });
+        return;
+      }
       // Shared thrown-failure epilogue (abort-rethrow → emit appstrate.error →
       // best-effort drain → reduce → stamp usage/cost → finalize). The Pi runner
       // leaves `status` unset on this path (setFailedStatus: false, preserved
@@ -278,6 +341,8 @@ export class PiRunner implements Runner {
       });
       return;
     }
+    // Session ran to completion — stand the timeout watchdog down.
+    clearRunTimeout();
 
     // Authoritative terminal verdict, captured by the bridge while it
     // streamed `message_end` events. When the agent loop ended on an

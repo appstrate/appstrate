@@ -35,6 +35,13 @@ export interface ExecuteAgentInBackgroundInput {
    * exercise the lifecycle without a real container runtime.
    */
   orchestrator?: ContainerOrchestrator;
+  /**
+   * Grace (ms) added to `plan.timeout` for the platform's safety-net
+   * container watchdog. Production leaves this unset (the runner owns the
+   * primary, boot-excluded budget; the platform default folds in cold-start).
+   * Tests inject `0` to exercise the net at the budget itself.
+   */
+  timeoutBootGraceMs?: number;
 }
 
 /**
@@ -121,6 +128,9 @@ async function executeAgentInBackgroundImpl(input: ExecuteAgentInBackgroundInput
         sinkCredentials,
         signal,
         ...(input.orchestrator ? { orchestrator: input.orchestrator } : {}),
+        ...(input.timeoutBootGraceMs !== undefined
+          ? { timeoutBootGraceMs: input.timeoutBootGraceMs }
+          : {}),
       });
     } catch (err) {
       // Orchestrator-level failure (Docker unreachable, image missing, ...)

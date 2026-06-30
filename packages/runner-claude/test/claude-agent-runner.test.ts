@@ -375,5 +375,99 @@ describe("ClaudeAgentRunner — idle-stall watchdog", () => {
     expect(m.result).toBeNull();
   });
 });
+describe("ClaudeAgentRunner — timeout watchdog", () => {
+  // Same shape as the idle test's hanging query: yields an optional prelude,
+  // then blocks until the SDK's own AbortController (which BOTH watchdogs and a
+  // real cancel drive) fires, at which point it throws like the real SDK.
+  function hangingQuery(prelude: SdkRunMessage[] = []) {
+    const fn = (input: ClaudeQueryInput): AsyncIterable<SdkRunMessage> => {
+      const controller = (input.options as { abortController?: AbortController }).abortController;
+      return (async function* () {
+        for (const m of prelude) yield m;
+        await new Promise<void>((resolve) => {
+          const sig = controller?.signal;
+          if (!sig || sig.aborted) return resolve();
+          sig.addEventListener("abort", () => resolve(), { once: true });
+        });
+        throw new Error("aborted by SDK controller");
+      })();
+    };
+    return { fn };
+  }
+
+  it("fires the budget → finalizes a first-class `timeout` terminal (status + message + duration)", async () => {
+    const { fn } = hangingQuery();
+    const m = memorySink();
+    // Real clock so the execution-window duration is a positive measurement.
+    // `0.05` s → a 50ms watchdog (the field is seconds; the runner × 1000).
+    await new ClaudeAgentRunner(baseOpts({ query: fn, now: Date.now, idleTimeoutMs: 0 })).run({
+      context: { ...ctx, timeoutSeconds: 0.05 },
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+
+    expect(m.result?.status).toBe("timeout");
+    expect(m.result?.error?.code).toBe("timeout");
+    expect(m.result?.error?.message).toMatch(/timed out after/i);
+    // Duration is the runner-stamped execution window (from run() start), not
+    // left for the platform to infer as `now - startedAt` (which folds in boot).
+    expect(typeof m.result?.durationMs).toBe("number");
+    expect(m.result!.durationMs!).toBeGreaterThanOrEqual(0);
+    expect(m.events.some((e) => e.type === "appstrate.error")).toBe(true);
+  });
+
+  it("does not fire on a fast run even with a tiny budget (no false positive)", async () => {
+    const { fn } = fakeQuery([
+      { type: "assistant", message: { content: [{ type: "text", text: "quick" }] } },
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        duration_ms: 5,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    ]);
+    const m = memorySink();
+    await new ClaudeAgentRunner(baseOpts({ query: fn })).run({
+      context: { ...ctx, timeoutSeconds: 0.05 },
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+    expect(m.result?.status).toBe("success");
+  });
+
+  it("a real cancel is NOT masked as a timeout (abort-rethrow arm wins, no finalize)", async () => {
+    const controller = new AbortController();
+    const fn = () =>
+      (async function* (): AsyncIterable<SdkRunMessage> {
+        yield { type: "assistant", message: { content: [{ type: "text", text: "step" }] } };
+        controller.abort();
+        throw new Error("aborted by signal");
+      })();
+    const m = memorySink();
+    await expect(
+      // Budget set generously so only the cancel fires — proving cancel
+      // precedence over the timeout terminal.
+      new ClaudeAgentRunner(baseOpts({ query: fn, idleTimeoutMs: 0 })).run({
+        context: { ...ctx, timeoutSeconds: 100 },
+        eventSink: m.sink,
+        bundle: undefined as never,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow();
+    expect(m.result).toBeNull();
+  });
+
+  it("no budget set → watchdog never arms (a completed run still succeeds)", async () => {
+    const { fn } = fakeQuery([{ type: "result", subtype: "success", is_error: false, usage: {} }]);
+    const m = memorySink();
+    await new ClaudeAgentRunner(baseOpts({ query: fn })).run({
+      context: ctx, // no timeoutSeconds
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+    expect(m.result?.status).toBe("success");
+  });
+});
 // `buildClaudeSdkEnv` is shared infra — its tests live in
 // `@appstrate/core` (test/claude-binary.test.ts).

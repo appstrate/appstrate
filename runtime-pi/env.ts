@@ -51,6 +51,13 @@ export interface RuntimeEnv {
   sidecarUrl?: string;
   /** Heartbeat ping interval (ms). */
   heartbeatIntervalMs: number;
+  /**
+   * Wall-clock execution budget for the run, in seconds. Surfaced on
+   * `ExecutionContext.timeoutSeconds`; the runner arms its own timeout
+   * watchdog from it (boot excluded). Absent when the platform did not
+   * forward `AGENT_TIMEOUT_SECONDS` — no runner-side enforcement.
+   */
+  timeoutSeconds?: number;
   /** Optional output JSON schema for constrained decoding (raw string — Pi SDK consumes it directly). */
   outputSchemaRaw?: string;
   /**
@@ -276,6 +283,15 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     DEFAULT_MCP_CONNECT_DEADLINE_MS,
     issues,
   );
+  // Optional: a 0 fallback means "absent" (parsePositiveInt only returns it
+  // for a missing var, or after pushing an issue for a malformed one). We map
+  // 0 → undefined so an absent budget leaves runner-side enforcement off.
+  const agentTimeoutSeconds = parsePositiveInt(
+    "AGENT_TIMEOUT_SECONDS",
+    source.AGENT_TIMEOUT_SECONDS,
+    0,
+    issues,
+  );
 
   if (issues.length > 0) throw new RuntimeEnvError(issues);
 
@@ -296,6 +312,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     sink: { url: sinkUrl!, finalizeUrl: sinkFinalizeUrl!, secret: sinkSecret! },
     sidecarUrl: sidecarUrl || undefined,
     heartbeatIntervalMs,
+    timeoutSeconds: agentTimeoutSeconds > 0 ? agentTimeoutSeconds : undefined,
     mcpConnectDeadlineMs,
     outputSchemaRaw: source.OUTPUT_SCHEMA || undefined,
     traceparent: source.TRACEPARENT || undefined,

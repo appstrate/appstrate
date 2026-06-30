@@ -29,6 +29,23 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_API_KEY).toBeUndefined();
   });
 
+  it("emits AGENT_TIMEOUT_SECONDS only for a positive integer budget", () => {
+    expect(buildRuntimePiEnv({ model, agentPrompt: "p" }).AGENT_TIMEOUT_SECONDS).toBeUndefined();
+    expect(
+      buildRuntimePiEnv({ model, agentPrompt: "p", timeoutSeconds: 300 }).AGENT_TIMEOUT_SECONDS,
+    ).toBe("300");
+    // Non-positive / non-integer budgets are dropped (no enforcement key).
+    expect(
+      buildRuntimePiEnv({ model, agentPrompt: "p", timeoutSeconds: 0 }).AGENT_TIMEOUT_SECONDS,
+    ).toBeUndefined();
+    expect(
+      buildRuntimePiEnv({ model, agentPrompt: "p", timeoutSeconds: -5 }).AGENT_TIMEOUT_SECONDS,
+    ).toBeUndefined();
+    expect(
+      buildRuntimePiEnv({ model, agentPrompt: "p", timeoutSeconds: 1.5 }).AGENT_TIMEOUT_SECONDS,
+    ).toBeUndefined();
+  });
+
   it("omits RUN_ENGINE for Pi (byte-identical) and emits it only for claude", () => {
     expect(buildRuntimePiEnv({ model, agentPrompt: "p" }).RUN_ENGINE).toBeUndefined();
     expect(buildRuntimePiEnv({ model, agentPrompt: "p", engine: "pi" }).RUN_ENGINE).toBeUndefined();

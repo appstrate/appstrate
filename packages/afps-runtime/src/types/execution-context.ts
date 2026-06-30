@@ -109,6 +109,18 @@ export const executionContextSchema = z.object({
   // Reproducibility knobs
   dryRun: z.boolean().optional(),
   traceparent: z.string().optional(), // W3C Trace Context
+
+  /**
+   * Wall-clock execution budget for the run, in seconds. When set, the
+   * runner arms its OWN timeout watchdog measured from the moment
+   * `run()` starts — so container cold-start / boot is deliberately
+   * EXCLUDED from the budget (the platform arms a separate, longer safety
+   * net that folds in boot). On expiry the runner finalizes a `timeout`
+   * terminal with an explicit `Run timed out after Ns` message, rather
+   * than letting the platform kill the container and surface a generic
+   * abort. Absent ⇒ no runner-side enforcement (platform safety net only).
+   */
+  timeoutSeconds: z.number().int().positive().optional(),
 });
 
 export type ExecutionContext = z.infer<typeof executionContextSchema>;

@@ -84,8 +84,15 @@ export interface FinalizeThrownFailureOptions {
    * `{ message, stack }`; Codex overrides to `{ code: "adapter_error", message }`.
    */
   buildError?: (message: string, err: unknown) => RunError;
-  /** Stamp `status = "failed"` on the result. Defaults to `true`. */
+  /** Stamp the terminal status on the result. Defaults to `true`. */
   setFailedStatus?: boolean;
+  /**
+   * Terminal status stamped when {@link setFailedStatus} is not `false`.
+   * Defaults to `"failed"`. A runner-enforced timeout passes `"timeout"`
+   * so the run surfaces its specific terminal cause instead of a generic
+   * failure. Ignored when `setFailedStatus === false`.
+   */
+  terminalStatus?: NonNullable<RunResult["status"]>;
   /** Extra terminal stamping (cost / durationMs) applied after `usage`. */
   stamp?: (result: RunResult, usage: TokenUsage | undefined) => void;
   /** Transform applied to the emitted error event AND the terminal result. Defaults to identity. */
@@ -130,7 +137,7 @@ export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions):
       stack: e instanceof Error ? e.stack : undefined,
     }));
   const result = reduceEvents(events, { error: buildError(message, err) });
-  if (opts.setFailedStatus !== false) result.status = "failed";
+  if (opts.setFailedStatus !== false) result.status = opts.terminalStatus ?? "failed";
   if (usage !== undefined) result.usage = usage;
   opts.stamp?.(result, usage);
   await eventSink.finalize(transform(result));

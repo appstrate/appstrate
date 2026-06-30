@@ -154,6 +154,11 @@ export class ClaudeAgentRunner implements Runner {
 
     const runId = context.runId;
     const now = this.opts.now ?? Date.now;
+    // Captured here, NOT at module/instance scope: the timeout budget is
+    // measured from the moment the run loop starts (boot/cold-start already
+    // behind us), so the `timeout` terminal reports an execution-window
+    // duration that lines up with the budget the user configured.
+    const runStart = now();
     const events: RunEvent[] = [];
     const emit = async (event: RunEvent): Promise<void> => {
       events.push(event);
@@ -218,6 +223,30 @@ export class ClaudeAgentRunner implements Runner {
       }, idleMs);
     };
 
+    // Hard timeout watchdog: an ABSOLUTE execution budget (unlike the idle
+    // watchdog, never re-armed) measured from `runStart`. Aborts the runner's
+    // OWN controller (never the AFPS `signal`) so `signal.aborted` stays false
+    // and the catch can stamp an explicit `timeout` terminal instead of taking
+    // `finalizeThrownFailure`'s abort-rethrow arm. The platform arms a longer
+    // safety-net timeout (this budget + a boot grace) that folds in cold-start;
+    // it only fires if this watchdog never gets a chance to (e.g. a wedged
+    // boot), in which case the platform synthesises the `timeout` terminal.
+    const timeoutSeconds = context.timeoutSeconds ?? 0;
+    let timedOut = false;
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+    const clearRunTimeout = (): void => {
+      if (timeoutTimer !== undefined) {
+        clearTimeout(timeoutTimer);
+        timeoutTimer = undefined;
+      }
+    };
+    if (timeoutSeconds > 0) {
+      timeoutTimer = setTimeout(() => {
+        timedOut = true;
+        controller.abort(new Error("claude-agent-runner: run timeout watchdog"));
+      }, timeoutSeconds * 1000);
+    }
+
     const queryOptions: Record<string, unknown> = {
       pathToClaudeCodeExecutable: this.opts.binaryPath,
       env: buildClaudeSdkEnv({
@@ -255,8 +284,38 @@ export class ClaudeAgentRunner implements Runner {
         armIdle(); // re-arm for the gap before the next message
       }
       clearIdle();
+      clearRunTimeout();
     } catch (err) {
       clearIdle();
+      clearRunTimeout();
+
+      // Runner-enforced timeout: surface a first-class `timeout` terminal
+      // (explicit status + `Run timed out after Ns` message + an
+      // execution-window duration) instead of a generic failure. Gated on
+      // `!signal.aborted` so a real cancellation that raced the watchdog still
+      // flows through the epilogue's abort-rethrow arm untouched.
+      if (timedOut && !signal?.aborted) {
+        await finalizeThrownFailure({
+          events,
+          err,
+          signal,
+          runId,
+          now,
+          emit,
+          drainAndEmit: () => drainAndEmit(true),
+          eventSink,
+          usage: mapper.liveUsageSnapshot(),
+          terminalStatus: "timeout",
+          buildError: () => ({
+            code: "timeout",
+            message: `Run timed out after ${timeoutSeconds}s`,
+          }),
+          stamp: (result) => {
+            result.durationMs = now() - runStart;
+          },
+        });
+        return;
+      }
       // A watchdog-fired abort throws an opaque SDK AbortError; translate it
       // into an explicit, actionable failure. Gated on `!signal.aborted` so a
       // real cancellation that raced the watchdog still flows through the
