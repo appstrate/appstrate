@@ -3,8 +3,8 @@
 /**
  * Live execution-time ticker for the run card. Given the run's `startedAt` (and
  * `completedAt` once terminal), returns the elapsed milliseconds, re-rendering
- * ~10×/s while the run is in flight (the card shows millisecond precision) and
- * freezing at the final duration once it completes.
+ * ~10×/s while the run is in flight (so the card's tenth-of-a-second figure
+ * updates smoothly) and freezing at the final duration once it completes.
  *
  * Returns `undefined` until `startedAt` is known (e.g. a run_and_wait still
  * blocking before its first `run_update`), so the caller can omit the time

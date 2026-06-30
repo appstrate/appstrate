@@ -27,13 +27,9 @@ import { AlertTriangleIcon, CheckIcon, ExternalLinkIcon, Loader2Icon } from "luc
 import { Modal } from "./modal.tsx";
 import { useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
+import { formatDuration } from "@appstrate/core/format";
 import { useLiveElapsedMs } from "./use-elapsed.ts";
-import {
-  formatRunDuration,
-  isTerminalStatus,
-  visibleLogEntries,
-  type RunStatus,
-} from "./run-events.ts";
+import { isTerminalStatus, visibleLogEntries, type RunStatus } from "./run-events.ts";
 import type { ToolPhase } from "./tool-result.ts";
 
 const STATUS_TONE: Record<RunStatus, string> = {
@@ -129,7 +125,7 @@ export function RunPanel({
             <span className="ml-auto flex shrink-0 items-center gap-2">
               {elapsedMs !== undefined ? (
                 <span className="text-muted-foreground text-xs tabular-nums">
-                  {formatRunDuration(elapsedMs)}
+                  {formatDuration(elapsedMs)}
                 </span>
               ) : null}
               {runHref ? (

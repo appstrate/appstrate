@@ -24,7 +24,6 @@ import {
   parseRunUpdateFrame,
   safeJsonParse,
   visibleLogEntries,
-  formatRunDuration,
   type RunLogLine,
 } from "../src/ui/run-events.ts";
 
@@ -229,23 +228,6 @@ describe("visibleLogEntries", () => {
     expect(visibleLogEntries([{ id: 1, level: "info", event: "progress", message: "x" }])).toEqual(
       [],
     );
-  });
-});
-
-describe("formatRunDuration", () => {
-  test("renders milliseconds, rounded", () => {
-    expect(formatRunDuration(0)).toBe("0ms");
-    expect(formatRunDuration(8)).toBe("8ms");
-    expect(formatRunDuration(2_657)).toBe("2 657ms");
-    expect(formatRunDuration(999.4)).toBe("999ms");
-    expect(formatRunDuration(999.6)).toBe("1 000ms");
-  });
-  test("space-groups thousands", () => {
-    expect(formatRunDuration(1_234_567)).toBe("1 234 567ms");
-  });
-  test("clamps negatives / non-finite to 0ms", () => {
-    expect(formatRunDuration(-500)).toBe("0ms");
-    expect(formatRunDuration(Number.NaN)).toBe("0ms");
   });
 });
 

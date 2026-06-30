@@ -86,17 +86,6 @@ export const runUpdateLiteSchema = z.object({
 export type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
 
 /**
- * Format a run's elapsed time in milliseconds for the card (e.g. `2657ms`),
- * matching the runtime's own `…ms` log style. Negative/NaN clamps to `0ms`;
- * thousands are space-grouped so a long run stays readable (`1 234 567ms`).
- */
-export function formatRunDuration(ms: number): string {
-  const value = Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : 0;
-  const grouped = String(value).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  return `${grouped}ms`;
-}
-
-/**
  * `run_update` frame from the org-wide realtime stream, with the fields needed
  * to discover the run a blocking `run_and_wait` just launched (its id only
  * appears in the tool result once the call returns, which is after the run is

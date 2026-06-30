@@ -3,6 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { Coins, FileCode2 } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
+import { formatDuration } from "@appstrate/core/format";
 import { JsonView } from "./json-view";
 import { SectionCard } from "./section-card";
 import { EmptyState } from "./page-states";
@@ -21,15 +22,6 @@ function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
       <p className="text-sm font-medium">{value}</p>
     </div>
   );
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = Math.round(seconds - minutes * 60);
-  return `${minutes}m ${rest}s`;
 }
 
 function formatTimestamp(value: string | Date | null | undefined): string | null {
