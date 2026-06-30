@@ -80,9 +80,26 @@ export const runUpdateLiteSchema = z.object({
   id: z.string().optional(),
   status: z.string(),
   error: z.string().nullable().optional(),
+  startedAt: z.string().nullable().optional(),
   completedAt: z.string().nullable().optional(),
 });
 export type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
+
+/**
+ * Format a run's elapsed time (ms) compactly for the card: `45s`, `2m 05s`,
+ * `1h 03m`. Sub-second / negative clamps to `0s`. Seconds/minutes are
+ * zero-padded only when a larger unit precedes them, so a short run reads as a
+ * bare `8s` while a longer one reads as `2m 05s`.
+ */
+export function formatRunDuration(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
+  if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
+  return `${s}s`;
+}
 
 /**
  * `run_update` frame from the org-wide realtime stream, with the fields needed

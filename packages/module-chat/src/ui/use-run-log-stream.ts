@@ -33,6 +33,10 @@ import {
 export interface RunLogStream {
   logs: RunLogLine[];
   status: RunStatus | undefined;
+  /** ISO timestamp the run started executing, once a `run_update` reports it. */
+  startedAt: string | undefined;
+  /** ISO timestamp the run reached a terminal status, once reported. */
+  completedAt: string | undefined;
   /** True while the live SSE tail is connected (run not yet terminal). */
   live: boolean;
 }
@@ -49,6 +53,8 @@ export function useRunLogStream(runId: string | undefined, initialStatus?: strin
   const [status, setStatus] = useState<RunStatus | undefined>(
     isTerminalStatus(initialStatus) ? initialStatus : undefined,
   );
+  const [startedAt, setStartedAt] = useState<string | undefined>(undefined);
+  const [completedAt, setCompletedAt] = useState<string | undefined>(undefined);
   const [live, setLive] = useState(false);
 
   useEffect(() => {
@@ -108,6 +114,8 @@ export function useRunLogStream(runId: string | undefined, initialStatus?: strin
       const update = parseRunUpdateFrame((e as MessageEvent).data);
       if (!update || cancelled) return;
       setStatus(update.status as RunStatus);
+      if (update.startedAt) setStartedAt(update.startedAt);
+      if (update.completedAt) setCompletedAt(update.completedAt);
       if (isTerminalStatus(update.status)) {
         // One final full history sweep to catch log lines the trigger may have
         // emitted in the same tick as the terminal status (mergeLogs dedups the
@@ -142,5 +150,5 @@ export function useRunLogStream(runId: string | undefined, initialStatus?: strin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId]);
 
-  return { logs, status, live };
+  return { logs, status, startedAt, completedAt, live };
 }

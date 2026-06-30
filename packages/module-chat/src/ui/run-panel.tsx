@@ -12,37 +12,29 @@
  * (`useRunLogStream`) and paced one at a time (`useLogTicker`, ≥500ms each) with
  * a fade/slide animation so a burst reads as a sequence rather than a flash.
  * Before the first log the line reads "Lancement" (still starting), then
- * "Exécution en cours" once running; once terminal it settles on "Complété". A live status
- * badge and a link to the run's page sit on the right. Clicking the card opens
- * the raw input/output detail modal (`details`).
+ * "Exécution en cours" once running; once terminal it settles on "Complété". A
+ * leading status glyph (centered across both lines) shows the run state; the
+ * live execution time and a link to the run's page sit on the right. Clicking
+ * the card opens the raw input/output detail modal (`details`).
  *
  * Before the launch returns a `run_…` id (e.g. `run_and_wait` still blocking)
- * there is no SSE yet: the badge falls back to the tool-call phase and line 2
- * shows a placeholder — same height throughout.
+ * there is no SSE yet: the status glyph falls back to the tool-call phase and
+ * line 2 shows a placeholder — same height throughout.
  */
 
 import * as React from "react";
-import {
-  AlertTriangleIcon,
-  CheckIcon,
-  ExternalLinkIcon,
-  Loader2Icon,
-  PlayIcon,
-} from "lucide-react";
+import { AlertTriangleIcon, CheckIcon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import { Modal } from "./modal.tsx";
 import { useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
-import { isTerminalStatus, visibleLogEntries, type RunStatus } from "./run-events.ts";
+import { useLiveElapsedMs } from "./use-elapsed.ts";
+import {
+  formatRunDuration,
+  isTerminalStatus,
+  visibleLogEntries,
+  type RunStatus,
+} from "./run-events.ts";
 import type { ToolPhase } from "./tool-result.ts";
-
-const STATUS_LABEL: Record<RunStatus, string> = {
-  pending: "En attente",
-  running: "En cours",
-  success: "Terminé",
-  failed: "Échec",
-  timeout: "Expiré",
-  cancelled: "Annulé",
-};
 
 const STATUS_TONE: Record<RunStatus, string> = {
   pending: "text-muted-foreground",
@@ -54,42 +46,26 @@ const STATUS_TONE: Record<RunStatus, string> = {
 };
 
 /**
- * Status badge. Prefers the run's real status (from SSE / launch result); until
- * that exists it falls back to the tool-call phase so a just-started run still
- * shows a spinner ("En cours") or an error state rather than nothing.
+ * Leading status glyph (no label — the icon IS the status). Prefers the run's
+ * real status (SSE / launch result); until that exists it falls back to the
+ * tool-call phase so a just-started run still shows a spinner (or an error
+ * state) rather than nothing. A non-terminal run spins; success shows a check;
+ * any other terminal state shows a warning triangle.
  */
-function StatusBadge({ status, phase }: { status: RunStatus | undefined; phase: ToolPhase }) {
+function StatusIcon({ status, phase }: { status: RunStatus | undefined; phase: ToolPhase }) {
   if (status) {
-    const terminal = isTerminalStatus(status);
-    return (
-      <span
-        className={`flex shrink-0 items-center gap-1 text-xs font-medium ${STATUS_TONE[status]}`}
-      >
-        {!terminal ? (
-          <Loader2Icon className="size-3 animate-spin" />
-        ) : status === "success" ? (
-          <CheckIcon className="size-3" />
-        ) : (
-          <AlertTriangleIcon className="size-3" />
-        )}
-        {STATUS_LABEL[status]}
-      </span>
-    );
+    if (!isTerminalStatus(status)) {
+      return <Loader2Icon className={`size-4 shrink-0 animate-spin ${STATUS_TONE[status]}`} />;
+    }
+    if (status === "success") {
+      return <CheckIcon className={`size-4 shrink-0 ${STATUS_TONE[status]}`} />;
+    }
+    return <AlertTriangleIcon className={`size-4 shrink-0 ${STATUS_TONE[status]}`} />;
   }
   if (phase === "error") {
-    return (
-      <span className="text-destructive flex shrink-0 items-center gap-1 text-xs font-medium">
-        <AlertTriangleIcon className="size-3" />
-        Échec
-      </span>
-    );
+    return <AlertTriangleIcon className="text-destructive size-4 shrink-0" />;
   }
-  return (
-    <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs font-medium">
-      <Loader2Icon className="size-3 animate-spin" />
-      En cours
-    </span>
-  );
+  return <Loader2Icon className="text-muted-foreground size-4 shrink-0 animate-spin" />;
 }
 
 export function RunPanel({
@@ -109,10 +85,13 @@ export function RunPanel({
   modalTitle: React.ReactNode;
   details: React.ReactNode;
 }) {
-  const { logs, status } = useRunLogStream(runId, initialStatus);
+  const { logs, status, startedAt, completedAt } = useRunLogStream(runId, initialStatus);
   const effectiveStatus =
     status ?? (isTerminalStatus(initialStatus) ? (initialStatus as RunStatus) : undefined);
   const [open, setOpen] = React.useState(false);
+
+  // Live execution time — ticks each second while running, freezes on completion.
+  const elapsedMs = useLiveElapsedMs(startedAt, completedAt);
 
   // Pace the log line: a burst of lines plays back one at a time (≥500ms each)
   // rather than flashing straight to the last one. `current` carries a stable
@@ -140,14 +119,19 @@ export function RunPanel({
         className="hover:bg-muted/40 absolute inset-0 z-0 rounded-lg"
         onClick={() => setOpen(true)}
       />
-      <div className="pointer-events-none relative z-10 flex items-start gap-2 px-3 py-2">
-        <PlayIcon className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+      <div className="pointer-events-none relative z-10 flex items-center gap-2 px-3 py-2">
+        {/* Leading status glyph — vertically centered across the two lines. */}
+        <StatusIcon status={effectiveStatus} phase={phase} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          {/* Line 1: package name + live status + run-page link */}
+          {/* Line 1: package name + live execution time + run-page link */}
           <div className="flex items-center gap-2">
             <span className="truncate text-sm font-medium">{agentLabel ?? "Run"}</span>
             <span className="ml-auto flex shrink-0 items-center gap-2">
-              <StatusBadge status={effectiveStatus} phase={phase} />
+              {elapsedMs !== undefined ? (
+                <span className="text-muted-foreground text-xs tabular-nums">
+                  {formatRunDuration(elapsedMs)}
+                </span>
+              ) : null}
               {runHref ? (
                 <a
                   href={runHref}
