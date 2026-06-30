@@ -1058,6 +1058,7 @@ export const schemas = {
       "label",
       "apiShape",
       "providerId",
+      "providerName",
       "baseUrl",
       "modelId",
       "enabled",
@@ -1082,6 +1083,11 @@ export const schemas = {
         type: ["string", "null"],
         description:
           "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for model aliases — binding hidden.",
+      },
+      providerName: {
+        type: ["string", "null"],
+        description:
+          "The provider's human display name resolved from the model-provider registry by `providerId` (e.g. `OpenCode Go`, `OpenAI`). The authoritative label for grouping/badging a model by provider — `apiShape` is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so do NOT derive a provider label from it. `null` for model aliases (binding hidden) and for rows whose `providerId` has no registry entry.",
       },
       baseUrl: {
         type: ["string", "null"],

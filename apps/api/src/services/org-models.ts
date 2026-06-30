@@ -124,6 +124,7 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
     // Backing — always null for an alias.
     apiShape: null,
     providerId: null,
+    providerName: null,
     baseUrl: null,
     modelId: null,
     credentialId: null,
@@ -187,6 +188,7 @@ export async function listOrgModels(
       ),
       apiShape: def.apiShape,
       providerId: def.providerId,
+      providerName: getModelProvider(def.providerId)?.displayName ?? null,
       baseUrl: def.baseUrl,
       modelId: def.modelId,
       enabled: def.enabled !== false,
@@ -210,6 +212,7 @@ export async function listOrgModels(
         ),
         apiShape: creds.apiShape,
         providerId: creds.providerId,
+        providerName: getModelProvider(creds.providerId)?.displayName ?? null,
         baseUrl: creds.baseUrl,
         modelId: row.modelId,
         enabled: row.enabled,

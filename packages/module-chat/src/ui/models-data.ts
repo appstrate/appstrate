@@ -15,6 +15,13 @@ export interface OrgModelOption {
   /** `null` for model aliases — the backing protocol is hidden from the browser. */
   apiShape: string | null;
   providerId?: string | null;
+  /**
+   * Provider display name, resolved server-side from the model-provider registry
+   * by `providerId` (e.g. "OpenCode Go"). The picker groups/labels by this —
+   * `apiShape` alone is ambiguous (OpenCode Go shares `openai-completions` with
+   * OpenAI). `null` for aliases (binding hidden) or rows with no registry entry.
+   */
+  providerName?: string | null;
   label: string | null;
   /** snake_case to match the `/api/models` wire field (org-models.ts). */
   is_default?: boolean;
