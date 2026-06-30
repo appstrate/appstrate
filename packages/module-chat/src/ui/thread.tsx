@@ -2,10 +2,10 @@
 
 /**
  * Styled chat thread built on assistant-ui primitives — ported from the
- * appstrate-chat satellite. Assistant text renders as markdown; MCP tool
- * calls render as collapsible cards (consecutive calls coalesce into one
- * group card). Single-path: no edit/regenerate/branch — the server is the
- * sole writer and chains turns linearly. Only copy (assistant) is offered.
+ * appstrate-chat satellite. Assistant text renders as markdown; each MCP tool
+ * call renders as its own card. Single-path: no edit/regenerate/branch — the
+ * server is the sole writer and chains turns linearly. Only copy (assistant)
+ * is offered.
  */
 
 import * as React from "react";
@@ -17,11 +17,9 @@ import {
   ErrorPrimitive,
   AuiIf,
   useMessage,
-  groupPartByType,
 } from "@assistant-ui/react";
 import { ArrowDownIcon, CheckIcon, CopyIcon, SendHorizontalIcon, SquareIcon } from "lucide-react";
 import { Button } from "./button.tsx";
-import { CollapsibleToolCard } from "./collapsible-tool-card.tsx";
 import { MarkdownText } from "./markdown-text.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
@@ -30,7 +28,6 @@ import {
   DescribeOperationToolUI,
   GetMeToolUI,
 } from "./tool-uis.tsx";
-import { deriveToolPhase, type ToolPhase } from "./tool-result.ts";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 
@@ -231,67 +228,21 @@ function ThinkingIndicator() {
   );
 }
 
-/** Collapsible card wrapping a run of consecutive tool calls. */
-function ToolGroup({
-  count,
-  phase,
-  children,
-}: React.PropsWithChildren<{ count: number; phase: ToolPhase }>) {
-  return (
-    <CollapsibleToolCard
-      phase={phase}
-      header={
-        <>
-          <span className="text-muted-foreground">tools</span>{" "}
-          <span className="font-medium">{count} appels</span>
-        </>
-      }
-    >
-      <div className="border-t px-3 pt-3">{children}</div>
-    </CollapsibleToolCard>
-  );
-}
-
-// Module-level so the helper's memo fingerprint keeps the group tree stable
-// across re-renders. Adjacent tool calls coalesce under "group-tools", except
-// tool UIs marked `display: "standalone"`, which get an empty path and render
-// outside the pli.
-const groupToolCalls = groupPartByType({
-  "tool-call": ["group-tools"],
-  "standalone-tool-call": [],
-});
-
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
       <div className="text-foreground text-sm leading-relaxed">
-        <MessagePrimitive.GroupedParts groupBy={groupToolCalls}>
-          {({ part, children }) => {
-            switch (part.type) {
-              case "group-tools":
-                // A lone tool call keeps its own card — no wrapper for 1.
-                if (part.indices.length === 1) return children;
-                return (
-                  <ToolGroup
-                    count={part.indices.length}
-                    phase={deriveToolPhase({ status: part.status })}
-                  >
-                    {children}
-                  </ToolGroup>
-                );
-              case "text":
-                return <MarkdownText />;
-              case "tool-call":
-                return part.toolUI ?? <ToolFallback {...part} />;
-              // Emitted while running when the last part isn't text (e.g.
-              // between a tool result and the next streamed token).
-              case "indicator":
-                return <ThinkingIndicator />;
-              default:
-                return null;
-            }
+        {/* Each tool call renders as its own card (no coalescing). Registered
+            tool UIs resolve first; unregistered tools fall back to ToolFallback.
+            Empty renders the thinking indicator while the model is still
+            working and the last part isn't text. */}
+        <MessagePrimitive.Parts
+          components={{
+            Text: MarkdownText,
+            tools: { Fallback: ToolFallback },
+            Empty: ThinkingIndicator,
           }}
-        </MessagePrimitive.GroupedParts>
+        />
       </div>
       <MessageError />
       <div className="mt-1 flex items-center gap-1">
