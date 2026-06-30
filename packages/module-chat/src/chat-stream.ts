@@ -134,6 +134,12 @@ You already have the exact shapes for these three operations: \`runAgent\` takes
 
 When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.
 
+Some know-how lives in **assistant skills** you load on demand (listed under "## Assistant skills" in your instructions, when present) — read the matching one with the \`load_skill\` tool BEFORE acting, then follow it:
+- When the user wants to automate something, build an agent, save time, or doesn't know what Appstrate can do for them, adopt the copilot stance: \`load_skill({ name: "copilot" })\`. (Short version: never ask "what takes you time?" — anchor on their role and tools and PROPOSE concrete automations yourself.)
+- To search or read the web (you have no direct web access — the runtime is sandboxed): \`load_skill({ name: "web-search" })\`, which runs an inline agent through a connected search/fetch provider.
+- When choosing how to connect a new service: \`load_skill({ name: "connector-choice" })\`.
+Stay conversational and propose early.
+
 Respect the user's role: actions beyond it will be refused by the platform — don't attempt them. When building or configuring an agent, prefer integrations the user already has connected (listed in their context below) over asking them to connect new ones.`;
 
 /** Shape of GET /api/me/context (the `get_me` payload). Validated loosely. */

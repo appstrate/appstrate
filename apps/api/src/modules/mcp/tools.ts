@@ -31,6 +31,7 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
+import { loadAssistantSkill } from "./assistant-skills.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 
 /** Issue an in-process request back through the platform app. */
@@ -41,6 +42,7 @@ export type McpToolName =
   | "search_operations"
   | "describe_operation"
   | "invoke_operation"
+  | "load_skill"
   | "get_me";
 
 /** Outcome of an `invoke_operation` call, for audit + telemetry. */
@@ -680,9 +682,79 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
+/**
+ * Serve the full body of a system skill shipped with the platform (the `## Assistant
+ * skills` index in the server instructions lists which ones). Pure read: it returns
+ * the skill's markdown — no dispatch, no credential, no side effect — so it carries
+ * no `mcp:invoke` gate (the endpoint's `mcp:read` already governs access). Every
+ * orchestrator-level MCP consumer (the chat on both engines, external clients) gets
+ * it; sandboxed agents reach only the sidecar MCP and never see it. The whitelist is
+ * the skills folder itself — see ./assistant-skills.ts for the path-traversal guard.
+ */
+function buildLoadSkillTool(ctx: McpToolContext): AppstrateToolDefinition {
+  const descriptor: Tool = {
+    name: "load_skill",
+    description:
+      "Read the full body of a system skill listed under '## Assistant skills' in these server " +
+      "instructions (progressive disclosure). Call it when the user's intent matches a skill, then " +
+      "follow it before acting. Pass `reference` to read one of that skill's referenced docs " +
+      "instead of its main body.",
+    annotations: {
+      title: "Load a skill",
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "The skill name, exactly as listed (e.g. 'copilot').",
+        },
+        reference: {
+          type: "string",
+          description: "Optional reference doc name to load instead of the main SKILL.md body.",
+        },
+      },
+      required: ["name"],
+    },
+  };
+
+  const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+    const start = performance.now();
+    const name = asString(args.name);
+    if (!name) {
+      throw new McpError(ErrorCode.InvalidParams, "name is required.");
+    }
+    const reference = asString(args.reference);
+    emit(ctx, { tool: "load_skill", durationMs: performance.now() - start });
+
+    const loaded = loadAssistantSkill(name, reference);
+    if (!loaded) {
+      return textResult(
+        {
+          error: reference
+            ? `No reference "${reference}" for skill "${name}". Load the skill's main body first to see which references it offers.`
+            : `No skill named "${name}". See the '## Assistant skills' list in the server instructions for valid names.`,
+        },
+        true,
+      );
+    }
+    return textResult({ content: loaded.content });
+  };
+
+  return { descriptor, handler };
+}
+
 /** Build the per-request tool set. Handlers close over the caller's auth context. */
 export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
-  const tools = [buildSearchTool(ctx), buildDescribeTool(ctx), buildInvokeTool(ctx)];
+  const tools = [
+    buildSearchTool(ctx),
+    buildDescribeTool(ctx),
+    buildInvokeTool(ctx),
+    buildLoadSkillTool(ctx),
+  ];
   // get_me dispatches to GET /api/me/context. A consumer that already injects
   // that payload into its own system prompt (the chat module) drops the tool —
   // it would only re-fetch what the model already has. search_operations is
