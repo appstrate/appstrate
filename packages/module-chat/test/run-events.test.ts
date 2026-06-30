@@ -233,21 +233,19 @@ describe("visibleLogEntries", () => {
 });
 
 describe("formatRunDuration", () => {
-  test("seconds only under a minute", () => {
-    expect(formatRunDuration(0)).toBe("0s");
-    expect(formatRunDuration(8_400)).toBe("8s");
-    expect(formatRunDuration(59_900)).toBe("59s");
+  test("renders milliseconds, rounded", () => {
+    expect(formatRunDuration(0)).toBe("0ms");
+    expect(formatRunDuration(8)).toBe("8ms");
+    expect(formatRunDuration(2_657)).toBe("2 657ms");
+    expect(formatRunDuration(999.4)).toBe("999ms");
+    expect(formatRunDuration(999.6)).toBe("1 000ms");
   });
-  test("minutes + zero-padded seconds", () => {
-    expect(formatRunDuration(60_000)).toBe("1m 00s");
-    expect(formatRunDuration(125_000)).toBe("2m 05s");
+  test("space-groups thousands", () => {
+    expect(formatRunDuration(1_234_567)).toBe("1 234 567ms");
   });
-  test("hours + zero-padded minutes", () => {
-    expect(formatRunDuration(3_600_000)).toBe("1h 00m");
-    expect(formatRunDuration(3_780_000)).toBe("1h 03m");
-  });
-  test("clamps negatives to 0s", () => {
-    expect(formatRunDuration(-500)).toBe("0s");
+  test("clamps negatives / non-finite to 0ms", () => {
+    expect(formatRunDuration(-500)).toBe("0ms");
+    expect(formatRunDuration(Number.NaN)).toBe("0ms");
   });
 });
 

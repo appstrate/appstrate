@@ -86,19 +86,14 @@ export const runUpdateLiteSchema = z.object({
 export type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
 
 /**
- * Format a run's elapsed time (ms) compactly for the card: `45s`, `2m 05s`,
- * `1h 03m`. Sub-second / negative clamps to `0s`. Seconds/minutes are
- * zero-padded only when a larger unit precedes them, so a short run reads as a
- * bare `8s` while a longer one reads as `2m 05s`.
+ * Format a run's elapsed time in milliseconds for the card (e.g. `2657ms`),
+ * matching the runtime's own `…ms` log style. Negative/NaN clamps to `0ms`;
+ * thousands are space-grouped so a long run stays readable (`1 234 567ms`).
  */
 export function formatRunDuration(ms: number): string {
-  const totalSec = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
-  if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
-  return `${s}s`;
+  const value = Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : 0;
+  const grouped = String(value).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  return `${grouped}ms`;
 }
 
 /**
