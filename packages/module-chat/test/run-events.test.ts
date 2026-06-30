@@ -12,12 +12,8 @@ import {
   extractRunPackageId,
   isRunLaunchOp,
   isTerminalStatus,
-  lastLogText,
-  lastVisibleLogText,
-  logLineText,
   matchesLaunchedRun,
   parseRunUpdateDiscovery,
-  maxLogId,
   mergeLogs,
   orgAppFromHeaders,
   parseLogListResponse,
@@ -139,60 +135,6 @@ describe("extractAgentLabel", () => {
     expect(extractAgentLabel({})).toBeUndefined();
     expect(extractAgentLabel(undefined)).toBeUndefined();
     expect(extractAgentLabel({ operation_id: "runAgent" })).toBeUndefined();
-  });
-});
-
-describe("logLineText", () => {
-  test("prefers message", () => {
-    expect(logLineText({ id: 1, message: "hi", event: "ev", data: { a: 1 } })).toBe("hi");
-  });
-  test("falls back to event then data", () => {
-    expect(logLineText({ id: 1, event: "started" })).toBe("started");
-    expect(logLineText({ id: 1, data: "raw" })).toBe("raw");
-    expect(logLineText({ id: 1, data: { a: 1 } })).toBe('{"a":1}');
-  });
-  test("empty string when nothing displayable", () => {
-    expect(logLineText({ id: 1 })).toBe("");
-    expect(logLineText({ id: 1, message: null, event: null, data: null })).toBe("");
-  });
-});
-
-describe("lastLogText", () => {
-  test("most recent non-empty line", () => {
-    expect(
-      lastLogText([
-        { id: 1, message: "a" },
-        { id: 2, message: "b" },
-      ]),
-    ).toBe("b");
-  });
-  test("skips trailing empty lines", () => {
-    expect(lastLogText([{ id: 1, message: "a" }, { id: 2 }, { id: 3, data: null }])).toBe("a");
-  });
-  test("undefined on empty / all-empty", () => {
-    expect(lastLogText([])).toBeUndefined();
-    expect(lastLogText([{ id: 1 }])).toBeUndefined();
-  });
-});
-
-describe("lastVisibleLogText", () => {
-  test("skips debug-level lines", () => {
-    const logs: RunLogLine[] = [
-      { id: 1, level: "info", message: "a" },
-      { id: 2, level: "debug", message: "noise" },
-    ];
-    expect(lastVisibleLogText(logs)).toBe("a");
-  });
-  test("returns the last non-debug line", () => {
-    const logs: RunLogLine[] = [
-      { id: 1, level: "info", message: "a" },
-      { id: 2, level: "warn", message: "b" },
-      { id: 3, level: "debug", message: "noise" },
-    ];
-    expect(lastVisibleLogText(logs)).toBe("b");
-  });
-  test("undefined when only debug lines", () => {
-    expect(lastVisibleLogText([{ id: 1, level: "debug", message: "x" }])).toBeUndefined();
   });
 });
 
@@ -421,15 +363,6 @@ describe("mergeLogs", () => {
   test("returns existing reference-equal when nothing incoming", () => {
     const existing = [a, b];
     expect(mergeLogs(existing, [])).toBe(existing);
-  });
-});
-
-describe("maxLogId", () => {
-  test("highest id", () => {
-    expect(maxLogId([{ id: 3 }, { id: 9 }, { id: 5 }])).toBe(9);
-  });
-  test("zero on empty", () => {
-    expect(maxLogId([])).toBe(0);
   });
 });
 

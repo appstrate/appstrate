@@ -237,13 +237,6 @@ export function mergeLogs(
   return [...byId.values()].sort((a, b) => a.id - b.id);
 }
 
-/** Highest log id seen, for the `?since=` cursor on a history refetch. 0 if empty. */
-export function maxLogId(logs: readonly RunLogLine[]): number {
-  let max = 0;
-  for (const line of logs) if (line.id > max) max = line.id;
-  return max;
-}
-
 /**
  * Build the per-run SSE URL. Returns `undefined` when org/app context is
  * missing (the caller then renders the static card instead of a live panel).
@@ -322,37 +315,6 @@ export function extractAgentLabel(args: Record<string, unknown> | undefined): st
   return isInline ? "Run inline" : undefined;
 }
 
-/** Display text for one log line — `message`, then `event`, then compact `data`. */
-export function logLineText(line: RunLogLine): string {
-  if (nonEmptyString(line.message)) return line.message as string;
-  if (nonEmptyString(line.event)) return line.event as string;
-  if (typeof line.data === "string") return line.data;
-  if (line.data && typeof line.data === "object") return JSON.stringify(line.data);
-  return "";
-}
-
-/** Text of the most recent log line with displayable content, or undefined. */
-export function lastLogText(logs: readonly RunLogLine[]): string | undefined {
-  for (let i = logs.length - 1; i >= 0; i -= 1) {
-    const text = logLineText(logs[i]!);
-    if (text) return text;
-  }
-  return undefined;
-}
-
-/**
- * Like `lastLogText`, but skips `debug`-level lines — debug logs are noise we
- * never surface in the chat card.
- */
-export function lastVisibleLogText(logs: readonly RunLogLine[]): string | undefined {
-  for (let i = logs.length - 1; i >= 0; i -= 1) {
-    if (logs[i]!.level === "debug") continue;
-    const text = logLineText(logs[i]!);
-    if (text) return text;
-  }
-  return undefined;
-}
-
 /** One displayable log line: its stable `id` (animation key) and rendered text. */
 export interface VisibleLogEntry {
   id: number;
@@ -372,8 +334,8 @@ export function visibleLogEntries(logs: readonly RunLogLine[]): VisibleLogEntry[
   const out: VisibleLogEntry[] = [];
   for (const line of logs) {
     if (line.event !== "log") continue;
-    // Text from `message` (then `data`) only — NOT `logLineText`, whose `event`
-    // fallback would surface the literal "log" tag for a message-less row.
+    // Text from `message` (then `data`) only — never the `event` field, whose
+    // value here is the literal "log" tag, not displayable content.
     const text =
       nonEmptyString(line.message) ??
       (typeof line.data === "string"

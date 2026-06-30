@@ -32,6 +32,7 @@ import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
+import { TERMINAL_RUN_STATUSES, type RunStatus } from "@appstrate/db/schema";
 
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
@@ -639,8 +640,6 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
 // --- run_and_wait ----------------------------------------------------------
 
-/** Terminal run statuses (mirrors `TERMINAL_RUN_STATUSES` in the runs schema). */
-const TERMINAL_RUN_STATUSES = new Set(["success", "failed", "timeout", "cancelled"]);
 const MCP_RUN_AND_WAIT_CORRELATION_METADATA_KEY = "appstrate.mcpRunAndWaitCorrelationId";
 /**
  * Total time `run_and_wait` blocks before giving up and returning a
@@ -889,7 +888,10 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
     );
     let run: unknown = launched;
     let waited = 0;
-    while (!TERMINAL_RUN_STATUSES.has(asString(asRecord(run)?.status) ?? "") && waited < budget) {
+    while (
+      !TERMINAL_RUN_STATUSES.has((asString(asRecord(run)?.status) ?? "") as RunStatus) &&
+      waited < budget
+    ) {
       const window = Math.min(RUN_POLL_WINDOW_SECONDS, budget - waited);
       const getResponse = await dispatchCatalogOperation(ctx, "getRun", {
         pathParams: { id: runId },
@@ -913,7 +915,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
 
     const runRecord = asRecord(run) ?? {};
     const status = asString(runRecord.status);
-    const done = TERMINAL_RUN_STATUSES.has(status ?? "");
+    const done = TERMINAL_RUN_STATUSES.has((status ?? "") as RunStatus);
     emit(ctx, {
       tool: "run_and_wait",
       durationMs: performance.now() - start,
