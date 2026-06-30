@@ -454,6 +454,11 @@ describe("buildMcpTools contextInjected", () => {
     const names = tools.map((t) => t.descriptor.name).sort();
     // get_me is redundant for a context-injected caller; search_operations stays
     // (its best_match schema is not covered by the injected operation index).
-    expect(names).toEqual(["describe_operation", "invoke_operation", "search_operations"]);
+    expect(names).toEqual([
+      "describe_operation",
+      "invoke_operation",
+      "run_and_wait",
+      "search_operations",
+    ]);
   });
 });

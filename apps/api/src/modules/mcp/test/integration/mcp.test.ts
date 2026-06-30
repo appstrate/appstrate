@@ -255,8 +255,11 @@ describe("mcp tool round-trip", () => {
       "describe_operation",
       "get_me",
       "invoke_operation",
+      "run_and_wait",
       "search_operations",
     ]);
+    const runAndWait = tools.find((t) => t.name === "run_and_wait")!;
+    expect((runAndWait.annotations as Record<string, unknown>).destructiveHint).toBe(true);
     const getMe = tools.find((t) => t.name === "get_me")!;
     expect((getMe.annotations as Record<string, unknown>).readOnlyHint).toBe(true);
     const invoke = tools.find((t) => t.name === "invoke_operation")!;

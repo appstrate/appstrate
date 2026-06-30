@@ -35,6 +35,8 @@ import {
 import { Modal } from "./modal.tsx";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
+import { RunPanel } from "./run-panel.tsx";
+import { extractRunId, extractRunStatus, isRunLaunchOp } from "./run-events.ts";
 import { extractAuthOffer } from "./auth-offer.ts";
 import {
   asRecord,
@@ -251,7 +253,7 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
     }
 
     const rule = OP_RULES.find((r) => r.re.test(opId)) ?? { Icon: ZapIcon, label: "Opération" };
-    return (
+    const card = (
       <ToolCallCard
         phase={deriveToolPhase(props)}
         Icon={rule.Icon}
@@ -265,6 +267,18 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
         timing={props.timing}
       />
     );
+
+    // Run launch (runAgent / runInline / run_and_wait) → wrap the card in a
+    // panel that tails the launched run's logs live once the result carries a
+    // `run_…` id. A failed launch (no id) renders the bare card unchanged.
+    if (isRunLaunchOp(opId) && !props.isError) {
+      const runId = extractRunId(result);
+      if (runId) {
+        return <RunPanel runId={runId} initialStatus={extractRunStatus(result)} header={card} />;
+      }
+    }
+
+    return card;
   },
 });
 
