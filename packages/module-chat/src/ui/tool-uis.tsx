@@ -236,16 +236,14 @@ type AnyToolProps = ToolCallMessagePartProps<Record<string, unknown>, unknown>;
 
 /**
  * Render the rich run panel for a launch tool-call (`runAgent` / `runInline` /
- * `run_and_wait`) once its result carries a `run_…` id. Returns `null` (caller
- * falls back to the bare card) on a failed or not-yet-returned launch. Builds
- * the same input/output/metadata detail body the generic card's modal shows, so
- * clicking the panel opens identical details.
+ * `run_and_wait`). Rendered from the start — before the launch returns a `run_…`
+ * id — so the card keeps a constant height with no transient placeholder swap;
+ * the SSE log tail + live status kick in once the id is known. Builds the same
+ * input/output/metadata detail body the generic card's modal shows, so clicking
+ * the panel opens identical details.
  */
-function renderRunLaunch(props: AnyToolProps): React.ReactNode | null {
-  if (props.isError) return null;
+function renderRunLaunch(props: AnyToolProps): React.ReactNode {
   const runId = extractRunId(props.result);
-  if (!runId) return null;
-
   const unwrapped = unwrapResult(props.result);
   const meta = definedEntries({
     tool_call_id: props.toolCallId,
@@ -259,7 +257,7 @@ function renderRunLaunch(props: AnyToolProps): React.ReactNode | null {
     <span className="flex items-center gap-2">
       <PlayIcon className="size-4 shrink-0" />
       {agentLabel ?? "Run"}
-      <code className="text-muted-foreground text-xs">{runId}</code>
+      {runId ? <code className="text-muted-foreground text-xs">{runId}</code> : null}
     </span>
   );
   const details = (
@@ -274,7 +272,8 @@ function renderRunLaunch(props: AnyToolProps): React.ReactNode | null {
       runId={runId}
       initialStatus={extractRunStatus(props.result)}
       agentLabel={agentLabel}
-      runHref={buildRunPageHref(extractRunPackageId(props.result), runId)}
+      runHref={runId ? buildRunPageHref(extractRunPackageId(props.result), runId) : undefined}
+      phase={deriveToolPhase(props)}
       modalTitle={modalTitle}
       details={details}
     />
@@ -322,12 +321,9 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       />
     );
 
-    // Run launch (runAgent / runInline) → rich live run panel once the result
-    // carries a `run_…` id; otherwise the bare card.
-    if (isRunLaunchOp(opId)) {
-      const panel = renderRunLaunch(props);
-      if (panel) return panel;
-    }
+    // Run launch (runAgent / runInline) → rich live run panel (constant height,
+    // from launch through terminal).
+    if (isRunLaunchOp(opId)) return renderRunLaunch(props);
 
     return card;
   },
@@ -392,29 +388,10 @@ export const GetMeToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>
 });
 
 // `run_and_wait` is its own MCP tool (not invoke_operation), so it needs its
-// own UI. While it blocks (no result yet) the generic launch card shows; once
-// it returns a `run_…` id, the rich RunPanel takes over (agent name, live
-// status, latest log line). A still-running run (`done:false` early return)
-// keeps streaming over SSE.
+// own UI. The rich RunPanel renders from the start (constant height): agent
+// name + live status, and the SSE log tail once the run id is known. A
+// still-running run (`done:false` early return) keeps streaming over SSE.
 export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "run_and_wait",
-  render: (props: AnyToolProps) => {
-    const card = (
-      <ToolCallCard
-        phase={deriveToolPhase(props)}
-        Icon={PlayIcon}
-        label="Lancement"
-        idText={stringArg(props.args, "kind")}
-        args={props.args}
-        result={props.result}
-        isError={props.isError}
-        toolCallId={props.toolCallId}
-        artifact={props.artifact}
-        timing={props.timing}
-      />
-    );
-    const panel = renderRunLaunch(props);
-    if (panel) return panel;
-    return card;
-  },
+  render: (props: AnyToolProps) => renderRunLaunch(props),
 });

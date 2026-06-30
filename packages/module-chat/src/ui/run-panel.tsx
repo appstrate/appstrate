@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * In-chat run panel. Rendered when the assistant launches a run (the
- * `runAgent` / `runInline` / `run_and_wait` tool result carries a `run_…` id).
+ * In-chat run panel. Rendered for every run-launch tool-call (`runAgent` /
+ * `runInline` / `run_and_wait`) — from the moment it starts, before the run id
+ * is even known — so the card keeps a constant two-line height with no
+ * transient "Lancement…" placeholder swap.
  *
- * A compact two-line card: line 1 is the agent name + a live status badge + a
- * link to the run's page; line 2 is the latest log line (debug excluded), both
- * updating in real time from the run's SSE channel (`useRunLogStream`). Clicking
- * the card opens the raw input/output detail modal (`details`). No accordion.
+ * Line 1: the package name. Line 2: the latest non-debug log line, updated in
+ * real time over the run's SSE channel (`useRunLogStream`). A live status badge
+ * and a link to the run's page sit on the right. Clicking the card opens the
+ * raw input/output detail modal (`details`).
  *
- * Purely additive: with no org/app context or SSE the card still shows the
- * status from the launch result and degrades gracefully.
+ * Before the launch returns a `run_…` id (e.g. `run_and_wait` still blocking)
+ * there is no SSE yet: the badge falls back to the tool-call phase and line 2
+ * shows a placeholder — same height throughout.
  */
 
 import * as React from "react";
@@ -24,6 +27,7 @@ import {
 import { Modal } from "./modal.tsx";
 import { useRunLogStream } from "./use-run-log-stream.ts";
 import { isTerminalStatus, lastVisibleLogText, type RunStatus } from "./run-events.ts";
+import type { ToolPhase } from "./tool-result.ts";
 
 const STATUS_LABEL: Record<RunStatus, string> = {
   pending: "En attente",
@@ -43,21 +47,41 @@ const STATUS_TONE: Record<RunStatus, string> = {
   cancelled: "text-muted-foreground",
 };
 
-/** Status indicator: spinner while live/pending, check on success, warn otherwise. */
-function StatusBadge({ status, live }: { status: RunStatus | undefined; live: boolean }) {
-  const label = status ? STATUS_LABEL[status] : live ? "En cours" : "—";
-  const tone = status ? STATUS_TONE[status] : "text-muted-foreground";
-  const terminal = isTerminalStatus(status);
-  return (
-    <span className={`flex shrink-0 items-center gap-1 text-xs font-medium ${tone}`}>
-      {!terminal && (live || status === "running" || status === "pending") ? (
-        <Loader2Icon className="size-3 animate-spin" />
-      ) : status === "success" ? (
-        <CheckIcon className="size-3" />
-      ) : terminal ? (
+/**
+ * Status badge. Prefers the run's real status (from SSE / launch result); until
+ * that exists it falls back to the tool-call phase so a just-started run still
+ * shows a spinner ("En cours") or an error state rather than nothing.
+ */
+function StatusBadge({ status, phase }: { status: RunStatus | undefined; phase: ToolPhase }) {
+  if (status) {
+    const terminal = isTerminalStatus(status);
+    return (
+      <span
+        className={`flex shrink-0 items-center gap-1 text-xs font-medium ${STATUS_TONE[status]}`}
+      >
+        {!terminal ? (
+          <Loader2Icon className="size-3 animate-spin" />
+        ) : status === "success" ? (
+          <CheckIcon className="size-3" />
+        ) : (
+          <AlertTriangleIcon className="size-3" />
+        )}
+        {STATUS_LABEL[status]}
+      </span>
+    );
+  }
+  if (phase === "error") {
+    return (
+      <span className="text-destructive flex shrink-0 items-center gap-1 text-xs font-medium">
         <AlertTriangleIcon className="size-3" />
-      ) : null}
-      {label}
+        Échec
+      </span>
+    );
+  }
+  return (
+    <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs font-medium">
+      <Loader2Icon className="size-3 animate-spin" />
+      En cours
     </span>
   );
 }
@@ -67,34 +91,31 @@ export function RunPanel({
   initialStatus,
   agentLabel,
   runHref,
+  phase,
   modalTitle,
   details,
 }: {
-  runId: string;
+  runId: string | undefined;
   initialStatus?: string;
   agentLabel?: string;
   runHref?: string;
+  phase: ToolPhase;
   modalTitle: React.ReactNode;
   details: React.ReactNode;
 }) {
-  const { logs, status, live } = useRunLogStream(runId, initialStatus);
+  const { logs, status } = useRunLogStream(runId, initialStatus);
   const effectiveStatus =
     status ?? (isTerminalStatus(initialStatus) ? (initialStatus as RunStatus) : undefined);
   const [open, setOpen] = React.useState(false);
 
   const latest = lastVisibleLogText(logs);
   const secondLine =
-    latest ??
-    (effectiveStatus === "pending"
-      ? "Démarrage du run…"
-      : live
-        ? "En attente des premiers logs…"
-        : runId);
+    latest ?? (effectiveStatus === "pending" ? "Démarrage du run…" : "En attente des logs…");
 
   return (
     <div className="bg-card text-card-foreground relative my-3 w-full rounded-lg border">
-      {/* Full-card click target (opens the detail modal). Kept behind the content
-          so the run-page link can re-enable pointer events for itself — avoids
+      {/* Full-card click target (opens the detail modal). Behind the content so
+          the run-page link can re-enable pointer events for itself — avoids
           nesting interactive elements. */}
       <button
         type="button"
@@ -105,11 +126,11 @@ export function RunPanel({
       <div className="pointer-events-none relative z-10 flex items-start gap-2 px-3 py-2">
         <PlayIcon className="text-muted-foreground mt-0.5 size-4 shrink-0" />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          {/* Line 1: agent name + live status + run-page link */}
+          {/* Line 1: package name + live status + run-page link */}
           <div className="flex items-center gap-2">
             <span className="truncate text-sm font-medium">{agentLabel ?? "Run"}</span>
             <span className="ml-auto flex shrink-0 items-center gap-2">
-              <StatusBadge status={effectiveStatus} live={live} />
+              <StatusBadge status={effectiveStatus} phase={phase} />
               {runHref ? (
                 <a
                   href={runHref}
@@ -122,7 +143,7 @@ export function RunPanel({
               ) : null}
             </span>
           </div>
-          {/* Line 2: latest non-debug log line */}
+          {/* Line 2: latest non-debug log line (constant height) */}
           <div className="text-muted-foreground truncate font-mono text-xs">{secondLine}</div>
         </div>
       </div>
