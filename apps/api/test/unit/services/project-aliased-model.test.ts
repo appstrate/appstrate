@@ -18,6 +18,7 @@ const base: OrgModelInfo = {
   label: "Appstrate Medium",
   apiShape: "openai-completions",
   providerId: "openai-compatible",
+  providerName: "OpenAI-compatible (custom)",
   baseUrl: "https://api.deepseek.com/v1",
   modelId: "deepseek-chat",
   input: ["text"],
@@ -55,6 +56,8 @@ describe("projectAliasedModel", () => {
     // (iconUrl is a deliberate public choice, decoupled from the backing — see
     // the dedicated case below; it must survive the projection.)
     expect(out.apiShape).toBeNull();
+    expect(out.providerId).toBeNull();
+    expect(out.providerName).toBeNull();
     expect(out.baseUrl).toBeNull();
     expect(out.modelId).toBeNull();
     expect(out.credentialId).toBeNull();

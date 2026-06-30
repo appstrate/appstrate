@@ -621,6 +621,16 @@ export interface OrgModelInfo extends ModelMetadata {
    * (part of the stripped backing, same as {@link apiShape}).
    */
   providerId: string | null;
+  /**
+   * The provider's human display name resolved from the model-provider
+   * registry by {@link providerId} (e.g. `OpenCode Go`, `OpenAI`). The single
+   * authoritative label for grouping/badging a model by provider — `apiShape`
+   * is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so
+   * clients must NOT derive a provider label from it. `null` for model aliases
+   * (part of the stripped backing) and for any row whose `providerId` has no
+   * registry entry (custom providers).
+   */
+  providerName: string | null;
   baseUrl: string | null;
   modelId: string | null;
   enabled: boolean;

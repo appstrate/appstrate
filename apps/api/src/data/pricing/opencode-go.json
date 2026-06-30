@@ -21,8 +21,8 @@
       "cacheRead": 0.22
     }
   },
-  "kimi-k2.7": {
-    "label": "Kimi K2.7",
+  "kimi-k2.7-code": {
+    "label": "Kimi K2.7 Code",
     "contextWindow": 262144,
     "maxTokens": 131072,
     "capabilities": ["text", "reasoning"],
@@ -83,6 +83,60 @@
     "cost": {
       "input": 0.5,
       "output": 2.0
+    }
+  },
+  "minimax-m3": {
+    "label": "MiniMax M3",
+    "contextWindow": 524288,
+    "maxTokens": 131072,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 0.3,
+      "output": 1.2
+    }
+  },
+  "minimax-m2.7": {
+    "label": "MiniMax M2.7",
+    "contextWindow": 204800,
+    "maxTokens": 131072,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 0.3,
+      "output": 1.2,
+      "cacheRead": 0.06
+    }
+  },
+  "qwen3.7-max": {
+    "label": "Qwen3.7 Max",
+    "contextWindow": 1048576,
+    "maxTokens": 65536,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 2.5,
+      "output": 7.5,
+      "cacheRead": 0.5
+    }
+  },
+  "qwen3.7-plus": {
+    "label": "Qwen3.7 Plus",
+    "contextWindow": 1048576,
+    "maxTokens": 65536,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 0.5,
+      "output": 3.0,
+      "cacheRead": 0.04
+    }
+  },
+  "qwen3.6-plus": {
+    "label": "Qwen3.6 Plus",
+    "contextWindow": 1048576,
+    "maxTokens": 65536,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 0.5,
+      "output": 3.0,
+      "cacheRead": 0.05
     }
   }
 }

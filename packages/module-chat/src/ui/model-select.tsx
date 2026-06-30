@@ -15,22 +15,15 @@ import type { OrgModelOption } from "./models-data.ts";
 /** Group/button label for an alias — provider-neutral so the backing stays hidden. */
 const ALIAS_LABEL = "Alias";
 
-const PROVIDERS: Record<string, string> = {
-  "anthropic-messages": "Anthropic",
-  "openai-completions": "OpenAI",
-  "mistral-conversations": "Mistral",
-};
-
-function providerLabel(model: {
-  apiShape: string | null;
-  providerId?: string | null;
-  aliased?: boolean;
-}): string {
-  // Aliases hide their backing — group/badge them neutrally, never by the real
-  // provider/protocol (which is null on the browser-facing projection anyway).
+function providerLabel(model: { providerName?: string | null; aliased?: boolean }): string {
+  // Aliases hide their backing — group/badge them neutrally (their `providerName`
+  // is nulled server-side anyway).
   if (model.aliased) return ALIAS_LABEL;
-  if (model.providerId === "claude-code") return "Claude Code";
-  return (model.apiShape && PROVIDERS[model.apiShape]) || ALIAS_LABEL;
+  // `providerName` is the server's registry-resolved display name (`providerId`
+  // → `displayName`) — the single source for provider labels. We deliberately do
+  // NOT fall back to `apiShape`: it's ambiguous (OpenCode Go and OpenAI both use
+  // `openai-completions`), which is the bug this replaced.
+  return model.providerName || ALIAS_LABEL;
 }
 
 interface Props {
