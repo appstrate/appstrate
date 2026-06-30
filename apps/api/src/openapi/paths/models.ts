@@ -123,7 +123,7 @@ export const modelsPaths = {
                 aliased: {
                   type: "boolean",
                   description:
-                    "Model-alias flag. When true, this model's `id` becomes a public alias and its real binding (modelId, provider, baseUrl, capabilities/cost) is hidden from user-facing surfaces; the sidecar rewrites the `model` field on every inference call.",
+                    "Managed-model flag. When true, this model's binding (modelId, provider, baseUrl, capabilities/cost) is not exposed on user-facing surfaces and these fields are null; inference is routed by the platform.",
                 },
               },
             },
@@ -489,7 +489,7 @@ export const modelsPaths = {
                 aliased: {
                   type: "boolean",
                   description:
-                    "Model-alias flag. When true, this model's `id` becomes a public alias and its real binding is hidden from user-facing surfaces.",
+                    "Managed-model flag. When true, this model's binding is not exposed on user-facing surfaces.",
                 },
               },
             },

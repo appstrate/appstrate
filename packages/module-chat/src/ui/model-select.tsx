@@ -12,18 +12,18 @@ import { useEffect, useRef, useState } from "react";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import type { OrgModelOption } from "./models-data.ts";
 
-/** Group/button label for an alias — provider-neutral so the backing stays hidden. */
-const ALIAS_LABEL = "Alias";
+/** Group/button label for a managed model — provider-neutral, binding not exposed. */
+const MANAGED_LABEL = "Géré";
 
 function providerLabel(model: { providerName?: string | null; aliased?: boolean }): string {
-  // Aliases hide their backing — group/badge them neutrally (their `providerName`
-  // is nulled server-side anyway).
-  if (model.aliased) return ALIAS_LABEL;
+  // Managed models don't expose their binding — group/badge them neutrally (their
+  // `providerName` is nulled server-side anyway).
+  if (model.aliased) return MANAGED_LABEL;
   // `providerName` is the server's registry-resolved display name (`providerId`
   // → `displayName`) — the single source for provider labels. We deliberately do
   // NOT fall back to `apiShape`: it's ambiguous (OpenCode Go and OpenAI both use
   // `openai-completions`), which is the bug this replaced.
-  return model.providerName || ALIAS_LABEL;
+  return model.providerName || MANAGED_LABEL;
 }
 
 interface Props {

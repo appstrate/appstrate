@@ -1024,12 +1024,12 @@ export const schemas = {
       apiShape: {
         type: ["string", "null"],
         description:
-          "Protocol family. `null` for a built-in credential whose every backing model is an alias (#727) — binding hidden so the endpoint doesn't reveal the provider.",
+          "Protocol family. `null` for a built-in credential whose every model is managed (#727) — the binding is not exposed, so the endpoint doesn't reveal the provider.",
       },
       baseUrl: {
         type: ["string", "null"],
         description:
-          "Endpoint base URL. `null` for an alias-only built-in credential (see apiShape).",
+          "Endpoint base URL. `null` for a managed-only built-in credential (see apiShape).",
       },
       source: { type: "string", enum: ["built-in", "custom"] },
       authMode: { type: "string", enum: ["api_key", "oauth2"] },
@@ -1077,25 +1077,25 @@ export const schemas = {
       apiShape: {
         type: ["string", "null"],
         description:
-          "Protocol family. `null` for model aliases (`aliased: true`) — binding hidden.",
+          "Protocol family. `null` for managed models (`aliased: true`) — binding not exposed.",
       },
       providerId: {
         type: ["string", "null"],
         description:
-          "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for model aliases — binding hidden.",
+          "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for managed models — binding not exposed.",
       },
       providerName: {
         type: ["string", "null"],
         description:
-          "The provider's human display name resolved from the model-provider registry by `providerId` (e.g. `OpenCode Go`, `OpenAI`). The authoritative label for grouping/badging a model by provider — `apiShape` is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so do NOT derive a provider label from it. `null` for model aliases (binding hidden) and for rows whose `providerId` has no registry entry.",
+          "The provider's human display name resolved from the model-provider registry by `providerId` (e.g. `OpenCode Go`, `OpenAI`). The authoritative label for grouping/badging a model by provider — `apiShape` is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so do NOT derive a provider label from it. `null` for managed models (binding not exposed) and for rows whose `providerId` has no registry entry.",
       },
       baseUrl: {
         type: ["string", "null"],
-        description: "Provider endpoint. `null` for model aliases — binding hidden.",
+        description: "Provider endpoint. `null` for managed models — binding not exposed.",
       },
       modelId: {
         type: ["string", "null"],
-        description: "Upstream model id. `null` for model aliases — the real backing is hidden.",
+        description: "Upstream model id. `null` for managed models — not exposed.",
       },
       input: { type: ["array", "null"], items: { type: "string" } },
       contextWindow: { type: ["integer", "null"] },
@@ -1106,18 +1106,18 @@ export const schemas = {
       aliased: {
         type: "boolean",
         description:
-          "Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a public alias and the real binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is stripped from this projection — render an alias badge; the backing model is hidden.",
+          "Managed-model flag. When true, the binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge.",
       },
       iconUrl: {
         type: ["string", "null"],
         description:
-          "Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the backing provider, so an aliased model can show an icon without exposing its hidden binding. `null` means resolve the icon from the (visible) `apiShape`/`baseUrl`, or fall back to a generic alias icon.",
+          "Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`baseUrl`, or fall back to a generic icon.",
       },
       source: { type: "string", enum: ["built-in", "custom"] },
       credentialId: {
         type: ["string", "null"],
         description:
-          "ID of the backing `model_provider_credentials` row. `null` for model aliases — binding hidden.",
+          "ID of the `model_provider_credentials` row. `null` for managed models — binding not exposed.",
       },
       cost: {
         type: ["object", "null"],
