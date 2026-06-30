@@ -72,8 +72,8 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'application_id', NEW.application_id,
         'schedule_id', NEW.schedule_id,
         'error', NEW.error,
-        'started_at', to_char(NEW.started_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-        'completed_at', to_char(NEW.completed_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+        'started_at', to_char(NEW.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+        'completed_at', to_char(NEW.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'duration', NEW.duration
       )::text);
       RETURN NEW;
@@ -103,7 +103,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
           WHEN octet_length(NEW.data::text) <= 6000 THEN NEW.data
           ELSE '"[payload too large]"'::jsonb
         END,
-        'created_at', to_char(NEW.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        'created_at', to_char(NEW.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
       )::text);
       RETURN NEW;
     END;
