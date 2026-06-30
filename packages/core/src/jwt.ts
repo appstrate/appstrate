@@ -37,6 +37,52 @@ export function base64UrlDecode(input: string): string {
 }
 
 /**
+ * Build an UNSIGNED (`alg:none`) JWT carrying `payload`. The signature segment
+ * is the literal `"placeholder"` — never verified. Used where a consumer needs a
+ * syntactically-valid JWT only to parse local claims (e.g. the Codex CLI's boot
+ * parse, or pi-ai decoding `chatgpt_account_id` off the placeholder `MODEL_API_KEY`).
+ * It forges no identity: it is local-only and never transmitted to any upstream
+ * that would verify it.
+ */
+export function buildUnsignedJwt(payload: Record<string, unknown>): string {
+  return [
+    base64UrlEncode(JSON.stringify({ alg: "none", typ: "JWT" })),
+    base64UrlEncode(JSON.stringify(payload)),
+    "placeholder",
+  ].join(".");
+}
+
+/** Far-future placeholder email written into the synthetic Codex id_token. */
+const CODEX_PLACEHOLDER_EMAIL = "chat@appstrate.local";
+
+/** One year, in seconds — the `exp` window of the synthetic Codex id_token. */
+const CODEX_PLACEHOLDER_EXP_WINDOW_SEC = 365 * 24 * 3600;
+
+/**
+ * Build the local-only, unsigned (`alg:none`) placeholder Codex `id_token`.
+ *
+ * Single source of truth for the synthetic token shape, consumed BOTH by the
+ * API-side `@appstrate/module-codex` provider (as the `MODEL_API_KEY`
+ * placeholder pi-ai's `openai-codex-responses` decodes for `chatgpt_account_id`)
+ * AND by `@appstrate/runner-codex`'s `auth.json` builder (the `tokens.id_token`
+ * the Codex CLI parses to boot). Both paths must produce a BYTE-IDENTICAL token
+ * so the in-container auth state is the same regardless of entry point.
+ *
+ * Carries ONLY the `chatgpt_account_id` routing claim, a far-future `exp` (so
+ * nothing tries to refresh it), and a placeholder `email` — no real token
+ * material. It is `alg:none`, LOCAL-ONLY, and NEVER transmitted to any upstream
+ * that would verify it; the genuine outbound identity is the real vended
+ * `access_token` the official Codex binary sends itself.
+ */
+export function buildCodexPlaceholderIdToken(accountId: string, nowMs: number): string {
+  return buildUnsignedJwt({
+    exp: Math.floor(nowMs / 1000) + CODEX_PLACEHOLDER_EXP_WINDOW_SEC,
+    "https://api.openai.com/auth": { chatgpt_account_id: accountId },
+    email: CODEX_PLACEHOLDER_EMAIL,
+  });
+}
+
+/**
  * Decode a JWT's payload segment (the middle part). Returns the parsed
  * object, or `null` when the token isn't a well-formed three-segment JWT
  * or the payload isn't a JSON object.

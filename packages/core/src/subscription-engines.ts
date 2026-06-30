@@ -3,17 +3,17 @@
 /**
  * Provider → execution-engine binding — the engine ROUTING CONTRACT.
  *
- * A model provider runs on one of two engines: the generic `pi` loop (every
+ * A model provider runs on one of three engines: the generic `pi` loop (every
  * API-key provider, and the default for anything unregistered), or a
- * subscription engine that drives the vendor's OFFICIAL binary so it signs its
+ * subscription engine that drives a vendor's OFFICIAL binary so it signs its
  * own client fingerprint (no forging). Core owns only the engine VOCABULARY and
- * the binding SHAPE — the `"claude"` engine id, the binding field (`engine`),
- * and the pure {@link isSubscriptionEngine} predicate. This binding is
- * RUN-ONLY: it routes autonomous runs to an engine and carries NO interactive
- * chat surface. Core ships ZERO bindings: the `claude` (Claude Agent SDK)
- * binding is contributed at boot by its opt-in provider module
- * (`@appstrate/module-claude-code`) via the `subscriptionEngine` field on its
- * {@link ModelProviderDefinition}.
+ * the binding SHAPE — the `"claude"|"codex"` engine ids, the binding field
+ * (`engine`), and the pure {@link isSubscriptionEngine} predicate. This binding
+ * is RUN-ONLY: it routes autonomous runs to an engine and carries NO interactive
+ * chat surface. Core ships ZERO bindings: the `claude` (Claude Agent SDK) and
+ * `codex` (Codex CLI) bindings are contributed at boot by their opt-in provider
+ * modules (`@appstrate/module-claude-code`, `@appstrate/module-codex`) via the
+ * `subscriptionEngine` field on their {@link ModelProviderDefinition}.
  *
  * No registry here. The provider definition is the SINGLE source of truth for a
  * provider's engine; the platform's model-provider registry (apps/api) exposes
@@ -30,7 +30,7 @@
  */
 
 /** The execution engine resolved for a model. */
-export type RunEngine = "pi" | "claude";
+export type RunEngine = "pi" | "claude" | "codex";
 
 /** A subscription engine — one that drives the vendor's official binary. */
 export type SubscriptionRunEngine = Exclude<RunEngine, "pi">;
@@ -49,7 +49,7 @@ export interface SubscriptionEngineBinding {
 
 /** The binding plus the identity (provider id + label) it is registered under. */
 export interface SubscriptionEngineDef extends SubscriptionEngineBinding {
-  /** The credential provider id (e.g. `"claude-code"`). */
+  /** The credential provider id (e.g. `"claude-code"`, `"codex"`). */
   providerId: string;
   /** Human-readable provider name for user-facing messages. */
   label: string;

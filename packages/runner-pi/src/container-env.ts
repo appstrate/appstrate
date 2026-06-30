@@ -32,13 +32,14 @@ export interface RuntimePiEnvOptions {
   model: RuntimePiModelConfig;
   /**
    * In-container agent engine. `"pi"` (default) runs the Pi SDK loop;
-   * `"claude"` runs the official Claude Agent SDK (claude-code subscription).
-   * The subscription binary signs its own provider identity — the runner forges
-   * nothing. Emitted as `RUN_ENGINE` only when not `"pi"` so existing Pi runs
-   * keep a byte-identical env. The entrypoint defaults to `"pi"` when the var is
-   * absent.
+   * `"claude"` runs the official Claude Agent SDK (claude-code subscription);
+   * `"codex"` runs the official OpenAI Codex CLI (codex subscription). Each
+   * subscription binary signs its own provider identity — the runner forges
+   * nothing. Emitted as `RUN_ENGINE` only when not `"pi"` so
+   * existing Pi runs keep a byte-identical env. The entrypoint defaults to
+   * `"pi"` when the var is absent.
    */
-  engine?: "pi" | "claude";
+  engine?: "pi" | "claude" | "codex";
   /** Full enriched system prompt fed to the Pi SDK. */
   agentPrompt: string;
   /** Run identifier. Bundled tools + the entrypoint surface it in every emitted {@link RunEvent}. */

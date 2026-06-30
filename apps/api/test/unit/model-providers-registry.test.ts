@@ -123,10 +123,14 @@ describe("model-providers runtime registry", () => {
           subscriptionEngine: { engine: "claude" },
         }),
       );
-      // codex is registered as a model provider (inference / model-listing) but
-      // contributes NO subscription engine — agent runs on a ChatGPT/Codex
-      // subscription are deferred to a follow-up PR.
-      registerModelProvider(fakeDef("codex", { authMode: "oauth2" }));
+      registerModelProvider(
+        fakeDef("codex", {
+          authMode: "oauth2",
+          subscriptionEngine: {
+            engine: "codex",
+          },
+        }),
+      );
       registerModelProvider(fakeDef("openai", { authMode: "api_key" }));
     });
 
@@ -138,9 +142,12 @@ describe("model-providers runtime registry", () => {
           label: "claude-code",
           engine: "claude",
         });
+        expect(subscriptionEngineForProvider("codex")).toMatchObject({
+          providerId: "codex",
+          engine: "codex",
+        });
       });
       it("returns undefined for a non-subscription / unknown provider", () => {
-        expect(subscriptionEngineForProvider("codex")).toBeUndefined();
         expect(subscriptionEngineForProvider("openai")).toBeUndefined();
         expect(subscriptionEngineForProvider("not-here")).toBeUndefined();
       });

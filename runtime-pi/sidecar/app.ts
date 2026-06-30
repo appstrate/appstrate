@@ -518,6 +518,18 @@ export function createApp(deps: AppDeps): Hono {
   const fetchFn = deps.fetchFn ?? fetch;
   const isReady = deps.isReady ?? (() => true);
 
+  // FREEZE-ON-FIRST snapshot for the vend endpoint. A sidecar serves EXACTLY
+  // one run, and `createApp` runs once per sidecar (once per test), so a
+  // closure-scoped variable is per-sidecar state. The vended subscription
+  // token is resolved from the platform ONCE on the first successful
+  // `/credential-vend` call, frozen here, and every subsequent GET returns
+  // this same snapshot WITHOUT re-resolving — so the in-container token is
+  // genuinely non-renewable (the platform's proactive near-expiry refresh can
+  // never be triggered from inside the container after the freeze). Freezing
+  // (rather than 410-ing on a second call) keeps the GET idempotent, so a
+  // runner retry of the handover is safe — it gets the identical token.
+  let frozenVendToken: { accessToken: string; accountId: string | null } | null = null;
+
   const app = new Hono();
 
   // Health check for startup readiness (includes forward proxy readiness)
@@ -555,6 +567,75 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(deps.integrationBootReportProvider());
   });
 
+  // Credential vend — the in-container path for a `vend`-mode run (the Codex
+  // CLI, whose models-manager calls the upstream verbatim and cannot be
+  // reverse-proxied through `/llm`). The in-container runner GETs this ONCE at
+  // run start, writes the resolved token into the binary's `auth.json`, and the
+  // binary egresses straight to the provider — locked to the provider's hosts
+  // by the per-run egress allowlist (`LlmProxyVendConfig.egressAllowlist`).
+  //
+  // No inbound auth — same posture as `/mcp` and `/integrations/boot-report`:
+  // the per-run internal Docker network is the boundary. Only a `vend`-mode run
+  // answers; `oauth` (Claude) and `api_key` runs 403, so their
+  // no-real-token-in-container invariant is preserved.
+  //
+  // FREEZE-ON-FIRST: the token is resolved from the platform exactly once (on
+  // the first successful call) and frozen in `frozenVendToken`. Every later
+  // GET returns the frozen snapshot without re-resolving — never triggering the
+  // platform's near-expiry refresh — so the handed-over token is non-renewable
+  // in-container. A 410 (NeedsReconnection) can therefore only occur on the
+  // FIRST resolve, before the freeze; after the freeze there is no refresh.
+  app.get("/credential-vend", async (c) => {
+    // Host-header validation (DNS-rebinding defence) — this endpoint vends
+    // the REAL subscription token, so it must enforce the same Host guard as
+    // its same-commit siblings (`/mcp`, `/runtime-events`). Inbound auth is
+    // the per-run Docker network; the Host guard rejects rebind attempts.
+    const hostError = validateMcpHostHeader(c.req.raw);
+    if (hostError) return hostError;
+    if (config.llm?.authMode !== "vend") {
+      return c.json({ error: "credential vend not enabled for this run" }, 403);
+    }
+    // Already frozen: return the snapshot verbatim — no resolver call, no
+    // refresh. Idempotent under a runner retry of the handover.
+    if (frozenVendToken) {
+      c.header("cache-control", "no-store");
+      return c.json({
+        access_token: frozenVendToken.accessToken,
+        account_id: frozenVendToken.accountId,
+      });
+    }
+    const tokenCache = deps.oauthTokenCache;
+    if (!tokenCache) {
+      return c.json({ error: "oauth token cache unavailable" }, 503);
+    }
+    try {
+      const token = await tokenCache.getToken(config.llm.credentialId);
+      // Freeze the first successful resolve. Subsequent calls short-circuit
+      // above and never reach the resolver again.
+      frozenVendToken = { accessToken: token.accessToken, accountId: token.accountId ?? null };
+      c.header("cache-control", "no-store");
+      return c.json({
+        access_token: frozenVendToken.accessToken,
+        account_id: frozenVendToken.accountId,
+      });
+    } catch (err) {
+      if (err instanceof NeedsReconnectionError) {
+        // Status stays 410 (distinct from the oauth path's 401 by design), but
+        // share the `needsReconnection: true` discriminator so both modes carry
+        // one machine-readable flag the runner can branch on.
+        return c.json(
+          { error: "subscription credential needs reconnection", needsReconnection: true },
+          410,
+        );
+      }
+      logger.error("credential vend: token resolution failed", {
+        credentialId: config.llm.credentialId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.json({ error: "failed to resolve credential" }, 502);
+    }
+  });
+
   // LLM reverse proxy. Two modes:
   //
   //   - api_key: the Pi SDK formats every header (auth, beta, identity)
@@ -571,6 +652,16 @@ export function createApp(deps: AppDeps): Hono {
   app.all("/llm/*", async (c) => {
     if (!config.llm) {
       return c.json({ error: "LLM proxy not configured" }, 503);
+    }
+
+    if (config.llm.authMode === "vend") {
+      // Vend-mode runs (the Codex CLI) drive the upstream directly with a
+      // token handed over via `/credential-vend` — they never proxy through
+      // `/llm` (and carry no `baseUrl`). A request here is a misconfiguration.
+      return c.json(
+        { error: "this run uses an in-container credential driver; /llm is disabled" },
+        400,
+      );
     }
 
     if (isBlockedUrl(config.llm.baseUrl)) {

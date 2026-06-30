@@ -44,9 +44,9 @@ function readOutputSchemaFromEnv(): Record<string, unknown> | null {
  * Validate the parsed credential config crossing into the sidecar (the
  * credential-handling process). A blind `as` cast would let union drift (a
  * renamed `authMode`, a removed required field) parse cleanly and surface far
- * later as a confusing 401/503 from `/llm`. We assert the discriminant + the
- * per-mode required fields here so drift fails at boot, at the cause. No Zod:
- * the sidecar deliberately
+ * later as a confusing 401/503 from `/llm` or a silent 403 from
+ * `/credential-vend`. We assert the discriminant + the per-mode required fields
+ * here so drift fails at boot, at the cause. No Zod: the sidecar deliberately
  * carries no validation dependency; this is a focused shape guard.
  */
 function assertLlmProxyConfig(value: unknown): LlmProxyConfig {
@@ -69,6 +69,27 @@ function assertLlmProxyConfig(value: unknown): LlmProxyConfig {
       need("baseUrl");
       need("credentialId");
       break;
+    case "vend":
+      need("credentialId");
+      // Fail closed at the cause: a vend run hands the REAL subscription token
+      // into the container and relies on the per-run egress allowlist to keep it
+      // from being exfiltrated. The allowlist lives ON the vend config (not a
+      // sibling env var), so the `vend ⟺ egress-lock` invariant is structural —
+      // assert it here so a vend payload without a non-empty allowlist fails at
+      // boot rather than silently leaving the forward proxy SSRF-block-only while
+      // still vending the live token.
+      if (
+        !Array.isArray(c.egressAllowlist) ||
+        c.egressAllowlist.length === 0 ||
+        !c.egressAllowlist.every((h) => typeof h === "string" && h.length > 0)
+      ) {
+        throw new Error(
+          'PI_LLM_OAUTH_CONFIG_JSON: vend config requires a non-empty "egressAllowlist" ' +
+            "string array (the real subscription token must never be served without the " +
+            "egress lock active).",
+        );
+      }
+      break;
     default:
       throw new Error(`PI_LLM_OAUTH_CONFIG_JSON: unknown authMode "${String(c.authMode)}"`);
   }
@@ -76,7 +97,7 @@ function assertLlmProxyConfig(value: unknown): LlmProxyConfig {
 }
 
 function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
-  // OAuth credentials ship as a single JSON env var carrying the full
+  // OAuth/vend credentials ship as a single JSON env var carrying the full
   // LlmProxyConfig. A malformed payload here is a launcher bug — let JSON.parse
   // throw (and assertLlmProxyConfig reject shape drift) rather than fall through
   // silently to the API-key path.
@@ -125,6 +146,13 @@ const config = {
   modelContextWindow: readPositiveIntFromEnv("MODEL_CONTEXT_WINDOW"),
   modelMaxTokens: readPositiveIntFromEnv("MODEL_MAX_TOKENS"),
 };
+
+// The `vend ⟺ egress-lock` invariant is now STRUCTURAL: the allowlist lives on
+// the vend config (parsed + asserted non-empty in `assertLlmProxyConfig`), and
+// the forward proxy derives the lock solely from `config.llm.authMode === "vend"`.
+// A vend run therefore cannot boot without its lock, and no non-vend run can
+// carry one — so the two former top-level boot checks (M1 forward + reverse) are
+// no longer needed; the type makes both failure modes unrepresentable.
 
 // ─── P4 — connect mode (`runAt: "link"` ephemeral connect-run) ───
 // When `CONNECT_LOGIN_JSON` is present the sidecar is NOT serving an agent
@@ -258,6 +286,19 @@ let integrationTools: AppstrateToolDefinition[] = [];
 const specs = readIntegrationSpecsFromEnv();
 const declaredIntegrations = specs?.length ?? 0;
 
+// H1 (defense in depth) — a `vend`-mode run hands the real subscription token to
+// the in-container runner over the per-run network, where `/credential-vend` is
+// gated only by network membership (same trust model as `/mcp`). That is sound
+// only when the network has no untrusted peers. Integration runner containers
+// join the SAME network, so a vend run MUST NOT declare integrations. The
+// launcher already refuses this, but the sidecar must not trust the launcher:
+// fail closed rather than spawn integration siblings that could vend the token.
+if (config.llm?.authMode === "vend" && declaredIntegrations > 0) {
+  throw new Error(
+    "Sidecar refusing to boot: a vend-mode run cannot spawn integrations " +
+      "(integration containers share the per-run network and could vend the real token).",
+  );
+}
 // Boot report fetched by the agent via `GET /integrations/boot-report`. Starts
 // as a synthetic empty-OK report (covers the no-integrations run); the boot
 // `.then`/`.catch` below overwrite it with the real outcome.
