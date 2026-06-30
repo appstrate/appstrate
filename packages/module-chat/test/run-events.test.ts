@@ -3,10 +3,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildRunSseUrl,
+  extractAgentLabel,
   extractRunId,
   extractRunStatus,
   isRunLaunchOp,
   isTerminalStatus,
+  lastLogText,
+  logLineText,
   maxLogId,
   mergeLogs,
   orgAppFromHeaders,
@@ -96,6 +99,70 @@ describe("extractRunStatus", () => {
   test("undefined when absent", () => {
     expect(extractRunStatus({ status: 201, body: { id: "run_x" } })).toBeUndefined();
     expect(extractRunStatus(null)).toBeUndefined();
+  });
+});
+
+describe("extractAgentLabel", () => {
+  test("agent id from invoke_operation path_params", () => {
+    expect(
+      extractAgentLabel({
+        operation_id: "runAgent",
+        path_params: { scope: "@acme", name: "writer" },
+      }),
+    ).toBe("@acme/writer");
+  });
+  test("agent id from run_and_wait scope/name", () => {
+    expect(extractAgentLabel({ kind: "agent", scope: "@acme", name: "writer" })).toBe(
+      "@acme/writer",
+    );
+  });
+  test("inline manifest display_name then name", () => {
+    expect(extractAgentLabel({ kind: "inline", manifest: { display_name: "My Tool" } })).toBe(
+      "My Tool",
+    );
+    expect(extractAgentLabel({ kind: "inline", manifest: { name: "tmp" } })).toBe("tmp");
+  });
+  test("generic 'Run inline' when inline has no manifest name", () => {
+    expect(extractAgentLabel({ kind: "inline", manifest: {} })).toBe("Run inline");
+    expect(extractAgentLabel({ operation_id: "runInline" })).toBe("Run inline");
+  });
+  test("undefined when nothing identifiable", () => {
+    expect(extractAgentLabel({})).toBeUndefined();
+    expect(extractAgentLabel(undefined)).toBeUndefined();
+    expect(extractAgentLabel({ operation_id: "runAgent" })).toBeUndefined();
+  });
+});
+
+describe("logLineText", () => {
+  test("prefers message", () => {
+    expect(logLineText({ id: 1, message: "hi", event: "ev", data: { a: 1 } })).toBe("hi");
+  });
+  test("falls back to event then data", () => {
+    expect(logLineText({ id: 1, event: "started" })).toBe("started");
+    expect(logLineText({ id: 1, data: "raw" })).toBe("raw");
+    expect(logLineText({ id: 1, data: { a: 1 } })).toBe('{"a":1}');
+  });
+  test("empty string when nothing displayable", () => {
+    expect(logLineText({ id: 1 })).toBe("");
+    expect(logLineText({ id: 1, message: null, event: null, data: null })).toBe("");
+  });
+});
+
+describe("lastLogText", () => {
+  test("most recent non-empty line", () => {
+    expect(
+      lastLogText([
+        { id: 1, message: "a" },
+        { id: 2, message: "b" },
+      ]),
+    ).toBe("b");
+  });
+  test("skips trailing empty lines", () => {
+    expect(lastLogText([{ id: 1, message: "a" }, { id: 2 }, { id: 3, data: null }])).toBe("a");
+  });
+  test("undefined on empty / all-empty", () => {
+    expect(lastLogText([])).toBeUndefined();
+    expect(lastLogText([{ id: 1 }])).toBeUndefined();
   });
 });
 

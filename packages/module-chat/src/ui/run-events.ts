@@ -209,3 +209,48 @@ export function orgAppFromHeaders(headers: Record<string, string> | undefined): 
     applicationId: h["X-Application-Id"] ?? h["x-application-id"],
   };
 }
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Derive a human label for the launched run from the launch tool-call args.
+ * Handles both shapes: `invoke_operation` (`operation_id` + `path_params`) and
+ * the `run_and_wait` tool (`kind` + `scope`/`name`/`manifest`). Returns the
+ * agent id (`@scope/name`) for an agent run, the manifest's display name/name
+ * for an inline run, or a generic "Run inline" / undefined fallback.
+ */
+export function extractAgentLabel(args: Record<string, unknown> | undefined): string | undefined {
+  if (!args) return undefined;
+  const pathParams = asRecord(args.path_params);
+  const scope = nonEmptyString(pathParams?.scope) ?? nonEmptyString(args.scope);
+  const name = nonEmptyString(pathParams?.name) ?? nonEmptyString(args.name);
+  if (scope && name) return `${scope}/${name}`;
+
+  const manifest = asRecord(args.manifest);
+  const manifestName = nonEmptyString(manifest?.display_name) ?? nonEmptyString(manifest?.name);
+  if (manifestName) return manifestName;
+
+  const isInline =
+    nonEmptyString(args.kind) === "inline" || nonEmptyString(args.operation_id) === "runInline";
+  return isInline ? "Run inline" : undefined;
+}
+
+/** Display text for one log line — `message`, then `event`, then compact `data`. */
+export function logLineText(line: RunLogLine): string {
+  if (nonEmptyString(line.message)) return line.message as string;
+  if (nonEmptyString(line.event)) return line.event as string;
+  if (typeof line.data === "string") return line.data;
+  if (line.data && typeof line.data === "object") return JSON.stringify(line.data);
+  return "";
+}
+
+/** Text of the most recent log line with displayable content, or undefined. */
+export function lastLogText(logs: readonly RunLogLine[]): string | undefined {
+  for (let i = logs.length - 1; i >= 0; i -= 1) {
+    const text = logLineText(logs[i]!);
+    if (text) return text;
+  }
+  return undefined;
+}

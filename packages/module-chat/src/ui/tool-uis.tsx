@@ -36,7 +36,7 @@ import { Modal } from "./modal.tsx";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { RunPanel } from "./run-panel.tsx";
-import { extractRunId, extractRunStatus, isRunLaunchOp } from "./run-events.ts";
+import { extractAgentLabel, extractRunId, extractRunStatus, isRunLaunchOp } from "./run-events.ts";
 import { extractAuthOffer } from "./auth-offer.ts";
 import {
   asRecord,
@@ -274,7 +274,14 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
     if (isRunLaunchOp(opId) && !props.isError) {
       const runId = extractRunId(result);
       if (runId) {
-        return <RunPanel runId={runId} initialStatus={extractRunStatus(result)} header={card} />;
+        return (
+          <RunPanel
+            runId={runId}
+            initialStatus={extractRunStatus(result)}
+            agentLabel={extractAgentLabel(args)}
+            header={card}
+          />
+        );
       }
     }
 
@@ -338,4 +345,43 @@ export const GetMeToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>
       timing={props.timing}
     />
   ),
+});
+
+// `run_and_wait` is its own MCP tool (not invoke_operation), so it needs its
+// own UI. While it blocks (no result yet) the generic launch card shows; once
+// it returns a `run_…` id, the rich RunPanel takes over (agent name, live
+// status, latest log line). A still-running run (`done:false` early return)
+// keeps streaming over SSE.
+export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
+  toolName: "run_and_wait",
+  render: (props: AnyToolProps) => {
+    const card = (
+      <ToolCallCard
+        phase={deriveToolPhase(props)}
+        Icon={PlayIcon}
+        label="Lancement"
+        idText={stringArg(props.args, "kind")}
+        args={props.args}
+        result={props.result}
+        isError={props.isError}
+        toolCallId={props.toolCallId}
+        artifact={props.artifact}
+        timing={props.timing}
+      />
+    );
+    if (!props.isError) {
+      const runId = extractRunId(props.result);
+      if (runId) {
+        return (
+          <RunPanel
+            runId={runId}
+            initialStatus={extractRunStatus(props.result)}
+            agentLabel={extractAgentLabel(props.args)}
+            header={card}
+          />
+        );
+      }
+    }
+    return card;
+  },
 });
