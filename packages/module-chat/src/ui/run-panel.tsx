@@ -10,9 +10,10 @@
  * tags `event='log'`, i.e. the agent's explicit `log` runtime tool — NOT runtime
  * lifecycle or tool-call breadcrumbs), streamed live over the run's SSE channel
  * (`useRunLogStream`) and paced one at a time (`useLogTicker`, ≥500ms each) with
- * a fade/slide animation so a burst reads as a sequence rather than a flash. A
- * live status badge and a link to the run's page sit on the right. Clicking the
- * card opens the raw input/output detail modal (`details`).
+ * a fade/slide animation so a burst reads as a sequence rather than a flash.
+ * Once the run is terminal the line settles on a fixed "Complété". A live status
+ * badge and a link to the run's page sit on the right. Clicking the card opens
+ * the raw input/output detail modal (`details`).
  *
  * Before the launch returns a `run_…` id (e.g. `run_and_wait` still blocking)
  * there is no SSE yet: the badge falls back to the tool-call phase and line 2
@@ -118,6 +119,12 @@ export function RunPanel({
   const current = useLogTicker(visibleLogEntries(logs));
   const placeholder = effectiveStatus === "pending" ? "Démarrage du run…" : "En attente des logs…";
 
+  // Once the run is terminal, the live log line is replaced by a fixed
+  // "Complété" so the card settles on a clear end state instead of freezing on
+  // whatever the last log happened to be. A stable key (-1) lets it animate in.
+  const terminal = isTerminalStatus(effectiveStatus);
+  const line = terminal ? { id: -1, text: "Complété" } : current;
+
   return (
     <div className="bg-card text-card-foreground relative my-3 w-full rounded-lg border">
       {/* Full-card click target (opens the detail modal). Behind the content so
@@ -153,12 +160,12 @@ export function RunPanel({
               so each new line remounts and runs the fade/slide enter animation;
               `grid` keeps the row height fixed while the line swaps. */}
           <div className="grid font-mono text-xs">
-            {current ? (
+            {line ? (
               <span
-                key={current.id}
+                key={line.id}
                 className="text-muted-foreground animate-in fade-in slide-in-from-bottom-1 col-start-1 row-start-1 truncate duration-300"
               >
-                {current.text}
+                {line.text}
               </span>
             ) : (
               <span className="text-muted-foreground col-start-1 row-start-1 truncate">
