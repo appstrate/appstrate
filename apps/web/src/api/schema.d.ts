@@ -4785,9 +4785,9 @@ export interface components {
         ModelProviderCredential: {
             id: string;
             label: string;
-            /** @description Protocol family. `null` for a built-in credential whose every backing model is an alias (#727) — binding hidden so the endpoint doesn't reveal the provider. */
+            /** @description Protocol family. `null` for a built-in credential whose every model is managed (#727) — the binding is not exposed, so the endpoint doesn't reveal the provider. */
             apiShape: string | null;
-            /** @description Endpoint base URL. `null` for an alias-only built-in credential (see apiShape). */
+            /** @description Endpoint base URL. `null` for a managed-only built-in credential (see apiShape). */
             baseUrl: string | null;
             /** @enum {string} */
             source: "built-in" | "custom";
@@ -4884,15 +4884,15 @@ export interface components {
         OrgModel: {
             id: string;
             label: string;
-            /** @description Protocol family. `null` for model aliases (`aliased: true`) — binding hidden. */
+            /** @description Protocol family. `null` for managed models (`aliased: true`) — binding not exposed. */
             apiShape: string | null;
-            /** @description The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for model aliases — binding hidden. */
+            /** @description The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for managed models — binding not exposed. */
             providerId: string | null;
-            /** @description The provider's human display name resolved from the model-provider registry by `providerId` (e.g. `OpenCode Go`, `OpenAI`). The authoritative label for grouping/badging a model by provider — `apiShape` is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so do NOT derive a provider label from it. `null` for model aliases (binding hidden) and for rows whose `providerId` has no registry entry. */
+            /** @description The provider's human display name resolved from the model-provider registry by `providerId` (e.g. `OpenCode Go`, `OpenAI`). The authoritative label for grouping/badging a model by provider — `apiShape` is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so do NOT derive a provider label from it. `null` for managed models (binding not exposed) and for rows whose `providerId` has no registry entry. */
             providerName: string | null;
-            /** @description Provider endpoint. `null` for model aliases — binding hidden. */
+            /** @description Provider endpoint. `null` for managed models — binding not exposed. */
             baseUrl: string | null;
-            /** @description Upstream model id. `null` for model aliases — the real backing is hidden. */
+            /** @description Upstream model id. `null` for managed models — not exposed. */
             modelId: string | null;
             input?: string[] | null;
             contextWindow?: number | null;
@@ -4900,13 +4900,13 @@ export interface components {
             reasoning?: boolean | null;
             enabled: boolean;
             is_default: boolean;
-            /** @description Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a public alias and the real binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is stripped from this projection — render an alias badge; the backing model is hidden. */
+            /** @description Managed-model flag. When true, the binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge. */
             aliased: boolean;
-            /** @description Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the backing provider, so an aliased model can show an icon without exposing its hidden binding. `null` means resolve the icon from the (visible) `apiShape`/`baseUrl`, or fall back to a generic alias icon. */
+            /** @description Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`baseUrl`, or fall back to a generic icon. */
             iconUrl: string | null;
             /** @enum {string} */
             source: "built-in" | "custom";
-            /** @description ID of the backing `model_provider_credentials` row. `null` for model aliases — binding hidden. */
+            /** @description ID of the `model_provider_credentials` row. `null` for managed models — binding not exposed. */
             credentialId: string | null;
             /** @description Cost per million tokens */
             cost?: {
@@ -12656,7 +12656,7 @@ export interface operations {
                         cacheRead?: number;
                         cacheWrite?: number;
                     };
-                    /** @description Model-alias flag. When true, this model's `id` becomes a public alias and its real binding (modelId, provider, baseUrl, capabilities/cost) is hidden from user-facing surfaces; the sidecar rewrites the `model` field on every inference call. */
+                    /** @description Managed-model flag. When true, this model's binding (modelId, provider, baseUrl, capabilities/cost) is not exposed on user-facing surfaces and these fields are null; inference is routed by the platform. */
                     aliased?: boolean;
                 };
             };
@@ -12955,7 +12955,7 @@ export interface operations {
                         cacheRead?: number;
                         cacheWrite?: number;
                     } | null;
-                    /** @description Model-alias flag. When true, this model's `id` becomes a public alias and its real binding is hidden from user-facing surfaces. */
+                    /** @description Managed-model flag. When true, this model's binding is not exposed on user-facing surfaces. */
                     aliased?: boolean;
                 };
             };
