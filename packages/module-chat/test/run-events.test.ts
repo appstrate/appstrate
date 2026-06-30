@@ -6,9 +6,12 @@ import {
   extractAgentLabel,
   extractRunId,
   extractRunStatus,
+  buildRunPageHref,
+  extractRunPackageId,
   isRunLaunchOp,
   isTerminalStatus,
   lastLogText,
+  lastVisibleLogText,
   logLineText,
   maxLogId,
   mergeLogs,
@@ -163,6 +166,52 @@ describe("lastLogText", () => {
   test("undefined on empty / all-empty", () => {
     expect(lastLogText([])).toBeUndefined();
     expect(lastLogText([{ id: 1 }])).toBeUndefined();
+  });
+});
+
+describe("lastVisibleLogText", () => {
+  test("skips debug-level lines", () => {
+    const logs: RunLogLine[] = [
+      { id: 1, level: "info", message: "a" },
+      { id: 2, level: "debug", message: "noise" },
+    ];
+    expect(lastVisibleLogText(logs)).toBe("a");
+  });
+  test("returns the last non-debug line", () => {
+    const logs: RunLogLine[] = [
+      { id: 1, level: "info", message: "a" },
+      { id: 2, level: "warn", message: "b" },
+      { id: 3, level: "debug", message: "noise" },
+    ];
+    expect(lastVisibleLogText(logs)).toBe("b");
+  });
+  test("undefined when only debug lines", () => {
+    expect(lastVisibleLogText([{ id: 1, level: "debug", message: "x" }])).toBeUndefined();
+  });
+});
+
+describe("extractRunPackageId", () => {
+  test("from body.packageId (invoke envelope)", () => {
+    expect(extractRunPackageId({ status: 201, body: { packageId: "@acme/writer" } })).toBe(
+      "@acme/writer",
+    );
+  });
+  test("from top-level packageId (run_and_wait)", () => {
+    expect(extractRunPackageId({ id: "run_1", packageId: "@acme/writer" })).toBe("@acme/writer");
+  });
+  test("undefined when absent or orphaned (null)", () => {
+    expect(extractRunPackageId({ body: { id: "run_1", packageId: null } })).toBeUndefined();
+    expect(extractRunPackageId({})).toBeUndefined();
+    expect(extractRunPackageId(null)).toBeUndefined();
+  });
+});
+
+describe("buildRunPageHref", () => {
+  test("builds the agent run-detail path, packageId slashes literal", () => {
+    expect(buildRunPageHref("@acme/writer", "run_42")).toBe("/agents/@acme/writer/runs/run_42");
+  });
+  test("undefined without a package id", () => {
+    expect(buildRunPageHref(undefined, "run_42")).toBeUndefined();
   });
 });
 

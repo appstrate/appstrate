@@ -36,7 +36,14 @@ import { Modal } from "./modal.tsx";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { RunPanel } from "./run-panel.tsx";
-import { extractAgentLabel, extractRunId, extractRunStatus, isRunLaunchOp } from "./run-events.ts";
+import {
+  buildRunPageHref,
+  extractAgentLabel,
+  extractRunId,
+  extractRunPackageId,
+  extractRunStatus,
+  isRunLaunchOp,
+} from "./run-events.ts";
 import { extractAuthOffer } from "./auth-offer.ts";
 import {
   asRecord,
@@ -227,6 +234,53 @@ export function ToolCallCard({
 
 type AnyToolProps = ToolCallMessagePartProps<Record<string, unknown>, unknown>;
 
+/**
+ * Render the rich run panel for a launch tool-call (`runAgent` / `runInline` /
+ * `run_and_wait`) once its result carries a `run_…` id. Returns `null` (caller
+ * falls back to the bare card) on a failed or not-yet-returned launch. Builds
+ * the same input/output/metadata detail body the generic card's modal shows, so
+ * clicking the panel opens identical details.
+ */
+function renderRunLaunch(props: AnyToolProps): React.ReactNode | null {
+  if (props.isError) return null;
+  const runId = extractRunId(props.result);
+  if (!runId) return null;
+
+  const unwrapped = unwrapResult(props.result);
+  const meta = definedEntries({
+    tool_call_id: props.toolCallId,
+    is_error: props.isError,
+    http_status: httpStatusOf(unwrapped),
+    duration_ms: readDurationMs(props.timing),
+    artifact: props.artifact,
+  });
+  const agentLabel = extractAgentLabel(props.args);
+  const modalTitle = (
+    <span className="flex items-center gap-2">
+      <PlayIcon className="size-4 shrink-0" />
+      {agentLabel ?? "Run"}
+      <code className="text-muted-foreground text-xs">{runId}</code>
+    </span>
+  );
+  const details = (
+    <div className="space-y-4">
+      <DetailSection title="Entrée" value={props.args} />
+      <DetailSection title="Sortie" value={unwrapped} />
+      <DetailSection title="Métadonnées" value={meta} />
+    </div>
+  );
+  return (
+    <RunPanel
+      runId={runId}
+      initialStatus={extractRunStatus(props.result)}
+      agentLabel={agentLabel}
+      runHref={buildRunPageHref(extractRunPackageId(props.result), runId)}
+      modalTitle={modalTitle}
+      details={details}
+    />
+  );
+}
+
 export const InvokeOperationToolUI = makeAssistantToolUI<
   { operation_id?: string; path_params?: { packageId?: string } } & Record<string, unknown>,
   unknown
@@ -268,21 +322,11 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       />
     );
 
-    // Run launch (runAgent / runInline / run_and_wait) → wrap the card in a
-    // panel that tails the launched run's logs live once the result carries a
-    // `run_…` id. A failed launch (no id) renders the bare card unchanged.
-    if (isRunLaunchOp(opId) && !props.isError) {
-      const runId = extractRunId(result);
-      if (runId) {
-        return (
-          <RunPanel
-            runId={runId}
-            initialStatus={extractRunStatus(result)}
-            agentLabel={extractAgentLabel(args)}
-            header={card}
-          />
-        );
-      }
+    // Run launch (runAgent / runInline) → rich live run panel once the result
+    // carries a `run_…` id; otherwise the bare card.
+    if (isRunLaunchOp(opId)) {
+      const panel = renderRunLaunch(props);
+      if (panel) return panel;
     }
 
     return card;
@@ -369,19 +413,8 @@ export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unk
         timing={props.timing}
       />
     );
-    if (!props.isError) {
-      const runId = extractRunId(props.result);
-      if (runId) {
-        return (
-          <RunPanel
-            runId={runId}
-            initialStatus={extractRunStatus(props.result)}
-            agentLabel={extractAgentLabel(props.args)}
-            header={card}
-          />
-        );
-      }
-    }
+    const panel = renderRunLaunch(props);
+    if (panel) return panel;
     return card;
   },
 });

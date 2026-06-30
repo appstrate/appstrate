@@ -4,39 +4,26 @@
  * In-chat run panel. Rendered when the assistant launches a run (the
  * `runAgent` / `runInline` / `run_and_wait` tool result carries a `run_…` id).
  *
- * Shows a compact two-line summary block — agent name + live status on line 1,
- * the latest log line on line 2 — that updates in real time from the run's SSE
- * channel (`useRunLogStream`). A "détails" toggle expands the full scrolling log
- * tail and the raw tool-call card (`header`).
+ * A compact two-line card: line 1 is the agent name + a live status badge + a
+ * link to the run's page; line 2 is the latest log line (debug excluded), both
+ * updating in real time from the run's SSE channel (`useRunLogStream`). Clicking
+ * the card opens the raw input/output detail modal (`details`). No accordion.
  *
- * Purely additive: with no org/app context or SSE the summary still shows the
- * status from the launch result and the panel degrades gracefully.
+ * Purely additive: with no org/app context or SSE the card still shows the
+ * status from the launch result and degrades gracefully.
  */
 
 import * as React from "react";
 import {
   AlertTriangleIcon,
   CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
+  ExternalLinkIcon,
   Loader2Icon,
   PlayIcon,
 } from "lucide-react";
+import { Modal } from "./modal.tsx";
 import { useRunLogStream } from "./use-run-log-stream.ts";
-import {
-  isTerminalStatus,
-  lastLogText,
-  logLineText,
-  type RunLogLine,
-  type RunStatus,
-} from "./run-events.ts";
-
-const LEVEL_TONE: Record<string, string> = {
-  debug: "text-muted-foreground",
-  info: "text-foreground",
-  warn: "text-amber-600 dark:text-amber-400",
-  error: "text-destructive",
-};
+import { isTerminalStatus, lastVisibleLogText, type RunStatus } from "./run-events.ts";
 
 const STATUS_LABEL: Record<RunStatus, string> = {
   pending: "En attente",
@@ -75,115 +62,75 @@ function StatusBadge({ status, live }: { status: RunStatus | undefined; live: bo
   );
 }
 
-/** One log row in the expanded viewport. */
-function LogRow({ line }: { line: RunLogLine }) {
-  const tone = LEVEL_TONE[line.level ?? "info"] ?? "text-foreground";
-  const text = logLineText(line);
-  if (!text) return null;
-  return (
-    <div className={`break-words whitespace-pre-wrap ${tone}`}>
-      <span className="text-muted-foreground/60 select-none">{line.level ?? "info"} </span>
-      {text}
-    </div>
-  );
-}
-
 export function RunPanel({
   runId,
   initialStatus,
   agentLabel,
-  header,
+  runHref,
+  modalTitle,
+  details,
 }: {
   runId: string;
   initialStatus?: string;
   agentLabel?: string;
-  header?: React.ReactNode;
+  runHref?: string;
+  modalTitle: React.ReactNode;
+  details: React.ReactNode;
 }) {
   const { logs, status, live } = useRunLogStream(runId, initialStatus);
   const effectiveStatus =
     status ?? (isTerminalStatus(initialStatus) ? (initialStatus as RunStatus) : undefined);
-  const [expanded, setExpanded] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
 
-  const latest = lastLogText(logs);
+  const latest = lastVisibleLogText(logs);
   const secondLine =
     latest ??
     (effectiveStatus === "pending"
       ? "Démarrage du run…"
       : live
         ? "En attente des premiers logs…"
-        : `Run ${runId}`);
-
-  // Auto-scroll the expanded viewport as lines stream in, unless scrolled up.
-  const viewportRef = React.useRef<HTMLDivElement>(null);
-  const pinnedRef = React.useRef(true);
-  React.useEffect(() => {
-    const el = viewportRef.current;
-    if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
-  }, [logs, expanded]);
-
-  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const el = e.currentTarget;
-    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
-  };
+        : runId);
 
   return (
-    <div className="bg-card text-card-foreground my-3 w-full rounded-lg border">
-      {/* Two-line summary block */}
-      <div className="flex items-start gap-2 px-3 py-2">
+    <div className="bg-card text-card-foreground relative my-3 w-full rounded-lg border">
+      {/* Full-card click target (opens the detail modal). Kept behind the content
+          so the run-page link can re-enable pointer events for itself — avoids
+          nesting interactive elements. */}
+      <button
+        type="button"
+        aria-label="Détails du run"
+        className="hover:bg-muted/40 absolute inset-0 z-0 rounded-lg"
+        onClick={() => setOpen(true)}
+      />
+      <div className="pointer-events-none relative z-10 flex items-start gap-2 px-3 py-2">
         <PlayIcon className="text-muted-foreground mt-0.5 size-4 shrink-0" />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          {/* Line 1: agent name + live status */}
+          {/* Line 1: agent name + live status + run-page link */}
           <div className="flex items-center gap-2">
             <span className="truncate text-sm font-medium">{agentLabel ?? "Run"}</span>
-            <code className="text-muted-foreground/70 hidden truncate text-xs sm:inline">
-              {runId}
-            </code>
-            <span className="ml-auto flex items-center gap-2">
-              {logs.length > 0 ? (
-                <span className="text-muted-foreground/50 text-xs tabular-nums">
-                  {logs.length} logs
-                </span>
-              ) : null}
+            <span className="ml-auto flex shrink-0 items-center gap-2">
               <StatusBadge status={effectiveStatus} live={live} />
+              {runHref ? (
+                <a
+                  href={runHref}
+                  className="text-muted-foreground hover:text-foreground pointer-events-auto"
+                  title="Ouvrir la page du run"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <ExternalLinkIcon className="size-3.5" />
+                </a>
+              ) : null}
             </span>
           </div>
-          {/* Line 2: latest log line */}
+          {/* Line 2: latest non-debug log line */}
           <div className="text-muted-foreground truncate font-mono text-xs">{secondLine}</div>
         </div>
       </div>
 
-      {/* Details toggle + expanded content */}
-      {logs.length > 0 || header ? (
-        <div className="border-t">
-          <button
-            type="button"
-            className="hover:bg-muted/40 text-muted-foreground flex w-full items-center gap-1 px-3 py-1.5 text-left text-xs"
-            onClick={() => setExpanded((v) => !v)}
-          >
-            {expanded ? (
-              <ChevronDownIcon className="size-3.5" />
-            ) : (
-              <ChevronRightIcon className="size-3.5" />
-            )}
-            Détails
-          </button>
-          {expanded ? (
-            <div className="space-y-2 px-3 pb-3">
-              {logs.length > 0 ? (
-                <div
-                  ref={viewportRef}
-                  onScroll={onScroll}
-                  className="bg-muted/30 max-h-64 overflow-y-auto rounded-md p-2 font-mono text-xs leading-relaxed"
-                >
-                  {logs.map((line) => (
-                    <LogRow key={line.id} line={line} />
-                  ))}
-                </div>
-              ) : null}
-              {header}
-            </div>
-          ) : null}
-        </div>
+      {open ? (
+        <Modal title={modalTitle} onClose={() => setOpen(false)}>
+          {details}
+        </Modal>
       ) : null}
     </div>
   );

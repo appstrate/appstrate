@@ -254,3 +254,34 @@ export function lastLogText(logs: readonly RunLogLine[]): string | undefined {
   }
   return undefined;
 }
+
+/**
+ * Like `lastLogText`, but skips `debug`-level lines — debug logs are noise we
+ * never surface in the chat card.
+ */
+export function lastVisibleLogText(logs: readonly RunLogLine[]): string | undefined {
+  for (let i = logs.length - 1; i >= 0; i -= 1) {
+    if (logs[i]!.level === "debug") continue;
+    const text = logLineText(logs[i]!);
+    if (text) return text;
+  }
+  return undefined;
+}
+
+/** Run package id from a launch result (`body.packageId`, then top-level). */
+export function extractRunPackageId(result: unknown): string | undefined {
+  const unwrapped = asRecord(unwrapResult(result));
+  if (!unwrapped) return undefined;
+  return nonEmptyString(asRecord(unwrapped.body)?.packageId) ?? nonEmptyString(unwrapped.packageId);
+}
+
+/**
+ * Build the in-app run-detail URL (`/agents/{packageId}/runs/{runId}`, the same
+ * route `run-row.tsx` links to). `undefined` when the run has no package id
+ * (orphaned) so the caller can omit the link. `packageId` keeps its `@scope/name`
+ * slashes literal to match the route; only the run id is encoded.
+ */
+export function buildRunPageHref(packageId: string | undefined, runId: string): string | undefined {
+  if (!packageId) return undefined;
+  return `/agents/${packageId}/runs/${encodeURIComponent(runId)}`;
+}
