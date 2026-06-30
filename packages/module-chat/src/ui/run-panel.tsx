@@ -17,9 +17,7 @@
  * live execution time and a link to the run's page sit on the right. Clicking
  * the card opens the raw input/output detail modal (`details`).
  *
- * Before the launch returns a `run_…` id (e.g. `run_and_wait` still blocking)
- * there is no SSE yet: the status glyph falls back to the tool-call phase and
- * line 2 shows a placeholder — same height throughout.
+ * Before returns `run_…` id there is no SSE yet: status glyph falls back tool-call phase.
  */
 
 import * as React from "react";
@@ -29,7 +27,12 @@ import { useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
 import { formatDuration } from "@appstrate/core/format";
 import { useLiveElapsedMs } from "./use-elapsed.ts";
-import { isTerminalStatus, visibleLogEntries, type RunStatus } from "./run-events.ts";
+import {
+  buildRunPageHref,
+  isTerminalStatus,
+  visibleLogEntries,
+  type RunStatus,
+} from "./run-events.ts";
 import type { ToolPhase } from "./tool-result.ts";
 
 const STATUS_TONE: Record<RunStatus, string> = {
@@ -69,6 +72,7 @@ export function RunPanel({
   initialStatus,
   agentLabel,
   runHref,
+  initialPackageId,
   phase,
   modalTitle,
   details,
@@ -77,11 +81,16 @@ export function RunPanel({
   initialStatus?: string;
   agentLabel?: string;
   runHref?: string;
+  initialPackageId?: string;
   phase: ToolPhase;
   modalTitle: React.ReactNode;
   details: React.ReactNode;
 }) {
-  const { logs, status, startedAt, completedAt } = useRunLogStream(runId, initialStatus);
+  const { logs, status, packageId, startedAt, completedAt } = useRunLogStream(
+    runId,
+    initialStatus,
+    initialPackageId,
+  );
   const effectiveStatus =
     status ?? (isTerminalStatus(initialStatus) ? (initialStatus as RunStatus) : undefined);
   const [open, setOpen] = React.useState(false);
@@ -103,6 +112,7 @@ export function RunPanel({
   // whatever the last log happened to be. A stable key (-1) lets it animate in.
   const terminal = isTerminalStatus(effectiveStatus);
   const line = terminal ? { id: -1, text: "Complété" } : current;
+  const effectiveRunHref = runHref ?? (runId ? buildRunPageHref(packageId, runId) : undefined);
 
   return (
     <div className="bg-card text-card-foreground relative my-3 w-full rounded-lg border">
@@ -128,9 +138,9 @@ export function RunPanel({
                   {formatDuration(elapsedMs)}
                 </span>
               ) : null}
-              {runHref ? (
+              {effectiveRunHref ? (
                 <a
-                  href={runHref}
+                  href={effectiveRunHref}
                   className="text-muted-foreground hover:text-foreground pointer-events-auto"
                   title="Ouvrir la page du run"
                   onClick={(e) => e.stopPropagation()}

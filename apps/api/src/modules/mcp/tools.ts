@@ -29,10 +29,14 @@
 
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
+import type { AppstrateRequestExtra, AppstrateToolDefinition } from "@appstrate/mcp-transport";
+import {
+  RUN_AND_WAIT_BACKOFF_MS,
+  RUN_AND_WAIT_MAX_MS,
+  isRunAndWaitTerminalStatus,
+} from "@appstrate/core/run-and-wait-client";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
-import { TERMINAL_RUN_STATUSES, type RunStatus } from "@appstrate/db/schema";
 
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
@@ -640,27 +644,6 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
 // --- run_and_wait ----------------------------------------------------------
 
-const MCP_RUN_AND_WAIT_CORRELATION_METADATA_KEY = "appstrate.mcpRunAndWaitCorrelationId";
-/**
- * Total time `run_and_wait` blocks before giving up and returning a
- * still-running run. The default blocks until the run is TERMINAL (the tool's
- * whole contract is "launch AND wait"): the value is the safety ceiling, set
- * just under the chat's per-turn MCP timeout (~30 min) so a pathologically long
- * run can't wedge the call forever. The chat UI shows the run's logs live while
- * this blocks (it discovers the run from the realtime run stream, independent of
- * this call). Internally it long-polls the run-get operation in ~55 s windows
- * (the server's `?wait=` cap) until terminal. `max_wait_seconds` lowers the
- * ceiling for a caller that wants to bail out sooner.
- */
-const MAX_RUN_WAIT_SECONDS = 1740;
-const DEFAULT_RUN_WAIT_SECONDS = MAX_RUN_WAIT_SECONDS;
-/** Per-iteration long-poll window — matches the run-get `?wait=` server cap. */
-const RUN_POLL_WINDOW_SECONDS = 55;
-
-function asNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
 /**
  * Build + dispatch a single catalog operation in-process and return the raw
  * Response (NOT a CallToolResult) so a composing tool can read its body. Same
@@ -670,7 +653,12 @@ function asNumber(value: unknown): number | undefined {
 async function dispatchCatalogOperation(
   ctx: McpToolContext,
   operationId: string,
-  opts: { pathParams?: Record<string, unknown>; query?: Record<string, unknown>; body?: unknown },
+  opts: {
+    pathParams?: Record<string, unknown>;
+    query?: Record<string, unknown>;
+    body?: unknown;
+    signal?: AbortSignal;
+  },
 ): Promise<Response> {
   const { operations } = getCatalog();
   const op = operations.get(operationId);
@@ -698,26 +686,49 @@ async function dispatchCatalogOperation(
     method: op.method,
     headers,
     body: sendBody ? JSON.stringify(opts.body) : undefined,
+    signal: opts.signal,
   });
   return ctx.dispatch(request);
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  throw signal.reason ?? new Error("Aborted");
+}
+
+function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, ms);
+    function done(): void {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }
+    function onAbort(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(signal?.reason ?? new Error("Aborted"));
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "run_and_wait",
     description:
-      'Launch a run AND wait for it to finish, in one call: starts an agent run (`kind:"agent"`, ' +
-      'by `scope`/`name`) or an inline run (`kind:"inline"`, by `manifest`+`prompt`), then blocks ' +
-      "until the run reaches a terminal status (success/failed/timeout/cancelled) and returns " +
-      "`{ id, status, done, result?, error? }`. Read `result` for the run's deliverable — you do " +
-      "NOT need a separate run-get call; this already waited. The chat shows the run's logs live " +
-      "while it runs — but ONLY the lines the run emits through the `log` runtime tool. For an " +
-      'inline run (`kind:"inline"`) you MUST therefore (1) declare `"runtime_tools": ["log"]` in the ' +
-      "manifest AND (2) instruct the run, in its `prompt`, to call the `log` tool to report each " +
-      "meaningful step — otherwise the live panel stays empty. Prefer an existing agent over an " +
-      "inline manifest when one matches the intent. " +
-      "(Only if it returns `done:false` — a run that outran the wait ceiling — keep following with " +
-      "the run-get operation, `wait:true`.)",
+      'Launch a run and wait for its final status in one call: starts an agent run (`kind:"agent"`, ' +
+      'by `scope`/`name`) or an inline run (`kind:"inline"`, by `manifest`+`prompt`), exposes ' +
+      "the created run to chat for live logs, then returns " +
+      "`{ id, packageId, status, done:true, result?, error? }` when the run reaches a terminal " +
+      "status. Do NOT call `getRun` after this tool just to wait for completion; this tool already " +
+      "waits. The chat shows logs after the run id is known, but ONLY lines the run emits " +
+      "through the `log` runtime tool. For an " +
+      'inline run (`kind:"inline"`) you MUST therefore (1) declare `"runtime_tools": ["log"]` in ' +
+      "the manifest AND (2) instruct the run, in its `prompt`, to call the `log` " +
+      "tool to report each meaningful step — otherwise the live panel stays empty. " +
+      "Prefer an existing agent over an inline manifest when one matches the intent.",
     annotations: {
       title: "Run and wait",
       readOnlyHint: false,
@@ -733,11 +744,6 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
           enum: ["agent", "inline"],
           description:
             "`agent` runs a published/draft agent by scope+name; `inline` runs a manifest.",
-        },
-        correlation_id: {
-          type: "string",
-          description:
-            "Fresh unique id for this tool call. Required so chat can correlate the blocking run_and_wait call with the exact run on the realtime stream.",
         },
         scope: { type: "string", description: "Agent scope, keep the leading `@` (kind:agent)." },
         name: { type: "string", description: "Agent name (kind:agent)." },
@@ -771,21 +777,18 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
           description: "Per-run config override (either kind).",
           additionalProperties: true,
         },
-        max_wait_seconds: {
-          type: "number",
-          description:
-            `Max seconds to wait for terminal status before returning a still-running run. ` +
-            `Defaults to ${DEFAULT_RUN_WAIT_SECONDS} (effectively "until the run finishes"); lower ` +
-            `it to bail out sooner. The wait long-polls in ~55 s windows, so the call stays open ` +
-            `for roughly the run's duration.`,
-        },
       },
-      required: ["kind", "correlation_id"],
+      required: ["kind"],
     },
   };
 
-  const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+  const handler = async (
+    args: Record<string, unknown>,
+    extra: AppstrateRequestExtra,
+  ): Promise<CallToolResult> => {
     const start = performance.now();
+    const signal = extra.signal;
+    throwIfAborted(signal);
     if (!ctx.permissions.has("mcp:invoke")) {
       emit(ctx, { tool: "run_and_wait", durationMs: performance.now() - start, outcome: "denied" });
       return textResult({ error: "Permission 'mcp:invoke' is required to launch runs." }, true);
@@ -801,16 +804,6 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       throw new McpError(ErrorCode.InvalidParams, "`kind` must be 'agent' or 'inline'.");
     }
 
-    const correlationId = asString(args.correlation_id);
-    if (!correlationId) {
-      emit(ctx, {
-        tool: "run_and_wait",
-        durationMs: performance.now() - start,
-        outcome: "rejected",
-      });
-      return textResult({ error: "`correlation_id` required." }, true);
-    }
-
     // --- launch (fire-and-forget; the route returns the created run) ---
     let launchResponse: Response;
     if (kind === "agent") {
@@ -824,9 +817,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         });
         return textResult({ error: "`scope` and `name` are required for kind:'agent'." }, true);
       }
-      const body: Record<string, unknown> = {
-        metadata: { [MCP_RUN_AND_WAIT_CORRELATION_METADATA_KEY]: correlationId },
-      };
+      const body: Record<string, unknown> = {};
       if (asRecord(args.input)) body.input = args.input;
       if (asRecord(args.config)) body.config = args.config;
       const query: Record<string, unknown> = {};
@@ -836,6 +827,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         pathParams: { scope, name },
         query,
         body: Object.keys(body).length > 0 ? body : undefined,
+        signal,
       });
     } else {
       const manifest = asRecord(args.manifest);
@@ -847,14 +839,11 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         });
         return textResult({ error: "`manifest` is required for kind:'inline'." }, true);
       }
-      const body: Record<string, unknown> = {
-        manifest,
-        metadata: { [MCP_RUN_AND_WAIT_CORRELATION_METADATA_KEY]: correlationId },
-      };
+      const body: Record<string, unknown> = { manifest };
       const prompt = asString(args.prompt);
       if (prompt) body.prompt = prompt;
       if (asRecord(args.config)) body.config = args.config;
-      launchResponse = await dispatchCatalogOperation(ctx, "runInline", { body });
+      launchResponse = await dispatchCatalogOperation(ctx, "runInline", { body, signal });
     }
 
     // Surface a launch failure (4xx/5xx) verbatim so the model can self-correct
@@ -881,61 +870,83 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       return textResult({ error: "Run launch returned no run id.", launch: launched }, true);
     }
 
-    // --- follow (bounded long-poll) ---
-    const budget = Math.min(
-      Math.max(asNumber(args.max_wait_seconds) ?? DEFAULT_RUN_WAIT_SECONDS, 0),
-      MAX_RUN_WAIT_SECONDS,
-    );
-    let run: unknown = launched;
-    let waited = 0;
-    while (
-      !TERMINAL_RUN_STATUSES.has((asString(asRecord(run)?.status) ?? "") as RunStatus) &&
-      waited < budget
-    ) {
-      const window = Math.min(RUN_POLL_WINDOW_SECONDS, budget - waited);
-      const getResponse = await dispatchCatalogOperation(ctx, "getRun", {
-        pathParams: { id: runId },
-        query: { wait: String(window) },
-      });
-      if (getResponse.status >= 400) {
-        // Lost visibility of the run (deleted, scope changed) — report it; the
-        // run itself may still be going.
-        emit(ctx, {
-          tool: "run_and_wait",
-          durationMs: performance.now() - start,
-          method: "GET",
-          status: getResponse.status,
-          outcome: "invoked",
-        });
-        return readResponse(getResponse);
-      }
-      run = (await getResponse.json().catch(() => undefined)) as unknown;
-      waited += window;
-    }
-
-    const runRecord = asRecord(run) ?? {};
-    const status = asString(runRecord.status);
-    const done = TERMINAL_RUN_STATUSES.has((status ?? "") as RunStatus);
+    const runRecord = asRecord(launched) ?? {};
+    const packageId = asString(runRecord.packageId) ?? null;
+    const status = asString(runRecord.status) ?? null;
     emit(ctx, {
       tool: "run_and_wait",
       durationMs: performance.now() - start,
       operationId: kind === "agent" ? "runAgent" : "runInline",
-      status: done ? 200 : 202,
+      status: 202,
       outcome: "invoked",
     });
-    return textResult({
-      id: runId,
-      status: status ?? null,
-      done,
-      ...(done
-        ? { result: runRecord.result ?? null, error: runRecord.error ?? null }
-        : {
-            hint:
-              "Run still in progress. Its live logs are streaming in the chat; keep following " +
-              "with the run-get operation (path param `id`, `query: { wait: true }`) and read " +
-              "`result` once it goes terminal.",
-          }),
+
+    let run: Record<string, unknown> | undefined;
+    const deadline = start + RUN_AND_WAIT_MAX_MS;
+    while (performance.now() < deadline) {
+      throwIfAborted(signal);
+      const pollStart = performance.now();
+      const response = await dispatchCatalogOperation(ctx, "getRun", {
+        pathParams: { id: runId },
+        query: { wait: "true" },
+        signal,
+      });
+      if (response.status >= 400) {
+        emit(ctx, {
+          tool: "run_and_wait",
+          durationMs: performance.now() - start,
+          operationId: "getRun",
+          method: "GET",
+          status: response.status,
+          outcome: "invoked",
+        });
+        return readResponse(response);
+      }
+
+      run = asRecord((await response.json().catch(() => undefined)) as unknown) ?? undefined;
+      if (!run) {
+        emit(ctx, {
+          tool: "run_and_wait",
+          durationMs: performance.now() - start,
+          outcome: "rejected",
+        });
+        return textResult({ error: "Run wait returned no run resource." }, true);
+      }
+
+      const currentStatus = asString(run.status);
+      if (isRunAndWaitTerminalStatus(currentStatus)) {
+        break;
+      }
+
+      const pollMs = performance.now() - pollStart;
+      if (pollMs < RUN_AND_WAIT_BACKOFF_MS) {
+        await sleep(
+          Math.min(RUN_AND_WAIT_BACKOFF_MS - pollMs, deadline - performance.now()),
+          signal,
+        );
+      }
+    }
+
+    if (!run || !isRunAndWaitTerminalStatus(run.status)) {
+      return textResult({
+        ...(run ?? { id: runId, packageId, status }),
+        id: asString(run?.id) ?? runId,
+        packageId: asString(run?.packageId) ?? packageId,
+        status: asString(run?.status) ?? status,
+        done: false,
+        error: "run_and_wait timed out before the run reached a terminal status.",
+      });
+    }
+
+    emit(ctx, {
+      tool: "run_and_wait",
+      durationMs: performance.now() - start,
+      operationId: "getRun",
+      method: "GET",
+      status: 200,
+      outcome: "invoked",
     });
+    return textResult({ ...run, done: true });
   };
 
   return { descriptor, handler };

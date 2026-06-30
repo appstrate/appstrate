@@ -79,77 +79,12 @@ export type RunLogLine = z.infer<typeof runLogLineSchema>;
 export const runUpdateLiteSchema = z.object({
   id: z.string().optional(),
   status: z.string(),
+  packageId: z.string().nullable().optional(),
   error: z.string().nullable().optional(),
   startedAt: z.string().nullable().optional(),
   completedAt: z.string().nullable().optional(),
 });
 export type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
-
-/**
- * Minimal `GET /api/runs/:id` shape — the run's status + timing. Fetched once at
- * mount so a reopened/refreshed conversation seeds the badge and execution time
- * for a run that already finished (no live `run_update` ever arrives for it).
- *
- * Reads snake_case `started_at` / `completed_at`: that is the canonical run REST
- * DTO shape the rest of the app already consumes (`run.started_at` everywhere).
- * It differs from the camelCase `run_update` SSE frame (`parseRunUpdateFrame`) —
- * a deliberate, pre-existing split (REST DTO = snake, realtime = camel), not a
- * mix introduced here: each parser matches its own endpoint. We normalise to the
- * camelCase shape used internally so the hook state stays one convention.
- */
-export const runTimingSchema = z
-  .object({
-    status: z.string().optional(),
-    started_at: z.string().nullable().optional(),
-    completed_at: z.string().nullable().optional(),
-  })
-  .transform((d) => ({
-    status: d.status,
-    startedAt: d.started_at ?? null,
-    completedAt: d.completed_at ?? null,
-  }));
-export type RunTiming = z.infer<typeof runTimingSchema>;
-
-/** Parse a `GET /api/runs/:id` body into its status + timing, or undefined. */
-export function parseRunTiming(body: unknown): RunTiming | undefined {
-  const parsed = runTimingSchema.safeParse(body);
-  return parsed.success ? parsed.data : undefined;
-}
-
-/**
- * `run_update` frame from the org-wide realtime stream, reduced to the two
- * fields discovery needs: the run `id` and the `mcpCorrelationId` echoed back
- * from `runs.metadata`. A blocking `run_and_wait` only learns its run id once
- * the call returns — after the run is already done, too late to stream live — so
- * the panel finds the run on the stream by matching this correlation id.
- */
-export const runUpdateDiscoverySchema = z.object({
-  id: z.string(),
-  mcpCorrelationId: z.string().nullable().optional(),
-});
-export type RunUpdateDiscovery = z.infer<typeof runUpdateDiscoverySchema>;
-
-export function parseRunUpdateDiscovery(raw: string): RunUpdateDiscovery | undefined {
-  const parsed = runUpdateDiscoverySchema.safeParse(safeJsonParse(raw));
-  return parsed.success ? parsed.data : undefined;
-}
-
-/**
- * Does this org-wide `run_update` correspond to the run a `run_and_wait` just
- * launched? Matched ONLY on an exact correlation id: `run_and_wait` mints a
- * fresh `correlation_id`, stamps it into `runs.metadata`, and the realtime
- * trigger echoes it back as `mcpCorrelationId` on every frame for that run. This
- * is robust for both `kind:agent` and `kind:inline` and never misattributes a
- * concurrent run. With no correlation id (or no match) we deliberately match
- * nothing — better to show no live logs than the wrong run's.
- */
-export function matchesLaunchedRun(
-  update: RunUpdateDiscovery,
-  correlationId: string | undefined,
-): boolean {
-  if (!update.id.startsWith("run_")) return false;
-  return !!correlationId && update.mcpCorrelationId === correlationId;
-}
 
 /**
  * Pull the launched run id out of a tool-call result. The invoke-operation
@@ -258,24 +193,6 @@ export function buildRunSseUrl(args: {
   return `/api/realtime/runs/${encodeURIComponent(runId)}?${qs.toString()}`;
 }
 
-/**
- * Build the ORG-WIDE realtime run-stream URL (`GET /api/realtime/runs`) used to
- * discover the run a blocking `run_and_wait` just launched. NOTE: the path is
- * `/api/realtime/runs`, NOT `/api/realtime` — the latter is not a route (the
- * realtime router only exposes `/runs`, `/runs/:id`, `/agents/:id/runs`), and
- * only paths under `/api/realtime/` skip the auth middleware. Returns undefined
- * without org/app context.
- */
-export function buildOrgRunsSseUrl(args: {
-  orgId: string | undefined;
-  applicationId: string | undefined;
-}): string | undefined {
-  const { orgId, applicationId } = args;
-  if (!orgId || !applicationId) return undefined;
-  const qs = new URLSearchParams({ orgId, applicationId });
-  return `/api/realtime/runs?${qs.toString()}`;
-}
-
 /** Read org/app ids out of the chat host's forwarded headers (case-tolerant). */
 export function orgAppFromHeaders(headers: Record<string, string> | undefined): {
   orgId: string | undefined;
@@ -352,13 +269,13 @@ export function visibleLogEntries(logs: readonly RunLogLine[]): VisibleLogEntry[
 export function extractRunPackageId(result: unknown): string | undefined {
   const unwrapped = asRecord(unwrapResult(result));
   if (!unwrapped) return undefined;
-  return nonEmptyString(asRecord(unwrapped.body)?.packageId) ?? nonEmptyString(unwrapped.packageId);
-}
-
-/** Correlation id passed to `run_and_wait`, used only for live discovery. */
-export function extractRunCorrelationId(args: unknown): string | undefined {
-  const rec = asRecord(args);
-  return nonEmptyString(rec?.correlation_id);
+  const body = asRecord(unwrapped.body);
+  return (
+    nonEmptyString(body?.packageId) ??
+    nonEmptyString(body?.package_id) ??
+    nonEmptyString(unwrapped.packageId) ??
+    nonEmptyString(unwrapped.package_id)
+  );
 }
 
 /**

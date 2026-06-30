@@ -7,18 +7,22 @@
  * The platform exposes its whole REST surface through three progressive tools
  * (`search_operations` / `describe_operation` / `invoke_operation`); we hand
  * them to `streamText` so the model can drive Appstrate — list/run agents,
- * search documents, schedule — with the caller's own permissions. Even
- * in-process we go through `/api/mcp` rather than importing platform
- * internals: the server re-applies auth and RBAC on dispatch, so the chat
- * can never exceed what the caller's credential could do over REST.
+ * search documents, schedule — with the caller's own permissions. `run_and_wait`
+ * is wrapped locally after discovery so it can emit an AI SDK preliminary result
+ * as soon as the run id exists; that is what lets the chat render live logs while
+ * the final tool result is still blocked on completion. The wrapper still uses
+ * the public REST routes with the caller's forwarded auth/RBAC context.
  */
 
 import { createMCPClient, type MCPClient } from "@ai-sdk/mcp";
+import { runAndWaitSteps } from "@appstrate/core/run-and-wait-client";
 import { logger } from "./logger.ts";
+
+type ToolSet = Awaited<ReturnType<MCPClient["tools"]>>;
 
 export interface McpHandle {
   /** AI SDK ToolSet, ready for `streamText({ tools })`. */
-  tools: Awaited<ReturnType<MCPClient["tools"]>>;
+  tools: ToolSet;
   /** Server-provided usage guidance, to append to the system prompt. */
   instructions?: string;
   /** Idempotent — safe to call from multiple stream lifecycle hooks. */
@@ -46,6 +50,7 @@ export async function openPlatformMcp(args: {
   orgId: string;
   /** App context for app-scoped operations (agents, runs); forwarded to dispatch. */
   applicationId?: string;
+  fetch?: typeof fetch;
 }): Promise<McpHandle> {
   const headers: Record<string, string> = { ...args.headers };
   if (args.applicationId) headers["x-application-id"] = args.applicationId;
@@ -61,9 +66,14 @@ export async function openPlatformMcp(args: {
 
   // `createMCPClient` has already opened the session; if listing tools fails
   // we must close it or the connection leaks (the caller never gets a handle).
-  let tools: Awaited<ReturnType<MCPClient["tools"]>>;
+  let tools: ToolSet;
   try {
     tools = await client.tools();
+    tools = wrapRunAndWaitTool(tools, {
+      origin: args.origin,
+      headers,
+      fetch: args.fetch ?? fetch,
+    });
   } catch (err) {
     await client.close().catch(() => {});
     throw err;
@@ -81,4 +91,41 @@ export async function openPlatformMcp(args: {
   };
 
   return { tools, instructions: client.instructions, close };
+}
+
+function callToolResult(payload: unknown, isError = false): unknown {
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+    ...(isError ? { isError: true } : {}),
+  };
+}
+
+export function wrapRunAndWaitTool(
+  tools: ToolSet,
+  opts: { origin: string; headers: Record<string, string>; fetch: typeof fetch },
+): ToolSet {
+  const runAndWait = tools.run_and_wait as
+    | (Record<string, unknown> & {
+        execute?: (args: unknown, options: { abortSignal?: AbortSignal }) => unknown;
+      })
+    | undefined;
+  if (!runAndWait?.execute) return tools;
+
+  const wrapped = {
+    ...runAndWait,
+    async *execute(rawArgs: unknown, options: { abortSignal?: AbortSignal }) {
+      for await (const step of runAndWaitSteps(rawArgs, {
+        origin: opts.origin,
+        headers: opts.headers,
+        fetch: opts.fetch,
+        signal: options.abortSignal,
+      })) {
+        yield callToolResult(step.payload, step.isError);
+      }
+    },
+  };
+
+  const next = { ...tools } as Record<string, unknown>;
+  next.run_and_wait = wrapped;
+  return next as unknown as ToolSet;
 }

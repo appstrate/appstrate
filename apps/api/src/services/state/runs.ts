@@ -320,8 +320,6 @@ interface CreateRunParams {
   agentName?: string | null;
   /** Snapshot of the effective agent config (merged overrides) at run creation. */
   config?: Record<string, unknown> | null;
-  /** Opaque run metadata stamped at creation time. */
-  metadata?: Record<string, unknown> | null;
   /**
    * Per-run override delta — the raw object the caller sent in the
    * request body (or `null` if the run used persisted defaults verbatim).
@@ -422,9 +420,6 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     runNumber,
     agentScope: params.agentScope ?? null,
     agentName: params.agentName ?? null,
-    ...(params.metadata !== undefined
-      ? { metadata: params.metadata === null ? null : parseRunMetadata(params.metadata) }
-      : {}),
     config: parseRunConfig(params.config),
     configOverride: parseRunConfigOverride(params.configOverride),
     ...(params.dependencyOverrides !== undefined

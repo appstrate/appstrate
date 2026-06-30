@@ -64,8 +64,6 @@ import { getEnv } from "@appstrate/env";
 export interface ParsedInput {
   input?: Record<string, unknown>;
   uploadedFiles?: FileReference[];
-  /** Opaque run metadata stamped at creation time. */
-  metadata?: Record<string, unknown>;
   /** Per-run model override (wire field `modelId` on the request body). */
   modelIdOverride?: string;
   /** Per-run proxy override (wire field `proxyId` on the request body). */
@@ -117,7 +115,6 @@ interface RunRequestBody {
   modelId?: string;
   proxyId?: string;
   config?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
   connection_overrides?: Record<string, string>;
   dependency_overrides?: Record<string, string>;
 }
@@ -731,16 +728,6 @@ export async function parseRequestInput(
     );
   }
 
-  if (
-    body.metadata !== undefined &&
-    (body.metadata === null || typeof body.metadata !== "object" || Array.isArray(body.metadata))
-  ) {
-    throw invalidRequest(
-      "`metadata` must be JSON object — omit field to store no metadata",
-      "metadata",
-    );
-  }
-
   // `connection_overrides` shape guard. Flat map: integrationId → connectionId.
   // Invalid bodies produce a 400 with a precise param so the picker UI can
   // highlight the offender.
@@ -799,7 +786,6 @@ export async function parseRequestInput(
     modelIdOverride: body.modelId,
     proxyIdOverride: body.proxyId,
     configOverride: body.config,
-    metadata: body.metadata,
     connectionOverrides: body.connection_overrides,
     dependencyOverrides,
   };

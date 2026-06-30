@@ -175,7 +175,6 @@ export async function triggerInlineRun(params: {
       actor,
       input: effectiveInput,
       config: effectiveConfig,
-      metadata: body.metadata ?? null,
       modelId: modelIdOverride,
       proxyId: proxyIdOverride,
       applicationId,

@@ -25,7 +25,6 @@ import {
   orgAppFromHeaders,
   parseLogListResponse,
   parseRunLogFrame,
-  parseRunTiming,
   parseRunUpdateFrame,
   type RunLogLine,
   type RunStatus,
@@ -34,6 +33,7 @@ import {
 export interface RunLogStream {
   logs: RunLogLine[];
   status: RunStatus | undefined;
+  packageId: string | undefined;
   /** ISO timestamp the run started executing, once a `run_update` reports it. */
   startedAt: string | undefined;
   /** ISO timestamp the run reached a terminal status, once reported. */
@@ -48,12 +48,17 @@ export interface RunLogStream {
  *                      `run_and_wait` returns a terminal run) — seeds the badge
  *                      and lets the hook skip the SSE when already terminal.
  */
-export function useRunLogStream(runId: string | undefined, initialStatus?: string): RunLogStream {
+export function useRunLogStream(
+  runId: string | undefined,
+  initialStatus?: string,
+  initialPackageId?: string,
+): RunLogStream {
   const getHeaders = useChatHeaders();
   const [logs, setLogs] = useState<RunLogLine[]>([]);
   const [status, setStatus] = useState<RunStatus | undefined>(
     isTerminalStatus(initialStatus) ? initialStatus : undefined,
   );
+  const [packageId, setPackageId] = useState<string | undefined>(undefined);
   const [startedAt, setStartedAt] = useState<string | undefined>(undefined);
   const [completedAt, setCompletedAt] = useState<string | undefined>(undefined);
   const [live, setLive] = useState(false);
@@ -84,31 +89,10 @@ export function useRunLogStream(runId: string | undefined, initialStatus?: strin
       }
     })();
 
-    // 1b. Run-resource fetch — seeds status + execution time so a reopened or
-    //     refreshed conversation shows them for an already-finished run, which
-    //     emits no live `run_update`. Best-effort; the SSE below still overrides
-    //     with fresher values for an in-flight run.
-    void (async () => {
-      try {
-        const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`, {
-          headers,
-          credentials: "include",
-        });
-        if (!res.ok || cancelled) return;
-        const timing = parseRunTiming(await res.json());
-        if (!timing || cancelled) return;
-        if (isTerminalStatus(timing.status)) setStatus(timing.status);
-        if (timing.startedAt) setStartedAt(timing.startedAt);
-        if (timing.completedAt) setCompletedAt(timing.completedAt);
-      } catch {
-        // ignore — timing is non-essential; the badge falls back gracefully
-      }
-    })();
-
-    // 2. Live tail. Skipped when org/app context or EventSource is unavailable
-    //    (SSR / already terminal): the history fetch still populates the panel.
+    // 2. Live tail. Skipped only when org/app context or EventSource is unavailable.
+    //    Even terminal initial results still open briefly to receive the SSE snapshot.
     const sseUrl = buildRunSseUrl({ runId, orgId, applicationId });
-    if (!sseUrl || typeof EventSource === "undefined" || isTerminalStatus(initialStatus)) {
+    if (!sseUrl || typeof EventSource === "undefined") {
       return () => {
         cancelled = true;
       };
@@ -136,6 +120,7 @@ export function useRunLogStream(runId: string | undefined, initialStatus?: strin
       const update = parseRunUpdateFrame((e as MessageEvent).data);
       if (!update || cancelled) return;
       setStatus(update.status as RunStatus);
+      if (update.packageId) setPackageId(update.packageId);
       if (update.startedAt) setStartedAt(update.startedAt);
       if (update.completedAt) setCompletedAt(update.completedAt);
       if (isTerminalStatus(update.status)) {
@@ -172,5 +157,5 @@ export function useRunLogStream(runId: string | undefined, initialStatus?: strin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId]);
 
-  return { logs, status, startedAt, completedAt, live };
+  return { logs, status, packageId: packageId ?? initialPackageId, startedAt, completedAt, live };
 }

@@ -108,7 +108,6 @@ export function createRunsRouter() {
           modelIdOverride,
           proxyIdOverride,
           configOverride,
-          metadata,
           connectionOverrides,
           dependencyOverrides,
         } = inputResult;
@@ -162,7 +161,6 @@ export function createRunsRouter() {
           // streamed into the run workspace during consume.
           files: uploadedFiles,
           config: mergedConfig,
-          metadata: metadata ?? null,
           configOverride: configOverride ?? null,
           modelId: modelIdOverride ?? preflightModelId,
           proxyId: proxyIdOverride ?? preflightProxyId,

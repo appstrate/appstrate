@@ -36,11 +36,9 @@ import { Modal } from "./modal.tsx";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { RunPanel } from "./run-panel.tsx";
-import { useDiscoverRunId } from "./use-discover-run-id.ts";
 import {
   buildRunPageHref,
   extractAgentLabel,
-  extractRunCorrelationId,
   extractRunId,
   extractRunPackageId,
   extractRunStatus,
@@ -237,17 +235,7 @@ export function ToolCallCard({
 type AnyToolProps = ToolCallMessagePartProps<Record<string, unknown>, unknown>;
 
 /**
- * Render the rich run panel for a launch tool-call (`runAgent` / `runInline` /
- * `run_and_wait`). Rendered from the start — before the launch returns a `run_…`
- * id — so the card keeps a constant height with no transient placeholder swap;
- * the SSE log tail + live status kick in once the id is known. Builds the same
- * input/output/metadata detail body the generic card's modal shows, so clicking
- * the panel opens identical details.
- *
- * `runId` is passed in: `invoke_operation(runAgent|runInline)` reads it straight
- * from the result (immediate), while `run_and_wait` blocks until terminal so its
- * panel discovers the id from the realtime stream (`RunAndWaitCard`) and passes
- * that.
+ * Render run-launch tool calls as a live run panel once the result exposes `run_...`.
  */
 function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.ReactNode {
   const unwrapped = unwrapResult(props.result);
@@ -273,11 +261,9 @@ function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.R
       <DetailSection title="Métadonnées" value={meta} />
     </div>
   );
-  // Run-page link needs the package id. The result carries it once known;
-  // during a blocking run_and_wait (id discovered, result not yet in) fall back
-  // to the agent label only when it IS a package id (`@scope/name`, kind:agent).
-  // An inline run's label is a manifest name, not a package id — no link until
-  // the result lands.
+  // Run-page link needs package id. The result normally carries it; for agent
+  // runs the label is also the package id (`@scope/name`), so it is a safe fallback.
+  // Inline labels are manifest names, not package ids, so they wait for result/fetch.
   const packageId =
     extractRunPackageId(props.result) ?? (agentLabel?.startsWith("@") ? agentLabel : undefined);
   return (
@@ -286,6 +272,7 @@ function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.R
       initialStatus={extractRunStatus(props.result)}
       agentLabel={agentLabel}
       runHref={runId ? buildRunPageHref(packageId, runId) : undefined}
+      initialPackageId={packageId}
       phase={deriveToolPhase(props)}
       modalTitle={modalTitle}
       details={details}
@@ -400,24 +387,14 @@ export const GetMeToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>
   ),
 });
 
-/**
- * `run_and_wait` card. The tool blocks until the run is terminal, so its result
- * (with the run id) only lands after the run is already done — too late to
- * stream. So while it's still running we DISCOVER the run id from the org-wide
- * realtime stream (`useDiscoverRunId`) and feed it to the panel, which then
- * streams the logs + live status throughout. Once the tool returns, the result's
- * own id takes over (same value).
- */
+/** Render `run_and_wait` like other run launch tools. Chat emits the run id as a preliminary result. */
 function RunAndWaitCard(props: AnyToolProps): React.ReactNode {
   const resultRunId = extractRunId(props.result);
-  // The blocking tool stamps this id into run metadata, then the org-wide
-  // realtime stream echoes it back so discovery is exact.
-  const discoveredRunId = useDiscoverRunId(!resultRunId, extractRunCorrelationId(props.args));
-  return buildRunLaunch(props, resultRunId ?? discoveredRunId);
+  return buildRunLaunch(props, resultRunId);
 }
 
 // `run_and_wait` is its own MCP tool (not invoke_operation), so it needs its own
-// UI — a component (not a plain render fn) because it calls a discovery hook.
+// UI — a component (not a plain render fn) to keep the render path consistent.
 export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "run_and_wait",
   render: (props: AnyToolProps) => <RunAndWaitCard {...props} />,
