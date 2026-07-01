@@ -26,6 +26,7 @@
 import { query, type CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { buildClaudeSdkEnv, CLAUDE_SDK_HARDENING } from "@appstrate/runner-claude/binary";
 import { RUN_AND_WAIT_MAX_MS } from "@appstrate/core/run-and-wait-client";
+import { mergeTurnMetadata } from "@appstrate/core/chat-turn-metadata";
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { createLogger } from "@appstrate/core/logger";
 import type { ChatEngineInput } from "@appstrate/core/chat-engine-contract";
@@ -167,7 +168,21 @@ export function runClaudeAgentChat(input: ChatEngineInput): Response {
             });
             writer.write({ type: "error", errorText: meta.errorText ?? input.onError(undefined) });
           }
-          writer.write(mapper.finishChunk());
+          writer.write(
+            mapper.finishChunk(
+              mergeTurnMetadata(
+                meta ? { usage: meta.usage, costUsd: meta.totalCostUsd } : undefined,
+                {
+                  engine: "subscription",
+                  finishReason: meta?.finishReason ?? "unknown",
+                  stepCount: mapper.stepCount(),
+                  maxSteps: MAX_TURNS,
+                  maxStepsReached: mapper.stepCount() >= MAX_TURNS,
+                  ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
+                },
+              ),
+            ),
+          );
         } finally {
           clearTimeout(deadline);
           slot.release();

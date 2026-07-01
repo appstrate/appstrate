@@ -18,7 +18,13 @@
  */
 
 import type { Context } from "hono";
-import { streamText, convertToModelMessages, stepCountIs, type UIMessage } from "ai";
+import {
+  streamText,
+  convertToModelMessages,
+  stepCountIs,
+  type FinishReason,
+  type UIMessage,
+} from "ai";
 
 /**
  * Minimal Hono Env mirroring what the platform auth pipeline sets on the chat
@@ -49,8 +55,12 @@ import { ensureSession, persistUserMessage, persistAssistantMessage } from "./pe
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
 import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
+import { mergeTurnMetadata, type AppstrateTurnMetadata } from "@appstrate/core/chat-turn-metadata";
 
 const MAX_STEPS = 16;
+const MAX_TOOL_STEPS = MAX_STEPS - 1;
+const FINAL_STEP_SYSTEM_PROMPT =
+  "You are on the final step budget for this turn. Do not call tools. Give the user a concise final answer from the evidence already gathered, explicitly mark any remaining checks as untested, and ask them to continue if more tool work is needed.";
 
 // Heading that fences the generated operation index at the tail of the platform
 // MCP server instructions (emitted by apps/api/src/modules/mcp/router.ts). We
@@ -450,9 +460,12 @@ export async function handleChatStream(
   // only under CHAT_DEBUG — they may carry PII/customer content.
   const debug = Boolean(process.env.CHAT_DEBUG);
   const turnStart = Date.now();
-  let step = 0;
+  let completedSteps = 0;
   let stepStart = turnStart;
   let firstChunkAt = 0;
+  let lastToolName: string | undefined;
+  let toolStepBudgetReached = false;
+  let aiSdkFinishReason: FinishReason | "unknown" = "unknown";
 
   // The proxy surfaces are bearer-only (cookies refused — CSRF model):
   // inference loopback calls carry a short-lived token only this process
@@ -697,6 +710,15 @@ export async function handleChatStream(
       ],
       tools: mcp ? mcp.tools : undefined,
       stopWhen: stepCountIs(MAX_STEPS),
+      prepareStep: ({ stepNumber }) => {
+        if (stepNumber < MAX_TOOL_STEPS) return undefined;
+        toolStepBudgetReached = true;
+        return {
+          activeTools: [],
+          toolChoice: "none" as const,
+          system: `${system}\n\n${FINAL_STEP_SYSTEM_PROMPT}`,
+        };
+      },
       experimental_repairToolCall: repairStringifiedToolCall,
       // Decoupled from the request connection (see `generation` above): a client
       // disconnect must not cancel generation; only an explicit stop does.
@@ -711,8 +733,12 @@ export async function handleChatStream(
       },
       onStepFinish: ({ toolCalls, toolResults, finishReason, usage }) => {
         const now = Date.now();
+        const step = completedSteps;
+        completedSteps += 1;
+        const toolName = toolCalls.at(-1)?.toolName;
+        if (toolName) lastToolName = toolName;
         logger.info("chat step", {
-          step: step++,
+          step,
           finishReason,
           usage: usage as unknown as Record<string, unknown>,
           stepMs: now - stepStart,
@@ -735,8 +761,9 @@ export async function handleChatStream(
         logger.error("chat stream error", { err: String(error) });
       },
       onFinish: ({ totalUsage, finishReason }) => {
+        aiSdkFinishReason = finishReason ?? "unknown";
         logger.info("chat turn done", {
-          steps: step,
+          steps: completedSteps,
           totalMs: Date.now() - turnStart,
           usage: totalUsage as unknown as Record<string, unknown>,
           finishReason,
@@ -754,6 +781,20 @@ export async function handleChatStream(
         // Emit a real assistant message id in the stream so the client and the
         // server-side persist agree on it (and never collide on an empty id).
         generateMessageId: () => crypto.randomUUID(),
+        messageMetadata: ({ part }) => {
+          if (part.type !== "finish") return undefined;
+          const turn: AppstrateTurnMetadata = {
+            engine: "ai-sdk",
+            finishReason: part.finishReason ?? aiSdkFinishReason,
+            stepCount: completedSteps,
+            maxSteps: MAX_STEPS,
+            toolStepBudget: MAX_TOOL_STEPS,
+            toolStepBudgetReached,
+            maxStepsReached: completedSteps >= MAX_STEPS,
+            ...(lastToolName ? { lastToolName } : {}),
+          };
+          return mergeTurnMetadata(undefined, turn);
+        },
       }),
     );
   } catch (err) {

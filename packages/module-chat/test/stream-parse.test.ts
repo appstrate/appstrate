@@ -54,4 +54,38 @@ describe("extractAssistantMessage", () => {
     const message = await extractAssistantMessage(body);
     expect(message?.id).toBe("asst_2");
   });
+
+  it("preserves finish message metadata on the persisted assistant message", async () => {
+    const body = encode(async ({ writer }) => {
+      writer.write({ type: "start", messageId: "asst_meta" });
+      writer.write({ type: "text-start", id: "t" });
+      writer.write({ type: "text-delta", id: "t", delta: "partial" });
+      writer.write({ type: "text-end", id: "t" });
+      writer.write({
+        type: "finish",
+        messageMetadata: {
+          appstrate: {
+            turn: {
+              engine: "ai-sdk",
+              stepCount: 16,
+              maxSteps: 16,
+              maxStepsReached: true,
+            },
+          },
+        },
+      });
+    });
+
+    const message = await extractAssistantMessage(body);
+    expect((message as { metadata?: unknown } | undefined)?.metadata).toEqual({
+      appstrate: {
+        turn: {
+          engine: "ai-sdk",
+          stepCount: 16,
+          maxSteps: 16,
+          maxStepsReached: true,
+        },
+      },
+    });
+  });
 });

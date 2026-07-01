@@ -53,7 +53,8 @@ describe("SdkUiStreamMapper — text turn", () => {
 
 describe("SdkUiStreamMapper — tool call + result", () => {
   it("streams tool input then maps the tool_result to tool-output-available", () => {
-    const chunks = run([
+    const mapper = new SdkUiStreamMapper();
+    const chunks = [
       ev({ type: "message_start" }),
       ev({
         type: "content_block_start",
@@ -89,7 +90,7 @@ describe("SdkUiStreamMapper — tool call + result", () => {
           ],
         },
       } as ClaudeSdkMessage,
-    ]);
+    ].flatMap((m) => mapper.map(m));
 
     expect(chunks).toEqual([
       { type: "start-step" },
@@ -110,6 +111,8 @@ describe("SdkUiStreamMapper — tool call + result", () => {
         output: [{ type: "text", text: "ok" }],
       },
     ]);
+    expect(mapper.stepCount()).toBe(1);
+    expect(mapper.lastToolName()).toBe("invoke_operation");
   });
 
   it("maps an errored tool_result to tool-output-error", () => {
@@ -205,6 +208,11 @@ describe("SdkUiStreamMapper — terminal metadata", () => {
       type: "finish",
       finishReason: "stop",
       messageMetadata: { usage: { input_tokens: 10, output_tokens: 3 }, costUsd: 0.0012 },
+    });
+    expect(mapper.finishChunk({ appstrate: { turn: { stepCount: 1 } } })).toEqual({
+      type: "finish",
+      finishReason: "stop",
+      messageMetadata: { appstrate: { turn: { stepCount: 1 } } },
     });
   });
 
