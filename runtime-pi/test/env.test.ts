@@ -39,8 +39,8 @@ describe("parseRuntimeEnv — happy path", () => {
   });
 
   it("parses AGENT_TIMEOUT_SECONDS into env.timeoutSeconds", () => {
-    const env = parseRuntimeEnv({ ...VALID, AGENT_TIMEOUT_SECONDS: "300" });
-    expect(env.timeoutSeconds).toBe(300);
+    const env = parseRuntimeEnv({ ...VALID, AGENT_TIMEOUT_SECONDS: "1.5" });
+    expect(env.timeoutSeconds).toBe(1.5);
   });
 
   it("parses optional fields when set", () => {
@@ -181,12 +181,12 @@ describe("parseRuntimeEnv — fail-fast errors", () => {
     expect(() => parseRuntimeEnv({ ...VALID, SIDECAR_URL: "weird://x" })).toThrow(/SIDECAR_URL/);
   });
 
-  it("rejects a non-positive-integer AGENT_TIMEOUT_SECONDS", () => {
+  it("rejects a non-positive or non-finite AGENT_TIMEOUT_SECONDS", () => {
     expect(() => parseRuntimeEnv({ ...VALID, AGENT_TIMEOUT_SECONDS: "0" })).toThrow(
-      /AGENT_TIMEOUT_SECONDS: must be a positive integer/,
+      /AGENT_TIMEOUT_SECONDS: must be a positive finite number/,
     );
-    expect(() => parseRuntimeEnv({ ...VALID, AGENT_TIMEOUT_SECONDS: "1.5" })).toThrow(
-      /AGENT_TIMEOUT_SECONDS: must be a positive integer/,
+    expect(() => parseRuntimeEnv({ ...VALID, AGENT_TIMEOUT_SECONDS: "Infinity" })).toThrow(
+      /AGENT_TIMEOUT_SECONDS: must be a positive finite number/,
     );
   });
 

@@ -203,6 +203,21 @@ function parsePositiveInt(
   return n;
 }
 
+function parsePositiveNumber(
+  name: string,
+  raw: string | undefined,
+  fallback: number,
+  issues: string[],
+): number {
+  if (!raw) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    issues.push(`${name}: must be a positive finite number (got "${raw}")`);
+    return fallback;
+  }
+  return n;
+}
+
 /**
  * Parse + validate the runtime-pi env vars from a source object.
  *
@@ -283,10 +298,10 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     DEFAULT_MCP_CONNECT_DEADLINE_MS,
     issues,
   );
-  // Optional: a 0 fallback means "absent" (parsePositiveInt only returns it
+  // Optional: a 0 fallback means "absent" (parsePositiveNumber only returns it
   // for a missing var, or after pushing an issue for a malformed one). We map
   // 0 → undefined so an absent budget leaves runner-side enforcement off.
-  const agentTimeoutSeconds = parsePositiveInt(
+  const agentTimeoutSeconds = parsePositiveNumber(
     "AGENT_TIMEOUT_SECONDS",
     source.AGENT_TIMEOUT_SECONDS,
     0,

@@ -214,6 +214,10 @@ describe("finalizeThrownFailure", () => {
     expect(h.finalized?.status).toBe("timeout");
     expect(h.finalized?.error).toEqual({ code: "timeout", message: "Run timed out after 5s" });
     expect(h.finalized?.durationMs).toBe(5000);
+    expect(h.emitted[0]).toMatchObject({
+      type: "appstrate.error",
+      message: "Run timed out after 5s",
+    });
   });
 
   it("ignores `terminalStatus` when setFailedStatus:false (status stays unset)", async () => {

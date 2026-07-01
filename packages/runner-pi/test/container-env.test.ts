@@ -29,12 +29,15 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_API_KEY).toBeUndefined();
   });
 
-  it("emits AGENT_TIMEOUT_SECONDS only for a positive integer budget", () => {
+  it("emits AGENT_TIMEOUT_SECONDS only for a positive finite budget", () => {
     expect(buildRuntimePiEnv({ model, agentPrompt: "p" }).AGENT_TIMEOUT_SECONDS).toBeUndefined();
     expect(
       buildRuntimePiEnv({ model, agentPrompt: "p", timeoutSeconds: 300 }).AGENT_TIMEOUT_SECONDS,
     ).toBe("300");
-    // Non-positive / non-integer budgets are dropped (no enforcement key).
+    expect(
+      buildRuntimePiEnv({ model, agentPrompt: "p", timeoutSeconds: 1.5 }).AGENT_TIMEOUT_SECONDS,
+    ).toBe("1.5");
+    // Non-positive / non-finite budgets are dropped (no enforcement key).
     expect(
       buildRuntimePiEnv({ model, agentPrompt: "p", timeoutSeconds: 0 }).AGENT_TIMEOUT_SECONDS,
     ).toBeUndefined();
@@ -42,7 +45,8 @@ describe("buildRuntimePiEnv", () => {
       buildRuntimePiEnv({ model, agentPrompt: "p", timeoutSeconds: -5 }).AGENT_TIMEOUT_SECONDS,
     ).toBeUndefined();
     expect(
-      buildRuntimePiEnv({ model, agentPrompt: "p", timeoutSeconds: 1.5 }).AGENT_TIMEOUT_SECONDS,
+      buildRuntimePiEnv({ model, agentPrompt: "p", timeoutSeconds: Infinity })
+        .AGENT_TIMEOUT_SECONDS,
     ).toBeUndefined();
   });
 

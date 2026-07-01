@@ -139,7 +139,7 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   if (opts.agentInput !== undefined) env.AGENT_INPUT = JSON.stringify(opts.agentInput);
   if (
     opts.timeoutSeconds !== undefined &&
-    Number.isInteger(opts.timeoutSeconds) &&
+    Number.isFinite(opts.timeoutSeconds) &&
     opts.timeoutSeconds > 0
   ) {
     env.AGENT_TIMEOUT_SECONDS = String(opts.timeoutSeconds);

@@ -114,10 +114,22 @@ export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions):
 
   const transform = opts.transform ?? (<T>(value: T): T => value);
   const message = errorMessage(err);
+  const buildError =
+    opts.buildError ??
+    ((m: string, e: unknown): RunError => ({
+      message: m,
+      stack: e instanceof Error ? e.stack : undefined,
+    }));
+  const resultError = buildError(message, err);
 
   // 2. Surface the failure as a live event (transformed first so a
   //    redaction transform scrubs it before it reaches the sink).
-  const errorEvent: RunEvent = { type: "appstrate.error", timestamp: now(), runId, message };
+  const errorEvent: RunEvent = {
+    type: "appstrate.error",
+    timestamp: now(),
+    runId,
+    message: resultError.message,
+  };
   await emit(transform(errorEvent));
 
   // 3. Best-effort final drain: capture any runtime events journaled before
@@ -130,13 +142,7 @@ export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions):
 
   // 4. Reduce → stamp → finalize. `reduceEvents` (not emptyRunResult) so any
   //    partial canonical output the agent emitted before the throw survives.
-  const buildError =
-    opts.buildError ??
-    ((m: string, e: unknown): RunError => ({
-      message: m,
-      stack: e instanceof Error ? e.stack : undefined,
-    }));
-  const result = reduceEvents(events, { error: buildError(message, err) });
+  const result = reduceEvents(events, { error: resultError });
   if (opts.setFailedStatus !== false) result.status = opts.terminalStatus ?? "failed";
   if (usage !== undefined) result.usage = usage;
   opts.stamp?.(result, usage);
