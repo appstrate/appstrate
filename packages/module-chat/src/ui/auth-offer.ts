@@ -17,6 +17,65 @@ export interface AuthOffer {
   state?: string;
 }
 
+/** Payload the OAuth callback page broadcasts (see `apps/api/src/lib/oauth-popup-html.ts`). */
+export interface CompletionDetail {
+  type?: string;
+  ok?: boolean;
+  state?: string;
+  packageId?: string;
+  error?: string;
+}
+
+/**
+ * Whether a completion broadcast is addressed to the card identified by
+ * `{ state, packageId }`. BroadcastChannel/postMessage signals fan out to every
+ * mounted card, so correlation lives here:
+ *
+ *  - `state` — exact when both sides carry one. The hosted-connect offer
+ *    (`connect_url`) carries NO state (its OAuth state is minted later, at
+ *    /connect/start click time), so cards from that flow can't rely on it.
+ *  - `packageId` — the package-level filter, mirroring the SSE
+ *    `connection_update` backstop so all three completion signals share the
+ *    same semantics. Without it, one Gmail connect flipped an unrelated card
+ *    "connected" and double-resumed the conversation (forked thread).
+ *
+ * Completions without a packageId (context-less error pages such as "Missing
+ * connect token") stay accepted: they only surface an error, never an append.
+ */
+export function completionMatches(
+  detail: CompletionDetail | undefined,
+  card: { messageType: string; state?: string; packageId?: string },
+): boolean {
+  if (!detail || detail.type !== card.messageType) return false;
+  if (card.state && detail.state && detail.state !== card.state) return false;
+  if (card.packageId && detail.packageId && detail.packageId !== card.packageId) return false;
+  return true;
+}
+
+/**
+ * One resume append per (package, completion) across every card in this tab.
+ *
+ * A single completion signal reaches ALL mounted cards, so two cards awaiting
+ * the same package — e.g. a retry card issued after an abandoned first
+ * attempt — would BOTH append a resume message, forking the conversation into
+ * two concurrent turns (each user turn chains onto the last message, but each
+ * assistant turn chains onto its own trigger). The first card to complete
+ * claims the append; siblings settle for the connected visual. The short TTL
+ * only needs to outlive the fan-out burst (all cards fire within ms of one
+ * broadcast) while staying well under any legitimate later reconnect in the
+ * same conversation.
+ */
+const RESUME_CLAIM_TTL_MS = 30_000;
+const resumeClaims = new Map<string, number>();
+
+export function claimResume(packageId: string | undefined, now = Date.now()): boolean {
+  if (!packageId) return true;
+  const prev = resumeClaims.get(packageId);
+  if (prev !== undefined && now - prev < RESUME_CLAIM_TTL_MS) return false;
+  resumeClaims.set(packageId, now);
+  return true;
+}
+
 /**
  * Prefix the chat auto-resume message carries so the UI can render it as a
  * discreet "connected" notice instead of a raw user bubble. It is an invisible
