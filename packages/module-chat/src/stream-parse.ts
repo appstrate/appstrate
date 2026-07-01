@@ -53,10 +53,11 @@ function sseToChunks(byteStream: ReadableStream<Uint8Array>): ReadableStream<UIM
  * Drain the stream and return the FINAL state of EACH assembled message, in
  * order of first appearance. `readUIMessageStream` re-emits an evolving snapshot
  * per message as chunks arrive, so we key a Map by message id (last snapshot
- * wins) — a single turn can carry more than one assistant message (the
- * claude-agent engine emits several), and keeping only the last would drop the
- * earlier ones from persistence. Reading the whole stream is what drives
- * generation to completion on this teed branch.
+ * wins). Both engines emit a single top-level `start` per turn today, so the
+ * multi-message handling is defensive — but it is what makes a future
+ * multi-message engine safe to add without silently dropping or duplicating
+ * content. Reading the whole stream is what drives generation to completion on
+ * this teed branch.
  */
 export async function extractAssistantMessages(
   byteStream: ReadableStream<Uint8Array>,
@@ -67,5 +68,24 @@ export async function extractAssistantMessages(
     // the snapshot without moving it — so order = first appearance, value = last.
     byId.set(message.id, message);
   }
-  return [...byId.values()];
+  const snapshots = [...byId.values()];
+  // ai-sdk v6 `readUIMessageStream` carries parts forward across a mid-stream
+  // `start` boundary (it relabels the message id rather than resetting parts),
+  // so each later snapshot is cumulative: message N begins with everything
+  // message N-1 already held. Persisting that verbatim would duplicate the
+  // earlier messages' content in the later rows — strip the carried prefix.
+  // Comparing against the PREVIOUS snapshot (itself cumulative) covers the
+  // whole run of prior messages.
+  return snapshots.map((message, i) => {
+    if (i === 0) return message;
+    const prevParts = snapshots[i - 1]!.parts;
+    const carried =
+      prevParts.length > 0 &&
+      message.parts.length >= prevParts.length &&
+      prevParts.every(
+        (part, j) =>
+          part === message.parts[j] || JSON.stringify(part) === JSON.stringify(message.parts[j]),
+      );
+    return carried ? { ...message, parts: message.parts.slice(prevParts.length) } : message;
+  });
 }

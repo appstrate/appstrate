@@ -64,14 +64,14 @@ describe("extractAssistantMessages", () => {
 
     // The guarantee: when a turn carries more than one message id, EVERY id
     // survives as a distinct entry, in first-appearance order — earlier ones are
-    // no longer dropped. (ai-sdk v6 `readUIMessageStream` carries parts forward
-    // across `start` boundaries within one stream — it relabels the message id
-    // rather than resetting parts — so the later snapshot is cumulative; the Map
-    // keeps the last snapshot per id, which is what the persistence rows store.)
+    // no longer dropped. ai-sdk v6 `readUIMessageStream` carries parts forward
+    // across `start` boundaries within one stream (the later snapshot is
+    // cumulative); the extractor strips that carried prefix so each persisted
+    // message holds ONLY its own content — no duplication across rows.
     const messages = await extractAssistantMessages(body);
     expect(messages.map((m) => m.id)).toEqual(["asst_a", "asst_b"]);
     expect(textOf(messages[0]!)).toBe("first");
-    expect(textOf(messages[1]!)).toContain("second");
+    expect(textOf(messages[1]!)).toBe("second");
   });
 
   it("drains a multi-event stream to completion (the disconnect-proof read)", async () => {
