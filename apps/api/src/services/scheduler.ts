@@ -116,37 +116,37 @@ async function getQueue(): Promise<JobQueue<ScheduleJobData>> {
   return scheduleQueue;
 }
 
-/** Upsert a repeatable job scheduler for a schedule. */
-async function upsertScheduleJob(schedule: ScheduleWireDto, orgId: string): Promise<void> {
-  const actor = schedule.userId
-    ? ({ type: "user", id: schedule.userId } as const)
-    : schedule.endUserId
-      ? ({ type: "end_user", id: schedule.endUserId } as const)
+/** Upsert a repeatable job scheduler for a schedule row. */
+async function upsertScheduleJob(row: typeof schedules.$inferSelect): Promise<void> {
+  const actor = row.userId
+    ? ({ type: "user", id: row.userId } as const)
+    : row.endUserId
+      ? ({ type: "end_user", id: row.endUserId } as const)
       : null;
   if (!actor) {
     throw internalError();
   }
 
   const jobData: ScheduleJobData = {
-    scheduleId: schedule.id,
-    packageId: schedule.packageId,
+    scheduleId: row.id,
+    packageId: row.packageId,
     actor,
-    orgId,
-    applicationId: schedule.applicationId,
-    input: schedule.input ?? undefined,
-    configOverride: schedule.config_override ?? undefined,
-    modelIdOverride: schedule.model_id_override ?? undefined,
-    proxyIdOverride: schedule.proxy_id_override ?? undefined,
-    versionOverride: schedule.version_override ?? undefined,
-    connectionOverrides: schedule.connection_overrides ?? undefined,
-    dependencyOverrides: schedule.dependency_overrides ?? undefined,
+    orgId: row.orgId,
+    applicationId: row.applicationId,
+    input: asRecordOrNull(row.input) ?? undefined,
+    configOverride: asRecordOrNull(row.configOverride) ?? undefined,
+    modelIdOverride: row.modelIdOverride ?? undefined,
+    proxyIdOverride: row.proxyIdOverride ?? undefined,
+    versionOverride: row.versionOverride ?? undefined,
+    connectionOverrides: (row.connectionOverrides as Record<string, string> | null) ?? undefined,
+    dependencyOverrides: (row.dependencyOverrides as Record<string, string> | null) ?? undefined,
   };
 
   await (
     await getQueue()
   ).upsertScheduler(
-    schedule.id,
-    { pattern: schedule.cron_expression, tz: schedule.timezone ?? "UTC" },
+    row.id,
+    { pattern: row.cronExpression, tz: row.timezone ?? "UTC" },
     { name: "execute-agent", data: jobData },
   );
 }
@@ -235,8 +235,7 @@ export async function initScheduleWorker(): Promise<void> {
       });
       continue;
     }
-    const schedule = toSchedule(row);
-    await upsertScheduleJob(schedule, row.orgId);
+    await upsertScheduleJob(row);
     synced++;
   }
 
@@ -631,7 +630,7 @@ export async function createSchedule(
   }
   const schedule = toSchedule(row);
 
-  await upsertScheduleJob(schedule, scope.orgId);
+  await upsertScheduleJob(row);
 
   // Same EnrichedSchedule serializer as getSchedule/listSchedules, so the
   // create response matches the GET detail shape (actor_name/actor_type).
@@ -711,8 +710,8 @@ export async function updateSchedule(
   }
   const schedule = toSchedule(row);
 
-  if (schedule.enabled) {
-    await upsertScheduleJob(schedule, scope.orgId);
+  if (row.enabled) {
+    await upsertScheduleJob(row);
   } else {
     await removeScheduleJob(id);
   }

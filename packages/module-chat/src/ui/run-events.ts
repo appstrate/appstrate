@@ -20,13 +20,19 @@
  */
 
 import { z } from "zod";
+import type { RunStatus as DbRunStatus, TerminalRunStatus } from "@appstrate/db/schema";
 import { asRecord, unwrapResult } from "./tool-result.ts";
 
 /** Operation ids whose result launches a run we can follow. */
 export const RUN_LAUNCH_OPS = ["runAgent", "runInline", "run_and_wait"] as const;
 export type RunLaunchOp = (typeof RUN_LAUNCH_OPS)[number];
 
-/** All run statuses (mirrors `packages/db/src/schema/enums.ts`). */
+/**
+ * All run statuses. Kept as a local literal so this browser-bundled UI
+ * module never pulls `@appstrate/db` values (drizzle) into the web build —
+ * the type-only parity assertions below fail compilation if either side
+ * drifts from the canonical enums in `packages/db/src/schema/enums.ts`.
+ */
 export const RUN_STATUSES = [
   "pending",
   "running",
@@ -37,13 +43,28 @@ export const RUN_STATUSES = [
 ] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
 
-/** Statuses past which a run never changes again (mirrors TERMINAL_RUN_STATUSES). */
-export const TERMINAL_RUN_STATUSES: ReadonlySet<RunStatus> = new Set<RunStatus>([
-  "success",
-  "failed",
-  "timeout",
-  "cancelled",
-]);
+/** Statuses past which a run never changes again. */
+const terminalRunStatuses = ["success", "failed", "timeout", "cancelled"] as const;
+export const TERMINAL_RUN_STATUSES: ReadonlySet<RunStatus> = new Set<RunStatus>(
+  terminalRunStatuses,
+);
+
+// Compile-time parity checks — fail to compile if either literal drifts
+// from the canonical @appstrate/db enums (type-only import, erased at build).
+type _RunStatusParity = [DbRunStatus] extends [RunStatus]
+  ? [RunStatus] extends [DbRunStatus]
+    ? true
+    : never
+  : never;
+type _TerminalParity = [TerminalRunStatus] extends [(typeof terminalRunStatuses)[number]]
+  ? [(typeof terminalRunStatuses)[number]] extends [TerminalRunStatus]
+    ? true
+    : never
+  : never;
+const _runStatusParity: _RunStatusParity = true;
+const _terminalParity: _TerminalParity = true;
+void _runStatusParity;
+void _terminalParity;
 
 export function isTerminalStatus(status: string | null | undefined): status is RunStatus {
   return typeof status === "string" && TERMINAL_RUN_STATUSES.has(status as RunStatus);

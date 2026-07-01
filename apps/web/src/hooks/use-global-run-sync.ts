@@ -6,7 +6,7 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateNotificationQueries } from "./use-notifications";
-import { parseSSEFrames } from "../lib/sse-parser";
+import { parseSseFrames } from "@appstrate/core/sse";
 import {
   runKeys,
   runsKeys,
@@ -198,7 +198,7 @@ export function useGlobalRunSync() {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const { frames, buffer } = parseSSEFrames(decoder.decode(value, { stream: true }), buf);
+          const { frames, buffer } = parseSseFrames(decoder.decode(value, { stream: true }), buf);
           buf = buffer;
 
           for (const { event, data } of frames) {

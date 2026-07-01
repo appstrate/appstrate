@@ -43,7 +43,8 @@
     "./file-field": "./src/file-field.ts",
     "./ssrf": "./src/ssrf.ts",
     "./token-usage": "./src/token-usage.ts",
-    "./ssrf-dns": "./src/ssrf-dns.ts"
+    "./ssrf-dns": "./src/ssrf-dns.ts",
+    "./backoff": "./src/backoff.ts"
   },
   "dependencies": {
     "semver": "^7.8.4"

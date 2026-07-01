@@ -9,6 +9,7 @@
  */
 
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
+import { parseSseFrames, parseSseJsonData } from "@appstrate/core/sse";
 
 /** Decode an AI SDK UI-message SSE byte stream into its chunk objects. */
 function sseToChunks(byteStream: ReadableStream<Uint8Array>): ReadableStream<UIMessageChunk> {
@@ -17,22 +18,13 @@ function sseToChunks(byteStream: ReadableStream<Uint8Array>): ReadableStream<UIM
   return byteStream.pipeThrough(
     new TransformStream<Uint8Array, UIMessageChunk>({
       transform(bytes, controller) {
-        buffer += decoder.decode(bytes, { stream: true });
-        let sep: number;
-        // SSE events are separated by a blank line; each carries one `data:` line.
-        while ((sep = buffer.indexOf("\n\n")) !== -1) {
-          const block = buffer.slice(0, sep);
-          buffer = buffer.slice(sep + 2);
-          for (const line of block.split("\n")) {
-            if (!line.startsWith("data:")) continue;
-            const data = line.slice(5).trim();
-            if (!data || data === "[DONE]") continue;
-            try {
-              controller.enqueue(JSON.parse(data) as UIMessageChunk);
-            } catch {
-              // Ignore a malformed SSE fragment rather than failing the whole parse.
-            }
-          }
+        const parsed = parseSseFrames(decoder.decode(bytes, { stream: true }), buffer);
+        buffer = parsed.buffer;
+        for (const frame of parsed.frames) {
+          // null covers the empty / [DONE] / malformed-fragment cases —
+          // skip the frame rather than failing the whole parse.
+          const chunk = parseSseJsonData(frame.data);
+          if (chunk !== null) controller.enqueue(chunk as UIMessageChunk);
         }
       },
     }),

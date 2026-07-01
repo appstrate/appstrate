@@ -5,7 +5,7 @@ import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
 import { readBundleFromBuffer } from "../../bundle/read.ts";
 import { renderPrompt } from "../../bundle/prompt-renderer.ts";
-import type { ExecutionContext } from "../../types/execution-context.ts";
+import type { ExecutionContext, SnapshotFile } from "../../types/execution-context.ts";
 import type { CliIO } from "../index.ts";
 
 const HELP = `afps render — dry-run render of a bundle's prompt template
@@ -27,12 +27,6 @@ interface RenderContextFile {
   runId?: string;
   input?: unknown;
   [key: string]: unknown;
-}
-
-interface SnapshotFile {
-  memories?: ExecutionContext["memories"];
-  history?: ExecutionContext["history"];
-  checkpoint?: unknown;
 }
 
 export async function run(argv: readonly string[], io: CliIO): Promise<number> {

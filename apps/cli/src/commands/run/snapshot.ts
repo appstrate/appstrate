@@ -15,14 +15,10 @@
  */
 
 import { readFile } from "node:fs/promises";
-import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import type { ExecutionContext, SnapshotFile } from "@appstrate/afps-runtime/types";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-export interface SnapshotFile {
-  memories?: ExecutionContext["memories"];
-  history?: ExecutionContext["history"];
-  checkpoint?: unknown;
-}
+export type { SnapshotFile };
 
 export class SnapshotError extends Error {
   constructor(

@@ -18,6 +18,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { sign } from "@appstrate/afps-runtime/events";
+import { computeBackoffDelayMs, isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
@@ -82,13 +83,13 @@ export async function signedGetWithRetry(url: string, deps: ProvisionDeps): Prom
       const res = await fetchFn(url, { method: "GET", headers });
       // Success, or a deterministic 4xx (404 missing, 401 bad signature, 410
       // closed/expired sink) that retrying cannot fix — hand back either way.
-      if (res.ok || (res.status < 500 && res.status !== 429)) return res;
+      if (res.ok || !isRetryableHttpStatus(res.status)) return res;
       lastError = `HTTP ${res.status}`;
     } catch (err) {
       lastError = getErrorMessage(err);
     }
     if (attempt < maxAttempts) {
-      await sleep(Math.min(500 * 2 ** (attempt - 1), 2000));
+      await sleep(computeBackoffDelayMs(attempt, { baseMs: 500, capMs: 2000 }));
     }
   }
   throw new Error(`request to ${url} failed after ${maxAttempts} attempts: ${lastError}`);

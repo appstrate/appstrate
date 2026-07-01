@@ -98,6 +98,11 @@ export const runs = pgTable(
     scheduleId: text("schedule_id").references(() => schedules.id, {
       onDelete: "set null",
     }),
+    // Version vocabulary across the pipeline: the REQUESTED selector
+    // (exact version / dist-tag / semver range / "draft") is persisted as
+    // `version_ref` here and on the wire, and travels the service layer as
+    // `versionSpec` (the PackageCatalog.resolve() parameter). The RESOLVED
+    // concrete version stamped on the run is `versionLabel` everywhere.
     versionLabel: text("version_label"),
     versionRef: text("version_ref").default("draft").notNull(),
     proxyLabel: text("proxy_label"),

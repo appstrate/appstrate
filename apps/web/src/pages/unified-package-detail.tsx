@@ -70,11 +70,11 @@ const EMPTY_CONFIG_SCHEMA: JSONSchemaObject = { type: "object", properties: {} }
 
 function AgentRunButtonInline({
   packageId,
-  resolvedVersion,
+  versionLabel,
   configSchemaOverride,
 }: {
   packageId: string;
-  resolvedVersion: string | undefined;
+  versionLabel: string | undefined;
   configSchemaOverride?: JSONSchemaObject;
 }) {
   const { t } = useTranslation("agents");
@@ -106,7 +106,7 @@ function AgentRunButtonInline({
     <RunAgentButton
       packageId={packageId}
       detail={detail}
-      version={resolvedVersion}
+      version={versionLabel}
       disabled={runDisabled}
       disabledTitle={runDisabledTitle}
       connectionWarning={!runDisabled && !integrationsReady.ready}
@@ -334,7 +334,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const tabDefs = [...(type === "agent" ? agentTabs : pkgTabs), ...sharedTabs];
 
-  const resolvedVersion = isHistoricalVersion ? versionDetail?.version : undefined;
+  const versionLabel = isHistoricalVersion ? versionDetail?.version : undefined;
 
   return (
     <div className="p-6">
@@ -346,7 +346,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           type === "agent" ? (
             <AgentRunButtonInline
               packageId={packageId}
-              resolvedVersion={resolvedVersion}
+              versionLabel={versionLabel}
               configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
             />
           ) : undefined
@@ -487,7 +487,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type === "agent" && tab === "runs" && (
         <AgentRunsTab
           packageId={packageId}
-          resolvedVersion={resolvedVersion}
+          versionLabel={versionLabel}
           configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
         />
       )}
