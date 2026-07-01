@@ -23,6 +23,7 @@
  * duplicates.
  */
 
+import { parseSseFrames, parseSseJsonData } from "@appstrate/core/sse";
 import { invalidRequest } from "../../lib/errors.ts";
 
 /**
@@ -88,21 +89,13 @@ export function numberOrUndefined(v: unknown): number | undefined {
 }
 
 /**
- * Extract the JSON payload of an SSE `data: …` frame. Concatenates
- * multi-line `data:` payloads per RFC, returns null on the OpenAI
- * `[DONE]` terminator or unparseable JSON.
+ * Extract the JSON payload of an SSE `data: …` frame block (one frame,
+ * already split on the blank-line delimiter). Returns null on the OpenAI
+ * `[DONE]` terminator or unparseable JSON. Thin wrapper over the shared
+ * `@appstrate/core/sse` primitives.
  */
 export function parseSseDataFrame(chunk: string): unknown | null {
-  const lines = chunk.split("\n");
-  const data: string[] = [];
-  for (const line of lines) {
-    if (line.startsWith("data:")) data.push(line.slice(5).trim());
-  }
-  const payload = data.join("");
-  if (!payload || payload === "[DONE]") return null;
-  try {
-    return JSON.parse(payload);
-  } catch {
-    return null;
-  }
+  const { frames } = parseSseFrames(chunk + "\n\n", "");
+  const frame = frames[0];
+  return frame ? parseSseJsonData(frame.data) : null;
 }

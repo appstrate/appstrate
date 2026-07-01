@@ -65,6 +65,7 @@
     "./runtime-tool-defs": "./src/runtime-tool-defs.ts",
     "./runtime-event-drain": "./src/runtime-event-drain.ts",
     "./ssrf": "./src/ssrf.ts",
+    "./sse": "./src/sse.ts",
     "./html": "./src/html.ts",
     "./schemas": "./src/schemas.ts",
     "./schema-validation": "./src/schema-validation.ts",
