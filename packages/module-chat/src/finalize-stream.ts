@@ -22,7 +22,7 @@
 
 import type { UIMessage } from "ai";
 import { logger } from "./logger.ts";
-import { extractAssistantMessage } from "./stream-parse.ts";
+import { extractAssistantMessages } from "./stream-parse.ts";
 import { trackTurn } from "./inflight.ts";
 import { getResumableContext } from "./resumable.ts";
 
@@ -32,17 +32,22 @@ export interface FinalizeChatStreamOptions {
   /** Resumable producer key — the id stored as `chat_sessions.active_stream_id`. */
   streamId: string;
   /**
-   * Persist the assistant turn. Omit when there is no session to persist into
+   * Persist ONE assistant message, chained onto `parentId`, and return the id it
+   * was stored under. Called once per assistant message the turn emits, in order,
+   * with each call's `parentId` set to the previous call's return value (the first
+   * chains onto {@link parentId}). Omit when there is no session to persist into
    * (the stream is still drained so the source completes). Runs to completion
    * independently of the client connection.
    */
-  onAssistant?: (message: UIMessage) => Promise<void> | void;
+  onAssistant?: (message: UIMessage, parentId: string | null) => Promise<string> | string;
+  /** Parent for the first assistant message — the user turn's message id. */
+  parentId?: string | null;
   /** Best-effort teardown after persistence settles (close MCP, unregister stop, clear active stream). */
   onSettled?: () => void;
 }
 
 export async function finalizeChatStream(opts: FinalizeChatStreamOptions): Promise<Response> {
-  const { engineResponse, streamId, onAssistant, onSettled } = opts;
+  const { engineResponse, streamId, onAssistant, parentId, onSettled } = opts;
 
   const sourceBody = engineResponse.body;
   if (!sourceBody) {
@@ -57,11 +62,35 @@ export async function finalizeChatStream(opts: FinalizeChatStreamOptions): Promi
   // it. Reading the whole branch also drives generation to completion.
   const persistTask = (async () => {
     try {
-      if (onAssistant) {
-        const assistant = await extractAssistantMessage(forPersist);
-        if (assistant?.role === "assistant") await onAssistant(assistant);
-      } else {
+      if (!onAssistant) {
         await forPersist.pipeTo(new WritableStream());
+        return;
+      }
+      // Consume the stream ONCE, up front: parse before persisting so a persist
+      // failure can be retried without re-reading the (now drained) branch. A turn
+      // may emit several assistant messages — persist each in order, chaining each
+      // onto the previous (the first onto the user turn's `parentId`).
+      const assistants = (await extractAssistantMessages(forPersist)).filter(
+        (m) => m.role === "assistant",
+      );
+      const persistAll = async () => {
+        let parent = parentId ?? null;
+        for (const assistant of assistants) {
+          parent = await onAssistant(assistant, parent);
+        }
+      };
+      try {
+        await persistAll();
+      } catch (firstErr) {
+        // Retry once after a short delay: a transient DB hiccup should not silently
+        // lose the assistant turn. Upserts are keyed by (session, message id), so
+        // re-running any already-persisted messages is idempotent.
+        await new Promise((r) => setTimeout(r, 250));
+        try {
+          await persistAll();
+        } catch {
+          throw firstErr;
+        }
       }
     } catch (err) {
       // The persist drain is the data-safety guarantee — a failure here silently

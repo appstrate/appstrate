@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { formatCallerContext, buildCallerContextBlock } from "../src/chat-stream.ts";
+import { formatCallerContext, buildCallerContextBlock } from "../src/prompt.ts";
 import type { ChatPlatformDeps } from "../src/platform-services.ts";
 
 /** Minimal Hono-context stub exposing the `c.get(key)` reads the builder makes. */

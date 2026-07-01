@@ -109,14 +109,20 @@ export async function persistUserMessage(sessionId: string, message: UIMessage):
   return messageId;
 }
 
-/** Persist the assistant turn when the stream finalizes, chained onto the user turn. */
+/**
+ * Persist one assistant message when the stream finalizes, chained onto `parentId`
+ * — the user turn for the first assistant message, or the previous assistant
+ * message when a single turn emits several. Returns the persisted message id so
+ * the next message in the turn can chain onto it.
+ */
 export async function persistAssistantMessage(
   sessionId: string,
   message: UIMessage,
-  userMessageId: string,
-): Promise<void> {
-  await upsertMessage(sessionId, message, userMessageId);
+  parentId: string | null,
+): Promise<string> {
+  const messageId = await upsertMessage(sessionId, message, parentId);
   await touchSession(sessionId);
+  return messageId;
 }
 
 /** Bump `updatedAt` and derive a title from the first user message if still unset. */
