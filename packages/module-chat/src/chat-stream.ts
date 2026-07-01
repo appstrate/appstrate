@@ -411,7 +411,12 @@ export async function handleChatStream(
   }
 
   try {
-    const modelMessages = await convertToModelMessages(messages);
+    // Pass the tools so replayed tool results go through each tool's
+    // `toModelOutput` — the connect-link redaction must hold on history
+    // replay too, not just on the turn that produced the result.
+    const modelMessages = await convertToModelMessages(messages, {
+      tools: mcp ? mcp.tools : undefined,
+    });
     const result = streamText({
       model,
       // System rides as a cached message part rather than the `system` field:
