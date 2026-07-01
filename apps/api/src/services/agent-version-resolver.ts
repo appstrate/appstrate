@@ -39,8 +39,8 @@
  * the run hot path, by `RunPackageCatalog` (#666) — it resolves each
  * `dependencies.skills` entry against PUBLISHED versions honoring the manifest
  * pin, so a dependency's mutable draft never leaks into a run. Integration /
- * mcp-server spawns are resolved by the sidecar and remain the open follow-up
- * (#686).
+ * mcp-server spawns are frozen by the shared run-pipeline dependency resolver
+ * before the sidecar receives its spawn plan (#686).
  */
 
 import { ApiError, notFound } from "../lib/errors.ts";
