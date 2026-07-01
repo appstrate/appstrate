@@ -18,7 +18,15 @@ import {
   AuiIf,
   useMessage,
 } from "@assistant-ui/react";
-import { ArrowDownIcon, CheckIcon, CopyIcon, SendHorizontalIcon, SquareIcon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  ArrowDownIcon,
+  CheckIcon,
+  CopyIcon,
+  SendHorizontalIcon,
+  SquareIcon,
+} from "lucide-react";
+import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
 import { Button } from "./button.tsx";
 import { MarkdownText } from "./markdown-text.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
@@ -230,6 +238,17 @@ function ThinkingIndicator() {
   );
 }
 
+function TurnLimitNotice() {
+  const reached = useMessage((m) => turnLimitReached(m));
+  if (!reached) return null;
+  return (
+    <div className="text-muted-foreground mt-3 flex items-center gap-2 text-xs" role="status">
+      <AlertTriangleIcon className="size-3.5 shrink-0" />
+      <span>Réponse partielle : limite d'étapes atteinte.</span>
+    </div>
+  );
+}
+
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
@@ -245,6 +264,7 @@ function AssistantMessage() {
             Empty: ThinkingIndicator,
           }}
         />
+        <TurnLimitNotice />
       </div>
       <MessageError />
       <div className="mt-1 flex items-center gap-1">

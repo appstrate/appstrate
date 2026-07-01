@@ -120,6 +120,7 @@ export class SdkUiStreamMapper {
   private step = 0;
   private readonly open = new Map<number, OpenBlock>();
   private result: ClaudeResultMeta | null = null;
+  private lastTool: string | undefined;
 
   private blockId(index: number): string {
     return `${this.step}-${index}`;
@@ -182,6 +183,7 @@ export class SdkUiStreamMapper {
     }
     if (cb.type === "tool_use" && cb.id && cb.name) {
       const toolName = stripMcpToolPrefix(cb.name);
+      this.lastTool = toolName;
       this.open.set(index, { kind: "tool", id: cb.id, toolCallId: cb.id, toolName, json: "" });
       return [{ type: "tool-input-start", toolCallId: cb.id, toolName }];
     }
@@ -274,17 +276,26 @@ export class SdkUiStreamMapper {
     return this.result;
   }
 
+  stepCount(): number {
+    return this.step;
+  }
+
+  lastToolName(): string | undefined {
+    return this.lastTool;
+  }
+
   /**
    * The closing `finish` chunk (engine writes this last). When the turn ended
    * in an SDK error the engine writes an `error` chunk before it; the finish
    * still closes the stream cleanly.
    */
-  finishChunk(): UIMessageChunk {
+  finishChunk(messageMetadata?: unknown): UIMessageChunk {
     const meta = this.result;
     return {
       type: "finish",
       finishReason: meta?.finishReason ?? "stop",
-      messageMetadata: meta ? { usage: meta.usage, costUsd: meta.totalCostUsd } : undefined,
+      messageMetadata:
+        messageMetadata ?? (meta ? { usage: meta.usage, costUsd: meta.totalCostUsd } : undefined),
     };
   }
 }

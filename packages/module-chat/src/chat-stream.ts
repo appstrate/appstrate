@@ -18,7 +18,13 @@
  */
 
 import type { Context } from "hono";
-import { streamText, convertToModelMessages, stepCountIs, type UIMessage } from "ai";
+import {
+  streamText,
+  convertToModelMessages,
+  stepCountIs,
+  type FinishReason,
+  type UIMessage,
+} from "ai";
 
 /**
  * Minimal Hono Env mirroring what the platform auth pipeline sets on the chat
@@ -49,8 +55,14 @@ import { ensureSession, persistUserMessage, persistAssistantMessage } from "./pe
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
 import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
-
-const MAX_STEPS = 16;
+import {
+  appendFinalStepSystemPrompt,
+  CHAT_MAX_STEPS,
+  CHAT_TOOL_STEP_BUDGET,
+  isFinalChatStep,
+  mergeTurnMetadata,
+  type AppstrateTurnMetadata,
+} from "@appstrate/core/chat-turn-metadata";
 
 // Heading that fences the generated operation index at the tail of the platform
 // MCP server instructions (emitted by apps/api/src/modules/mcp/router.ts). We
@@ -73,11 +85,41 @@ export function applyOperationIndexPolicy(system: string, apiShape: string): str
   return system;
 }
 
+type ConvertedModelMessages = Awaited<ReturnType<typeof convertToModelMessages>>;
+
+export function aiSdkCachedSystemMessage(content: string) {
+  return {
+    role: "system" as const,
+    content,
+    providerOptions: { anthropic: { cacheControl: { type: "ephemeral" as const } } },
+  };
+}
+
+export function prepareAiSdkChatStep({
+  stepNumber,
+  system,
+  modelMessages,
+  markToolStepBudgetReached,
+}: {
+  stepNumber: number;
+  system: string;
+  modelMessages: ConvertedModelMessages;
+  markToolStepBudgetReached: () => void;
+}) {
+  if (!isFinalChatStep(stepNumber, CHAT_MAX_STEPS)) return undefined;
+  markToolStepBudgetReached();
+  return {
+    activeTools: [],
+    toolChoice: "none" as const,
+    messages: [aiSdkCachedSystemMessage(appendFinalStepSystemPrompt(system)), ...modelMessages],
+  };
+}
+
 /**
  * TTL for the engine path's loopback bearer. The Agent SDK bakes it into the
  * spawned binary's env once, so it must outlive the whole turn (up to
- * MAX_STEPS turns, each able to long-poll a run's status for ~55 s). 30 min
- * is a generous ceiling for a single interactive turn.
+ * CHAT_MAX_STEPS turns, each able to long-poll a run's status for ~55 s). 30
+ * min is a generous ceiling for a single interactive turn.
  */
 const ENGINE_LOOPBACK_TTL_MS = 30 * 60_000;
 
@@ -450,9 +492,12 @@ export async function handleChatStream(
   // only under CHAT_DEBUG — they may carry PII/customer content.
   const debug = Boolean(process.env.CHAT_DEBUG);
   const turnStart = Date.now();
-  let step = 0;
+  let completedSteps = 0;
   let stepStart = turnStart;
   let firstChunkAt = 0;
+  let lastToolName: string | undefined;
+  let toolStepBudgetReached = false;
+  let aiSdkFinishReason: FinishReason | "unknown" = "unknown";
 
   // The proxy surfaces are bearer-only (cookies refused — CSRF model):
   // inference loopback calls carry a short-lived token only this process
@@ -460,7 +505,7 @@ export async function handleChatStream(
   // the caller's own credentials (full RBAC fidelity on tool calls).
   //
   // The token lives 60 s, but a turn fans out into many inference calls over
-  // up to MAX_STEPS steps (with a run long-poll blocking for ~55s between
+  // up to CHAT_MAX_STEPS steps (with a run long-poll blocking for ~55s between
   // them), so we hand modelFromFamily a *minter* — the provider re-mints a fresh
   // bearer on every proxy call. The static header below is for the one-shot
   // calls (listModels) that fire immediately on this same line.
@@ -678,25 +723,28 @@ export async function handleChatStream(
   }
 
   try {
+    const modelMessages = await convertToModelMessages(messages);
     const result = streamText({
       model,
       // System rides as a cached message part rather than the `system` field:
       // the platform MCP instructions now carry a generated operation index
-      // (several KB, re-sent on every one of the up-to-MAX_STEPS inference
+      // (several KB, re-sent on every one of the up-to-CHAT_MAX_STEPS inference
       // calls in a turn). OpenAI auto-caches the prefix and the Claude Agent
       // SDK path caches on its own; the ai-sdk Anthropic providers need an
       // explicit cache_control breakpoint or they'd pay the index in full each
       // step. Harmless for non-Anthropic models (providerOptions is namespaced).
-      messages: [
-        {
-          role: "system",
-          content: system,
-          providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
-        },
-        ...(await convertToModelMessages(messages)),
-      ],
+      messages: [aiSdkCachedSystemMessage(system), ...modelMessages],
       tools: mcp ? mcp.tools : undefined,
-      stopWhen: stepCountIs(MAX_STEPS),
+      stopWhen: stepCountIs(CHAT_MAX_STEPS),
+      prepareStep: ({ stepNumber }) =>
+        prepareAiSdkChatStep({
+          stepNumber,
+          system,
+          modelMessages,
+          markToolStepBudgetReached: () => {
+            toolStepBudgetReached = true;
+          },
+        }),
       experimental_repairToolCall: repairStringifiedToolCall,
       // Decoupled from the request connection (see `generation` above): a client
       // disconnect must not cancel generation; only an explicit stop does.
@@ -711,8 +759,12 @@ export async function handleChatStream(
       },
       onStepFinish: ({ toolCalls, toolResults, finishReason, usage }) => {
         const now = Date.now();
+        const step = completedSteps;
+        completedSteps += 1;
+        const toolName = toolCalls.at(-1)?.toolName;
+        if (toolName) lastToolName = toolName;
         logger.info("chat step", {
-          step: step++,
+          step,
           finishReason,
           usage: usage as unknown as Record<string, unknown>,
           stepMs: now - stepStart,
@@ -735,8 +787,9 @@ export async function handleChatStream(
         logger.error("chat stream error", { err: String(error) });
       },
       onFinish: ({ totalUsage, finishReason }) => {
+        aiSdkFinishReason = finishReason ?? "unknown";
         logger.info("chat turn done", {
-          steps: step,
+          steps: completedSteps,
           totalMs: Date.now() - turnStart,
           usage: totalUsage as unknown as Record<string, unknown>,
           finishReason,
@@ -754,6 +807,20 @@ export async function handleChatStream(
         // Emit a real assistant message id in the stream so the client and the
         // server-side persist agree on it (and never collide on an empty id).
         generateMessageId: () => crypto.randomUUID(),
+        messageMetadata: ({ part }) => {
+          if (part.type !== "finish") return undefined;
+          const turn: AppstrateTurnMetadata = {
+            engine: "ai-sdk",
+            finishReason: part.finishReason ?? aiSdkFinishReason,
+            stepCount: completedSteps,
+            maxSteps: CHAT_MAX_STEPS,
+            toolStepBudget: CHAT_TOOL_STEP_BUDGET,
+            toolStepBudgetReached,
+            maxStepsReached: completedSteps >= CHAT_MAX_STEPS,
+            ...(lastToolName ? { lastToolName } : {}),
+          };
+          return mergeTurnMetadata(undefined, turn);
+        },
       }),
     );
   } catch (err) {
