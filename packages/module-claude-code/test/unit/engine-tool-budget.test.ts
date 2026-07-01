@@ -31,7 +31,13 @@ describe("buildRunAndWaitCanUseTool", () => {
       { signal: new AbortController().signal, toolUseID: "toolu_1" },
     );
 
-    expect(result).toEqual({ behavior: "allow", toolUseID: "toolu_1" });
+    // `updatedInput` must echo the input: the CLI's runtime Zod schema requires
+    // it on allow responses even though the SDK TS type marks it optional.
+    expect(result).toEqual({
+      behavior: "allow",
+      updatedInput: { kind: "agent", scope: "@acme", name: "writer" },
+      toolUseID: "toolu_1",
+    });
     expect(calls).toEqual([
       {
         toolName: "mcp__appstrate_chat__run_and_wait",

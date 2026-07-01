@@ -106,7 +106,10 @@ export function buildRunAndWaitCanUseTool(
       };
     }
     runAndWaitBridge.handleToolPermission(toolName, toolInput, options.toolUseID);
-    return { behavior: "allow", toolUseID: options.toolUseID };
+    // `updatedInput` is optional in the SDK's TS type but REQUIRED by the CLI's
+    // runtime Zod schema for allow responses — omitting it fails every tool
+    // call with "updatedInput: expected record, received undefined".
+    return { behavior: "allow", updatedInput: toolInput, toolUseID: options.toolUseID };
   };
 }
 
@@ -182,6 +185,14 @@ export function runClaudeAgentChat(input: ChatEngineInput): Response {
                 : undefined,
               includePartialMessages: true,
               ...CLAUDE_SDK_HARDENING,
+              // The shared hardening sets permissionMode:"bypassPermissions" —
+              // right for the agent runner (no permission hook), fatal for chat:
+              // bypass means the CLI never consults `canUseTool`, which is what
+              // pre-launches run_and_wait (streaming the preliminary run id the
+              // live run card needs) and what denies the final-step tool budget.
+              // "default" routes every tool call through the hook, which allows
+              // everything anyway — same effective permissiveness, hook alive.
+              permissionMode: "default",
               maxTurns: CHAT_MAX_STEPS,
               abortController: controller,
             },
