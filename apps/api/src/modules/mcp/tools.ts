@@ -31,9 +31,8 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra, AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import {
-  RUN_AND_WAIT_BACKOFF_MS,
-  RUN_AND_WAIT_MAX_MS,
-  isRunAndWaitTerminalStatus,
+  waitForRunAndWaitCompletion,
+  type RunAndWaitLaunch,
 } from "@appstrate/core/run-and-wait-client";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
@@ -696,24 +695,6 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   throw signal.reason ?? new Error("Aborted");
 }
 
-function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  if (ms <= 0) return Promise.resolve();
-  throwIfAborted(signal);
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(done, ms);
-    function done(): void {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }
-    function onAbort(): void {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-      reject(signal?.reason ?? new Error("Aborted"));
-    }
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
 function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "run_and_wait",
@@ -877,76 +858,38 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       tool: "run_and_wait",
       durationMs: performance.now() - start,
       operationId: kind === "agent" ? "runAgent" : "runInline",
-      status: 202,
+      status: launchResponse.status,
       outcome: "invoked",
     });
 
-    let run: Record<string, unknown> | undefined;
-    const deadline = start + RUN_AND_WAIT_MAX_MS;
-    while (performance.now() < deadline) {
-      throwIfAborted(signal);
-      const pollStart = performance.now();
-      const response = await dispatchCatalogOperation(ctx, "getRun", {
-        pathParams: { id: runId },
-        query: { wait: "true" },
-        signal,
-      });
-      if (response.status >= 400) {
-        emit(ctx, {
-          tool: "run_and_wait",
-          durationMs: performance.now() - start,
-          operationId: "getRun",
-          method: "GET",
-          status: response.status,
-          outcome: "invoked",
-        });
-        return readResponse(response);
-      }
-
-      run = asRecord((await response.json().catch(() => undefined)) as unknown) ?? undefined;
-      if (!run) {
-        emit(ctx, {
-          tool: "run_and_wait",
-          durationMs: performance.now() - start,
-          outcome: "rejected",
-        });
-        return textResult({ error: "Run wait returned no run resource." }, true);
-      }
-
-      const currentStatus = asString(run.status);
-      if (isRunAndWaitTerminalStatus(currentStatus)) {
-        break;
-      }
-
-      const pollMs = performance.now() - pollStart;
-      if (pollMs < RUN_AND_WAIT_BACKOFF_MS) {
-        await sleep(
-          Math.min(RUN_AND_WAIT_BACKOFF_MS - pollMs, deadline - performance.now()),
-          signal,
-        );
-      }
-    }
-
-    if (!run || !isRunAndWaitTerminalStatus(run.status)) {
-      return textResult({
-        ...(run ?? { id: runId, packageId, status }),
-        id: asString(run?.id) ?? runId,
-        packageId: asString(run?.packageId) ?? packageId,
-        status: asString(run?.status) ?? status,
-        done: false,
-        error: "run_and_wait timed out before the run reached a terminal status.",
-      });
-    }
+    const waitHeaders = new Headers(ctx.authHeaders);
+    waitHeaders.set(...internalDispatchHeader());
+    const launch: RunAndWaitLaunch = {
+      runId,
+      launchRecord: runRecord,
+      startedAtMs: start,
+      preliminary: { id: runId, packageId, status, done: false },
+    };
+    const final = await waitForRunAndWaitCompletion(launch, {
+      origin: ctx.origin,
+      headers: waitHeaders,
+      fetch: ((input, init) => {
+        const request =
+          input instanceof Request ? new Request(input, init) : new Request(input.toString(), init);
+        return ctx.dispatch(request);
+      }) as typeof fetch,
+      signal,
+    });
 
     emit(ctx, {
       tool: "run_and_wait",
       durationMs: performance.now() - start,
       operationId: "getRun",
       method: "GET",
-      status: 200,
+      status: typeof final.payload.status === "number" ? final.payload.status : 200,
       outcome: "invoked",
     });
-    return textResult({ ...run, done: true });
+    return textResult(final.payload, final.isError);
   };
 
   return { descriptor, handler };

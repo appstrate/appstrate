@@ -35,7 +35,7 @@ import {
 import { Modal } from "./modal.tsx";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
-import { RunPanel } from "./run-panel.tsx";
+import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
 import {
   buildRunPageHref,
   extractAgentLabel,
@@ -43,6 +43,7 @@ import {
   extractRunPackageId,
   extractRunStatus,
   isRunLaunchOp,
+  shouldRenderRunLaunchPanel,
 } from "./run-events.ts";
 import { extractAuthOffer } from "./auth-offer.ts";
 import {
@@ -234,9 +235,7 @@ export function ToolCallCard({
 
 type AnyToolProps = ToolCallMessagePartProps<Record<string, unknown>, unknown>;
 
-/**
- * Render run-launch tool calls as in-chat run progress once the result exposes `run_...`.
- */
+/** Render run-launch tool calls as in-chat run progress while launch/run state is available. */
 function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.ReactNode {
   const unwrapped = unwrapResult(props.result);
   const meta = definedEntries({
@@ -267,7 +266,7 @@ function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.R
   const packageId =
     extractRunPackageId(props.result) ?? (agentLabel?.startsWith("@") ? agentLabel : undefined);
   return (
-    <RunPanel
+    <ChatRunProgressCard
       runId={runId}
       initialStatus={extractRunStatus(props.result)}
       agentLabel={agentLabel}
@@ -305,10 +304,11 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       }
     }
 
+    const phase = deriveToolPhase(props);
     const rule = OP_RULES.find((r) => r.re.test(opId)) ?? { Icon: ZapIcon, label: "Opération" };
     const card = (
       <ToolCallCard
-        phase={deriveToolPhase(props)}
+        phase={phase}
         Icon={rule.Icon}
         label={rule.label}
         idText={opId}
@@ -322,8 +322,13 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
     );
 
     // Run launch (runAgent / runInline) → rich in-chat run progress. These return the
-    // run id immediately in the result, so no discovery is needed.
-    if (isRunLaunchOp(opId)) return buildRunLaunch(props, extractRunId(result));
+    // run id immediately in the result, so no discovery is needed. If launch
+    // fails before a run exists, fall back to the generic card so the inline
+    // error is visible instead of a stuck "Lancement" run panel.
+    if (isRunLaunchOp(opId)) {
+      const runId = extractRunId(result);
+      if (shouldRenderRunLaunchPanel(phase, runId)) return buildRunLaunch(props, runId);
+    }
 
     return card;
   },
@@ -389,8 +394,23 @@ export const GetMeToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>
 
 /** Render `run_and_wait` like other run launch tools. Chat emits the run id as a preliminary result. */
 function RunAndWaitCard(props: AnyToolProps): React.ReactNode {
+  const phase = deriveToolPhase(props);
   const resultRunId = extractRunId(props.result);
-  return buildRunLaunch(props, resultRunId);
+  if (shouldRenderRunLaunchPanel(phase, resultRunId)) return buildRunLaunch(props, resultRunId);
+  return (
+    <ToolCallCard
+      phase={phase}
+      Icon={PlayIcon}
+      label="Lancement"
+      idText="run_and_wait"
+      args={props.args}
+      result={props.result}
+      isError={props.isError}
+      toolCallId={props.toolCallId}
+      artifact={props.artifact}
+      timing={props.timing}
+    />
+  );
 }
 
 // `run_and_wait` is its own MCP tool (not invoke_operation), so it needs its own

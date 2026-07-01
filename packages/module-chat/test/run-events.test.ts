@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   buildRunPageHref,
   buildRunSseUrl,
@@ -16,12 +16,14 @@ import {
   parseRunLogFrame,
   parseRunUpdateFrame,
   safeJsonParse,
+  shouldRenderRunLaunchPanel,
+  terminalRunLineText,
   visibleLogEntries,
   type RunLogLine,
 } from "../src/ui/run-events.ts";
 
 describe("run-events helpers", () => {
-  test("identifies run launch operations and terminal statuses", () => {
+  it("identifies run launch operations and terminal statuses", () => {
     expect(isRunLaunchOp("runAgent")).toBe(true);
     expect(isRunLaunchOp("runInline")).toBe(true);
     expect(isRunLaunchOp("run_and_wait")).toBe(true);
@@ -31,9 +33,14 @@ describe("run-events helpers", () => {
     expect(isTerminalStatus("failed")).toBe(true);
     expect(isTerminalStatus("running")).toBe(false);
     expect(isTerminalStatus(undefined)).toBe(false);
+
+    expect(terminalRunLineText("success")).toBe("Complété");
+    expect(terminalRunLineText("failed")).toBe("Échec");
+    expect(terminalRunLineText("timeout")).toBe("Expiré");
+    expect(terminalRunLineText("cancelled")).toBe("Annulé");
   });
 
-  test("extracts run id and status from invoke and run_and_wait results", () => {
+  it("extracts run id and status from invoke and run_and_wait results", () => {
     expect(extractRunId({ status: 201, body: { id: "run_body" } })).toBe("run_body");
     expect(extractRunId({ id: "run_top" })).toBe("run_top");
     expect(extractRunId({ id: "conn_1" })).toBeUndefined();
@@ -43,7 +50,15 @@ describe("run-events helpers", () => {
     expect(extractRunStatus({ status: 201 })).toBeUndefined();
   });
 
-  test("extracts display labels and run links", () => {
+  it("renders the live run panel only while launching or once a run exists", () => {
+    expect(shouldRenderRunLaunchPanel("pending", undefined)).toBe(true);
+    expect(shouldRenderRunLaunchPanel("running", undefined)).toBe(true);
+    expect(shouldRenderRunLaunchPanel("error", undefined)).toBe(false);
+    expect(shouldRenderRunLaunchPanel("success", undefined)).toBe(false);
+    expect(shouldRenderRunLaunchPanel("error", "run_1")).toBe(true);
+  });
+
+  it("extracts display labels and run links", () => {
     expect(extractAgentLabel({ path_params: { scope: "@acme", name: "writer" } })).toBe(
       "@acme/writer",
     );
@@ -59,7 +74,7 @@ describe("run-events helpers", () => {
     expect(buildRunPageHref(undefined, "run_42")).toBeUndefined();
   });
 
-  test("parses JSON, logs, and run updates", () => {
+  it("parses JSON, logs, and run updates", () => {
     expect(safeJsonParse('{"a":1}')).toEqual({ a: 1 });
     expect(safeJsonParse("{bad")).toBeUndefined();
 
@@ -80,7 +95,7 @@ describe("run-events helpers", () => {
     expect(parseRunUpdateFrame(JSON.stringify({ id: "run_1" }))).toBeUndefined();
   });
 
-  test("parses, merges, and filters log rows", () => {
+  it("parses, merges, and filters log rows", () => {
     const logs = parseLogListResponse({
       data: [
         { id: 2, event: "progress", message: "hidden" },
@@ -100,7 +115,7 @@ describe("run-events helpers", () => {
     ]);
   });
 
-  test("builds SSE URLs from org/app headers", () => {
+  it("builds SSE URLs from org/app headers", () => {
     expect(buildRunSseUrl({ runId: "run a/b", orgId: "o", applicationId: "a" })).toBe(
       "/api/realtime/runs/run%20a%2Fb?orgId=o&applicationId=a&verbose=true",
     );

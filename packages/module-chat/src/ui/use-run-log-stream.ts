@@ -2,7 +2,7 @@
 
 /**
  * Follow a launched run's logs in the chat: fetch the persisted history once,
- * then tail new lines live over the run's SSE stream. Drives `RunPanel`.
+ * then tail new lines live over the run's SSE stream. Drives `ChatRunProgressCard`.
  *
  * Two sources, merged by log id (they overlap):
  *  1. `GET /api/runs/:id/logs` — the persisted history, so a panel that mounts

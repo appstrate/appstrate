@@ -9,7 +9,7 @@
  * (`GET /api/runs/:id/logs`), then tails new lines live over the run's SSE
  * stream (`GET /api/realtime/runs/:id?verbose=true`). These helpers parse and
  * merge both sources so the React layer (`use-run-log-stream.ts`,
- * `run-panel.tsx`) stays a thin shell.
+ * `chat-run-progress-card.tsx`) stays a thin shell.
  *
  * The schemas here are deliberately a MINIMAL local subset of the canonical
  * `@appstrate/shared-types` realtime schemas: depending on shared-types would
@@ -47,6 +47,21 @@ export const TERMINAL_RUN_STATUSES: ReadonlySet<RunStatus> = new Set<RunStatus>(
 
 export function isTerminalStatus(status: string | null | undefined): status is RunStatus {
   return typeof status === "string" && TERMINAL_RUN_STATUSES.has(status as RunStatus);
+}
+
+export function terminalRunLineText(status: RunStatus | undefined): string {
+  switch (status) {
+    case "success":
+      return "Complété";
+    case "failed":
+      return "Échec";
+    case "timeout":
+      return "Expiré";
+    case "cancelled":
+      return "Annulé";
+    default:
+      return "Terminé";
+  }
 }
 
 /** Is this op-id one whose result we can mine for a launched run id? */
@@ -101,6 +116,10 @@ export function extractRunId(result: unknown): string | undefined {
   const top = unwrapped.id;
   if (typeof top === "string" && top.startsWith("run_")) return top;
   return undefined;
+}
+
+export function shouldRenderRunLaunchPanel(phase: string, runId: string | undefined): boolean {
+  return !!runId || phase === "running" || phase === "pending";
 }
 
 /**

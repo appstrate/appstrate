@@ -12,12 +12,12 @@
  * (`useRunLogStream`) and paced one at a time (`useLogTicker`, ≥500ms each) with
  * a fade/slide animation so a burst reads as a sequence rather than a flash.
  * Before the first log the line reads "Lancement" (still starting), then
- * "Exécution en cours" once running; once terminal it settles on "Complété". A
+ * "Exécution en cours" once running; once terminal it settles on the final outcome. A
  * leading status glyph (centered across both lines) shows the run state; the
  * live execution time and a link to the run's page sit on the right. Clicking
  * the card opens the raw input/output detail modal (`details`).
  *
- * Before returns `run_…` id there is no SSE yet: status glyph falls back tool-call phase.
+ * Before the tool returns a `run_…` id there is no SSE yet: status glyph falls back to the tool-call phase.
  */
 
 import * as React from "react";
@@ -30,6 +30,7 @@ import { useLiveElapsedMs } from "./use-elapsed.ts";
 import {
   buildRunPageHref,
   isTerminalStatus,
+  terminalRunLineText,
   visibleLogEntries,
   type RunStatus,
 } from "./run-events.ts";
@@ -67,7 +68,7 @@ function StatusIcon({ status, phase }: { status: RunStatus | undefined; phase: T
   return <Loader2Icon className="text-muted-foreground size-4 shrink-0 animate-spin" />;
 }
 
-export function RunPanel({
+export function ChatRunProgressCard({
   runId,
   initialStatus,
   agentLabel,
@@ -107,11 +108,11 @@ export function RunPanel({
   // first log replaces it.
   const placeholder = effectiveStatus === "running" ? "Exécution en cours" : "Lancement";
 
-  // Once the run is terminal, the live log line is replaced by a fixed
-  // "Complété" so the card settles on a clear end state instead of freezing on
+  // Once the run is terminal, the live log line is replaced by a fixed status
+  // label so the card settles on the actual outcome instead of freezing on
   // whatever the last log happened to be. A stable key (-1) lets it animate in.
   const terminal = isTerminalStatus(effectiveStatus);
-  const line = terminal ? { id: -1, text: "Complété" } : current;
+  const line = terminal ? { id: -1, text: terminalRunLineText(effectiveStatus) } : current;
   const effectiveRunHref = runHref ?? (runId ? buildRunPageHref(packageId, runId) : undefined);
 
   return (

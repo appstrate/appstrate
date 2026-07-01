@@ -30,7 +30,7 @@
  *
  *   Platform write-through (always, both sinks):
  *     output.emitted  → run_logs (result/output)
- *     log.written     → run_logs (progress/progress) with level
+ *     log.written     → run_logs (progress/log) with level
  *
  *   Platform-specific (`appstrate.*` namespace):
  *     appstrate.progress → run_logs (progress/progress) with message/data/level
