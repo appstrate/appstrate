@@ -23,7 +23,7 @@
  *     transcript bleed.
  */
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { query, type CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { buildClaudeSdkEnv, CLAUDE_SDK_HARDENING } from "@appstrate/runner-claude/binary";
 import { RUN_AND_WAIT_MAX_MS } from "@appstrate/core/run-and-wait-client";
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
@@ -36,6 +36,7 @@ import {
   createRunAndWaitBridge,
   RUN_AND_WAIT_MCP_QUALIFIED_TOOL_NAME,
   RUN_AND_WAIT_MCP_SERVER_NAME,
+  type RunAndWaitBridge,
 } from "./run-and-wait-bridge.ts";
 
 const logger = createLogger(process.env.LOG_LEVEL ?? "info");
@@ -70,6 +71,16 @@ function buildMcpServers(
   }
   if (runAndWaitServer) servers[RUN_AND_WAIT_MCP_SERVER_NAME] = runAndWaitServer;
   return Object.keys(servers).length > 0 ? servers : undefined;
+}
+
+function buildRunAndWaitCanUseTool(
+  runAndWaitBridge: RunAndWaitBridge | null,
+): CanUseTool | undefined {
+  if (!runAndWaitBridge) return undefined;
+  return async (toolName, toolInput, options) => {
+    runAndWaitBridge.handleToolPermission(toolName, toolInput, options.toolUseID);
+    return { behavior: "allow", toolUseID: options.toolUseID };
+  };
 }
 
 /**
@@ -128,6 +139,7 @@ export function runClaudeAgentChat(input: ChatEngineInput): Response {
               systemPrompt: input.system,
               tools: [], // disable ALL built-ins — chat must not get host execution
               mcpServers: buildMcpServers(input, runAndWaitBridge?.mcpServer) as never,
+              canUseTool: buildRunAndWaitCanUseTool(runAndWaitBridge),
               disallowedTools: runAndWaitBridge ? ["mcp__platform__run_and_wait"] : undefined,
               toolAliases: runAndWaitBridge
                 ? {
@@ -145,7 +157,6 @@ export function runClaudeAgentChat(input: ChatEngineInput): Response {
           for await (const message of response) {
             for (const chunk of mapper.map(message as ClaudeSdkMessage)) {
               writer.write(chunk);
-              runAndWaitBridge?.handleChunk(chunk);
             }
           }
 

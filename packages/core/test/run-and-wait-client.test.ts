@@ -68,7 +68,7 @@ describe("run_and_wait client", () => {
         method: "POST",
         body: { input: { topic: "x" } },
       },
-      { url: "https://test.local/api/runs/run_1?wait=true", method: "GET" },
+      { url: "https://test.local/api/runs/run_1?wait=55", method: "GET" },
     ]);
   });
 
@@ -98,6 +98,44 @@ describe("run_and_wait client", () => {
         done: false,
         error: "run_and_wait timed out before the run reached a terminal status.",
       },
+    ]);
+  });
+
+  test("does not let an in-flight long poll overrun the wait budget", async () => {
+    const calls: string[] = [];
+    const fetchImpl = fakeFetch(async (input, init) => {
+      calls.push(String(input));
+      if (String(input).endsWith("/run")) {
+        return jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" });
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => reject(init.signal?.reason ?? new Error("aborted")),
+          { once: true },
+        );
+      });
+    });
+
+    await expect(
+      collectSteps(
+        fetchImpl,
+        { kind: "agent", scope: "@acme", name: "writer" },
+        { maxMs: 5, backoffMs: 0 },
+      ),
+    ).resolves.toEqual([
+      { id: "run_1", packageId: "@acme/writer", status: "pending", done: false },
+      {
+        id: "run_1",
+        packageId: "@acme/writer",
+        status: "pending",
+        done: false,
+        error: "run_and_wait timed out before the run reached a terminal status.",
+      },
+    ]);
+    expect(calls).toEqual([
+      "https://test.local/api/agents/%40acme/writer/run",
+      "https://test.local/api/runs/run_1?wait=0",
     ]);
   });
 

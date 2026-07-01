@@ -102,7 +102,7 @@ describe("platform MCP run_and_wait wrapper", () => {
         method: "POST",
         body: { input: { topic: "x" } },
       },
-      { url: "https://test.local/api/runs/run_1?wait=true", method: "GET" },
+      { url: "https://test.local/api/runs/run_1?wait=55", method: "GET" },
     ]);
   });
 

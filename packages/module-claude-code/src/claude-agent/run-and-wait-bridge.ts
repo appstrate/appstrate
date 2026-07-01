@@ -24,6 +24,8 @@ interface McpTextResult extends Record<string, unknown> {
 }
 
 interface PendingLaunch {
+  inputKey: string;
+  toolUseID?: string;
   launchPromise: Promise<RunAndWaitLaunchOutcome>;
 }
 
@@ -67,8 +69,40 @@ function inputKey(value: unknown): string {
   return JSON.stringify(sortForKey(value));
 }
 
+function isRunAndWaitToolName(toolName: string): boolean {
+  return (
+    toolName === RUN_AND_WAIT_MCP_TOOL_NAME ||
+    toolName === RUN_AND_WAIT_MCP_QUALIFIED_TOOL_NAME ||
+    toolName === "mcp__platform__run_and_wait"
+  );
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function toolUseIDFromExtra(extra: unknown): string | undefined {
+  const record = asRecord(extra);
+  const meta = asRecord(record?._meta);
+  return (
+    asNonEmptyString(record?.toolUseID) ??
+    asNonEmptyString(record?.toolUseId) ??
+    asNonEmptyString(record?.tool_use_id) ??
+    asNonEmptyString(meta?.toolUseID) ??
+    asNonEmptyString(meta?.toolUseId) ??
+    asNonEmptyString(meta?.tool_use_id)
+  );
+}
+
 export class RunAndWaitBridge {
   private readonly pendingByInput = new Map<string, PendingLaunch[]>();
+  private readonly pendingByToolUseID = new Map<string, PendingLaunch>();
   readonly mcpServer = createSdkMcpServer({
     name: RUN_AND_WAIT_MCP_SERVER_NAME,
     version: "1.0.0",
@@ -80,7 +114,7 @@ export class RunAndWaitBridge {
         RUN_AND_WAIT_MCP_TOOL_NAME,
         "Launch an Appstrate agent or inline run, stream run progress in chat, and wait for the final run status before returning.",
         runAndWaitInputSchema,
-        async (args) => this.execute(args),
+        async (args, extra) => this.execute(args, extra),
         {
           alwaysLoad: true,
           annotations: {
@@ -97,17 +131,21 @@ export class RunAndWaitBridge {
 
   constructor(private readonly opts: RunAndWaitBridgeOptions) {}
 
-  handleChunk(chunk: UIMessageChunk): void {
-    if (chunk.type !== "tool-input-available") return;
-    if (chunk.toolName !== RUN_AND_WAIT_MCP_TOOL_NAME) return;
+  handleToolPermission(
+    toolName: string,
+    input: Record<string, unknown>,
+    toolUseID: string | undefined,
+  ): void {
+    if (!toolUseID || !isRunAndWaitToolName(toolName)) return;
+    if (this.pendingByToolUseID.has(toolUseID)) return;
 
-    const pending = this.createPending(chunk.input, true);
+    const pending = this.createPending(input, toolUseID);
     pending.launchPromise
       .then((result) => {
         if (!result.ok) return;
         this.opts.write({
           type: "tool-output-available",
-          toolCallId: chunk.toolCallId,
+          toolCallId: toolUseID,
           output: callToolResult(result.launch.preliminary),
         });
       })
@@ -116,8 +154,20 @@ export class RunAndWaitBridge {
       });
   }
 
-  async execute(rawArgs: unknown): Promise<McpTextResult> {
-    const pending = this.claimPending(rawArgs) ?? this.createPending(rawArgs, false);
+  async execute(rawArgs: unknown, extra?: unknown): Promise<McpTextResult> {
+    const toolUseID = toolUseIDFromExtra(extra);
+    if (!toolUseID && this.hasAmbiguousPendingInput(rawArgs)) {
+      return callToolResult(
+        {
+          error: "run_and_wait could not correlate this SDK tool call to its pre-launched run.",
+        },
+        true,
+      );
+    }
+    const pending =
+      (toolUseID ? this.claimPendingByToolUseID(toolUseID) : undefined) ??
+      this.claimPendingByInput(rawArgs) ??
+      this.createPending(rawArgs);
     const launched = await pending.launchPromise;
     if (!launched.ok) return callToolResult(launched.step.payload, launched.step.isError);
 
@@ -134,12 +184,15 @@ export class RunAndWaitBridge {
     };
   }
 
-  private createPending(rawArgs: unknown, enqueue: boolean): PendingLaunch {
+  private createPending(rawArgs: unknown, toolUseID?: string): PendingLaunch {
     const key = inputKey(rawArgs);
     const pending: PendingLaunch = {
+      inputKey: key,
+      ...(toolUseID ? { toolUseID } : {}),
       launchPromise: launchRunAndWait(rawArgs, this.clientOptions()),
     };
-    if (enqueue) {
+    if (toolUseID) {
+      this.pendingByToolUseID.set(toolUseID, pending);
       const queue = this.pendingByInput.get(key);
       if (queue) queue.push(pending);
       else this.pendingByInput.set(key, [pending]);
@@ -147,12 +200,33 @@ export class RunAndWaitBridge {
     return pending;
   }
 
-  private claimPending(rawArgs: unknown): PendingLaunch | undefined {
+  private claimPendingByToolUseID(toolUseID: string): PendingLaunch | undefined {
+    const pending = this.pendingByToolUseID.get(toolUseID);
+    if (!pending) return undefined;
+    this.pendingByToolUseID.delete(toolUseID);
+    this.removePendingFromInputQueue(pending);
+    return pending;
+  }
+
+  private claimPendingByInput(rawArgs: unknown): PendingLaunch | undefined {
     const key = inputKey(rawArgs);
     const queue = this.pendingByInput.get(key);
     const pending = queue?.shift();
     if (queue && queue.length === 0) this.pendingByInput.delete(key);
+    if (pending?.toolUseID) this.pendingByToolUseID.delete(pending.toolUseID);
     return pending;
+  }
+
+  private removePendingFromInputQueue(pending: PendingLaunch): void {
+    const queue = this.pendingByInput.get(pending.inputKey);
+    if (!queue) return;
+    const index = queue.indexOf(pending);
+    if (index >= 0) queue.splice(index, 1);
+    if (queue.length === 0) this.pendingByInput.delete(pending.inputKey);
+  }
+
+  private hasAmbiguousPendingInput(rawArgs: unknown): boolean {
+    return (this.pendingByInput.get(inputKey(rawArgs))?.length ?? 0) > 1;
   }
 }
 

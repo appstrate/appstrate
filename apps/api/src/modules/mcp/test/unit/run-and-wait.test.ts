@@ -100,7 +100,7 @@ describe("run_and_wait", () => {
       result: { ok: true },
     });
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ input: { topic: "x" } });
-    expect(calls.find((c) => c.method === "GET")?.search).toBe("?wait=true");
+    expect(calls.find((c) => c.method === "GET")?.search).toBe("?wait=55");
   });
 
   it("launches an inline run without injecting metadata", async () => {

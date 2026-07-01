@@ -2,6 +2,7 @@
 
 export const RUN_AND_WAIT_MAX_MS = 30 * 60_000;
 export const RUN_AND_WAIT_BACKOFF_MS = 500;
+const RUN_GET_WAIT_MAX_SECONDS = 55;
 
 export const RUN_AND_WAIT_TERMINAL_STATUSES = new Set([
   "success",
@@ -98,6 +99,42 @@ function jsonHeaders(headers: RunAndWaitHeaders): Headers {
   const next = new Headers(headers);
   next.set("content-type", "application/json");
   return next;
+}
+
+function deadlineError(): Error {
+  return new Error("run_and_wait deadline exceeded");
+}
+
+function isDeadlineError(err: unknown): boolean {
+  return err instanceof Error && err.message === "run_and_wait deadline exceeded";
+}
+
+async function fetchWithDeadline(
+  fetchImpl: typeof fetch,
+  input: Parameters<typeof fetch>[0],
+  init: RequestInit,
+  timeoutMs: number,
+  parentSignal: AbortSignal | undefined,
+): Promise<Response> {
+  if (timeoutMs <= 0) throw deadlineError();
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(deadlineError()), timeoutMs);
+  const onAbort = () => controller.abort(parentSignal?.reason ?? new Error("Aborted"));
+
+  try {
+    throwIfAborted(parentSignal);
+    parentSignal?.addEventListener("abort", onAbort, { once: true });
+    return await fetchImpl(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+    parentSignal?.removeEventListener("abort", onAbort);
+  }
+}
+
+function waitQueryForRemainingMs(remainingMs: number): string {
+  const seconds = Math.floor(remainingMs / 1000);
+  return String(Math.max(0, Math.min(seconds, RUN_GET_WAIT_MAX_SECONDS)));
 }
 
 export async function launchRunAndWait(
@@ -210,11 +247,26 @@ export async function waitForRunAndWaitCompletion(
 
   while (performance.now() < deadline) {
     throwIfAborted(signal);
+    const remainingMs = deadline - performance.now();
+    if (remainingMs <= 0) break;
     const pollStart = performance.now();
-    const waitRes = await opts.fetch(
-      apiUrl(opts.origin, `/api/runs/${encodeURIComponent(launch.runId)}?wait=true`),
-      { method: "GET", headers: opts.headers, signal },
-    );
+    let waitRes: Response;
+    try {
+      waitRes = await fetchWithDeadline(
+        opts.fetch,
+        apiUrl(
+          opts.origin,
+          `/api/runs/${encodeURIComponent(launch.runId)}?wait=${waitQueryForRemainingMs(remainingMs)}`,
+        ),
+        { method: "GET", headers: opts.headers },
+        remainingMs,
+        signal,
+      );
+    } catch (err) {
+      if (signal?.aborted) throw signal.reason ?? err;
+      if (isDeadlineError(err) || performance.now() >= deadline) break;
+      throw err;
+    }
     const run = await readJsonResponse(waitRes);
     if (!waitRes.ok) {
       return { payload: { status: waitRes.status, body: run }, isError: true };
