@@ -32,9 +32,8 @@
  * — same behavior the route always had.
  *
  * When a published version is selected, the returned `overrideVersionLabel`
- * carries the concrete semver: `buildRunContext` persists it as the run's
- * `version_label` with `version_dirty: false`, and the run serializer derives
- * `version_ref` from that pair (see `deriveVersionRef` in state/runs.ts).
+ * carries the concrete semver: run creation persists it as both the run's
+ * `version_label` and `version_ref`.
  *
  * Scope: this resolver pins the agent's OWN definition (manifest + prompt) to
  * the selected version. The transitive skill closure is pinned separately, on
@@ -63,8 +62,8 @@ export interface ResolvedRunAgent {
   agent: LoadedPackage;
   /**
    * Concrete semver of the executed published version. Undefined when the
-   * draft runs — `buildRunContext` then derives `version_label` +
-   * `version_dirty` from the latest-version heuristic as before.
+   * draft runs — run creation then records `version_ref: "draft"` and keeps
+   * `version_label` as the latest published base when one exists.
    */
   overrideVersionLabel?: string;
 }

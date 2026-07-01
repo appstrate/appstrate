@@ -187,28 +187,6 @@ type EnrichedRunRow = {
 // if the mapper produces a field not on the wire DTO (the original bug leaked
 // `sinkSecretEncrypted` via a spread) or the wrong type for one. A new runs
 // column is only exposed if it is added here AND to `RunWireDto` deliberately.
-/**
- * Derive the unambiguous `version_ref` of a run from the persisted
- * `(version_label, version_dirty)` pair (#636):
- *
- *   - `"draft"`   — the run executed the mutable draft AND its content
- *                   diverged from every published version (dirty heuristic),
- *                   or the agent had no published version at all (label is
- *                   NULL, or the literal `"draft"` label written by the
- *                   remote-runs registry resolver).
- *   - `"<semver>"`— the run executed that published definition (explicit
- *                   selector / new published-by-default path), or a draft
- *                   whose content had not changed since that version was
- *                   published (clean draft ≡ published snapshot).
- *
- * Derived, not stored: every historical run row already carries the pair, so
- * old runs get a correct ref without a migration.
- */
-export function deriveVersionRef(versionLabel: string | null, versionDirty: boolean): string {
-  if (versionDirty) return "draft";
-  return versionLabel ?? "draft";
-}
-
 function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
   return {
     id: row.id,
@@ -234,8 +212,7 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     runNumber: row.runNumber,
     token_usage: row.tokenUsage,
     version_label: row.versionLabel,
-    version_dirty: row.versionDirty,
-    version_ref: deriveVersionRef(row.versionLabel, row.versionDirty),
+    version_ref: row.versionRef,
     proxy_label: row.proxyLabel,
     model_label: row.modelLabel,
     model_source: row.modelSource,
@@ -309,7 +286,7 @@ interface CreateRunParams {
   input: Record<string, unknown> | null;
   scheduleId?: string;
   versionLabel?: string;
-  versionDirty?: boolean;
+  versionRef?: string;
   proxyLabel?: string;
   modelLabel?: string;
   modelSource?: string;
@@ -411,7 +388,7 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     startedAt: new Date(),
     scheduleId: params.scheduleId,
     versionLabel: params.versionLabel,
-    versionDirty: params.versionDirty ?? false,
+    versionRef: params.versionRef ?? "draft",
     proxyLabel: params.proxyLabel,
     modelLabel: params.modelLabel,
     modelSource: params.modelSource,

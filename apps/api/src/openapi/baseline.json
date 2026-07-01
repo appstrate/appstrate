@@ -850,6 +850,15 @@
           },
           {
             "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). **Omitting the parameter resolves the `draft`** — preserving the launch-badge default. Pass a concrete version to get the same run-blocking verdict the run would produce for that pinned version (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents."
           }
         ],
         "responses": {
@@ -1547,6 +1556,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
@@ -1702,7 +1714,6 @@
                   "runNumber": 17,
                   "token_usage": null,
                   "version_label": "1.2.0",
-                  "version_dirty": false,
                   "version_ref": "1.2.0",
                   "proxy_label": null,
                   "model_label": "Claude Sonnet 4",
@@ -2085,7 +2096,6 @@
                   "runNumber": 1,
                   "token_usage": null,
                   "version_label": null,
-                  "version_dirty": true,
                   "version_ref": "draft",
                   "proxy_label": null,
                   "model_label": "Claude Sonnet 4",
@@ -2515,7 +2525,6 @@
                     "cache_read_input_tokens": 1024
                   },
                   "version_label": "1.2.0",
-                  "version_dirty": false,
                   "version_ref": "1.2.0",
                   "proxy_label": null,
                   "model_label": "Claude Sonnet 4",
@@ -2744,7 +2753,6 @@
                   "runNumber": 18,
                   "token_usage": null,
                   "version_label": "1.2.0",
-                  "version_dirty": false,
                   "version_ref": "1.2.0",
                   "proxy_label": null,
                   "model_label": "Claude Sonnet 4",
@@ -3692,6 +3700,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
@@ -4671,6 +4682,7 @@
                           "scopes",
                           "resource",
                           "connections",
+                          "ready",
                           "has_oauth_client",
                           "has_system_client",
                           "client_auto_provisioned"
@@ -4775,6 +4787,10 @@
                               }
                             }
                           },
+                          "ready": {
+                            "type": "boolean",
+                            "description": "Server-authoritative usability: true when ≥1 connection here is not flagged for reconnection. Single source so clients never re-derive connection state. Agent-agnostic — a run's authoritative readiness still comes from validateInlineRun."
+                          },
                           "has_oauth_client": {
                             "type": "boolean"
                           },
@@ -4817,6 +4833,20 @@
                           }
                         }
                       }
+                    },
+                    "default_tools": {
+                      "oneOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        {
+                          "type": "string",
+                          "enum": ["*"]
+                        }
+                      ]
                     },
                     "allow_undeclared_tools": {
                       "type": "boolean"
@@ -4924,6 +4954,7 @@
                           "scopes",
                           "resource",
                           "connections",
+                          "ready",
                           "has_oauth_client",
                           "has_system_client",
                           "client_auto_provisioned"
@@ -5028,6 +5059,10 @@
                               }
                             }
                           },
+                          "ready": {
+                            "type": "boolean",
+                            "description": "Server-authoritative usability: true when ≥1 connection here is not flagged for reconnection. Single source so clients never re-derive connection state. Agent-agnostic — a run's authoritative readiness still comes from validateInlineRun."
+                          },
                           "has_oauth_client": {
                             "type": "boolean"
                           },
@@ -5070,6 +5105,20 @@
                           }
                         }
                       }
+                    },
+                    "default_tools": {
+                      "oneOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        {
+                          "type": "string",
+                          "enum": ["*"]
+                        }
+                      ]
                     },
                     "allow_undeclared_tools": {
                       "type": "boolean"
@@ -5725,9 +5774,10 @@
     },
     "/api/integrations/{packageId}/auths/{authKey}/connect/fields": {
       "post": {
-        "operationId": "connectIntegrationFields",
+        "operationId": "importIntegrationConnection",
         "tags": ["Integrations"],
-        "summary": "Connect an api_key / basic / custom integration auth",
+        "summary": "Import a connection by submitting credentials directly (programmatic)",
+        "description": "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -5885,7 +5935,8 @@
       "post": {
         "operationId": "initiateIntegrationOAuth",
         "tags": ["Integrations"],
-        "summary": "Initiate the OAuth2 PKCE flow for an integration auth",
+        "summary": "Headless OAuth2 PKCE start — returns an authorize URL (programmatic)",
+        "description": "Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the shared `/callback`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -5973,6 +6024,357 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/auths/{authKey}/connect/session": {
+      "post": {
+        "operationId": "initiateIntegrationConnect",
+        "tags": ["Integrations"],
+        "summary": "Mint a hosted Connect portal session (interactive, auth-type-agnostic)",
+        "description": "Porte A — the hosted **Connect** portal (issue #769), the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`). Requires `CONNECT_SESSION_SECRET` to be configured (503 otherwise).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "authKey",
+            "in": "path",
+            "required": true,
+            "description": "Auth key as declared in the manifest's `auths` map.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "force_account_select": {
+                    "type": "boolean"
+                  },
+                  "connection_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Reconnect/upgrade an existing connection in place."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Connect URL",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["connect_url", "expires_at"],
+                  "properties": {
+                    "connect_url": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "expires_at": {
+                      "type": "integer",
+                      "description": "Absolute expiry of the connect session (epoch ms)."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "description": "Hosted connect portal not configured",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/connect/start": {
+      "get": {
+        "operationId": "startIntegrationConnect",
+        "tags": ["Integrations"],
+        "summary": "Hosted connect dispatch (token)",
+        "description": "Public entry the connect URL points at. Verifies the single-use session token, pins a page cookie, then 302-redirects to the provider OAuth screen (oauth2) or the hosted form (non-oauth). On failure returns an HTML error page. Authenticated by the signed token, not a session.",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Connect-session capability token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML error page (token missing/invalid/used) — see 4xx detail.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "302": {
+            "description": "Redirect to the provider OAuth screen or the hosted form."
+          },
+          "400": {
+            "description": "Missing token (HTML error page)."
+          },
+          "410": {
+            "description": "Invalid, expired, or already-used token (HTML error page)."
+          }
+        }
+      }
+    },
+    "/api/integrations/connect/context": {
+      "get": {
+        "operationId": "getIntegrationConnectContext",
+        "tags": ["Integrations"],
+        "summary": "Hosted form render context (page cookie)",
+        "description": "Returns the auth manifest + display metadata for the hosted credential form. Authenticated by the page cookie set during dispatch. Never returns a secret.",
+        "responses": {
+          "200": {
+            "description": "Hosted connect context",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["package_id", "auth_key", "display_name", "auth"],
+                  "properties": {
+                    "package_id": {
+                      "type": "string"
+                    },
+                    "auth_key": {
+                      "type": "string"
+                    },
+                    "display_name": {
+                      "type": "string"
+                    },
+                    "icon": {
+                      "type": ["string", "null"]
+                    },
+                    "auth": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "connection_id": {
+                      "type": ["string", "null"]
+                    },
+                    "csrf": {
+                      "type": ["string", "null"]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/integrations/connect/submit": {
+      "post": {
+        "operationId": "submitIntegrationConnect",
+        "tags": ["Integrations"],
+        "summary": "Hosted form credential submit (page cookie + CSRF)",
+        "description": "Persists credentials entered on the hosted form. Context + actor come from the page cookie; the request carries only the credentials and echoes the CSRF nonce in the `x-connect-csrf` header.",
+        "parameters": [
+          {
+            "name": "x-connect-csrf",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Double-submit CSRF nonce (from GET /connect/context)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["credentials"],
+                "properties": {
+                  "credentials": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Connection stored",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "connection"],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "connection": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "packageId",
+                        "auth_key",
+                        "account_id",
+                        "identity_claims",
+                        "scopes_granted",
+                        "needs_reconnection",
+                        "expiresAt",
+                        "owner_type",
+                        "owner_id",
+                        "client_ref",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "packageId": {
+                          "type": "string"
+                        },
+                        "auth_key": {
+                          "type": "string"
+                        },
+                        "account_id": {
+                          "type": "string"
+                        },
+                        "identity_claims": {
+                          "type": ["object", "null"],
+                          "additionalProperties": true
+                        },
+                        "scopes_granted": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "needs_reconnection": {
+                          "type": "boolean"
+                        },
+                        "expiresAt": {
+                          "type": ["string", "null"],
+                          "format": "date-time"
+                        },
+                        "owner_type": {
+                          "type": "string",
+                          "enum": ["user", "end_user"]
+                        },
+                        "owner_id": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": ["string", "null"]
+                        },
+                        "shared_with_org": {
+                          "type": "boolean"
+                        },
+                        "client_ref": {
+                          "type": ["string", "null"],
+                          "description": "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6367,6 +6769,7 @@
                           "scopes",
                           "resource",
                           "connections",
+                          "ready",
                           "has_oauth_client",
                           "has_system_client",
                           "client_auto_provisioned"
@@ -6471,6 +6874,10 @@
                               }
                             }
                           },
+                          "ready": {
+                            "type": "boolean",
+                            "description": "Server-authoritative usability: true when ≥1 connection here is not flagged for reconnection. Single source so clients never re-derive connection state. Agent-agnostic — a run's authoritative readiness still comes from validateInlineRun."
+                          },
                           "has_oauth_client": {
                             "type": "boolean"
                           },
@@ -6513,6 +6920,20 @@
                           }
                         }
                       }
+                    },
+                    "default_tools": {
+                      "oneOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        {
+                          "type": "string",
+                          "enum": ["*"]
+                        }
+                      ]
                     },
                     "allow_undeclared_tools": {
                       "type": "boolean"
@@ -7101,6 +7522,7 @@
                     {
                       "id": "gpt-4o",
                       "label": "GPT-4o",
+                      "providerId": "openai",
                       "apiShape": "openai-responses",
                       "baseUrl": "https://api.openai.com/v1",
                       "modelId": "gpt-4o",
@@ -7201,7 +7623,7 @@
                   },
                   "aliased": {
                     "type": "boolean",
-                    "description": "Model-alias flag. When true, this model's `id` becomes a public alias and its real binding (modelId, provider, baseUrl, capabilities/cost) is hidden from user-facing surfaces; the sidecar rewrites the `model` field on every inference call."
+                    "description": "Managed-model flag. When true, this model's binding (modelId, provider, baseUrl, capabilities/cost) is not exposed on user-facing surfaces and these fields are null; inference is routed by the platform."
                   }
                 }
               }
@@ -7721,7 +8143,7 @@
                   },
                   "aliased": {
                     "type": "boolean",
-                    "description": "Model-alias flag. When true, this model's `id` becomes a public alias and its real binding is hidden from user-facing surfaces."
+                    "description": "Managed-model flag. When true, this model's binding is not exposed on user-facing surfaces."
                   }
                 }
               }
@@ -11041,9 +11463,13 @@
                     "user",
                     "org",
                     "connections",
+                    "recent_runs",
                     "agents",
                     "agents_truncated",
-                    "agents_total"
+                    "agents_total",
+                    "skills",
+                    "skills_truncated",
+                    "skills_total"
                   ],
                   "properties": {
                     "user": {
@@ -11071,6 +11497,41 @@
                         "role": {
                           "type": "string",
                           "enum": ["owner", "admin", "member", "viewer", "end_user"]
+                        },
+                        "name": {
+                          "type": ["string", "null"],
+                          "description": "Human-readable organization name."
+                        },
+                        "slug": {
+                          "type": ["string", "null"],
+                          "description": "Organization slug."
+                        }
+                      }
+                    },
+                    "recent_runs": {
+                      "type": "array",
+                      "description": "The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip.",
+                      "items": {
+                        "type": "object",
+                        "required": ["package_id", "status"],
+                        "properties": {
+                          "package_id": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "run_number": {
+                            "type": ["integer", "null"]
+                          },
+                          "started_at": {
+                            "type": ["string", "null"],
+                            "format": "date-time"
+                          },
+                          "error": {
+                            "type": ["string", "null"],
+                            "description": "Failure message for non-success runs, when available."
+                          }
                         }
                       }
                     },
@@ -11094,6 +11555,21 @@
                           "version": {
                             "type": "string",
                             "description": "The integration package's own manifest version, when known. Use it to pin a satisfiable dependencies.integrations range."
+                          },
+                          "default_tools": {
+                            "description": "AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent when none declared; `[]` means the integration is inert. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}.",
+                            "oneOf": [
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["*"]
+                              }
+                            ]
                           }
                         }
                       }
@@ -11108,6 +11584,7 @@
                           "display_name",
                           "description",
                           "takes_input",
+                          "published",
                           "source"
                         ],
                         "properties": {
@@ -11125,6 +11602,10 @@
                             "type": "boolean",
                             "description": "Whether the agent declares an input schema with properties."
                           },
+                          "published": {
+                            "type": "boolean",
+                            "description": "True when the agent has a published version (or is a system agent). Run it via `runAgent` with `version` omitted. When false the agent is draft-only — run it with `version=draft` (omitting `version` would 404 `no_published_version`)."
+                          },
                           "source": {
                             "type": "string",
                             "enum": ["system", "local"]
@@ -11139,6 +11620,53 @@
                     "agents_total": {
                       "type": "integer",
                       "description": "Total runnable agents before the cap."
+                    },
+                    "skills": {
+                      "type": "array",
+                      "description": "Skills the caller could attach to an agent in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the long tail is reachable via the MCP `search_operations` tool.",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "package_id",
+                          "display_name",
+                          "description",
+                          "version",
+                          "published",
+                          "source"
+                        ],
+                        "properties": {
+                          "package_id": {
+                            "type": "string",
+                            "description": "Attachable identifier, e.g. \"@appstrate/web-research\". Declare under dependencies.skills."
+                          },
+                          "display_name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": ["string", "null"],
+                            "description": "The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range."
+                          },
+                          "published": {
+                            "type": "boolean",
+                            "description": "True when the skill has a published version (or is a system skill). When false the skill is draft-only — pin it for a run via `dependency_overrides` with `draft`."
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": ["system", "local"]
+                          }
+                        }
+                      }
+                    },
+                    "skills_truncated": {
+                      "type": "boolean",
+                      "description": "True when the skill list was capped (more via search_operations)."
+                    },
+                    "skills_total": {
+                      "type": "integer",
+                      "description": "Total installed skills before the cap."
                     }
                   }
                 },
@@ -11150,7 +11678,9 @@
                   },
                   "org": {
                     "id": "org_abc123",
-                    "role": "member"
+                    "role": "member",
+                    "name": "Acme",
+                    "slug": "acme"
                   },
                   "connections": [
                     {
@@ -11164,17 +11694,39 @@
                       "source": "shared"
                     }
                   ],
+                  "recent_runs": [
+                    {
+                      "package_id": "@appstrate/triage",
+                      "status": "failed",
+                      "run_number": 7,
+                      "started_at": "2026-06-25T09:12:00.000Z",
+                      "error": "Gmail token expired"
+                    }
+                  ],
                   "agents": [
                     {
                       "package_id": "@appstrate/triage",
                       "display_name": "Inbox Triage",
                       "description": "Sorts and labels incoming email.",
                       "takes_input": false,
+                      "published": true,
                       "source": "system"
                     }
                   ],
                   "agents_truncated": false,
-                  "agents_total": 1
+                  "agents_total": 1,
+                  "skills": [
+                    {
+                      "package_id": "@appstrate/web-research",
+                      "display_name": "Web Research",
+                      "description": "Multi-source web search and synthesis.",
+                      "version": "1.2.0",
+                      "published": true,
+                      "source": "system"
+                    }
+                  ],
+                  "skills_truncated": false,
+                  "skills_total": 1
                 }
               }
             }
@@ -13664,6 +14216,15 @@
           },
           {
             "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns config / input / integrations / skills from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents."
           }
         ],
         "responses": {
@@ -17264,6 +17825,9 @@
           },
           "422": {
             "$ref": "#/components/responses/IdempotencyConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       },
@@ -17406,6 +17970,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
@@ -17473,6 +18040,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       },
@@ -17593,6 +18163,9 @@
                 }
               }
             }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       },
@@ -17634,6 +18207,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
@@ -18847,7 +19423,7 @@
             }
           },
           "400": {
-            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
+            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -18979,7 +19555,7 @@
             }
           },
           "400": {
-            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
+            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -19080,7 +19656,7 @@
             }
           },
           "400": {
-            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
+            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -20215,7 +20791,6 @@
           "runNumber",
           "token_usage",
           "version_label",
-          "version_dirty",
           "version_ref",
           "proxy_label",
           "model_label",
@@ -20325,10 +20900,6 @@
           "version_label": {
             "type": ["string", "null"],
             "description": "Version label at run time (e.g. '1.0.0'). For draft runs this is the latest published version the draft sits on top of — read `version_ref` to know which definition actually executed."
-          },
-          "version_dirty": {
-            "type": "boolean",
-            "description": "Whether the draft had unpublished changes at run time. Kept for backward compatibility — prefer `version_ref`, which states unambiguously what executed."
           },
           "version_ref": {
             "type": "string",
@@ -20877,11 +21448,11 @@
           },
           "apiShape": {
             "type": ["string", "null"],
-            "description": "Protocol family. `null` for a built-in credential whose every backing model is an alias (#727) — binding hidden so the endpoint doesn't reveal the provider."
+            "description": "Protocol family. `null` for a built-in credential whose every model is managed (#727) — the binding is not exposed, so the endpoint doesn't reveal the provider."
           },
           "baseUrl": {
             "type": ["string", "null"],
-            "description": "Endpoint base URL. `null` for an alias-only built-in credential (see apiShape)."
+            "description": "Endpoint base URL. `null` for a managed-only built-in credential (see apiShape)."
           },
           "source": {
             "type": "string",
@@ -20928,11 +21499,13 @@
           "label",
           "apiShape",
           "providerId",
+          "providerName",
           "baseUrl",
           "modelId",
           "enabled",
           "is_default",
           "aliased",
+          "iconUrl",
           "source",
           "credentialId",
           "created_by",
@@ -20948,19 +21521,23 @@
           },
           "apiShape": {
             "type": ["string", "null"],
-            "description": "Protocol family. `null` for model aliases (`aliased: true`) — binding hidden."
+            "description": "Protocol family. `null` for managed models (`aliased: true`) — binding not exposed."
           },
           "providerId": {
             "type": ["string", "null"],
-            "description": "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for model aliases — binding hidden."
+            "description": "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for managed models — binding not exposed."
+          },
+          "providerName": {
+            "type": ["string", "null"],
+            "description": "The provider's human display name resolved from the model-provider registry by `providerId` (e.g. `OpenCode Go`, `OpenAI`). The authoritative label for grouping/badging a model by provider — `apiShape` is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so do NOT derive a provider label from it. `null` for managed models (binding not exposed) and for rows whose `providerId` has no registry entry."
           },
           "baseUrl": {
             "type": ["string", "null"],
-            "description": "Provider endpoint. `null` for model aliases — binding hidden."
+            "description": "Provider endpoint. `null` for managed models — binding not exposed."
           },
           "modelId": {
             "type": ["string", "null"],
-            "description": "Upstream model id. `null` for model aliases — the real backing is hidden."
+            "description": "Upstream model id. `null` for managed models — not exposed."
           },
           "input": {
             "type": ["array", "null"],
@@ -20985,7 +21562,11 @@
           },
           "aliased": {
             "type": "boolean",
-            "description": "Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a public alias and the real binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is stripped from this projection — render an alias badge; the backing model is hidden."
+            "description": "Managed-model flag. When true, the binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge."
+          },
+          "iconUrl": {
+            "type": ["string", "null"],
+            "description": "Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`baseUrl`, or fall back to a generic icon."
           },
           "source": {
             "type": "string",
@@ -20993,7 +21574,7 @@
           },
           "credentialId": {
             "type": ["string", "null"],
-            "description": "ID of the backing `model_provider_credentials` row. `null` for model aliases — binding hidden."
+            "description": "ID of the `model_provider_credentials` row. `null` for managed models — binding not exposed."
           },
           "cost": {
             "type": ["object", "null"],

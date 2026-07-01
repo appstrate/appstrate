@@ -254,7 +254,7 @@ describe("finalizeThrownFailure", () => {
     expect(h.finalized?.status).toBe("failed");
   });
 
-  it("leaves usage unset when undefined is passed (Pi bridge-null path)", async () => {
+  it("stamps explicit zero usage for very early failures", async () => {
     const h = harness();
     await finalizeThrownFailure({
       events: [],
@@ -265,11 +265,11 @@ describe("finalizeThrownFailure", () => {
       emit: h.emit,
       drainAndEmit: h.drainAndEmit,
       eventSink: h.eventSink,
-      usage: undefined,
+      usage: { input_tokens: 0, output_tokens: 0 },
       setFailedStatus: false,
     });
     expect(h.finalized).toBeDefined();
-    expect(h.finalized?.usage).toBeUndefined();
+    expect(h.finalized?.usage).toEqual({ input_tokens: 0, output_tokens: 0 });
     expect(h.finalized?.cost).toBeUndefined();
   });
 });

@@ -746,9 +746,10 @@ function buildMetricEvent(record: RemoteRunRecord): RunEvent | null {
  * Reconstruct a {@link RunResult} from the run record + terminal status,
  * matching the shape `EventSink.finalize` consumes locally. Fields the
  * record cannot reconstruct (`memories`, `pinned` named slots,
- * per-event `logs`, `report` aggregate, `usage`) are emitted as empty
- * defaults — the dashboard remains the source of truth for those
- * surfaces. `output` carries `runs.result` (the AFPS `output()` value),
+ * per-event `logs`, `report` aggregate) are emitted as empty defaults — the
+ * dashboard remains the source of truth for those surfaces. `usage` is
+ * reconstructed from the run row when present and otherwise explicit zero.
+ * `output` carries `runs.result` (the AFPS `output()` value),
  * matching `RunResult.output`. The status is mapped one-to-one.
  */
 function buildRunResultPayload(record: RemoteRunRecord, status: TerminalRunStatus): RunResult {
@@ -764,19 +765,17 @@ function buildRunResultPayload(record: RemoteRunRecord, status: TerminalRunStatu
   }
   if (record.duration != null) result.durationMs = record.duration;
   if (record.cost != null) result.cost = record.cost;
-  if (record.tokenUsage) {
-    const u = record.tokenUsage;
-    result.usage = {
-      input_tokens: u.input_tokens ?? 0,
-      output_tokens: u.output_tokens ?? 0,
-      ...(u.cache_creation_input_tokens != null
-        ? { cache_creation_input_tokens: u.cache_creation_input_tokens }
-        : {}),
-      ...(u.cache_read_input_tokens != null
-        ? { cache_read_input_tokens: u.cache_read_input_tokens }
-        : {}),
-    };
-  }
+  const u = record.tokenUsage;
+  result.usage = {
+    input_tokens: u?.input_tokens ?? 0,
+    output_tokens: u?.output_tokens ?? 0,
+    ...(u?.cache_creation_input_tokens != null
+      ? { cache_creation_input_tokens: u.cache_creation_input_tokens }
+      : {}),
+    ...(u?.cache_read_input_tokens != null
+      ? { cache_read_input_tokens: u.cache_read_input_tokens }
+      : {}),
+  };
   return result;
 }
 

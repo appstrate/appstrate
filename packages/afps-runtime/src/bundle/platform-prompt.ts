@@ -15,21 +15,8 @@
  */
 
 import type { ExecutionContext } from "../types/execution-context.ts";
-import { renderTemplate } from "../template/mustache.ts";
 import { isFileField } from "@appstrate/afps-shared/file-field";
 import type { PromptView, PromptViewUpload } from "./prompt-renderer.ts";
-
-const TEMPLATE_RENDER_MIN_VERSION = [1, 1] as const;
-
-function supportsTemplateRendering(schemaVersion: string | undefined): boolean {
-  if (!schemaVersion) return false;
-  const match = /^(\d+)\.(\d+)/.exec(schemaVersion);
-  if (!match) return false;
-  const major = Number(match[1]);
-  const minor = Number(match[2]);
-  const [minMajor, minMinor] = TEMPLATE_RENDER_MIN_VERSION;
-  return major > minMajor || (major === minMajor && minor >= minMinor);
-}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -70,10 +57,8 @@ export interface PlatformPromptSchema {
 export interface PlatformPromptOptions {
   /** Raw prompt template from the bundle's root package (`prompt.md`). */
   template: string;
-  /** Run context — flows into the 1.1+ template render + checkpoint/memory sections. */
+  /** Run context — flows into checkpoint/memory sections. */
   context: ExecutionContext;
-  /** Manifest schemaVersion — gates Mustache render path selection. */
-  schemaVersion?: string;
 
   /** Display name of the running platform. Default: `"Appstrate"`. */
   platformName?: string;
@@ -422,23 +407,5 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     sections.push("```\n");
   }
 
-  // schemaVersion 1.1+: render rawPrompt through logic-less Mustache so
-  // templates can reference `{{runId}}`, `{{input.*}}`, `{{#memories}}…`,
-  // etc. Legacy 1.0 bundles keep verbatim append — unchanged output.
-  const finalRawPrompt = supportsTemplateRendering(opts.schemaVersion)
-    ? renderTemplate(opts.template, buildTemplateView(context))
-    : opts.template;
-
-  return sections.join("\n") + "\n---\n\n" + finalRawPrompt;
-}
-
-function buildTemplateView(context: ExecutionContext): PromptView {
-  return {
-    runId: context.runId,
-    input: (context.input as Record<string, unknown>) ?? {},
-    config: context.config ?? {},
-    checkpoint: context.checkpoint ?? null,
-    memories: context.memories ?? [],
-    history: context.history ?? [],
-  };
+  return sections.join("\n") + "\n---\n\n" + opts.template;
 }

@@ -5,7 +5,7 @@
  *
  * Ground truth being pinned here: before #636, every platform run executed
  * the mutable draft while the run row was labeled with the latest published
- * semver (+ a `version_dirty` boolean). The resolver makes the choice
+ * semver (+ a persisted `version_ref`). The resolver makes the choice
  * explicit and deterministic:
  *
  *   - omitted  → strictly identical to "published" (latest published; 404

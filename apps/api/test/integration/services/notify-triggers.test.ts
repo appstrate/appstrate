@@ -22,7 +22,7 @@ import { db } from "../../helpers/db.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { listenClient } from "@appstrate/db/client";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { integrationConnections } from "@appstrate/db/schema";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedRunLog, seedPackage } from "../../helpers/seed.ts";
@@ -172,7 +172,7 @@ describe("NOTIFY triggers (regression)", () => {
         applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         endUserId: null,
-        credentialsEncrypted: encryptCredentials({ api_key: "v1" }),
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "v1" } }),
         scopesGranted: [],
       })
       .returning({ id: integrationConnections.id });

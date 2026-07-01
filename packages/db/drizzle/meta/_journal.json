@@ -127,6 +127,13 @@
       "when": 1782476003458,
       "tag": "0017_panoramic_lockjaw",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1782896961189,
+      "tag": "0018_white_captain_universe",
+      "breakpoints": true
     }
   ]
 }

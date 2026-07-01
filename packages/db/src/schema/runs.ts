@@ -99,7 +99,7 @@ export const runs = pgTable(
       onDelete: "set null",
     }),
     versionLabel: text("version_label"),
-    versionDirty: boolean("version_dirty").default(false).notNull(),
+    versionRef: text("version_ref").default("draft").notNull(),
     proxyLabel: text("proxy_label"),
     modelLabel: text("model_label"),
     modelSource: text("model_source"),
@@ -559,14 +559,8 @@ export const schedules = pgTable(
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    // Actor the scheduled run executes as. At most one of userId / endUserId is
-    // set; the SQL check below only forbids BOTH being set. Both-null is a
-    // LEGACY state only (rows created before the actor column was wired) — there
-    // is no shipped org-level/system principal. `createSchedule` now requires a
-    // non-null actor (#735), so no new actor-less rows can be minted by any
-    // caller; the check stays at-most-one (not NOT NULL) so legacy rows in
-    // existing deployments still load. The fire path fails an actor-less run
-    // fast when its agent declares integrations (`scheduleCannotResolveIntegrations`).
+    // Actor the scheduled run executes as. Exactly one of userId / endUserId is
+    // set; there is no org-level/system schedule principal.
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     endUserId: text("end_user_id").references(() => endUsers.id, {
       onDelete: "cascade",
@@ -617,8 +611,8 @@ export const schedules = pgTable(
     index("idx_package_schedules_org_id").on(table.orgId),
     index("idx_package_schedules_app_id").on(table.applicationId),
     check(
-      "package_schedules_at_most_one_actor",
-      sql`NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)`,
+      "package_schedules_exactly_one_actor",
+      sql`(user_id IS NOT NULL) <> (end_user_id IS NOT NULL)`,
     ),
   ],
 );

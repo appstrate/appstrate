@@ -27,9 +27,8 @@ import { projectToStringMap } from "./integration-credentials.ts";
  * feed into header injection / token-endpoint POST bodies. Returns only
  * the `outputs` plane of the structured envelope (spec §4.6) — bootstrap
  * `inputs` (login secrets) are NEVER returned here, so the injection path
- * can never reference them. A v1 flat blob reads back as all-outputs, so
- * legacy connections behave identically. Throws on decryption failure
- * (key rotation issue, corrupted ciphertext).
+ * can never reference them. Throws on decryption failure (key rotation
+ * issue, corrupted ciphertext, or non-v2 credential blob).
  */
 export function decryptCredentialsToStringMap(ciphertext: string): Record<string, string> {
   return projectToStringMap(decryptCredentialEnvelope(ciphertext).outputs);
@@ -38,10 +37,9 @@ export function decryptCredentialsToStringMap(ciphertext: string): Record<string
 /**
  * Decrypt a `credentials_encrypted` blob and project its **bootstrap
  * inputs** to a flat `Record<string, string>` (spec §4.6). Returns `{}`
- * for v1 flat blobs and for v2 envelopes persisted without
- * `persistLoginSecret`. The ONLY caller is the run-start spawn resolver,
- * which needs the login secret to re-bootstrap an expired session — the
- * injection path must never call this.
+ * for envelopes persisted without `persistLoginSecret`. The ONLY caller is
+ * the run-start spawn resolver, which needs the login secret to re-bootstrap
+ * an expired session — the injection path must never call this.
  */
 export function decryptCredentialInputsToStringMap(ciphertext: string): Record<string, string> {
   return projectToStringMap(decryptCredentialEnvelope(ciphertext).inputs);

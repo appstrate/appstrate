@@ -301,7 +301,7 @@ export class PiRunner implements Runner {
           emit,
           drainAndEmit: () => bridge?.drainPending() ?? Promise.resolve(),
           eventSink,
-          usage: bridge ? bridge.getUsage() : undefined,
+          usage: bridge?.getUsage() ?? { input_tokens: 0, output_tokens: 0 },
           terminalStatus: "timeout",
           buildError: () => ({
             code: "timeout",
@@ -318,8 +318,8 @@ export class PiRunner implements Runner {
       // best-effort drain → reduce → stamp usage/cost → finalize). The Pi runner
       // leaves `status` unset on this path (setFailedStatus: false, preserved
       // verbatim) and sources usage + cost from the session bridge — both only
-      // when the bridge was captured (an early throw can predate it). The "drain"
-      // here converges the bridge's pending fire-and-forget emits
+      // when the bridge was captured; a very early throw stamps explicit zero
+      // usage. The "drain" here converges the bridge's pending fire-and-forget emits
       // (`drainPending`) before finalize closes the sink, not a runtime-event
       // journal; it emits nothing new, so reducing before vs after it is
       // equivalent.
@@ -333,7 +333,7 @@ export class PiRunner implements Runner {
         emit,
         drainAndEmit: () => bridge?.drainPending() ?? Promise.resolve(),
         eventSink,
-        usage: bridge ? bridge.getUsage() : undefined,
+        usage: bridge?.getUsage() ?? { input_tokens: 0, output_tokens: 0 },
         setFailedStatus: false,
         stamp: (result) => {
           if (bridge) result.cost = bridge.getCost();

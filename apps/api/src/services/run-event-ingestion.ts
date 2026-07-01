@@ -343,17 +343,14 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // zero tokens, no terminal error surfaced" shape.
 
   // Zod boundary on the runner-supplied terminal usage (tolerant: known
-  // numeric fields kept, unknown keys stripped, an invalid shape is treated
-  // as ABSENT + a warn log — never fails the finalize of an already-completed
-  // run). The HTTP route already drops malformed usage via `.catch(undefined)`;
-  // this guards the non-HTTP callers (platform synthesis, in-process runners)
-  // and replaces the previous unchecked double-cast at the column write. The
-  // zero-token heuristic below only fires on validated-present usage.
+  // numeric fields kept, unknown keys stripped, absent/invalid shapes become
+  // explicit zero usage + a warn log). Finalize never consults the side-channel
+  // metric event for liveness; the terminal result is the single source of
+  // truth.
   const validatedUsage = validateFinalizeUsage(result.usage, run.id);
 
   if (status === "success") {
-    const zeroTokens = await runHadZeroTokens(run.id, validatedUsage);
-    if (zeroTokens) {
+    if (runHadZeroTokens(validatedUsage)) {
       status = "failed";
       errorMessage = llmUnreachableMessage(run);
     }
@@ -476,14 +473,10 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
       // on the unique index); `runs.checkpoint` preserves the per-run
       // history so agents can inspect what each prior run emitted.
       ...(checkpointToPersist !== null ? { checkpoint: checkpointToPersist } : {}),
-      // When the runner ships authoritative usage in the finalize body
-      // we persist it here so `runs.tokenUsage` reflects reality even if
-      // the side-channel `appstrate.metric` event was dropped (network
-      // hiccup, container exit before the POST drained, …). The metric
-      // handler still runs the same UPDATE on its own path; whichever
-      // arrives second is a no-op overwrite of the same value. Only the
-      // Zod-validated shape reaches the column (see validateFinalizeUsage).
-      ...(validatedUsage ? { tokenUsage: validatedUsage } : {}),
+      // The finalize body is the authoritative terminal usage. Metric events
+      // may still update this column before finalize for live charts, but the
+      // close path writes the terminal value exactly once.
+      tokenUsage: validatedUsage,
       ...(metadata ? { metadata } : {}),
     })
     .where(and(eq(runs.id, run.id), sql`sink_closed_at IS NULL`))
@@ -748,53 +741,34 @@ export function capUtf8Text(value: string, maxBytes: number): { text: string; tr
 }
 
 /**
- * Decide whether the run produced any LLM tokens. Used as a post-run
- * liveness signal — a run that exited "successfully" without consuming
- * tokens never reached an LLM and is treated as a failure.
- *
- * Resolution order:
- *
- *   1. `result.usage` from the finalize POST body — authoritative when
- *      present. Self-contained: no dependency on the side-channel
- *      `appstrate.metric` event having been ingested first, so the
- *      previous race window (metric POST and finalize POST in flight
- *      simultaneously → finalize reads stale `runs.tokenUsage` = 0 →
- *      false "could not reach the LLM API" failure) is closed.
- *
- *   2. Fallback: the `runs.tokenUsage` JSONB column written by the
- *      `appstrate.metric` event handler. Kept for runners (legacy CLI
- *      paths, third-party AFPS runners) that do not set `result.usage`
- *      and rely on the metric event being ingested before finalize.
+ * Decide whether the run produced any LLM tokens. Used as a post-run liveness
+ * signal — a run that exited "successfully" without consuming tokens never
+ * reached an LLM and is treated as a failure. The terminal `result.usage` is
+ * the only source of truth; side-channel metric events are for live updates and
+ * ledger writes, not for finalize liveness.
  */
-async function runHadZeroTokens(runId: string, usage: TokenUsage | null): Promise<boolean> {
-  if (usage) {
-    return (usage.input_tokens ?? 0) === 0 && (usage.output_tokens ?? 0) === 0;
-  }
-  const [row] = await db
-    .select({ tokenUsage: runs.tokenUsage })
-    .from(runs)
-    .where(eq(runs.id, runId))
-    .limit(1);
-  if (!row?.tokenUsage) return true;
-  return (row.tokenUsage.input_tokens ?? 0) === 0 && (row.tokenUsage.output_tokens ?? 0) === 0;
+function runHadZeroTokens(usage: TokenUsage): boolean {
+  return (usage.input_tokens ?? 0) === 0 && (usage.output_tokens ?? 0) === 0;
 }
 
 /**
- * Tolerant Zod boundary on the runner-supplied finalize `usage`: known
- * numeric fields validated, unknown keys stripped, and an invalid shape is
- * treated as absent (+ warn log) so a malformed billing field can never fail
- * the finalize of an already-completed run. Returns `null` when absent or
- * invalid — the zero-token heuristic then falls back to `runs.tokenUsage`.
+ * Tolerant Zod boundary on the runner-supplied finalize `usage`: known numeric
+ * fields validated, unknown keys stripped, and absent/invalid shapes become
+ * explicit zero usage (+ warn log) so a malformed billing field can never leave
+ * an already-completed run unfinalized.
  */
-function validateFinalizeUsage(usage: unknown, runId: string): TokenUsage | null {
-  if (usage === null || usage === undefined) return null;
+function validateFinalizeUsage(usage: unknown, runId: string): TokenUsage {
+  if (usage === null || usage === undefined) {
+    logger.warn("finalize: missing result.usage; treating as zero-token terminal usage", { runId });
+    return { input_tokens: 0, output_tokens: 0 };
+  }
   const parsed = tokenUsageSchema.safeParse(usage);
   if (!parsed.success) {
-    logger.warn("finalize: ignoring malformed result.usage", {
+    logger.warn("finalize: malformed result.usage; treating as zero-token terminal usage", {
       runId,
       reason: parsed.error.issues[0]?.message ?? "validation failed",
     });
-    return null;
+    return { input_tokens: 0, output_tokens: 0 };
   }
   return parsed.data;
 }

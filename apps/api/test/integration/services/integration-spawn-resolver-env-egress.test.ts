@@ -15,7 +15,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { integrationConnections } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
@@ -96,7 +96,9 @@ async function seedAll(ctx: TestContext, manifest: Record<string, unknown>) {
     applicationId: ctx.defaultAppId,
     userId: ctx.user.id,
     endUserId: null,
-    credentialsEncrypted: encryptCredentials({ zone: "phere", user: "lpayet", password: "secret" }),
+    credentialsEncrypted: encryptCredentialEnvelope({
+      outputs: { zone: "phere", user: "lpayet", password: "secret" },
+    }),
     identityClaims: {},
     scopesGranted: [],
     needsReconnection: false,

@@ -27,7 +27,7 @@ import {
   type RealtimeEvent,
 } from "../../../src/services/realtime.ts";
 import { integrationConnections } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import {
   localIntegrationManifest,
@@ -138,7 +138,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
         applicationId: opts.applicationId,
         userId: opts.userId,
         endUserId: null,
-        credentialsEncrypted: encryptCredentials({ api_key: "v1" }),
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "v1" } }),
         scopesGranted: [],
       })
       .returning({ id: integrationConnections.id });

@@ -25,7 +25,7 @@ import { seedPackage } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
 import {
   resolveIntegrationProxyCredentials,
   forceRefreshIntegrationProxyCredentials,
@@ -136,11 +136,13 @@ describe("credential-proxy integration-resolver", () => {
   });
 
   async function seedConnection(opts: { userId?: string; endUserId?: string }): Promise<string> {
-    const ciphertext = encryptCredentials({
-      access_token: "live-access",
-      accessToken: "live-access",
-      refresh_token: "rt-1",
-      refreshToken: "rt-1",
+    const ciphertext = encryptCredentialEnvelope({
+      outputs: {
+        access_token: "live-access",
+        accessToken: "live-access",
+        refresh_token: "rt-1",
+        refreshToken: "rt-1",
+      },
     });
     const [row] = await db
       .insert(integrationConnections)

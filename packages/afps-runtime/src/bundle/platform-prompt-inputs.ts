@@ -44,17 +44,6 @@ function readRootPromptTemplate(bundle: Bundle): string {
   return bytes ? new TextDecoder().decode(bytes) : "";
 }
 
-/**
- * Read the root agent's AFPS `schema_version` (snake_case) if declared.
- * AFPS only — there is no camelCase fallback.
- */
-function readSchemaVersion(bundle: Bundle): string | undefined {
-  const root = bundle.packages.get(bundle.root);
-  const manifest = root?.manifest as Record<string, unknown> | undefined;
-  const v = manifest?.["schema_version"];
-  return typeof v === "string" ? v : undefined;
-}
-
 /** Read `manifest.timeout` (seconds) from the root package if declared. */
 function readTimeoutSeconds(bundle: Bundle): number | undefined {
   const root = bundle.packages.get(bundle.root);
@@ -164,9 +153,6 @@ export function buildPlatformPromptInputs(
   const derived: PlatformPromptOptions = {
     template: readRootPromptTemplate(bundle),
     context,
-    ...(readSchemaVersion(bundle) !== undefined
-      ? { schemaVersion: readSchemaVersion(bundle)! }
-      : {}),
     ...(readTimeoutSeconds(bundle) !== undefined
       ? { timeoutSeconds: readTimeoutSeconds(bundle)! }
       : {}),

@@ -11,7 +11,7 @@
  *     public clients).
  *   - Connection writers (`persistCredentialBundle`, `saveIntegrationConnection`)
  *     that store per-(integration, auth, account) rows in
- *     `integration_connections` with v1-envelope encrypted credentials.
+ *     `integration_connections` with v2-envelope encrypted credentials.
  *     The acquisition flows themselves live in `services/connect/*-strategy.ts`.
  *   - Lookup helpers consumed by the UI (per-auth status, scopes granted,
  *     expiry, multi-account list) and by the runtime resolver cascade.
@@ -1585,10 +1585,9 @@ export type PersistTarget =
  *
  * `credentials` is the injectable **outputs** plane. `inputs` (spec §4.6) is
  * the bootstrap-secret plane, persisted ONLY when an OrchestratedStrategy
- * declares `persistLoginSecret` — when present (non-empty) the writer emits a
- * structured v2 envelope `{ v:2, outputs, inputs }`; otherwise it stays a flat
- * v1 blob, byte-identical to every pre-Phase-4 write. The injection path can
- * never read `inputs` (it only ever projects `outputs`).
+ * declares `persistLoginSecret`. The writer always emits the structured v2
+ * envelope `{ v:2, outputs, inputs? }`; the injection path can never read
+ * `inputs` (it only ever projects `outputs`).
  *
  * UPDATE column semantics (preserving today's behaviour exactly):
  *   - `credentials`, `expiresAt`, `needsReconnection` are ALWAYS written.
@@ -1653,13 +1652,11 @@ export async function persistCredentialBundle(
   target: PersistTarget,
   input: PersistCredentialInput,
 ): Promise<IntegrationConnectionSummary | null> {
-  // v2 structured envelope only when a bootstrap secret is being persisted
-  // (`persistLoginSecret`); otherwise a flat v1 blob, byte-identical to every
-  // pre-Phase-4 write so existing connections/round-trips are unchanged.
   const hasInputs = input.inputs && Object.keys(input.inputs).length > 0;
-  const ciphertext = hasInputs
-    ? encryptCredentialEnvelope({ outputs: input.credentials, inputs: input.inputs })
-    : encryptCredentials(input.credentials);
+  const ciphertext = encryptCredentialEnvelope({
+    outputs: input.credentials,
+    ...(hasInputs ? { inputs: input.inputs } : {}),
+  });
   const now = new Date();
 
   if (target.kind === "insert") {

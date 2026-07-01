@@ -42,7 +42,7 @@ import {
 import { seedAgent, seedPackage } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { integrationConnections, organizationMembers } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -101,7 +101,7 @@ describe("/api/integrations/:packageId admin surface", () => {
         applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         endUserId: null,
-        credentialsEncrypted: encryptCredentials({ api_key: "secret" }),
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
         sharedWithOrg: true,
       })
@@ -119,7 +119,7 @@ describe("/api/integrations/:packageId admin surface", () => {
         applicationId: ctx.defaultAppId,
         userId,
         endUserId: null,
-        credentialsEncrypted: encryptCredentials({ api_key: "secret" }),
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
         sharedWithOrg: false,
       })

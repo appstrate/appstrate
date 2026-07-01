@@ -534,7 +534,6 @@ export const schemas = {
       "runNumber",
       "token_usage",
       "version_label",
-      "version_dirty",
       "version_ref",
       "proxy_label",
       "model_label",
@@ -620,11 +619,6 @@ export const schemas = {
         type: ["string", "null"],
         description:
           "Version label at run time (e.g. '1.0.0'). For draft runs this is the latest published version the draft sits on top of — read `version_ref` to know which definition actually executed.",
-      },
-      version_dirty: {
-        type: "boolean",
-        description:
-          "Whether the draft had unpublished changes at run time. Kept for backward compatibility — prefer `version_ref`, which states unambiguously what executed.",
       },
       version_ref: {
         type: "string",

@@ -9,11 +9,8 @@
  * sidecar executor consume.
  *
  * Persistence: `persistCredentialBundle` writes the v2 structured envelope
- * (`{ outputs, inputs }`, spec §4.6) whenever a bootstrap secret is present
- * (`connect.persistLoginSecret`); otherwise it writes a flat v1 blob,
- * byte-identical to every pre-envelope write (which reads back as all-outputs).
- * The gating rule — only `outputs` is referenceable by `delivery.*` — holds in
- * both shapes.
+ * (`{ outputs, inputs }`, spec §4.6). The gating rule is single-shape: only
+ * `outputs` is referenceable by `delivery.*`.
  */
 
 /**
@@ -26,8 +23,7 @@ export interface CredentialBundle {
   /**
    * INJECTABLE material — access tokens, cookies, session ids. Only these
    * fields are referenceable by `delivery.{http,env,files}` (spec §4.6).
-   * Maps to `credentials_encrypted.outputs` in the v2 envelope, or the whole
-   * flat v1 blob when no `inputs` are persisted.
+   * Maps to `credentials_encrypted.outputs` in the v2 envelope.
    */
   outputs: Record<string, string>;
   /**
