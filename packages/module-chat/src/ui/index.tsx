@@ -33,8 +33,7 @@ import { fetchModels, type OrgModelOption } from "./models-data.ts";
 import { loadHistory, mintSessionId, SESSIONS_QUERY_KEY, type SessionSummary } from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
 import { subscribeSeen, getSeen, markSeen, isUnread } from "./unread-store.ts";
-
-const MODEL_STORAGE_KEY = "appstrate.chat.model";
+import { subscribeModel, getSelectedModel, setSelectedModel } from "./model-store.ts";
 
 export interface ChatPageProps {
   getHeaders?: GetHeaders;
@@ -85,24 +84,21 @@ export function ChatPage({
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const [models, setModels] = useState<OrgModelOption[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string | null>(() =>
-    typeof localStorage === "undefined" ? null : localStorage.getItem(MODEL_STORAGE_KEY),
-  );
+  // Model selection lives in an external store (localStorage-backed), not React
+  // state: the transport's header builder reads it per request through a stable
+  // function (see ConversationInner), so a switch applies to the very next send
+  // without remounting the conversation. This hook only mirrors it for the picker.
+  const selectedModel = useSyncExternalStore(subscribeModel, getSelectedModel, getSelectedModel);
 
   useEffect(() => {
     void fetchModels(getHeaders).then((list) => {
       setModels(list);
-      setSelectedModel((cur) => {
-        if (cur && list.some((m) => m.id === cur)) return cur;
-        return (list.find((m) => m.is_default) ?? list[0])?.id ?? null;
-      });
+      // Reconcile a stale/absent stored selection to the org default.
+      const cur = getSelectedModel();
+      if (cur && list.some((m) => m.id === cur)) return;
+      setSelectedModel((list.find((m) => m.is_default) ?? list[0])?.id ?? null);
     });
   }, [getHeaders]);
-
-  const selectModel = (id: string) => {
-    setSelectedModel(id);
-    localStorage.setItem(MODEL_STORAGE_KEY, id);
-  };
 
   // Unread replies for conversations the user left mid-generation. The list
   // query polls (fast while generating); the seen watermark is an external store
@@ -170,11 +166,14 @@ export function ChatPage({
                 key={activeId}
                 id={activeId}
                 getHeaders={getHeaders}
-                selectedModel={selectedModel}
                 isPersisted={isPersisted}
                 onConversationChange={onConversationChange}
                 composerSlot={
-                  <ModelSelect models={models} selectedId={selectedModel} onSelect={selectModel} />
+                  <ModelSelect
+                    models={models}
+                    selectedId={selectedModel}
+                    onSelect={setSelectedModel}
+                  />
                 }
               />
             </main>
@@ -188,7 +187,6 @@ export function ChatPage({
 interface ConversationProps {
   id: string;
   getHeaders?: GetHeaders;
-  selectedModel: string | null;
   isPersisted: boolean;
   onConversationChange?: SelectConversation;
   composerSlot?: React.ReactNode;
@@ -240,23 +238,25 @@ function ConversationInner({
   id,
   getHeaders,
   initialMessages,
-  selectedModel,
   isPersisted,
   onConversationChange,
   composerSlot,
 }: ConversationProps & { initialMessages: UIMessage[] }) {
   const queryClient = useQueryClient();
 
-  // Header builder invoked by the transport at request/reconnect time. Depends on
-  // the model state (no ref), so the transport rebuilds when the model changes —
-  // useChat picks it up for the next send. `getHeaders` is a stable host fn.
-  const buildHeaders = useCallback(
-    (): Record<string, string> => ({
+  // Header builder invoked by the transport at request/reconnect time. It reads
+  // the model from the external store, NOT from React state: `useChat` recreates
+  // its `Chat` instance only when `id` changes, so a transport rebuilt over
+  // fresh state would be silently ignored and every send would keep the model
+  // captured at mount. The store read resolves per request, so a model switch
+  // applies to the next send. `getHeaders` is a stable host fn.
+  const buildHeaders = useCallback((): Record<string, string> => {
+    const model = getSelectedModel();
+    return {
       ...getHeaders?.(),
-      ...(selectedModel ? { "X-Model-Id": selectedModel } : {}),
-    }),
-    [getHeaders, selectedModel],
-  );
+      ...(model ? { "X-Model-Id": model } : {}),
+    };
+  }, [getHeaders]);
 
   const transport = useMemo(
     () =>
