@@ -10,7 +10,6 @@ import { db } from "@appstrate/db/client";
 import {
   applicationPackages,
   packages,
-  applications,
   packageVersions,
   packageDistTags,
 } from "@appstrate/db/schema";
@@ -20,24 +19,9 @@ import { asRecord } from "@appstrate/core/safe-json";
 import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { AppScope } from "../lib/scope.ts";
+import { assertApplicationInScope } from "./applications.ts";
 
 export type { ResolvedRunConfig };
-
-// ---------------------------------------------------------------------------
-// Internal helper — verify the scope's application belongs to the scope's org.
-// Used by install which mutates installation state.
-// ---------------------------------------------------------------------------
-
-async function assertAppBelongsToOrg(scope: AppScope): Promise<void> {
-  const [app] = await db
-    .select({ id: applications.id })
-    .from(applications)
-    .where(and(eq(applications.id, scope.applicationId), eq(applications.orgId, scope.orgId)))
-    .limit(1);
-  if (!app) {
-    throw notFound(`Application '${scope.applicationId}' not found in this organization`);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Install / Uninstall
@@ -48,7 +32,7 @@ export async function installPackage(
   packageId: string,
   config?: Record<string, unknown>,
 ) {
-  await assertAppBelongsToOrg(scope);
+  await assertApplicationInScope(scope);
 
   // Verify the package exists in the org catalog (or is a system package).
   // Ephemeral shadow packages are never installable.

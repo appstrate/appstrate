@@ -69,7 +69,7 @@ export interface ConfigValidationResult {
  * empty-string and null values for required keys so AJV sees them as
  * missing and reports them as such.
  */
-function stripEmptyRequired(
+export function stripEmptyRequired(
   data: Record<string, unknown>,
   required: string[],
 ): Record<string, unknown> {
