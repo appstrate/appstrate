@@ -1,0 +1,310 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/mcp-server.schema.json",
+  "name": "@appstrate/quickbooks-online-mcp-server",
+  "version": "1.0.0",
+  "type": "mcp-server",
+  "schema_version": "0.1",
+  "manifest_version": "0.3",
+  "display_name": "QuickBooks Online (MCP server)",
+  "description": "Intuit's official QuickBooks Online MCP server (intuit/quickbooks-online-mcp-server, MIT), bundled to a single ESM file (esbuild) and run as a local stdio subprocess. Reads QUICKBOOKS_* OAuth credentials from its environment (injected by the @appstrate/quickbooks-online-mcp integration) and refreshes its own access token via intuit-oauth. Defaults to READ-ONLY: QUICKBOOKS_DISABLE_WRITE/UPDATE/DELETE are set in mcp_config.env, exposing 69 get/search tools + 11 financial reports. Remove those flags to enable create/update/delete (140 tools).",
+  "author": "Intuit (server) / Appstrate (packaging)",
+  "license": "MIT",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "server/index.mjs"
+      ],
+      "env": {
+        "QUICKBOOKS_DISABLE_WRITE": "true",
+        "QUICKBOOKS_DISABLE_UPDATE": "true",
+        "QUICKBOOKS_DISABLE_DELETE": "true"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "get_customer",
+      "description": "Get a customer by Id from QuickBooks Online."
+    },
+    {
+      "name": "search_customers",
+      "description": "Search customers in QuickBooks Online that match given criteria."
+    },
+    {
+      "name": "get_estimate",
+      "description": "Get an estimate by Id from QuickBooks Online."
+    },
+    {
+      "name": "search_estimates",
+      "description": "Search estimates in QuickBooks Online that match given criteria."
+    },
+    {
+      "name": "get-bill",
+      "description": "Get a bill by ID from QuickBooks Online."
+    },
+    {
+      "name": "search_bills",
+      "description": "Search bills in QuickBooks Online that match given criteria."
+    },
+    {
+      "name": "read_invoice",
+      "description": "Read a single invoice from QuickBooks Online by its ID."
+    },
+    {
+      "name": "search_invoices",
+      "description": "Search invoices in QuickBooks Online using criteria (maps to node-quickbooks findInvoices)."
+    },
+    {
+      "name": "get_account",
+      "description": "Get a single account by ID from QuickBooks Online."
+    },
+    {
+      "name": "search_accounts",
+      "description": "Search chart‑of‑accounts entries using criteria."
+    },
+    {
+      "name": "read_item",
+      "description": "Read a single item in QuickBooks Online by its ID."
+    },
+    {
+      "name": "search_items",
+      "description": "Search items in QuickBooks Online using criteria (maps to node-quickbooks findItems)."
+    },
+    {
+      "name": "get-vendor",
+      "description": "Get a vendor by ID from QuickBooks Online."
+    },
+    {
+      "name": "search_vendors",
+      "description": "Search vendors in QuickBooks Online that match given criteria."
+    },
+    {
+      "name": "get_employee",
+      "description": "Get an employee by Id from QuickBooks Online."
+    },
+    {
+      "name": "search_employees",
+      "description": "Search employees in QuickBooks Online that match given criteria."
+    },
+    {
+      "name": "get_journal_entry",
+      "description": "Get a journal entry by Id from QuickBooks Online."
+    },
+    {
+      "name": "search_journal_entries",
+      "description": "Search journal entries in QuickBooks Online that match given criteria."
+    },
+    {
+      "name": "get_bill_payment",
+      "description": "Get a bill payment by Id from QuickBooks Online."
+    },
+    {
+      "name": "search_bill_payments",
+      "description": "Search bill payments in QuickBooks Online that match given criteria."
+    },
+    {
+      "name": "get_purchase",
+      "description": "Get a purchase by Id from QuickBooks Online."
+    },
+    {
+      "name": "search_purchases",
+      "description": "Search purchases in QuickBooks Online that match given criteria."
+    },
+    {
+      "name": "get_payment",
+      "description": "Get a single payment by ID from QuickBooks Online."
+    },
+    {
+      "name": "search_payments",
+      "description": "Search for payments in QuickBooks Online."
+    },
+    {
+      "name": "get_sales_receipt",
+      "description": "Get a single sales receipt by ID from QuickBooks Online."
+    },
+    {
+      "name": "search_sales_receipts",
+      "description": "Search for sales receipts in QuickBooks Online."
+    },
+    {
+      "name": "get_credit_memo",
+      "description": "Get a single credit memo by ID from QuickBooks Online."
+    },
+    {
+      "name": "search_credit_memos",
+      "description": "Search for credit memos in QuickBooks Online."
+    },
+    {
+      "name": "get_refund_receipt",
+      "description": "Get a single refund receipt by ID from QuickBooks Online."
+    },
+    {
+      "name": "search_refund_receipts",
+      "description": "Search for refund receipts in QuickBooks Online."
+    },
+    {
+      "name": "get_purchase_order",
+      "description": "Get a single purchase order by ID from QuickBooks Online."
+    },
+    {
+      "name": "search_purchase_orders",
+      "description": "Search for purchase orders in QuickBooks Online."
+    },
+    {
+      "name": "get_vendor_credit",
+      "description": "Get a vendor credit by ID from QuickBooks Online."
+    },
+    {
+      "name": "search_vendor_credits",
+      "description": "Search for vendor credits in QuickBooks Online."
+    },
+    {
+      "name": "get_deposit",
+      "description": "Get a deposit by ID from QuickBooks Online."
+    },
+    {
+      "name": "search_deposits",
+      "description": "Search for deposits in QuickBooks Online."
+    },
+    {
+      "name": "get_transfer",
+      "description": "Get a transfer by ID from QuickBooks Online."
+    },
+    {
+      "name": "search_transfers",
+      "description": "Search for transfers in QuickBooks Online."
+    },
+    {
+      "name": "get_time_activity",
+      "description": "Get a time activity by ID from QuickBooks Online."
+    },
+    {
+      "name": "search_time_activities",
+      "description": "Search for time activities in QuickBooks Online."
+    },
+    {
+      "name": "get_class",
+      "description": "Retrieve a specific class from QuickBooks Online by ID."
+    },
+    {
+      "name": "search_classes",
+      "description": "Search for classes in QuickBooks Online with optional filters."
+    },
+    {
+      "name": "get_department",
+      "description": "Retrieve a specific department from QuickBooks Online by ID."
+    },
+    {
+      "name": "search_departments",
+      "description": "Search for departments in QuickBooks Online with optional filters."
+    },
+    {
+      "name": "get_term",
+      "description": "Retrieve a specific payment term from QuickBooks Online by ID."
+    },
+    {
+      "name": "search_terms",
+      "description": "Search for payment terms in QuickBooks Online with optional filters."
+    },
+    {
+      "name": "get_payment_method",
+      "description": "Retrieve a specific payment method from QuickBooks Online by ID."
+    },
+    {
+      "name": "search_payment_methods",
+      "description": "Search for payment methods in QuickBooks Online with optional filters."
+    },
+    {
+      "name": "search_budgets",
+      "description": "Search for budgets in QuickBooks Online. Returns Budget records with nested BudgetDetail line items (Amount, BudgetDate, AccountRef, ClassRe"
+    },
+    {
+      "name": "get_tax_code",
+      "description": "Retrieve a specific tax code from QuickBooks Online by ID."
+    },
+    {
+      "name": "search_tax_codes",
+      "description": "Search for tax codes in QuickBooks Online with optional filters."
+    },
+    {
+      "name": "get_tax_rate",
+      "description": "Retrieve a specific tax rate from QuickBooks Online by ID."
+    },
+    {
+      "name": "search_tax_rates",
+      "description": "Search for tax rates in QuickBooks Online with optional filters."
+    },
+    {
+      "name": "get_tax_agency",
+      "description": "Retrieve a specific tax agency from QuickBooks Online by ID."
+    },
+    {
+      "name": "search_tax_agencies",
+      "description": "Search for tax agencies in QuickBooks Online with optional filters."
+    },
+    {
+      "name": "get_company_info",
+      "description": "Retrieve the company information from QuickBooks Online."
+    },
+    {
+      "name": "get_attachable",
+      "description": "Retrieve a specific attachable from QuickBooks Online by ID."
+    },
+    {
+      "name": "search_attachables",
+      "description": "Search for attachables in QuickBooks Online with optional filters."
+    },
+    {
+      "name": "get_balance_sheet",
+      "description": "Generate a Balance Sheet report from QuickBooks Online showing assets, liabilities, and equity."
+    },
+    {
+      "name": "get_profit_and_loss",
+      "description": "Generate a Profit and Loss (Income Statement) report from QuickBooks Online."
+    },
+    {
+      "name": "get_cash_flow",
+      "description": "Generate a Statement of Cash Flows report from QuickBooks Online."
+    },
+    {
+      "name": "get_trial_balance",
+      "description": "Generate a Trial Balance report from QuickBooks Online showing all account balances."
+    },
+    {
+      "name": "get_general_ledger",
+      "description": "Generate a General Ledger report from QuickBooks Online showing detailed transaction history."
+    },
+    {
+      "name": "get_customer_sales",
+      "description": "Generate a Customer Sales report from QuickBooks Online showing sales by customer."
+    },
+    {
+      "name": "get_aged_receivables",
+      "description": "Generate an Aged Receivables (A/R Aging) report from QuickBooks Online showing outstanding customer invoices."
+    },
+    {
+      "name": "get_customer_balance",
+      "description": "Generate a Customer Balance report from QuickBooks Online showing outstanding balances by customer."
+    },
+    {
+      "name": "get_aged_payables",
+      "description": "Generate an Aged Payables (A/P Aging) report from QuickBooks Online showing outstanding vendor bills."
+    },
+    {
+      "name": "get_vendor_expenses",
+      "description": "Generate a Vendor Expenses report from QuickBooks Online showing expenses by vendor."
+    },
+    {
+      "name": "get_vendor_balance",
+      "description": "Generate a Vendor Balance report from QuickBooks Online showing outstanding balances by vendor."
+    }
+  ],
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

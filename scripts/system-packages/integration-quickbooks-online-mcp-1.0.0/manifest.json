@@ -1,0 +1,173 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/integration.schema.json",
+  "name": "@appstrate/quickbooks-online-mcp",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "QuickBooks Online (MCP)",
+  "description": "QuickBooks Online backed by Intuit's official MCP server, run locally in the per-run sandbox (source.kind: local → @appstrate/quickbooks-online-mcp-server). You paste your existing Intuit app credentials (client_id, client_secret, refresh_token, realm_id); the sidecar injects them as QUICKBOOKS_* env vars into the MCP subprocess, which manages its own OAuth refresh. Read-only by default (69 tools incl. balance sheet, P&L, cash flow, aged receivables/payables). Complements @appstrate/quickbooks-online (the plain REST api_call integration).",
+  "keywords": [
+    "accounting",
+    "finance"
+  ],
+  "license": "Apache-2.0",
+  "icon": "simple-icons:quickbooks",
+  "source": {
+    "kind": "local",
+    "server": {
+      "name": "@appstrate/quickbooks-online-mcp-server",
+      "version": "^1.0.0"
+    }
+  },
+  "auths": {
+    "primary": {
+      "type": "custom",
+      "authorized_uris": [
+        "https://quickbooks.api.intuit.com/**",
+        "https://sandbox-quickbooks.api.intuit.com/**",
+        "https://oauth.platform.intuit.com/**"
+      ],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "description": "Client ID of your Intuit app (developer.intuit.com → your app → Keys & credentials)."
+            },
+            "client_secret": {
+              "type": "string",
+              "description": "Client Secret of your Intuit app."
+            },
+            "refresh_token": {
+              "type": "string",
+              "description": "OAuth2 refresh token for the company (from Intuit's OAuth Playground or your existing flow). Valid 100 days; the server refreshes the access token from it on each run."
+            },
+            "realm_id": {
+              "type": "string",
+              "description": "Company ID (Realm ID) of the QuickBooks company."
+            },
+            "environment": {
+              "type": "string",
+              "enum": [
+                "production",
+                "sandbox"
+              ],
+              "default": "production",
+              "description": "Which Intuit environment the app/realm belongs to."
+            }
+          },
+          "required": [
+            "client_id",
+            "client_secret",
+            "refresh_token",
+            "realm_id"
+          ]
+        }
+      },
+      "delivery": {
+        "env": {
+          "QUICKBOOKS_CLIENT_ID": {
+            "value": "{$credential.client_id}",
+            "sensitive": true
+          },
+          "QUICKBOOKS_CLIENT_SECRET": {
+            "value": "{$credential.client_secret}",
+            "sensitive": true
+          },
+          "QUICKBOOKS_REFRESH_TOKEN": {
+            "value": "{$credential.refresh_token}",
+            "sensitive": true
+          },
+          "QUICKBOOKS_REALM_ID": {
+            "value": "{$credential.realm_id}"
+          },
+          "QUICKBOOKS_ENVIRONMENT": {
+            "value": "{$credential.environment}"
+          }
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "get_customer": {},
+    "search_customers": {},
+    "get_estimate": {},
+    "search_estimates": {},
+    "get-bill": {},
+    "search_bills": {},
+    "read_invoice": {},
+    "search_invoices": {},
+    "get_account": {},
+    "search_accounts": {},
+    "read_item": {},
+    "search_items": {},
+    "get-vendor": {},
+    "search_vendors": {},
+    "get_employee": {},
+    "search_employees": {},
+    "get_journal_entry": {},
+    "search_journal_entries": {},
+    "get_bill_payment": {},
+    "search_bill_payments": {},
+    "get_purchase": {},
+    "search_purchases": {},
+    "get_payment": {},
+    "search_payments": {},
+    "get_sales_receipt": {},
+    "search_sales_receipts": {},
+    "get_credit_memo": {},
+    "search_credit_memos": {},
+    "get_refund_receipt": {},
+    "search_refund_receipts": {},
+    "get_purchase_order": {},
+    "search_purchase_orders": {},
+    "get_vendor_credit": {},
+    "search_vendor_credits": {},
+    "get_deposit": {},
+    "search_deposits": {},
+    "get_transfer": {},
+    "search_transfers": {},
+    "get_time_activity": {},
+    "search_time_activities": {},
+    "get_class": {},
+    "search_classes": {},
+    "get_department": {},
+    "search_departments": {},
+    "get_term": {},
+    "search_terms": {},
+    "get_payment_method": {},
+    "search_payment_methods": {},
+    "search_budgets": {},
+    "get_tax_code": {},
+    "search_tax_codes": {},
+    "get_tax_rate": {},
+    "search_tax_rates": {},
+    "get_tax_agency": {},
+    "search_tax_agencies": {},
+    "get_company_info": {},
+    "get_attachable": {},
+    "search_attachables": {},
+    "get_balance_sheet": {},
+    "get_profit_and_loss": {},
+    "get_cash_flow": {},
+    "get_trial_balance": {},
+    "get_general_ledger": {},
+    "get_customer_sales": {},
+    "get_aged_receivables": {},
+    "get_customer_balance": {},
+    "get_aged_payables": {},
+    "get_vendor_expenses": {},
+    "get_vendor_balance": {}
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}
