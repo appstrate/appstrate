@@ -52,15 +52,14 @@ export function buildPackageId(scope: string, name: string): string {
 
 /**
  * Encode a packageId ("@scope/name") into a URL path segment, keeping the
- * `@` and `/` separators literal so it matches BOTH route shapes:
- *   - `/:scope{@[^/]+}/:name`            (single top-level package)
+ * `@` and `/` separators literal so it matches route shapes such as:
+ *   - `/:scope{(?:@|%40)...}/:name`      (single top-level package)
  *   - `/:packageId{@[^/]+/[^/]+}`        (routes that reference ≥2 packages)
  *
- * Naive `encodeURIComponent(packageId)` 404s both shapes because it
- * percent-encodes `@`→%40 and `/`→%2F, neither of which the route regexes
- * accept. Use this canonical encoder instead of hand-rolling — it is the
- * one contract every consumer (frontend, SDK, github-action, MCP) should
- * import rather than re-discovering the footgun.
+ * Naive `encodeURIComponent(packageId)` percent-encodes `/`→%2F, so the
+ * scope/name split is lost. Use this canonical encoder instead of hand-rolling
+ * — it is the one contract every consumer (frontend, SDK, github-action, MCP)
+ * should import rather than re-discovering the footgun.
  *
  * Each segment is `encodeURIComponent`-encoded individually (defensive even
  * if `SLUG_PATTERN` ever loosens); the `@`/`/` separators stay literal.

@@ -172,6 +172,26 @@ describe("Packages API", () => {
       expect(body.has_unarchived_changes).toBe(true);
     });
 
+    it("accepts an encoded @ scope", async () => {
+      await seedAgent({
+        id: "@pkgorg/encoded-detail-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@pkgorg/encoded-detail-agent",
+      );
+
+      const res = await app.request("/api/packages/agents/%40pkgorg/encoded-detail-agent", {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { id?: string };
+      expect(body.id).toBe("@pkgorg/encoded-detail-agent");
+    });
+
     it("returns hasUnarchivedChanges false when no changes since last version", async () => {
       await seedAgent({
         id: "@pkgorg/versioned-agent",

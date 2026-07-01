@@ -14,6 +14,7 @@ import { internalError, invalidRequest, parseBody } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
+import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 export const updateSkillsSchema = z.object({
   skillIds: z.array(z.string()).max(50),
 });
@@ -66,7 +67,7 @@ export function createUserAgentsRouter() {
 
   // PUT /api/agents/:scope/:name/skills — set skill references for an agent
   router.put(
-    "/:scope{@[^/]+}/:name/skills",
+    `/${SCOPED_PACKAGE_ROUTE}/skills`,
     requireOrgAgent(),
     requireMutableAgent(),
     async (c) => {

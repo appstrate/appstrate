@@ -50,6 +50,7 @@ import {
 import { readIntegrationManifestForRun } from "../services/integration-service.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
 import { isIntegrationActive } from "../services/integration-connections.ts";
+import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 
 /**
  * Verify the run token from the Authorization header.
@@ -330,7 +331,7 @@ export function createInternalRouter() {
   // delivery plans for an integration the running agent depends on.
   // OAuth tokens are refreshed proactively if within the lead window;
   // POST .../refresh forces a refresh regardless.
-  router.get("/integration-credentials/:scope{@[^/]+}/:name", async (c) => {
+  router.get(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
     const { runId, run } = await verifyRunToken(c);
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
     await assertAgentDeclaresIntegration(packageId, run, runId);
@@ -365,7 +366,7 @@ export function createInternalRouter() {
   // `metadata.degraded_integrations[]` so the finished run surfaces a reconnect
   // banner. The sidecar maps the 410 to "don't retry"; the next-launch
   // readiness gate + live badge do the user-facing surfacing.
-  router.post("/integration-credentials/:scope{@[^/]+}/:name/refresh", async (c) => {
+  router.post(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}/refresh`, async (c) => {
     const { runId, run } = await verifyRunToken(c);
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
     await assertAgentDeclaresIntegration(packageId, run, runId);
@@ -410,7 +411,7 @@ export function createInternalRouter() {
   // Bearer run-token as the credentials surface; additionally verifies the
   // run's agent declares an installed integration that references this
   // mcp-server, so a leaked run token can't enumerate arbitrary server source.
-  router.get("/mcp-server-bundle/:scope{@[^/]+}/:name", async (c) => {
+  router.get(`/mcp-server-bundle/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
     const { runId, run } = await verifyRunToken(c);
     const mcpServerId = `${c.req.param("scope")}/${c.req.param("name")}`;
     await assertAgentReferencesMcpServer(mcpServerId, run, runId);

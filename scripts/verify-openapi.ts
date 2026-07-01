@@ -25,7 +25,7 @@
  * Usage: bun scripts/verify-openapi.ts
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, normalize, relative } from "node:path";
 import { validate as validateOpenAPI } from "@readme/openapi-parser";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
 import type { OpenApiSchemaEntry } from "@appstrate/core/module";
@@ -1028,18 +1028,76 @@ function inferRequiredStatuses(callText: string): Set<string> {
 const unresolvedTemplatedRoutes: { file: string; verb: string; raw: string }[] = [];
 
 /**
- * Look up the string/template-literal value(s) bound to `ident` in a source
- * file, via either a top-level const (`const <ident> = "lit"`) or an
- * object-literal field (`<ident>: "lit"`). The captured value may itself be a
- * template literal that still contains `${…}` (e.g. `const MCP_PATH =
- * \`${MCP_PREFIX}/:org\``) — callers must recurse to fully resolve it.
+ * Resolve a relative import specifier from an `apps/api/src` file to another
+ * `apps/api/src` file key (`routes/foo`, `modules/bar/router`, ...). External
+ * imports intentionally return null: the route verifier must fail closed rather
+ * than chasing arbitrary package code.
  */
-function lookupIdentLiterals(ident: string, fullSrc: string): string[] {
+function resolveLocalImportFile(currentFile: string, source: string): string | null {
+  if (!source.startsWith(".")) return null;
+  const apiSrcRoot = normalize(join(REPO_ROOT, "apps/api/src"));
+  const currentFull = join(apiSrcRoot, currentFile + ".ts");
+  const sourceWithExt = source.endsWith(".ts") ? source : `${source}.ts`;
+  const importedFull = normalize(join(dirname(currentFull), sourceWithExt));
+  const rel = relative(apiSrcRoot, importedFull);
+  if (rel.startsWith("..") || rel.startsWith("/") || !rel.endsWith(".ts")) return null;
+  return rel.slice(0, -3).replace(/\\/g, "/");
+}
+
+/**
+ * Look up local named imports that bind `ident` in this source file:
+ * `import { X as ident } from "./local.ts"` or `import { ident } from "./local.ts"`.
+ */
+function lookupImportedIdentSources(
+  ident: string,
+  fullSrc: string,
+  file: string | undefined,
+): Array<{ imported: string; file: string }> {
+  if (!file) return [];
+  const out: Array<{ imported: string; file: string }> = [];
+  for (const m of fullSrc.matchAll(/import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["']/g)) {
+    const sourceFile = resolveLocalImportFile(file, m[2]!);
+    if (!sourceFile) continue;
+    for (const raw of m[1]!.split(",")) {
+      const [importedRaw, localRaw] = raw.split(/\s+as\s+/);
+      const imported = importedRaw?.trim();
+      const local = (localRaw ?? importedRaw)?.trim();
+      if (imported && local === ident) out.push({ imported, file: sourceFile });
+    }
+  }
+  return out;
+}
+
+/**
+ * Look up the string/template-literal value(s) bound to `ident` in a source
+ * file, via either a top-level const (`const <ident> = "lit"`), an object-literal
+ * field (`<ident>: "lit"`), or a local named import that resolves to either of
+ * those forms. The captured value may itself be a template literal that still
+ * contains `${…}` (e.g. `const MCP_PATH = \`${MCP_PREFIX}/:org\``) — callers
+ * must recurse to fully resolve it.
+ */
+function lookupIdentLiterals(
+  ident: string,
+  fullSrc: string,
+  file?: string,
+  seen = new Set<string>(),
+): string[] {
   const literals = new Set<string>();
   const constRe = new RegExp(`\\bconst\\s+${ident}\\s*=\\s*["'\`]([^"'\`]+)["'\`]`, "g");
   for (const m of fullSrc.matchAll(constRe)) literals.add(m[1]!);
   const fieldRe = new RegExp(`\\b${ident}\\s*:\\s*["'\`]([^"'\`]+)["'\`]`, "g");
   for (const m of fullSrc.matchAll(fieldRe)) literals.add(m[1]!);
+  if (literals.size > 0) return [...literals];
+
+  for (const source of lookupImportedIdentSources(ident, fullSrc, file)) {
+    const key = `${source.file}:${source.imported}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const importedSrc = readRouteFile(source.file);
+    for (const lit of lookupIdentLiterals(source.imported, importedSrc, source.file, seen)) {
+      literals.add(lit);
+    }
+  }
   return [...literals];
 }
 
@@ -1056,13 +1114,18 @@ function lookupIdentLiterals(ident: string, fullSrc: string): string[] {
  * (cross-product across multi-valued idents), or `null` if any `${…}` can't be
  * resolved or the nesting exceeds `depth` (caller fails closed).
  */
-function resolveTemplatedPath(rawPath: string, fullSrc: string, depth = 0): string[] | null {
+function resolveTemplatedPath(
+  rawPath: string,
+  fullSrc: string,
+  file: string | undefined,
+  depth = 0,
+): string[] | null {
   if (depth > 10) return null; // cycle / runaway guard
   const idents = [...rawPath.matchAll(/\$\{([a-zA-Z_$][\w$]*)\}/g)].map((m) => m[1]!);
   if (idents.length === 0) return [rawPath];
   let paths = [rawPath];
   for (const ident of idents) {
-    const literals = lookupIdentLiterals(ident, fullSrc);
+    const literals = lookupIdentLiterals(ident, fullSrc, file);
     if (literals.length === 0) return null;
     paths = paths.flatMap((p) =>
       literals.map((lit) => p.replace(new RegExp(`\\$\\{${ident}\\}`, "g"), lit)),
@@ -1072,7 +1135,7 @@ function resolveTemplatedPath(rawPath: string, fullSrc: string, depth = 0): stri
   const out: string[] = [];
   for (const p of paths) {
     if (p.includes("${")) {
-      const nested = resolveTemplatedPath(p, fullSrc, depth + 1);
+      const nested = resolveTemplatedPath(p, fullSrc, file, depth + 1);
       if (!nested) return null;
       out.push(...nested);
     } else {
@@ -1107,16 +1170,17 @@ function resolvePathArg(
   lit: string | undefined,
   ref: string | undefined,
   fullSrc: string,
+  file: string | undefined,
 ): string[] | null {
   if (lit !== undefined) {
-    return lit.includes("${") ? resolveTemplatedPath(lit, fullSrc) : [lit];
+    return lit.includes("${") ? resolveTemplatedPath(lit, fullSrc, file) : [lit];
   }
   if (ref !== undefined) {
-    const literals = lookupIdentLiterals(ref, fullSrc);
+    const literals = lookupIdentLiterals(ref, fullSrc, file);
     if (literals.length === 0) return null;
     const out: string[] = [];
     for (const l of literals) {
-      const resolved = l.includes("${") ? resolveTemplatedPath(l, fullSrc) : [l];
+      const resolved = l.includes("${") ? resolveTemplatedPath(l, fullSrc, file) : [l];
       if (!resolved) return null;
       out.push(...resolved);
     }
@@ -1149,7 +1213,7 @@ function extractRouterRegistrations(
   );
   for (const m of slice.matchAll(re)) {
     const verb = m[1]!;
-    const resolved = resolvePathArg(m[2], m[3], fullSrc);
+    const resolved = resolvePathArg(m[2], m[3], fullSrc, file);
     if (!resolved) {
       unresolvedTemplatedRoutes.push({ file, verb, raw: m[2] ?? m[3] ?? "<unknown>" });
       continue;

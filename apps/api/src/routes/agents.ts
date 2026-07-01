@@ -42,6 +42,7 @@ import {
 import { writeBundleToBuffer } from "@appstrate/afps-runtime/bundle";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
+import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 export const modelIdSchema = z.object({ modelId: z.string().nullable() });
 
@@ -113,7 +114,7 @@ export function createAgentsRouter() {
 
   // PUT /api/agents/:scope/:name/config — save agent configuration (admin-only)
   router.put(
-    "/:scope{@[^/]+}/:name/config",
+    `/${SCOPED_PACKAGE_ROUTE}/config`,
     requireAgent(),
     requirePermission("agents", "configure"),
     async (c) => {
@@ -147,7 +148,7 @@ export function createAgentsRouter() {
   );
 
   // GET /api/agents/:scope/:name/proxy — get agent proxy configuration
-  router.get("/:scope{@[^/]+}/:name/proxy", requireAgent(), async (c) => {
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/proxy`, requireAgent(), async (c) => {
     const agent = c.get("package");
     const applicationId = c.get("applicationId");
     const { proxyId } = await getPackageConfig(applicationId, agent.id);
@@ -159,7 +160,7 @@ export function createAgentsRouter() {
   // connection readiness for the agent: authoritative run-blocking verdict
   // (identical to the run-kickoff 412) + per-integration management DTO.
   router.get(
-    "/:scope{@[^/]+}/:name/connection-readiness",
+    `/${SCOPED_PACKAGE_ROUTE}/connection-readiness`,
     requireAgent(),
     requirePermission("integrations", "read"),
     async (c) => {
@@ -179,7 +180,7 @@ export function createAgentsRouter() {
 
   // PUT /api/agents/:scope/:name/proxy — set agent proxy override (admin-only)
   router.put(
-    "/:scope{@[^/]+}/:name/proxy",
+    `/${SCOPED_PACKAGE_ROUTE}/proxy`,
     requireAgent(),
     requirePermission("agents", "configure"),
     async (c) => {
@@ -205,7 +206,7 @@ export function createAgentsRouter() {
   );
 
   // GET /api/agents/:scope/:name/model — get agent model configuration
-  router.get("/:scope{@[^/]+}/:name/model", requireAgent(), async (c) => {
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/model`, requireAgent(), async (c) => {
     const agent = c.get("package");
     const applicationId = c.get("applicationId");
     const { modelId } = await getPackageConfig(applicationId, agent.id);
@@ -215,7 +216,7 @@ export function createAgentsRouter() {
 
   // PUT /api/agents/:scope/:name/model — set agent model override (admin-only)
   router.put(
-    "/:scope{@[^/]+}/:name/model",
+    `/${SCOPED_PACKAGE_ROUTE}/model`,
     requireAgent(),
     requirePermission("agents", "configure"),
     async (c) => {
@@ -247,7 +248,7 @@ export function createAgentsRouter() {
   // GET /api/agents/:scope/:name/persistence?kind=&actor_type=&actor_id=
   // Read the unified persistence rows visible to the caller.
   router.get(
-    "/:scope{@[^/]+}/:name/persistence",
+    `/${SCOPED_PACKAGE_ROUTE}/persistence`,
     requireAgent(),
     requirePermission("persistence", "read"),
     async (c) => {
@@ -321,7 +322,7 @@ export function createAgentsRouter() {
 
   // DELETE /api/agents/:scope/:name/persistence/memories/:id
   router.delete(
-    "/:scope{@[^/]+}/:name/persistence/memories/:id",
+    `/${SCOPED_PACKAGE_ROUTE}/persistence/memories/:id`,
     requireAgent(),
     requirePermission("persistence", "delete"),
     async (c) => {
@@ -347,7 +348,7 @@ export function createAgentsRouter() {
 
   // DELETE /api/agents/:scope/:name/persistence/pinned/:id
   router.delete(
-    "/:scope{@[^/]+}/:name/persistence/pinned/:id",
+    `/${SCOPED_PACKAGE_ROUTE}/persistence/pinned/:id`,
     requireAgent(),
     requirePermission("persistence", "delete"),
     async (c) => {
@@ -375,7 +376,7 @@ export function createAgentsRouter() {
   // Bulk delete: by default wipes every memory + checkpoint for the agent
   // in this app. Narrow with query params.
   router.delete(
-    "/:scope{@[^/]+}/:name/persistence",
+    `/${SCOPED_PACKAGE_ROUTE}/persistence`,
     requireAgent(),
     requirePermission("persistence", "delete"),
     async (c) => {
@@ -430,7 +431,7 @@ export function createAgentsRouter() {
   // suggest the package is mistyped. Inline check below distinguishes
   // them via `agent_not_installed_in_app`.
   router.get(
-    "/:scope{@[^/]+}/:name/bundle",
+    `/${SCOPED_PACKAGE_ROUTE}/bundle`,
     rateLimit(30),
     requirePermission("agents", "read"),
     async (c) => {
