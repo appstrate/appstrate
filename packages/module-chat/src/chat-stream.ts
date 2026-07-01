@@ -85,6 +85,36 @@ export function applyOperationIndexPolicy(system: string, apiShape: string): str
   return system;
 }
 
+type ConvertedModelMessages = Awaited<ReturnType<typeof convertToModelMessages>>;
+
+export function aiSdkCachedSystemMessage(content: string) {
+  return {
+    role: "system" as const,
+    content,
+    providerOptions: { anthropic: { cacheControl: { type: "ephemeral" as const } } },
+  };
+}
+
+export function prepareAiSdkChatStep({
+  stepNumber,
+  system,
+  modelMessages,
+  markToolStepBudgetReached,
+}: {
+  stepNumber: number;
+  system: string;
+  modelMessages: ConvertedModelMessages;
+  markToolStepBudgetReached: () => void;
+}) {
+  if (!isFinalChatStep(stepNumber, CHAT_MAX_STEPS)) return undefined;
+  markToolStepBudgetReached();
+  return {
+    activeTools: [],
+    toolChoice: "none" as const,
+    messages: [aiSdkCachedSystemMessage(appendFinalStepSystemPrompt(system)), ...modelMessages],
+  };
+}
+
 /**
  * TTL for the engine path's loopback bearer. The Agent SDK bakes it into the
  * spawned binary's env once, so it must outlive the whole turn (up to
@@ -692,12 +722,6 @@ export async function handleChatStream(
     throw invalidRequest(`Model family "${chosen.apiShape}" is not supported by the chat.`);
   }
 
-  const systemMessage = (content: string) => ({
-    role: "system" as const,
-    content,
-    providerOptions: { anthropic: { cacheControl: { type: "ephemeral" as const } } },
-  });
-
   try {
     const modelMessages = await convertToModelMessages(messages);
     const result = streamText({
@@ -709,18 +733,18 @@ export async function handleChatStream(
       // SDK path caches on its own; the ai-sdk Anthropic providers need an
       // explicit cache_control breakpoint or they'd pay the index in full each
       // step. Harmless for non-Anthropic models (providerOptions is namespaced).
-      messages: [systemMessage(system), ...modelMessages],
+      messages: [aiSdkCachedSystemMessage(system), ...modelMessages],
       tools: mcp ? mcp.tools : undefined,
       stopWhen: stepCountIs(CHAT_MAX_STEPS),
-      prepareStep: ({ stepNumber }) => {
-        if (!isFinalChatStep(stepNumber, CHAT_MAX_STEPS)) return undefined;
-        toolStepBudgetReached = true;
-        return {
-          activeTools: [],
-          toolChoice: "none" as const,
-          messages: [systemMessage(appendFinalStepSystemPrompt(system)), ...modelMessages],
-        };
-      },
+      prepareStep: ({ stepNumber }) =>
+        prepareAiSdkChatStep({
+          stepNumber,
+          system,
+          modelMessages,
+          markToolStepBudgetReached: () => {
+            toolStepBudgetReached = true;
+          },
+        }),
       experimental_repairToolCall: repairStringifiedToolCall,
       // Decoupled from the request connection (see `generation` above): a client
       // disconnect must not cancel generation; only an explicit stop does.

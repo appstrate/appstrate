@@ -9,7 +9,12 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { applyOperationIndexPolicy } from "../src/chat-stream.ts";
+import { CHAT_FINAL_STEP_SYSTEM_PROMPT } from "@appstrate/core/chat-turn-metadata";
+import {
+  aiSdkCachedSystemMessage,
+  applyOperationIndexPolicy,
+  prepareAiSdkChatStep,
+} from "../src/chat-stream.ts";
 
 const HEADING = "## Operation index";
 const BASE = "You are a helpful assistant.\n\nSome MCP instructions here.";
@@ -32,5 +37,56 @@ describe("applyOperationIndexPolicy", () => {
 
   it("is a no-op when there is no index to strip", () => {
     expect(applyOperationIndexPolicy(BASE, "mistral-conversations")).toBe(BASE);
+  });
+});
+
+describe("prepareAiSdkChatStep", () => {
+  const modelMessages = [{ role: "user", content: "hello" }] as Parameters<
+    typeof prepareAiSdkChatStep
+  >[0]["modelMessages"];
+
+  it("keeps ordinary steps unchanged", () => {
+    let reached = false;
+    const step = prepareAiSdkChatStep({
+      stepNumber: 14,
+      system: BASE,
+      modelMessages,
+      markToolStepBudgetReached: () => {
+        reached = true;
+      },
+    });
+
+    expect(step).toBeUndefined();
+    expect(reached).toBe(false);
+  });
+
+  it("disables tools and replaces messages on the reserved final step", () => {
+    let reached = false;
+    const step = prepareAiSdkChatStep({
+      stepNumber: 15,
+      system: BASE,
+      modelMessages,
+      markToolStepBudgetReached: () => {
+        reached = true;
+      },
+    });
+
+    expect(reached).toBe(true);
+    expect(step).toEqual({
+      activeTools: [],
+      toolChoice: "none",
+      messages: [
+        aiSdkCachedSystemMessage(`${BASE}\n\n${CHAT_FINAL_STEP_SYSTEM_PROMPT}`),
+        ...modelMessages,
+      ],
+    });
+  });
+
+  it("marks the system message as Anthropic-cacheable", () => {
+    expect(aiSdkCachedSystemMessage(BASE)).toEqual({
+      role: "system",
+      content: BASE,
+      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+    });
   });
 });
