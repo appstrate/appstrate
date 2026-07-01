@@ -11,10 +11,14 @@ export function MarkdownText() {
       remarkPlugins={[remarkGfm]}
       className="prose prose-sm dark:prose-invert max-w-none break-words [&_code]:text-[0.85em] [&_pre]:rounded-md [&_pre]:p-3 [&_pre]:text-xs"
       components={{
-        a: ({ node: _node, href, children: _children, ...props }) => {
+        a: ({ node: _node, href, children, ...props }) => {
           // Open links in a new tab so a click never navigates the chat SPA
           // away — the conversation stays mounted.
-          return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
+          return (
+            <a {...props} href={href} target="_blank" rel="noopener noreferrer">
+              {children}
+            </a>
+          );
         },
       }}
     />
