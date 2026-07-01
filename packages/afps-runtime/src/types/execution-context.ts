@@ -120,7 +120,7 @@ export const executionContextSchema = z.object({
    * than letting the platform kill the container and surface a generic
    * abort. Absent ⇒ no runner-side enforcement (platform safety net only).
    */
-  timeoutSeconds: z.number().finite().positive().optional(),
+  timeoutSeconds: z.number().positive().optional(),
 });
 
 export type ExecutionContext = z.infer<typeof executionContextSchema>;
