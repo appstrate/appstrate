@@ -235,7 +235,7 @@ export function ToolCallCard({
 type AnyToolProps = ToolCallMessagePartProps<Record<string, unknown>, unknown>;
 
 /**
- * Render run-launch tool calls as a live run panel once the result exposes `run_...`.
+ * Render run-launch tool calls as in-chat run progress once the result exposes `run_...`.
  */
 function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.ReactNode {
   const unwrapped = unwrapResult(props.result);
@@ -321,7 +321,7 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       />
     );
 
-    // Run launch (runAgent / runInline) → rich live run panel. These return the
+    // Run launch (runAgent / runInline) → rich in-chat run progress. These return the
     // run id immediately in the result, so no discovery is needed.
     if (isRunLaunchOp(opId)) return buildRunLaunch(props, extractRunId(result));
 

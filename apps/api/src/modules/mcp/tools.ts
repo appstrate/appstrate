@@ -720,14 +720,14 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
     description:
       'Launch a run and wait for its final status in one call: starts an agent run (`kind:"agent"`, ' +
       'by `scope`/`name`) or an inline run (`kind:"inline"`, by `manifest`+`prompt`), exposes ' +
-      "the created run to chat for live logs, then returns " +
+      "the created run to chat for live progress, then returns " +
       "`{ id, packageId, status, done:true, result?, error? }` when the run reaches a terminal " +
       "status. Do NOT call `getRun` after this tool just to wait for completion; this tool already " +
       "waits. The chat shows logs after the run id is known, but ONLY lines the run emits " +
       "through the `log` runtime tool. For an " +
       'inline run (`kind:"inline"`) you MUST therefore (1) declare `"runtime_tools": ["log"]` in ' +
       "the manifest AND (2) instruct the run, in its `prompt`, to call the `log` " +
-      "tool to report each meaningful step — otherwise the live panel stays empty. " +
+      "tool to report each meaningful step — otherwise the in-chat run progress component stays empty. " +
       "Prefer an existing agent over an inline manifest when one matches the intent.",
     annotations: {
       title: "Run and wait",

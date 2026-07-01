@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pure (React-free, unit-testable) helpers for the in-chat run panel.
+ * Pure (React-free, unit-testable) helpers for the in-chat run progress component.
  *
  * When the assistant launches a run — via `invoke_operation(runAgent|runInline)`
  * or the bundled `run_and_wait` tool — the result carries the created run's
@@ -91,7 +91,7 @@ export type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
  * envelope is `{ status, body }` (the run resource lives in `body`); the
  * bundled `run_and_wait` tool returns the run resource at the top level. Try
  * `body.id` first, then a top-level `id`. Guarded to `run_`-prefixed strings
- * so an unrelated id (e.g. a connection id) can never spin up a run panel.
+ * so an unrelated id (e.g. a connection id) can never spin up run progress UI.
  */
 export function extractRunId(result: unknown): string | undefined {
   const unwrapped = asRecord(unwrapResult(result));
@@ -174,7 +174,7 @@ export function mergeLogs(
 
 /**
  * Build the per-run SSE URL. Returns `undefined` when org/app context is
- * missing (the caller then renders the static card instead of a live panel).
+ * missing (the caller then renders the static card instead of live run progress).
  * `verbose=true` is REQUIRED: the server strips `run_log.data` for non-verbose
  * subscribers, so without it the panel would show empty lines.
  */

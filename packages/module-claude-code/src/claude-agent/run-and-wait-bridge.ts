@@ -78,7 +78,7 @@ export class RunAndWaitBridge {
     tools: [
       tool(
         RUN_AND_WAIT_MCP_TOOL_NAME,
-        "Launch an Appstrate agent or inline run, stream the run panel live, and wait for the final run status before returning.",
+        "Launch an Appstrate agent or inline run, stream run progress in chat, and wait for the final run status before returning.",
         runAndWaitInputSchema,
         async (args) => this.execute(args),
         {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * In-chat run panel. Rendered for every run-launch tool-call (`runAgent` /
+ * In-chat run progress component. Rendered for every run-launch tool-call (`runAgent` /
  * `runInline` / `run_and_wait`) — from the moment it starts, before the run id
  * is even known — so the card keeps a constant two-line height with no
  * transient "Lancement…" placeholder swap.
