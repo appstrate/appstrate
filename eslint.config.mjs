@@ -229,6 +229,9 @@ export default tseslint.config(
           // the factory so Fast Refresh treats those exports as components, the
           // sanctioned mechanism the rule offers for HOC factories.
           extraHOCs: ["makeAssistantToolUI"],
+          // Public shadcn-style design-system helpers exported from component
+          // entrypoints. Keep the API stable while avoiding Fast Refresh noise.
+          allowExportNames: ["badgeVariants", "buttonVariants", "useSidebar"],
         },
       ],
       // Re-render robustness: the React Compiler rules above check Rules-of-React

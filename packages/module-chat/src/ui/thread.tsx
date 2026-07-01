@@ -239,10 +239,7 @@ function ThinkingIndicator() {
 }
 
 function TurnLimitNotice() {
-  const reached = useMessage((m) => {
-    const raw = (m as { content?: unknown }).content ?? m;
-    return turnLimitReached(raw);
-  });
+  const reached = useMessage((m) => turnLimitReached(m));
   if (!reached) return null;
   return (
     <div className="text-muted-foreground mt-3 flex items-center gap-2 text-xs" role="status">

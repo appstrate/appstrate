@@ -26,7 +26,12 @@
 import { query, type CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { buildClaudeSdkEnv, CLAUDE_SDK_HARDENING } from "@appstrate/runner-claude/binary";
 import { RUN_AND_WAIT_MAX_MS } from "@appstrate/core/run-and-wait-client";
-import { mergeTurnMetadata } from "@appstrate/core/chat-turn-metadata";
+import {
+  CHAT_MAX_STEPS,
+  CHAT_TOOL_STEP_BUDGET,
+  CHAT_TOOL_STEP_BUDGET_DENIAL,
+  mergeTurnMetadata,
+} from "@appstrate/core/chat-turn-metadata";
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { createLogger } from "@appstrate/core/logger";
 import type { ChatEngineInput } from "@appstrate/core/chat-engine-contract";
@@ -37,13 +42,9 @@ import {
   createRunAndWaitBridge,
   RUN_AND_WAIT_MCP_QUALIFIED_TOOL_NAME,
   RUN_AND_WAIT_MCP_SERVER_NAME,
-  type RunAndWaitBridge,
 } from "./run-and-wait-bridge.ts";
 
 const logger = createLogger(process.env.LOG_LEVEL ?? "info");
-
-/** Upper bound on agent turns per chat message (mirrors the ai-sdk path's MAX_STEPS). */
-const MAX_TURNS = 16;
 
 /**
  * Wall-clock deadline for one chat turn. `maxTurns` bounds the agent loop, but a
@@ -74,11 +75,36 @@ function buildMcpServers(
   return Object.keys(servers).length > 0 ? servers : undefined;
 }
 
-function buildRunAndWaitCanUseTool(
-  runAndWaitBridge: RunAndWaitBridge | null,
+interface RunAndWaitPermissionBridge {
+  handleToolPermission(
+    toolName: string,
+    input: Record<string, unknown>,
+    toolUseID: string | undefined,
+  ): void;
+}
+
+interface ToolTurnBudget {
+  currentTurnCount: () => number;
+  markToolStepBudgetReached: () => void;
+}
+
+export function buildRunAndWaitCanUseTool(
+  runAndWaitBridge: RunAndWaitPermissionBridge | null,
+  budget: ToolTurnBudget,
 ): CanUseTool | undefined {
   if (!runAndWaitBridge) return undefined;
   return async (toolName, toolInput, options) => {
+    // The Claude Agent SDK cannot hide MCP tools for a specific turn before
+    // generation. Deny the first tool request on the reserved final-tool-budget
+    // turn so the denial is fed back and the remaining turn can produce text.
+    if (budget.currentTurnCount() >= CHAT_TOOL_STEP_BUDGET) {
+      budget.markToolStepBudgetReached();
+      return {
+        behavior: "deny",
+        message: CHAT_TOOL_STEP_BUDGET_DENIAL,
+        toolUseID: options.toolUseID,
+      };
+    }
     runAndWaitBridge.handleToolPermission(toolName, toolInput, options.toolUseID);
     return { behavior: "allow", toolUseID: options.toolUseID };
   };
@@ -109,6 +135,7 @@ export function runClaudeAgentChat(input: ChatEngineInput): Response {
   (deadline as unknown as { unref?: () => void }).unref?.();
 
   const mapper = new SdkUiStreamMapper();
+  let toolStepBudgetReached = false;
 
   try {
     const stream = createUIMessageStream({
@@ -140,7 +167,12 @@ export function runClaudeAgentChat(input: ChatEngineInput): Response {
               systemPrompt: input.system,
               tools: [], // disable ALL built-ins — chat must not get host execution
               mcpServers: buildMcpServers(input, runAndWaitBridge?.mcpServer) as never,
-              canUseTool: buildRunAndWaitCanUseTool(runAndWaitBridge),
+              canUseTool: buildRunAndWaitCanUseTool(runAndWaitBridge, {
+                currentTurnCount: () => mapper.stepCount(),
+                markToolStepBudgetReached: () => {
+                  toolStepBudgetReached = true;
+                },
+              }),
               disallowedTools: runAndWaitBridge ? ["mcp__platform__run_and_wait"] : undefined,
               toolAliases: runAndWaitBridge
                 ? {
@@ -150,7 +182,7 @@ export function runClaudeAgentChat(input: ChatEngineInput): Response {
                 : undefined,
               includePartialMessages: true,
               ...CLAUDE_SDK_HARDENING,
-              maxTurns: MAX_TURNS,
+              maxTurns: CHAT_MAX_STEPS,
               abortController: controller,
             },
           });
@@ -176,8 +208,10 @@ export function runClaudeAgentChat(input: ChatEngineInput): Response {
                   engine: "subscription",
                   finishReason: meta?.finishReason ?? "unknown",
                   stepCount: mapper.stepCount(),
-                  maxSteps: MAX_TURNS,
-                  maxStepsReached: mapper.stepCount() >= MAX_TURNS,
+                  maxSteps: CHAT_MAX_STEPS,
+                  toolStepBudget: CHAT_TOOL_STEP_BUDGET,
+                  toolStepBudgetReached,
+                  maxStepsReached: mapper.stepCount() >= CHAT_MAX_STEPS,
                   ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
                 },
               ),

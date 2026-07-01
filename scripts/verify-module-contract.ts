@@ -201,6 +201,7 @@ async function scanDeclarers(): Promise<{
 
 const problems: string[] = []; // hard failures — derived from the reviewed ledger
 const warnings: string[] = []; // soft hints — derived from the best-effort source scan
+const notes: string[] = []; // informational context — valid today, no action required
 
 const { observed, present: presentModules } = await scanDeclarers();
 
@@ -232,7 +233,7 @@ for (const [member, entry] of Object.entries(LEDGER) as [ContractMember, LedgerE
     } else {
       const tenants = new Set(entry.owners.map((o) => MODULE_TENANT[o] ?? "oss"));
       if (tenants.size < 2) {
-        warnings.push(
+        notes.push(
           `\`${member}\` has ${ownerCount} owners but all in one license tenant (${[...tenants][0]}). ` +
             `Fine today; becomes single-owner if those owners consolidate.`,
         );
@@ -277,6 +278,7 @@ for (const [member, entry] of Object.entries(LEDGER) as [ContractMember, LedgerE
   }
 }
 
+for (const n of notes) console.log(`ℹ️  ${n}`);
 for (const w of warnings) console.warn(`⚠️  ${w}`);
 for (const p of problems) console.error(`❌ ${p}`);
 
