@@ -223,7 +223,7 @@ export async function resolveVersion(packageId: string, query: string): Promise<
 /** Get a version row suitable for download (via 3-step resolution). Returns null if not found. */
 export async function getVersionForDownload(
   packageId: string,
-  versionQuery: string,
+  versionSpec: string,
 ): Promise<{
   id: number;
   version: string;
@@ -231,7 +231,7 @@ export async function getVersionForDownload(
   artifactSize: number;
   yanked: boolean;
 } | null> {
-  const versionId = await resolveVersion(packageId, versionQuery);
+  const versionId = await resolveVersion(packageId, versionSpec);
   if (!versionId) return null;
 
   const [row] = await db
@@ -272,9 +272,9 @@ interface VersionDetail {
  */
 export async function getVersionDetail(
   packageId: string,
-  versionQuery: string,
+  versionSpec: string,
 ): Promise<VersionDetail | null> {
-  const versionId = await resolveVersion(packageId, versionQuery);
+  const versionId = await resolveVersion(packageId, versionSpec);
   if (!versionId) return null;
 
   const [row] = await db

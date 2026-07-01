@@ -74,7 +74,7 @@ export async function buildBundleFromUploadedAfps(
  * Resolve the version of a package that should be exported.
  *
  * Resolution order:
- *   1. Explicit `versionQuery` (exact / dist-tag / semver range) — fails
+ *   1. Explicit `versionSpec` (exact / dist-tag / semver range) — fails
  *      with 404 if unresolvable.
  *   2. The version currently installed in the app (`application_packages.version_id`).
  *   3. The `"latest"` dist-tag of the package.
@@ -85,19 +85,19 @@ export async function buildBundleFromUploadedAfps(
 export async function resolveExportVersion(
   packageId: string,
   scope: BundleAssemblyScope,
-  versionQuery?: string | null,
+  versionSpec?: string | null,
 ): Promise<string> {
-  if (versionQuery) {
-    const versionId = await resolveVersion(packageId, versionQuery);
+  if (versionSpec) {
+    const versionId = await resolveVersion(packageId, versionSpec);
     if (!versionId) {
-      throw notFound(`Version '${versionQuery}' not found for '${packageId}'`);
+      throw notFound(`Version '${versionSpec}' not found for '${packageId}'`);
     }
     const [row] = await db
       .select({ version: packageVersions.version })
       .from(packageVersions)
       .where(eq(packageVersions.id, versionId))
       .limit(1);
-    if (!row) throw notFound(`Version '${versionQuery}' not found for '${packageId}'`);
+    if (!row) throw notFound(`Version '${versionSpec}' not found for '${packageId}'`);
     return row.version;
   }
 
@@ -143,9 +143,9 @@ export async function resolveExportVersion(
 export async function buildBundleForAgentExport(
   packageId: string,
   scope: BundleAssemblyScope,
-  opts: { versionQuery?: string | null; metadata?: BundleMetadata } = {},
+  opts: { versionSpec?: string | null; metadata?: BundleMetadata } = {},
 ): Promise<Bundle> {
-  const version = await resolveExportVersion(packageId, scope, opts.versionQuery);
+  const version = await resolveExportVersion(packageId, scope, opts.versionSpec);
   const zip = await downloadVersionZip(packageId, version);
   if (!zip) {
     throw notFound(`Artifact missing for '${packageId}@${version}'`);
