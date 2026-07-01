@@ -137,16 +137,19 @@ describe("realtime SSE routes (integration)", () => {
         package_id: agentPkg.id,
       });
 
-      // Collect: first event should be ping (from keep-alive), then our run_update
-      // But ping has 30s delay, so the run_update should arrive first
-      const events = await collectSSEEvents(res.body!, 1, {
+      // The endpoint emits an initial run_update snapshot (status "pending")
+      // on subscribe before any live event, so collect both frames and pick
+      // the live one carrying the injected status.
+      const events = await collectSSEEvents(res.body!, 2, {
         timeoutMs: 3000,
         ignoreEvents: ["ping"],
       });
-      expect(events.length).toBe(1);
-      expect(events[0]!.event).toBe("run_update");
+      const frame = events.find(
+        (e) => e.event === "run_update" && JSON.parse(e.data).status === "running",
+      );
+      expect(frame).toBeDefined();
 
-      const data = JSON.parse(events[0]!.data);
+      const data = JSON.parse(frame!.data);
       expect(data.id).toBe(run.id);
       expect(data.status).toBe("running");
       expect(data.orgId).toBe(ctx.orgId);
@@ -325,14 +328,17 @@ describe("realtime SSE routes (integration)", () => {
         package_id: agentPkg.id,
       });
 
-      const events = await collectSSEEvents(res.body!, 1, {
+      // Skip the initial "pending" snapshot; assert on the injected terminal frame.
+      const events = await collectSSEEvents(res.body!, 2, {
         timeoutMs: 3000,
         ignoreEvents: ["ping"],
       });
-      expect(events.length).toBe(1);
-      expect(events[0]!.event).toBe("run_update");
+      const frame = events.find(
+        (e) => e.event === "run_update" && JSON.parse(e.data).status === "success",
+      );
+      expect(frame).toBeDefined();
 
-      const data = JSON.parse(events[0]!.data);
+      const data = JSON.parse(frame!.data);
       expect(data.id).toBe(run.id);
       expect(data.status).toBe("success");
     });
@@ -377,13 +383,15 @@ describe("realtime SSE routes (integration)", () => {
         data: { verbose: "details" },
       });
 
-      const events = await collectSSEEvents(res.body!, 1, {
+      // Skip the initial run_update snapshot; assert on the injected run_log.
+      const events = await collectSSEEvents(res.body!, 2, {
         timeoutMs: 3000,
         ignoreEvents: ["ping"],
       });
-      expect(events[0]!.event).toBe("run_log");
+      const frame = events.find((e) => e.event === "run_log");
+      expect(frame).toBeDefined();
 
-      const data = JSON.parse(events[0]!.data);
+      const data = JSON.parse(frame!.data);
       // stripPayload removes "data" for run_log in non-verbose mode
       expect(data).not.toHaveProperty("data");
       expect(data.message).toBe("processing");
@@ -405,11 +413,16 @@ describe("realtime SSE routes (integration)", () => {
         duration: 1234,
       });
 
-      const events = await collectSSEEvents(res.body!, 1, {
+      // Skip the initial "pending" snapshot; assert on the injected terminal frame.
+      const events = await collectSSEEvents(res.body!, 2, {
         timeoutMs: 3000,
         ignoreEvents: ["ping"],
       });
-      const data = JSON.parse(events[0]!.data);
+      const frame = events.find(
+        (e) => e.event === "run_update" && JSON.parse(e.data).status === "success",
+      );
+      expect(frame).toBeDefined();
+      const data = JSON.parse(frame!.data);
       // run_update is never stripped (it carries no large user-content field),
       // so verbose mode delivers the complete validated frame untouched —
       // including non-default and nullable fields.
@@ -437,13 +450,15 @@ describe("realtime SSE routes (integration)", () => {
         data: { detail: "full-info" },
       });
 
-      const events = await collectSSEEvents(res.body!, 1, {
+      // Skip the initial run_update snapshot; assert on the injected run_log.
+      const events = await collectSSEEvents(res.body!, 2, {
         timeoutMs: 3000,
         ignoreEvents: ["ping"],
       });
-      expect(events[0]!.event).toBe("run_log");
+      const frame = events.find((e) => e.event === "run_log");
+      expect(frame).toBeDefined();
 
-      const data = JSON.parse(events[0]!.data);
+      const data = JSON.parse(frame!.data);
       expect(data.data).toEqual({ detail: "full-info" });
     });
   });

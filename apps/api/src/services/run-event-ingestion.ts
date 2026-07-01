@@ -717,6 +717,19 @@ export async function synthesiseFinalize(
   if (terminal.error) result.error = terminal.error;
   if (terminal.durationMs !== undefined) result.durationMs = terminal.durationMs;
 
+  // The synthesis path carries no runner-posted `result.usage` (the container
+  // exited without POSTing its own finalize). Reconstruct the terminal usage
+  // from the `runs.tokenUsage` column the `appstrate.metric` side-channel wrote
+  // during the run so the zero-token liveness heuristic in `finalizeRun` sees
+  // the tokens that were actually consumed — otherwise a synthesised `success`
+  // for a run that DID reach the LLM is wrongly flipped to `failed`.
+  const [row] = await db
+    .select({ tokenUsage: runs.tokenUsage })
+    .from(runs)
+    .where(eq(runs.id, runId))
+    .limit(1);
+  if (row?.tokenUsage) result.usage = row.tokenUsage;
+
   await finalizeRun({ run, result });
 }
 
