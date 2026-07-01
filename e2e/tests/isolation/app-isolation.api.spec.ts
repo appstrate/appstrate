@@ -372,34 +372,25 @@ test.describe("Cross-app resource isolation", () => {
   // ─── End-user creation scoping ────────────
 
   test.describe("End-user creation scoping", () => {
-    test("POST /end-users ignores applicationId in body — always uses X-Application-Id", async ({
-      request,
+    test("POST /end-users rejects applicationId in body", async ({
       apiClient: clientA,
-      orgContext,
       orgOnlyClient,
     }) => {
       const appB = await createApplication(orgOnlyClient, `AppB-eu-body-${Date.now()}`);
-      const clientB = createApiClient(request, {
-        cookie: orgContext.auth.cookie,
-        orgId: orgContext.org.orgId,
-        applicationId: appB.id,
-      });
 
-      // Create end-user from AppA context, but sneak appB's ID in the body
+      // App scoping is taken from X-Application-Id; body-level applicationId is
+      // rejected so clients cannot rely on a silently ignored override.
       const res = await clientA.post("/end-users", {
         name: "Body Override Test",
         applicationId: appB.id,
       });
-      expect(res.status()).toBe(201);
-      const eu = await res.json();
-
-      // The end-user should belong to AppA (the X-Application-Id), not AppB
-      const resA = await clientA.get(`/end-users/${eu.id}`);
-      expect(resA.status()).toBe(200);
-
-      // AppB should NOT see this end-user
-      const resB = await clientB.get(`/end-users/${eu.id}`);
-      expect(resB.status()).toBe(404);
+      expect(res.status()).toBe(400);
+      const body = (await res.json()) as {
+        code?: string;
+        errors?: Array<{ code?: string; message?: string }>;
+      };
+      expect(body.code).toBe("validation_failed");
+      expect(body.errors?.some((e) => e.code === "unknown_field")).toBe(true);
     });
   });
 
