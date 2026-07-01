@@ -183,6 +183,19 @@ export function parseRunUpdateFrame(raw: string): RunUpdateLite | undefined {
 }
 
 /**
+ * Parse a `GET /api/runs/:id` run resource down to the same lifecycle subset as
+ * a `run_update` frame (the resource is a superset — extra fields are dropped).
+ * Used to seed the run badge immediately on a mid-run reload, instead of waiting
+ * for the SSE snapshot: the persisted `run_and_wait` result only carries the
+ * transient launch status (`pending`), so without this the card would read
+ * "Lancement" for an already-running run until the first live frame arrives.
+ */
+export function parseRunResource(body: unknown): RunUpdateLite | undefined {
+  const parsed = runUpdateLiteSchema.safeParse(body);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/**
  * Parse the `GET /runs/:id/logs` list envelope (`{ object:"list", data, … }`)
  * into log lines, dropping any malformed row rather than failing the batch.
  */

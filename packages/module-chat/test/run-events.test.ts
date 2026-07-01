@@ -14,6 +14,7 @@ import {
   orgAppFromHeaders,
   parseLogListResponse,
   parseRunLogFrame,
+  parseRunResource,
   parseRunUpdateFrame,
   safeJsonParse,
   shouldRenderRunLaunchPanel,
@@ -93,6 +94,28 @@ describe("run-events helpers", () => {
     expect(update?.status).toBe("running");
     expect(update?.packageId).toBe("@inline/run");
     expect(parseRunUpdateFrame(JSON.stringify({ id: "run_1" }))).toBeUndefined();
+  });
+
+  it("parses a GET /runs/:id run resource down to the lifecycle subset", () => {
+    // A running run's resource carries extra fields (agent_scope, cost, …) that
+    // the lifecycle subset drops. This is what seeds the badge on a mid-run
+    // reload so it reads the live status, not the persisted "pending".
+    const run = parseRunResource({
+      id: "run_1",
+      status: "running",
+      packageId: "@inline/run",
+      startedAt: "2026-06-30T00:00:00Z",
+      completedAt: null,
+      duration: null,
+      agentScope: "@inline",
+      cost: 0,
+    });
+    expect(run?.status).toBe("running");
+    expect(run?.packageId).toBe("@inline/run");
+    expect(run?.startedAt).toBe("2026-06-30T00:00:00Z");
+    // Malformed body (no status) → undefined, so the seed is skipped.
+    expect(parseRunResource({ id: "run_1" })).toBeUndefined();
+    expect(parseRunResource(null)).toBeUndefined();
   });
 
   it("parses, merges, and filters log rows", () => {

@@ -25,6 +25,7 @@ import {
   orgAppFromHeaders,
   parseLogListResponse,
   parseRunLogFrame,
+  parseRunResource,
   parseRunUpdateFrame,
   type RunLogLine,
   type RunStatus,
@@ -92,6 +93,32 @@ export function useRunLogStream(
         });
         if (!res.ok || cancelled) return;
         apply(parseLogListResponse(await res.json()));
+      } catch {
+        // ignore — SSE remains the source of truth
+      }
+    })();
+
+    // 1b. One-shot current-status fetch (best-effort). On a mid-run reload the
+    //     persisted launch result only holds the transient `pending`, so the
+    //     badge would read "Lancement" until the SSE snapshot lands. Seed the
+    //     live lifecycle fields from the run resource so the card is correct
+    //     immediately. Every setter is a `prev ?? …` merge, so a live
+    //     `run_update` frame that arrives first always wins.
+    void (async () => {
+      try {
+        const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`, {
+          headers,
+          credentials: "include",
+        });
+        if (!res.ok || cancelled) return;
+        const run = parseRunResource(await res.json());
+        if (!run || cancelled) return;
+        setStatus((prev) => prev ?? (run.status as RunStatus));
+        if (run.packageId) setPackageId((prev) => prev ?? run.packageId ?? undefined);
+        if (run.startedAt) setStartedAt((prev) => prev ?? run.startedAt ?? undefined);
+        if (run.completedAt) setCompletedAt((prev) => prev ?? run.completedAt ?? undefined);
+        if (typeof run.duration === "number")
+          setDuration((prev) => prev ?? run.duration ?? undefined);
       } catch {
         // ignore — SSE remains the source of truth
       }
