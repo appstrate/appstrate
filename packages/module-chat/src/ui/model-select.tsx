@@ -114,10 +114,7 @@ export function ModelSelect({ models, selectedId, onSelect }: Props) {
         title="Modèle"
       >
         {active ? (
-          <>
-            <span className="text-muted-foreground shrink-0">{providerLabel(active)}</span>
-            <span className="truncate font-medium">{active.label ?? active.modelId}</span>
-          </>
+          <span className="truncate font-medium">{active.label ?? active.modelId}</span>
         ) : (
           <span className="font-medium">Modèle</span>
         )}
