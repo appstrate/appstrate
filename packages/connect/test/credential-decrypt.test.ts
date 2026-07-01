@@ -81,10 +81,9 @@ describe("decryptCredentialsToStringMap — outputs-only projection", () => {
     expect(outputs).toEqual({ access_token: "TOK" });
   });
 
-  it("reads a legacy v1 flat blob as all-outputs", () => {
-    const v1 = encryptCredentials({ access_token: "at_123", refresh_token: "rt_456" });
-    const outputs = decryptCredentialsToStringMap(v1);
-    expect(outputs).toEqual({ access_token: "at_123", refresh_token: "rt_456" });
+  it("rejects a flat encrypted blob", () => {
+    const flat = encryptCredentials({ access_token: "at_123", refresh_token: "rt_456" });
+    expect(() => decryptCredentialsToStringMap(flat)).toThrow();
   });
 });
 
@@ -101,9 +100,9 @@ describe("decryptCredentialInputsToStringMap — inputs-only projection", () => 
     expect(inputs).not.toHaveProperty("JSESSIONID");
   });
 
-  it("reads a legacy v1 flat blob as empty-inputs", () => {
-    const v1 = encryptCredentials({ access_token: "at_123", refresh_token: "rt_456" });
-    expect(decryptCredentialInputsToStringMap(v1)).toEqual({});
+  it("rejects a flat encrypted blob", () => {
+    const flat = encryptCredentials({ access_token: "at_123", refresh_token: "rt_456" });
+    expect(() => decryptCredentialInputsToStringMap(flat)).toThrow();
   });
 
   it("drops non-string input values during projection", () => {

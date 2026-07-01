@@ -34,6 +34,7 @@
   ],
   "exports": {
     "./schema-form": "./src/schema-form/index.tsx",
+    "./components/sidebar-context": "./src/components/sidebar-context.ts",
     "./components/*": "./src/components/*.tsx",
     "./cn": "./src/cn.ts",
     "./use-mobile": "./src/use-mobile.ts",

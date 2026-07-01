@@ -31,7 +31,7 @@ import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { integrationConnections, runs } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 
@@ -101,7 +101,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
 
   /** Seed an api_key connection for the test user on the given integration. */
   async function seedConnection(integrationId: string) {
-    const ciphertext = encryptCredentials({ api_key: "live-secret-value" });
+    const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
     await db.insert(integrationConnections).values({
       integrationId: integrationId,
       authKey: "primary",
@@ -253,7 +253,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
   }
 
   async function seedConnection(integrationId: string) {
-    const ciphertext = encryptCredentials({ api_key: "live-secret-value" });
+    const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
     await db.insert(integrationConnections).values({
       integrationId: integrationId,
       authKey: "primary",

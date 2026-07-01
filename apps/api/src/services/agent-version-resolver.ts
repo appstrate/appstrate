@@ -9,8 +9,7 @@
  *
  *   - `"draft"`     → execute the live draft (`packages.draft_manifest` /
  *                     `draft_content`) — the editor working copy.
- *   - `"published"` → execute the latest published version (the `latest`
- *                     dist-tag, falling back to the highest version id).
+ *   - `"published"` → execute the version selected by the `latest` dist-tag.
  *                     404 `no_published_version` when nothing is published.
  *   - anything else → 3-step resolution (exact version → dist-tag → semver
  *                     range) via {@link getVersionDetail}. 404 when nothing
@@ -32,17 +31,16 @@
  * — same behavior the route always had.
  *
  * When a published version is selected, the returned `overrideVersionLabel`
- * carries the concrete semver: `buildRunContext` persists it as the run's
- * `version_label` with `version_dirty: false`, and the run serializer derives
- * `version_ref` from that pair (see `deriveVersionRef` in state/runs.ts).
+ * carries the concrete semver: run creation persists it as both the run's
+ * `version_label` and `version_ref`.
  *
  * Scope: this resolver pins the agent's OWN definition (manifest + prompt) to
  * the selected version. The transitive skill closure is pinned separately, on
  * the run hot path, by `RunPackageCatalog` (#666) — it resolves each
  * `dependencies.skills` entry against PUBLISHED versions honoring the manifest
  * pin, so a dependency's mutable draft never leaks into a run. Integration /
- * mcp-server spawns are resolved by the sidecar and remain the open follow-up
- * (#686).
+ * mcp-server spawns are frozen by the shared run-pipeline dependency resolver
+ * before the sidecar receives its spawn plan (#686).
  */
 
 import { ApiError, notFound } from "../lib/errors.ts";
@@ -63,8 +61,8 @@ export interface ResolvedRunAgent {
   agent: LoadedPackage;
   /**
    * Concrete semver of the executed published version. Undefined when the
-   * draft runs — `buildRunContext` then derives `version_label` +
-   * `version_dirty` from the latest-version heuristic as before.
+   * draft runs — run creation then records `version_ref: "draft"` and keeps
+   * `version_label` as the latest published base when one exists.
    */
   overrideVersionLabel?: string;
 }

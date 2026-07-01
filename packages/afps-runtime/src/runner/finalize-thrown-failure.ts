@@ -74,11 +74,9 @@ export interface FinalizeThrownFailureOptions {
   eventSink: FinalizeSink;
   /**
    * Runner-sourced token-usage snapshot stamped onto the failed result.
-   * Pass `undefined` to leave `result.usage` unset — the Pi runner does this
-   * when the session bridge was never captured (a very early throw), so the
-   * failed result carries no usage rather than a spurious zero snapshot.
+   * Very early failures must pass an explicit zero snapshot.
    */
-  usage: TokenUsage | undefined;
+  usage: TokenUsage;
   /**
    * Builds the {@link RunError} attached to the reduced result. Defaults to
    * `{ message, stack }`; Codex overrides to `{ code: "adapter_error", message }`.
@@ -94,7 +92,7 @@ export interface FinalizeThrownFailureOptions {
    */
   terminalStatus?: NonNullable<RunResult["status"]>;
   /** Extra terminal stamping (cost / durationMs) applied after `usage`. */
-  stamp?: (result: RunResult, usage: TokenUsage | undefined) => void;
+  stamp?: (result: RunResult, usage: TokenUsage) => void;
   /** Transform applied to the emitted error event AND the terminal result. Defaults to identity. */
   transform?: <T>(value: T) => T;
 }
@@ -144,7 +142,7 @@ export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions):
   //    partial canonical output the agent emitted before the throw survives.
   const result = reduceEvents(events, { error: resultError });
   if (opts.setFailedStatus !== false) result.status = opts.terminalStatus ?? "failed";
-  if (usage !== undefined) result.usage = usage;
+  result.usage = usage;
   opts.stamp?.(result, usage);
   await eventSink.finalize(transform(result));
 }

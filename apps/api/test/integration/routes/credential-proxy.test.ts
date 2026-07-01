@@ -28,7 +28,7 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
 import { applicationPackages, integrationConnections } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   localIntegrationManifest,
@@ -99,7 +99,7 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
     accountId: "acct-1",
     applicationId: ctx.defaultAppId,
     userId: ctx.user.id,
-    credentialsEncrypted: encryptCredentials({ api_key: "ya29.live-token" }),
+    credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "ya29.live-token" } }),
     scopesGranted: [],
     sharedWithOrg: false,
   });

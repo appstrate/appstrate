@@ -241,7 +241,9 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       resolvedConnections,
       dependencyOverrides: input.dependencyOverrides ?? null,
       resolvedIntegrationVersions,
-      ...(overrideVersionLabel ? { versionLabel: overrideVersionLabel } : {}),
+      ...(overrideVersionLabel
+        ? { versionLabel: overrideVersionLabel, versionRef: overrideVersionLabel }
+        : { versionRef: "draft" }),
       ...(contextSnapshot !== undefined ? { contextSnapshot } : {}),
       runnerName: input.runnerName ?? null,
       runnerKind: input.runnerKind ?? null,

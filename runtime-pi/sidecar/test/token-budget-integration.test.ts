@@ -22,9 +22,6 @@
  *     runtime can react to structured truncation events.
  *   - `run_history` and `recall_memory` honour the same gate as
  *     `api_call`.
- *   - Without a token budget configured, the legacy byte threshold
- *     remains in force (no regression for embedders that don't wire
- *     the budget).
  */
 
 import { describe, it, expect, mock } from "bun:test";
@@ -120,7 +117,7 @@ interface CallToolResult {
  */
 async function buildTestApp(opts: {
   deps: AppDeps;
-  tokenBudget?: TokenBudget;
+  tokenBudget: TokenBudget;
   blobStore?: BlobStore;
 }): Promise<Hono> {
   const app = new Hono();
@@ -145,11 +142,11 @@ async function buildTestApp(opts: {
         refreshCredentials: opts.deps.fetchCredentials,
       },
     ],
-    { proxyDeps, blobStore, ...(opts.tokenBudget ? { tokenBudget: opts.tokenBudget } : {}) },
+    { proxyDeps, blobStore, tokenBudget: opts.tokenBudget },
   );
   mountMcp(app, {
     blobStore,
-    ...(opts.tokenBudget ? { tokenBudget: opts.tokenBudget } : {}),
+    tokenBudget: opts.tokenBudget,
     additionalToolsProvider: () => host.buildTools(),
     proxyDeps,
   });
@@ -157,12 +154,11 @@ async function buildTestApp(opts: {
 }
 
 describe("token-aware spill — dense JSON (issue #390 primary)", () => {
-  // 30 KB of dense JSON ≈ 8572 tokens. Under the 32 KB legacy byte
-  // threshold but ABOVE a tight 4000-token inline cap. With the token
-  // budget configured, this MUST spill — the legacy byte path would
-  // have inlined it and burned 8.5 K of context for free.
+  // 30 KB of dense JSON ≈ 8572 tokens: above a tight 4000-token inline
+  // cap even though the raw byte size is modest. The token budget must
+  // spill it instead of burning 8.5 K of context inline.
 
-  it("spills 30 KB JSON when token cap is 4000 tokens (legacy byte path would inline)", async () => {
+  it("spills 30 KB JSON when token cap is 4000 tokens", async () => {
     const denseJson = JSON.stringify({ items: "x".repeat(30_000) });
     const fetchFn = mock(
       async () =>
@@ -453,67 +449,6 @@ describe("token-aware spill — applied to all platform tools", () => {
     expect(result.content[0]!.type).toBe("resource_link");
     const meta = result._meta?.[TOKEN_BUDGET_META_KEY] as BudgetMeta;
     expect(meta.decision).toBe("spill");
-  });
-});
-
-describe("token-aware spill — backwards compatibility", () => {
-  it("without a TokenBudget, the legacy byte threshold still applies", async () => {
-    // 40 KB > 32 KB legacy threshold. With no TokenBudget wired, this
-    // should still spill via the byte path.
-    const payload = "y".repeat(40 * 1024);
-    const fetchFn = mock(
-      async () =>
-        new Response(payload, {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    // Build app with NO tokenBudget passed — exercise the legacy path.
-    const app = await buildTestApp({
-      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
-    });
-
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "test__api_call",
-        arguments: {
-          target: "https://api.example.com/items",
-          method: "GET",
-        },
-      },
-    });
-    const result = res.json.result as CallToolResult;
-    expect(result.content[0]!.type).toBe("resource_link");
-    // No token-budget meta should be attached when the budget isn't wired.
-    expect(result._meta?.[TOKEN_BUDGET_META_KEY]).toBeUndefined();
-  });
-
-  it("without a TokenBudget, small responses inline as before", async () => {
-    const fetchFn = mock(
-      async () =>
-        new Response('{"ok":true}', {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    const app = await buildTestApp({
-      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
-    });
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "test__api_call",
-        arguments: {
-          target: "https://api.example.com/items",
-          method: "GET",
-        },
-      },
-    });
-    const result = res.json.result as CallToolResult;
-    expect(result.content[0]!.type).toBe("text");
-    expect(result.content[0]!.text).toBe('{"ok":true}');
-    expect(result._meta?.[TOKEN_BUDGET_META_KEY]).toBeUndefined();
   });
 });
 

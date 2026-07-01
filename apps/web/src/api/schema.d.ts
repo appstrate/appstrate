@@ -4548,7 +4548,175 @@ export interface components {
             };
         };
         /** @description AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema. Most extension fields use the x- prefix per AFPS §10, with the exception of the Appstrate-specific top-level `runtime_tools` field documented below. */
-        AgentManifest: components["schemas"]["agent.schema"] & {
+        AgentManifest: ({
+            name: string;
+            version: string;
+            /** @constant */
+            type: "agent";
+            display_name: string;
+            description?: string;
+            long_description?: string;
+            keywords?: string[];
+            license?: string;
+            author: string | ({
+                name: string;
+                email?: string;
+                url?: string;
+            } & {
+                [key: string]: unknown;
+            });
+            repository?: string | ({
+                type: string;
+                url: string;
+                directory?: string;
+            } & {
+                [key: string]: unknown;
+            });
+            homepage?: string;
+            documentation?: string;
+            support?: string;
+            icon?: string;
+            icons?: ({
+                src: string;
+                size?: string;
+                /** @enum {string} */
+                theme?: "light" | "dark" | "high-contrast";
+            } & {
+                [key: string]: unknown;
+            })[];
+            screenshots?: string[];
+            privacy_policies?: string[];
+            compatibility?: {
+                platforms?: ("darwin" | "win32" | "linux")[];
+                runtimes?: {
+                    [key: string]: string;
+                };
+                clients?: {
+                    [key: string]: string;
+                };
+            } & {
+                [key: string]: unknown;
+            };
+            /** @description AFPS schema version this manifest targets, in MAJOR.MINOR format (e.g. "0.0"). Distinct from the package "version" field, which uses full MAJOR.MINOR.PATCH semver. */
+            schema_version: string;
+            dependencies?: {
+                skills?: {
+                    [key: string]: string;
+                };
+                mcp_servers?: {
+                    [key: string]: string;
+                };
+                integrations?: {
+                    [key: string]: string;
+                };
+            } & {
+                [key: string]: unknown;
+            };
+            _meta?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+            integrations_configuration?: {
+                [key: string]: {
+                    tools?: string[] | "*";
+                    scopes?: string[];
+                    auth_key?: string;
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+            input?: {
+                schema: {
+                    [key: string]: unknown;
+                } & {
+                    /** @constant */
+                    type: "object";
+                };
+                file_constraints?: {
+                    [key: string]: {
+                        accept?: string;
+                        max_size?: number;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+                ui_hints?: {
+                    [key: string]: {
+                        placeholder?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+                property_order?: string[];
+                _meta?: {
+                    [key: string]: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            output?: {
+                schema: {
+                    [key: string]: unknown;
+                } & {
+                    /** @constant */
+                    type: "object";
+                };
+                file_constraints?: {
+                    [key: string]: {
+                        accept?: string;
+                        max_size?: number;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+                ui_hints?: {
+                    [key: string]: {
+                        placeholder?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+                property_order?: string[];
+                _meta?: {
+                    [key: string]: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            config?: {
+                schema: {
+                    [key: string]: unknown;
+                } & {
+                    /** @constant */
+                    type: "object";
+                };
+                file_constraints?: {
+                    [key: string]: {
+                        accept?: string;
+                        max_size?: number;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+                ui_hints?: {
+                    [key: string]: {
+                        placeholder?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+                property_order?: string[];
+                _meta?: {
+                    [key: string]: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            timeout?: number;
+        } & {
+            [key: string]: unknown;
+        }) & {
             /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. */
             runtime_tools?: ("output" | "log" | "note" | "pin" | "report")[];
         };
@@ -5127,8 +5295,6 @@ export interface components {
             scheduleId: string | null;
             /** @description Version label at run time (e.g. '1.0.0'). For draft runs this is the latest published version the draft sits on top of — read `version_ref` to know which definition actually executed. */
             version_label: string | null;
-            /** @description Whether the draft had unpublished changes at run time. Kept for backward compatibility — prefer `version_ref`, which states unambiguously what executed. */
-            version_dirty: boolean;
             /** @description Unambiguous reference to the agent definition the run executed: 'draft' when the mutable draft ran with unpublished changes (or the agent has no published version), or the concrete semver (e.g. '2.1.0') when the run executed that published definition (or a draft identical to it). */
             version_ref: string;
             /** @description Proxy label used at run time */
@@ -5357,200 +5523,6 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
-        };
-        /** Format: uri-reference */
-        uriReferenceString: string;
-        /** Format: uri */
-        uriString: string;
-        anchorString: string;
-        /** Core vocabulary meta-schema */
-        core: Record<string, unknown>;
-        schemaArray: unknown[];
-        /** Applicator vocabulary meta-schema */
-        applicator: Record<string, unknown>;
-        /** Unevaluated applicator vocabulary meta-schema */
-        unevaluated: Record<string, unknown>;
-        nonNegativeInteger: number;
-        /** @enum {unknown} */
-        simpleTypes: "array" | "boolean" | "integer" | "null" | "number" | "object" | "string";
-        /** @default [] */
-        stringArray: string[];
-        /** Validation vocabulary meta-schema */
-        validation: Record<string, unknown>;
-        /** Meta-data vocabulary meta-schema */
-        "meta-data": Record<string, unknown>;
-        /** Format vocabulary meta-schema for annotation results */
-        "format-annotation": Record<string, unknown>;
-        /** Content vocabulary meta-schema */
-        content: Record<string, unknown>;
-        /** Core and Validation specifications meta-schema */
-        schema: Record<string, unknown>;
-        /**
-         * AFPS Agent Manifest
-         * @description Manifest schema for AFPS 0.2 agent packages. An agent declares dependencies, input/output/config schemas, a timeout hint, and per-integration configuration.
-         */
-        "agent.schema": {
-            name: string;
-            version: string;
-            /** @constant */
-            type: "agent";
-            display_name: string;
-            description?: string;
-            long_description?: string;
-            keywords?: string[];
-            license?: string;
-            author: string | ({
-                name: string;
-                email?: string;
-                url?: string;
-            } & {
-                [key: string]: unknown;
-            });
-            repository?: string | ({
-                type: string;
-                url: string;
-                directory?: string;
-            } & {
-                [key: string]: unknown;
-            });
-            homepage?: string;
-            documentation?: string;
-            support?: string;
-            icon?: string;
-            icons?: ({
-                src: string;
-                size?: string;
-                /** @enum {string} */
-                theme?: "light" | "dark" | "high-contrast";
-            } & {
-                [key: string]: unknown;
-            })[];
-            screenshots?: string[];
-            privacy_policies?: string[];
-            compatibility?: {
-                platforms?: ("darwin" | "win32" | "linux")[];
-                runtimes?: {
-                    [key: string]: string;
-                };
-                clients?: {
-                    [key: string]: string;
-                };
-            } & {
-                [key: string]: unknown;
-            };
-            /** @description AFPS schema version this manifest targets, in MAJOR.MINOR format (e.g. "0.0"). Distinct from the package "version" field, which uses full MAJOR.MINOR.PATCH semver. */
-            schema_version: string;
-            dependencies?: {
-                skills?: {
-                    [key: string]: string;
-                };
-                mcp_servers?: {
-                    [key: string]: string;
-                };
-                integrations?: {
-                    [key: string]: string;
-                };
-            } & {
-                [key: string]: unknown;
-            };
-            _meta?: {
-                [key: string]: {
-                    [key: string]: unknown;
-                };
-            };
-            integrations_configuration?: {
-                [key: string]: {
-                    tools?: string[] | "*";
-                    scopes?: string[];
-                    auth_key?: string;
-                } & {
-                    [key: string]: unknown;
-                };
-            };
-            input?: {
-                schema: components["schemas"]["schema"] & {
-                    /** @constant */
-                    type: "object";
-                };
-                file_constraints?: {
-                    [key: string]: {
-                        accept?: string;
-                        max_size?: number;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-                ui_hints?: {
-                    [key: string]: {
-                        placeholder?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-                property_order?: string[];
-                _meta?: {
-                    [key: string]: {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            output?: {
-                schema: components["schemas"]["schema"] & {
-                    /** @constant */
-                    type: "object";
-                };
-                file_constraints?: {
-                    [key: string]: {
-                        accept?: string;
-                        max_size?: number;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-                ui_hints?: {
-                    [key: string]: {
-                        placeholder?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-                property_order?: string[];
-                _meta?: {
-                    [key: string]: {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            config?: {
-                schema: components["schemas"]["schema"] & {
-                    /** @constant */
-                    type: "object";
-                };
-                file_constraints?: {
-                    [key: string]: {
-                        accept?: string;
-                        max_size?: number;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-                ui_hints?: {
-                    [key: string]: {
-                        placeholder?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-                property_order?: string[];
-                _meta?: {
-                    [key: string]: {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            timeout?: number;
-        } & {
-            [key: string]: unknown;
         };
     };
     responses: {
@@ -6664,7 +6636,6 @@ export interface operations {
                      *       "runNumber": 17,
                      *       "token_usage": null,
                      *       "version_label": "1.2.0",
-                     *       "version_dirty": false,
                      *       "version_ref": "1.2.0",
                      *       "proxy_label": null,
                      *       "model_label": "Claude Sonnet 4",
@@ -17438,7 +17409,6 @@ export interface operations {
                      *       "runNumber": 1,
                      *       "token_usage": null,
                      *       "version_label": null,
-                     *       "version_dirty": true,
                      *       "version_ref": "draft",
                      *       "proxy_label": null,
                      *       "model_label": "Claude Sonnet 4",
@@ -17770,7 +17740,6 @@ export interface operations {
                      *         "cache_read_input_tokens": 1024
                      *       },
                      *       "version_label": "1.2.0",
-                     *       "version_dirty": false,
                      *       "version_ref": "1.2.0",
                      *       "proxy_label": null,
                      *       "model_label": "Claude Sonnet 4",
@@ -17871,7 +17840,6 @@ export interface operations {
                      *       "runNumber": 18,
                      *       "token_usage": null,
                      *       "version_label": "1.2.0",
-                     *       "version_dirty": false,
                      *       "version_ref": "1.2.0",
                      *       "proxy_label": null,
                      *       "model_label": "Claude Sonnet 4",

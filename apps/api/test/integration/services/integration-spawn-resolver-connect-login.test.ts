@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { integrationConnections } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { LoginSecretStrategy } from "../../../src/services/connect/login-secret-strategy.ts";
 import type { ConnectContext } from "../../../src/services/connect/strategy.ts";
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
@@ -176,8 +176,8 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       applicationId: ctx.defaultAppId,
       userId: ctx.user.id,
       endUserId: null,
-      // Flat v1 blob = no inputs plane → decryptCredentialInputsToStringMap → {}
-      credentialsEncrypted: encryptCredentials({}),
+      // Empty inputs plane → decryptCredentialInputsToStringMap → {}
+      credentialsEncrypted: encryptCredentialEnvelope({ outputs: {} }),
       identityClaims: {},
       scopesGranted: [],
       needsReconnection: false,

@@ -27,7 +27,7 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedPackage, seedEndUser, seedApiKey } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { integrationConnections } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -86,7 +86,7 @@ describe("/api/me/integration-pins", () => {
         applicationId: ctx.defaultAppId,
         userId,
         endUserId: null,
-        credentialsEncrypted: encryptCredentials({ api_key: "secret" }),
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
       })
       .returning({ id: integrationConnections.id });

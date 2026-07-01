@@ -22,7 +22,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { integrationConnections } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
@@ -86,7 +86,7 @@ async function seedAll(ctx: TestContext, opts: SeedOpts, credBag: Record<string,
     applicationId: ctx.defaultAppId,
     userId: ctx.user.id,
     endUserId: null,
-    credentialsEncrypted: encryptCredentials(credBag),
+    credentialsEncrypted: encryptCredentialEnvelope({ outputs: credBag }),
     identityClaims: {},
     scopesGranted: [],
     needsReconnection: false,

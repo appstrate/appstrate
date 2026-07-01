@@ -114,6 +114,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     expect(run).toBeDefined();
     expect(run!.packageId).toBe("@acme/briefing");
     expect(run!.versionLabel).toBe("1.2.3");
+    expect(run!.versionRef).toBe("1.2.3");
 
     // No ephemeral shadow package was created.
     const ephemerals = await db
@@ -136,6 +137,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     const body = (await res.json()) as { id: string };
     const [run] = await db.select().from(runs).where(eq(runs.id, body.id)).limit(1);
     expect(run!.versionLabel).toBe("1.0.0");
+    expect(run!.versionRef).toBe("1.0.0");
   });
 
   it("creates a draft run with versionLabel `draft`", async () => {
@@ -167,6 +169,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     const [run] = await db.select().from(runs).where(eq(runs.id, body.id)).limit(1);
     expect(run!.packageId).toBe("@acme/draft-only");
     expect(run!.versionLabel).toBe("draft");
+    expect(run!.versionRef).toBe("draft");
   });
 
   it("rejects a malformed draft manifest with 400", async () => {

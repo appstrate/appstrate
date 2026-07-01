@@ -26,8 +26,7 @@ import { validateInput } from "./schema.ts";
 import { mergeAndValidateConfigOverride } from "./agent-readiness.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { computeNextRun } from "../lib/cron.ts";
-import { actorFromIds, type Actor } from "../lib/actor.ts";
-import { parseManifestIntegrations } from "@appstrate/core/dependencies";
+import type { Actor } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { setQueueDepthProvider } from "../observability/index.ts";
 
@@ -38,9 +37,8 @@ import { setQueueDepthProvider } from "../observability/index.ts";
 interface ScheduleJobData {
   scheduleId: string;
   packageId: string;
-  /** Actor the scheduled run executes as — at most one set. */
-  userId: string | null;
-  endUserId: string | null;
+  /** Actor the scheduled run executes as. */
+  actor: Actor;
   orgId: string;
   applicationId: string;
   input?: Record<string, unknown>;
@@ -120,11 +118,19 @@ async function getQueue(): Promise<JobQueue<ScheduleJobData>> {
 
 /** Upsert a repeatable job scheduler for a schedule. */
 async function upsertScheduleJob(schedule: ScheduleWireDto, orgId: string): Promise<void> {
+  const actor = schedule.userId
+    ? ({ type: "user", id: schedule.userId } as const)
+    : schedule.endUserId
+      ? ({ type: "end_user", id: schedule.endUserId } as const)
+      : null;
+  if (!actor) {
+    throw internalError();
+  }
+
   const jobData: ScheduleJobData = {
     scheduleId: schedule.id,
     packageId: schedule.packageId,
-    userId: schedule.userId,
-    endUserId: schedule.endUserId,
+    actor,
     orgId,
     applicationId: schedule.applicationId,
     input: schedule.input ?? undefined,
@@ -155,8 +161,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
   const {
     scheduleId,
     packageId,
-    userId,
-    endUserId,
+    actor,
     orgId,
     applicationId,
     input,
@@ -168,22 +173,14 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     dependencyOverrides,
   } = job.data;
 
-  await triggerScheduledRun(
-    scheduleId,
-    packageId,
-    actorFromIds(userId, endUserId),
-    orgId,
-    applicationId,
-    input,
-    {
-      configOverride,
-      modelIdOverride,
-      proxyIdOverride,
-      versionOverride,
-      connectionOverrides,
-      dependencyOverrides,
-    },
-  );
+  await triggerScheduledRun(scheduleId, packageId, actor, orgId, applicationId, input, {
+    configOverride,
+    modelIdOverride,
+    proxyIdOverride,
+    versionOverride,
+    connectionOverrides,
+    dependencyOverrides,
+  });
 
   // Update schedule timestamps
   const schedule = await getSchedule(scheduleId, { orgId, applicationId });
@@ -260,37 +257,6 @@ export async function shutdownScheduleWorker(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * #735: a scheduled run with no actor cannot execute an agent that declares
- * integrations. The actor is the run's execution identity across the whole
- * credential plane — three runtime sites short-circuit on a null actor
- * (`resolveIntegrationSpawns` returns `[]`, the run-pipeline connection
- * snapshot stays null, and the live credentials resolver throws). The agent
- * would therefore boot with only built-in tools, silently drop every declared
- * integration, and still finish `success`. The schema permits an actor-less
- * schedule (a legacy state from before the actor column was wired) but no
- * org-level/system principal was ever implemented, so the only safe outcome is
- * to fail fast. New schedules always carry an actor (`getActor` is non-null),
- * so this only guards legacy rows and is otherwise dead-but-defensive.
- *
- * Exported as a pure predicate so it can be unit-tested without the DB.
- */
-export function scheduleCannotResolveIntegrations(
-  actor: Actor | null,
-  manifest: Record<string, unknown>,
-): boolean {
-  if (actor) return false;
-  // Fail-safe: a malformed manifest must not throw out of the guard. The outer
-  // `triggerScheduledRun` catch only logs (no failed-run record), so an
-  // exception here would re-introduce the silent skip this guard exists to
-  // prevent. On a parse failure with no actor, block the run.
-  try {
-    return parseManifestIntegrations(manifest).length > 0;
-  } catch {
-    return true;
-  }
-}
-
-/**
  * Fire one scheduled run. Loads the agent, resolves the version selector
  * (`versionOverride` | inherit → `published`, #636), runs the readiness +
  * preflight gates, then executes. Any `ApiError` along the way is converted
@@ -304,7 +270,7 @@ export function scheduleCannotResolveIntegrations(
 export async function triggerScheduledRun(
   scheduleId: string,
   packageId: string,
-  actor: Actor | null,
+  actor: Actor,
   orgId: string,
   applicationId: string,
   input: Record<string, unknown> | undefined,
@@ -388,22 +354,6 @@ export async function triggerScheduledRun(
         return;
       }
       throw err;
-    }
-
-    // #735: fail fast on an actor-less schedule whose agent declares
-    // integrations. Without an execution identity the spawn resolver yields no
-    // integration tools, yet the run would otherwise finish `success` — a
-    // silent, invisible degradation. Record a visible failed run instead.
-    if (scheduleCannotResolveIntegrations(actor, agent.manifest as Record<string, unknown>)) {
-      logger.warn("Schedule has no actor but agent declares integrations, failing run", {
-        scheduleId,
-        packageId,
-      });
-      await failSchedule(
-        "Schedule has no execution identity (actor) but the agent declares integrations. " +
-          "Recreate the schedule so it runs as a specific user or end-user.",
-      );
-      return;
     }
 
     // Shared preflight: resolve config, validate readiness
@@ -632,11 +582,6 @@ async function enrichSchedules(
 export async function createSchedule(
   scope: AppScope,
   packageId: string,
-  // #735: a schedule MUST have an execution identity. Enforced at the service
-  // (non-null type) so every creation path — not just the authenticated route
-  // where `getActor` is non-null — is structurally prevented from minting a new
-  // actor-less row. Actor-less rows only exist as legacy data; the fire path
-  // fails them fast (`scheduleCannotResolveIntegrations`).
   actor: Actor,
   data: {
     name?: string;

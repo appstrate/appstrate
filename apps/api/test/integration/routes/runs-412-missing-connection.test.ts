@@ -37,7 +37,7 @@ import { seedAgent, seedPackage } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { integrationConnections, applicationPackages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -151,7 +151,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         applicationId: ctx.defaultAppId,
         userId,
         endUserId: null,
-        credentialsEncrypted: encryptCredentials({ api_key: "secret-value" }),
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret-value" } }),
         scopesGranted: [],
       })
       .returning({ id: integrationConnections.id });
@@ -370,7 +370,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         endUserId: null,
-        credentialsEncrypted: encryptCredentials({ api_key: "stale" }),
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "stale" } }),
         scopesGranted: [],
         needsReconnection: true,
       })

@@ -19,7 +19,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { integrationConnections } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
@@ -71,7 +71,7 @@ async function seedConnection(ctx: TestContext) {
     applicationId: ctx.defaultAppId,
     userId: ctx.user.id,
     endUserId: null,
-    credentialsEncrypted: encryptCredentials({ api_key: "secret" }),
+    credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
     identityClaims: {},
     scopesGranted: [],
     needsReconnection: false,

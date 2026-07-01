@@ -66,7 +66,7 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
                 {run.version_ref !== "draft"
                   ? `v${run.version_ref}`
                   : run.version_label && run.version_label !== "draft"
-                    ? `${t("run.draft")} (v${run.version_label} ${t("run.versionDirty")})`
+                    ? `${t("run.draft")} (v${run.version_label} ${t("run.versionModified")})`
                     : t("run.draft")}
               </span>
             }

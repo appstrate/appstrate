@@ -224,17 +224,6 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
 }
 
 /**
- * Legacy byte-based inline threshold. Kept as a defence-in-depth
- * fallback when no {@link TokenBudget} is configured (today: never in
- * production, but the option keeps tests and embedders simple).
- *
- * The token-aware path (see {@link TokenBudget}) is the primary
- * gate: dense JSON / base64 hits the agent's context budget far
- * harder than a byte cap suggests, and small calls accumulate.
- */
-const INLINE_RESPONSE_THRESHOLD_BYTES = 32 * 1024;
-
-/**
  * MCP `_meta` key under which the sidecar surfaces token-budget
  * accounting to the agent runtime. Agent-side resolvers can read this
  * to display "X / Y tokens of run budget consumed" or to react to
@@ -651,9 +640,7 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
  * per-call token cap, or would push the run-level cumulative budget
  * past its ceiling (see {@link TokenBudget}), the bytes are stored in
  * the supplied {@link BlobStore} and the tool returns a `resource_link`
- * block instead of an inline text body. The legacy byte threshold
- * {@link INLINE_RESPONSE_THRESHOLD_BYTES} is consulted only when no
- * {@link TokenBudget} is wired (tests / embedders).
+ * block instead of an inline text body.
  */
 function buildSidecarTools(options: MountMcpOptions): {
   firstParty: AppstrateToolDefinition[];
@@ -1138,7 +1125,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       }
       return responseToToolResult(result.response, {
         ...(blobStore ? { blobStore } : {}),
-        ...(tokenBudget ? { tokenBudget } : {}),
+        tokenBudget,
         source: `${ctx.label}:${ctx.integrationId}`,
         // Attach upstream `{ status, headers, finalUrl }` to the
         // CallToolResult `_meta` payload so the agent-side resolver
@@ -1189,7 +1176,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       return responseToToolResult(res, {
         source: "run_history",
         ...(blobStore ? { blobStore } : {}),
-        ...(tokenBudget ? { tokenBudget } : {}),
+        tokenBudget,
       });
     },
   };
@@ -1234,7 +1221,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       return responseToToolResult(res, {
         source: "recall_memory",
         ...(blobStore ? { blobStore } : {}),
-        ...(tokenBudget ? { tokenBudget } : {}),
+        tokenBudget,
       });
     },
   };
@@ -1293,21 +1280,14 @@ interface ResponseToToolResultOptions {
   /** Run-scoped blob store; required to spill non-text or oversized responses. */
   blobStore?: BlobStore;
   /**
-   * Run-scoped token budget. When provided, the inline-vs-spill
-   * decision for text responses is made on **estimated tokens**, not
-   * raw bytes — dense JSON or base64 that would otherwise sneak under
-   * the 32 KB byte threshold spills correctly, and a cumulative
-   * counter tightens the inline path as the agent's run budget runs
-   * down. Absent → fall back to the legacy byte threshold.
+   * Run-scoped token budget. The inline-vs-spill decision for text
+   * responses is made on **estimated tokens**, not raw bytes; dense
+   * JSON or base64 spills correctly, and a cumulative counter tightens
+   * the inline path as the agent's run budget runs down.
    */
-  tokenBudget?: TokenBudget;
+  tokenBudget: TokenBudget;
   /** Source label propagated to the BlobStore record (for observability). */
   source?: string;
-  /**
-   * Legacy byte threshold override (used when no `tokenBudget` is
-   * configured). Defaults to {@link INLINE_RESPONSE_THRESHOLD_BYTES}.
-   */
-  inlineThresholdBytes?: number;
   /**
    * When true, attach upstream `{ status, headers, finalUrl }` to the
    * `CallToolResult._meta` payload under {@link UPSTREAM_META_KEY}.
@@ -1340,22 +1320,14 @@ interface ResponseToToolResultOptions {
  *
  * Folded out of {@link responseToToolResult} so the budget logic is
  * unit-testable in isolation and the surrounding async flow stays
- * linear. When a {@link TokenBudget} is wired, calls
- * {@link TokenBudget.tryReserve} so the inline-record is atomic with
- * the decision (no decide/record interleave under concurrent calls).
- *
- * Returns `meta: undefined` when no budget is configured — the agent
- * sees no `_meta` payload and the legacy byte threshold drives the
- * spill decision.
+ * linear. Calls {@link TokenBudget.tryReserve} so the inline-record is
+ * atomic with the decision (no decide/record interleave under
+ * concurrent calls).
  */
-function evaluateBudget(args: {
-  text: string;
-  tokenBudget: TokenBudget | undefined;
-  byteThreshold: number;
-}): { shouldSpill: boolean; meta: TokenBudgetMeta | undefined } {
-  if (!args.tokenBudget) {
-    return { shouldSpill: args.text.length > args.byteThreshold, meta: undefined };
-  }
+function evaluateBudget(args: { text: string; tokenBudget: TokenBudget }): {
+  shouldSpill: boolean;
+  meta: TokenBudgetMeta;
+} {
   const estimated = args.tokenBudget.estimate(args.text);
   const decision = args.tokenBudget.tryReserve(estimated);
   // Per-call trace at debug only. Spill events are already surfaced by
@@ -1399,17 +1371,18 @@ function evaluateBudget(args: {
  *   `client.readResource({ uri })` only if needed.
  * - Binary content → always spilled regardless of size (binary in the
  *   agent's context window is never useful).
- * - No BlobStore configured → binary rejected; text falls back to the
- *   legacy byte threshold. Production always supplies a BlobStore +
- *   TokenBudget via `mountMcp`.
+ * - No BlobStore configured → binary rejected; text that should spill is
+ *   forced inline and recorded against the token budget with a distinct
+ *   reason. Production always supplies a BlobStore + TokenBudget via
+ *   `mountMcp`.
  *
  * Every text-path result carries a `dev.appstrate/token-budget` `_meta`
- * payload (when a TokenBudget is configured) so the agent runtime can
- * surface accounting and react to structured truncation events.
+ * payload so the agent runtime can surface accounting and react to
+ * structured truncation events.
  */
 async function responseToToolResult(
   res: Response,
-  options: ResponseToToolResultOptions = {},
+  options: ResponseToToolResultOptions,
 ): Promise<{
   content: Array<
     | { type: "text"; text: string }
@@ -1432,10 +1405,9 @@ async function responseToToolResult(
     ? buildUpstreamMeta(res, options.upstreamFinalUrl)
     : undefined;
 
-  // Budget meta accumulates per-response: estimated cost + the
-  // tracker's decision are folded in by the text path below. Stays
-  // undefined for binary spills (no estimate is meaningful) and when
-  // no TokenBudget is configured.
+  // Budget meta accumulates per-response: estimated cost + the tracker's
+  // decision are folded in by the text path below. Stays undefined for
+  // binary spills where no text estimate is meaningful.
   let budgetMeta: TokenBudgetMeta | undefined;
 
   type Result = {
@@ -1471,7 +1443,6 @@ async function responseToToolResult(
 
   const ct = res.headers.get("content-type") ?? "";
   const isText = ct.startsWith("text/") || ct.includes("json") || ct.includes("xml");
-  const byteThreshold = options.inlineThresholdBytes ?? INLINE_RESPONSE_THRESHOLD_BYTES;
 
   if (!isText) {
     if (!options.blobStore) {
@@ -1551,13 +1522,10 @@ async function responseToToolResult(
   // Token-aware spill decision. The token-budget path uses an atomic
   // tryReserve() so cumulative state doesn't drift under concurrent
   // calls (two awaits between decide() and record() would otherwise
-  // let two callers both observe a stale `consumed`). Without a
-  // TokenBudget we fall back to the legacy byte threshold so older
-  // tests + embedders that don't wire a budget keep working.
+  // let two callers both observe a stale `consumed`).
   const evaluation = evaluateBudget({
     text,
     tokenBudget: options.tokenBudget,
-    byteThreshold,
   });
   budgetMeta = evaluation.meta;
   const shouldSpillForBudget = evaluation.shouldSpill;
@@ -1577,14 +1545,12 @@ async function responseToToolResult(
       // Blob store full — surface a distinct reason and record the
       // forced-inline tokens against the budget. tryReserve() did NOT
       // record on the spill path, so we record explicitly here.
-      if (budgetMeta) {
-        budgetMeta = { ...budgetMeta, decision: "inline", reason: "blob_store_full" };
-        options.tokenBudget?.record(budgetMeta.estimatedTokens);
-      }
+      budgetMeta = { ...budgetMeta, decision: "inline", reason: "blob_store_full" };
+      options.tokenBudget.record(budgetMeta.estimatedTokens);
       logger.warn("token-budget: blob store full, forced inline", {
         source: options.source,
-        estimatedTokens: budgetMeta?.estimatedTokens,
-        consumedTokens: options.tokenBudget?.consumedTokens(),
+        estimatedTokens: budgetMeta.estimatedTokens,
+        consumedTokens: options.tokenBudget.consumedTokens(),
         error: getErrorMessage(err),
       });
       const fallback: Result = res.ok
@@ -1612,13 +1578,13 @@ async function responseToToolResult(
   // configured, surface the distinct reason and record the
   // forced-inline tokens. tryReserve() did NOT record on the spill
   // path, so we record explicitly here.
-  if (shouldSpillForBudget && !options.blobStore && budgetMeta) {
+  if (shouldSpillForBudget && !options.blobStore) {
     budgetMeta = { ...budgetMeta, decision: "inline", reason: "no_blob_store_configured" };
-    options.tokenBudget?.record(budgetMeta.estimatedTokens);
+    options.tokenBudget.record(budgetMeta.estimatedTokens);
     logger.warn("token-budget: no blob store configured, forced inline", {
       source: options.source,
       estimatedTokens: budgetMeta.estimatedTokens,
-      consumedTokens: options.tokenBudget?.consumedTokens(),
+      consumedTokens: options.tokenBudget.consumedTokens(),
     });
   }
 
@@ -1770,7 +1736,7 @@ export interface ApiCallIntegrationConfig {
 export interface ApiCallToolDeps {
   proxyDeps: ApiCallDeps;
   blobStore?: BlobStore;
-  tokenBudget?: TokenBudget;
+  tokenBudget: TokenBudget;
   apiCallLimit?: LimitFunction;
 }
 
@@ -1814,17 +1780,13 @@ export interface MountMcpOptions {
    */
   proxyDeps: ApiCallDeps;
   /**
-   * Run-scoped token budget. When present, every tool output is run
-   * through the budget tracker before being delivered to the agent —
-   * dense JSON that fits under the byte cap but would exhaust the
-   * context window now spills to the blob store, and a structured
-   * `dev.appstrate/token-budget` `_meta` payload records the accounting.
-   *
-   * Optional only so tests and embedders that don't care about the
-   * token path can omit it; production wires a `TokenBudget`
-   * unconditionally via `createApp` (see `app.ts`).
+   * Run-scoped token budget. Every tool output is run through the
+   * budget tracker before being delivered to the agent; dense JSON that
+   * fits under a byte cap but would exhaust the context window spills
+   * to the blob store, and a structured `dev.appstrate/token-budget`
+   * `_meta` payload records the accounting.
    */
-  tokenBudget?: TokenBudget;
+  tokenBudget: TokenBudget;
   /**
    * Run-scoped fan-out limiter for `api_call`. Caps the number of
    * concurrent upstream HTTP hops a single run can issue at once.

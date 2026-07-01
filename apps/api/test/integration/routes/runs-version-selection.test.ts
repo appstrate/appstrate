@@ -76,7 +76,7 @@ describe("POST /api/agents/:scope/:name/run — version selector", () => {
   });
 });
 
-describe("GET /api/runs/:id — version_ref derivation", () => {
+describe("GET /api/runs/:id — version_ref persistence", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -91,24 +91,23 @@ describe("GET /api/runs/:id — version_ref derivation", () => {
     expect(res.status).toBe(200);
     return (await res.json()) as {
       version_label: string | null;
-      version_dirty: boolean;
       version_ref: string;
     };
   }
 
-  it("reports 'draft' for a dirty-draft run (label carries the published base)", async () => {
+  it("reports the stored ref for a dirty-draft run (label carries the published base)", async () => {
     const row = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       userId: ctx.user.id,
       versionLabel: "2.1.0",
-      versionDirty: true,
+      versionRef: "draft",
     });
     const wire = await getRunWire(row.id);
     expect(wire.version_ref).toBe("draft");
     expect(wire.version_label).toBe("2.1.0");
-    expect(wire.version_dirty).toBe(true);
+    expect("version_dirty" in wire).toBe(false);
   });
 
   it("reports the semver for a published-definition run", async () => {
@@ -118,20 +117,19 @@ describe("GET /api/runs/:id — version_ref derivation", () => {
       applicationId: ctx.defaultAppId,
       userId: ctx.user.id,
       versionLabel: "2.1.0",
-      versionDirty: false,
+      versionRef: "2.1.0",
     });
     const wire = await getRunWire(row.id);
     expect(wire.version_ref).toBe("2.1.0");
   });
 
-  it("reports 'draft' for a run on a never-published agent (NULL label)", async () => {
+  it("defaults to 'draft' for a run on a never-published agent (NULL label)", async () => {
     const row = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       userId: ctx.user.id,
       versionLabel: null,
-      versionDirty: false,
     });
     const wire = await getRunWire(row.id);
     expect(wire.version_ref).toBe("draft");

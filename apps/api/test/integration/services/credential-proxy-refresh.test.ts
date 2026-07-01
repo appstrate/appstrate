@@ -22,7 +22,7 @@ import {
   integrationConnections,
   integrationOauthClients,
 } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
 import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
@@ -96,7 +96,7 @@ async function setup(
     accountId: "acct-1",
     applicationId: ctx.defaultAppId,
     userId: ctx.user.id,
-    credentialsEncrypted: encryptCredentials(fields),
+    credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
     scopesGranted: ["openid", "email"],
     sharedWithOrg: false,
     // oauth2 connections always pin their minting client by id; here the org's
@@ -136,7 +136,7 @@ async function setupSystemPinned(
     accountId: "acct-1",
     applicationId: ctx.defaultAppId,
     userId: ctx.user.id,
-    credentialsEncrypted: encryptCredentials(fields),
+    credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
     scopesGranted: ["openid", "email"],
     sharedWithOrg: false,
     clientRef: systemId,

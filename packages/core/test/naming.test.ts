@@ -124,11 +124,11 @@ describe("encodePackageIdPath", () => {
     expect(encodePackageIdPath("@org123/pkg-name")).toBe("@org123/pkg-name");
   });
 
-  it("output matches both route regexes", () => {
+  it("output preserves the split route segments", () => {
     const out = encodePackageIdPath("@acme/my-skill");
     // /:packageId{@[^/]+/[^/]+}
     expect(/^@[^/]+\/[^/]+$/.test(out)).toBe(true);
-    // /:scope{@[^/]+}/:name → first segment is the scope param
+    // /:scope/:name → first segment is the scope param
     const [scope, name] = out.split("/");
     expect(/^@[^/]+$/.test(scope!)).toBe(true);
     expect(name).toBe("my-skill");

@@ -42,6 +42,7 @@ import { recordAuditFromContext } from "../services/audit.ts";
 import { currentTraceparent } from "../observability/index.ts";
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/schema";
 import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
+import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 
 /**
  * Resolve the traceparent to seed the run-execution trace tree with, honoring
@@ -63,7 +64,7 @@ export function createRunsRouter() {
 
   // POST /api/agents/:scope/:name/run — execute an agent (fire-and-forget, returns JSON)
   router.post(
-    "/agents/:scope{@[^/]+}/:name/run",
+    `/agents/${SCOPED_PACKAGE_ROUTE}/run`,
     rateLimit(20),
     idempotency(),
     requireAgent(),
@@ -216,7 +217,7 @@ export function createRunsRouter() {
   );
 
   // GET /api/agents/:scope/:name/runs — list runs for an agent
-  router.get("/agents/:scope{@[^/]+}/:name/runs", requireAgent(), async (c) => {
+  router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/runs`, requireAgent(), async (c) => {
     const agent = c.get("package");
     const scope = getAppScope(c);
     const limit = z.coerce
@@ -529,7 +530,7 @@ export function createRunsRouter() {
 
   // DELETE /api/agents/:scope/:name/runs — delete all runs for an agent
   router.delete(
-    "/agents/:scope{@[^/]+}/:name/runs",
+    `/agents/${SCOPED_PACKAGE_ROUTE}/runs`,
     requireAgent(),
     requirePermission("runs", "delete"),
     async (c) => {

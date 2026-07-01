@@ -22,7 +22,7 @@ import { installPackage } from "../../../src/services/application-packages.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { eq } from "drizzle-orm";
 import { integrationConnections, packages } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -130,7 +130,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
       applicationId: ctx.defaultAppId,
       userId: ctx.user.id,
       endUserId: null,
-      credentialsEncrypted: encryptCredentials({ api_key: "secret-value" }),
+      credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret-value" } }),
       scopesGranted: [],
     });
   }

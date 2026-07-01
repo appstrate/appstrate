@@ -329,7 +329,11 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     // gap_fill CAS fix, every seq=2..11 buffered event would be removed
     // from the buffer with no dispatch — run_logs would have zero rows
     // from this batch.
-    const res = await postFinalize(runId, { status: "success", durationMs: 100 });
+    const res = await postFinalize(runId, {
+      status: "success",
+      durationMs: 100,
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
     expect(res.status).toBe(200);
 
     const [after] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
@@ -618,6 +622,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
       logs: [],
       status: "success",
       durationMs: 1234,
+      usage: { input_tokens: 10, output_tokens: 5 },
     };
     const res = await postFinalize(runId, result);
     expect(res.status).toBe(200);
@@ -664,9 +669,9 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   // Service-level Zod boundary on `result.usage` — the HTTP route already
   // drops malformed usage via `.catch(undefined)`, but `finalizeRun` is also
   // reached by non-HTTP callers (platform synthesis, in-process runners).
-  // The boundary must hold on its own: invalid shape ⇒ treated as absent
-  // (zero-token heuristic falls back to the column) ⇒ never written.
-  it("service-level finalize ignores malformed usage — column untouched, no false zero-token failure", async () => {
+  // Invalid shape becomes explicit zero usage; finalize never falls back to
+  // the side-channel column.
+  it("service-level finalize treats malformed usage as zero terminal usage", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent", {
       tokenUsage: { input_tokens: 50, output_tokens: 25 },
     });
@@ -682,11 +687,9 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     await finalizeRun({ run: run!, result });
 
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    // Invalid usage ⇒ absent: the heuristic reads the (non-zero) column and
-    // the run stays successful; the malformed shape never reaches the column.
-    expect(row?.status).toBe("success");
-    expect(row?.error).toBeNull();
-    expect(row?.tokenUsage).toMatchObject({ input_tokens: 50, output_tokens: 25 });
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toMatch(/could not reach the LLM API/);
+    expect(row?.tokenUsage).toMatchObject({ input_tokens: 0, output_tokens: 0 });
   });
 
   it("strips unknown keys from finalize usage before the runs.tokenUsage write", async () => {
@@ -716,6 +719,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
       status: "success",
       output: { blob: "x".repeat(600 * 1024) },
       durationMs: 5,
+      usage: { input_tokens: 10, output_tokens: 5 },
     });
     expect(res.status).toBe(200);
 
@@ -728,8 +732,18 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   it("idempotent — once the sink is closed, further finalize POSTs reject with 410", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
-    const first = { status: "success", output: { v: 1 }, durationMs: 10 };
-    const second = { status: "success", output: { v: 2 }, durationMs: 20 };
+    const first = {
+      status: "success",
+      output: { v: 1 },
+      durationMs: 10,
+      usage: { input_tokens: 10, output_tokens: 5 },
+    };
+    const second = {
+      status: "success",
+      output: { v: 2 },
+      durationMs: 20,
+      usage: { input_tokens: 20, output_tokens: 10 },
+    };
 
     const a = await postFinalize(runId, first);
     expect(a.status).toBe(200);
@@ -757,7 +771,12 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   it("CAS-guards all side effects — only the winning finalize writes log rows", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
-    const body = { status: "success", output: { v: 1 }, durationMs: 10 };
+    const body = {
+      status: "success",
+      output: { v: 1 },
+      durationMs: 10,
+      usage: { input_tokens: 10, output_tokens: 5 },
+    };
 
     const [a, b] = await Promise.all([postFinalize(runId, body), postFinalize(runId, body)]);
 
@@ -842,10 +861,10 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.tokenUsage).toMatchObject({ input_tokens: 0, output_tokens: 0 });
   });
 
-  it("falls back to runs.tokenUsage when result.usage is absent (legacy runners)", async () => {
-    // Runners that don't yet ship `usage` in the finalize body (older
-    // CLI, third-party AFPS runners) must keep working — finalize falls
-    // back to the side-channel-populated DB column.
+  it("does not fall back to runs.tokenUsage when result.usage is absent", async () => {
+    // The terminal finalize body is authoritative. A side-channel metric may
+    // have populated the column, but absence from finalize is treated as
+    // explicit zero usage and overwrites the column.
     const runId = await seedRunWithSink(ctx, "@test/final-agent", {
       tokenUsage: { input_tokens: 50, output_tokens: 25 },
     });
@@ -859,16 +878,12 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(res.status).toBe(200);
 
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.status).toBe("success");
-    expect(row?.error).toBeNull();
-    // No `usage` in body → finalize MUST NOT overwrite the column.
-    expect(row?.tokenUsage).toMatchObject({ input_tokens: 50, output_tokens: 25 });
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toMatch(/could not reach the LLM API/);
+    expect(row?.tokenUsage).toMatchObject({ input_tokens: 0, output_tokens: 0 });
   });
 
-  it("falls back to DB and flips to failed when neither body nor column has tokens", async () => {
-    // The pre-fix failure mode at the legacy layer — preserved so
-    // legitimate "agent never reached the LLM" cases still produce the
-    // diagnostic instead of silently succeeding.
+  it("flips to failed when result.usage is absent and no prior metric exists", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent", { tokenUsage: null });
 
     const res = await postFinalize(runId, {
@@ -882,6 +897,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.status).toBe("failed");
     expect(row?.error).toMatch(/could not reach the LLM API/);
+    expect(row?.tokenUsage).toMatchObject({ input_tokens: 0, output_tokens: 0 });
   });
 
   // ---------------------------------------------------------------------
@@ -1096,6 +1112,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
       status: "success",
       output: { ok: true },
       durationMs: 100,
+      usage: { input_tokens: 300, output_tokens: 125 },
     });
     expect(res.status).toBe(200);
 
