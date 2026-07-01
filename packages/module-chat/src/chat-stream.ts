@@ -46,7 +46,7 @@ import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-engine-contract";
 import { logger } from "./logger.ts";
 import { listModels, pickModel, modelFromFamily, resolveDefaultApplicationId } from "./llm.ts";
-import { openPlatformMcp, platformMcpUrl, repairStringifiedToolCall } from "./platform-mcp.ts";
+import { openPlatformMcp, platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
 import { buildTranscriptPrompt } from "./transcript.ts";
@@ -663,9 +663,10 @@ export async function handleChatStream(
     finalizeChatStream({
       engineResponse,
       streamId,
+      parentId: userMessageId ?? null,
       onAssistant:
         sessionId && userMessageId
-          ? (assistant) => persistAssistantMessage(sessionId, assistant, userMessageId)
+          ? (assistant, parentId) => persistAssistantMessage(sessionId, assistant, parentId)
           : undefined,
       onSettled: () => {
         unregisterStopController(streamId);
@@ -745,7 +746,6 @@ export async function handleChatStream(
             toolStepBudgetReached = true;
           },
         }),
-      experimental_repairToolCall: repairStringifiedToolCall,
       // Decoupled from the request connection (see `generation` above): a client
       // disconnect must not cancel generation; only an explicit stop does.
       abortSignal: generation.signal,

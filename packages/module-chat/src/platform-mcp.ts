@@ -17,7 +17,6 @@
 
 import { createMCPClient, type MCPClient } from "@ai-sdk/mcp";
 import { runAndWaitSteps } from "@appstrate/core/run-and-wait-client";
-import type { ToolCallRepairFunction, ToolSet as AiToolSet } from "ai";
 import { logger } from "./logger.ts";
 
 type ToolSet = Awaited<ReturnType<MCPClient["tools"]>>;
@@ -101,33 +100,6 @@ function callToolResult(payload: unknown, isError = false): unknown {
     ...(isError ? { isError: true } : {}),
   };
 }
-
-function parseNestedJsonObject(text: string): Record<string, unknown> | null {
-  try {
-    const outer = JSON.parse(text) as unknown;
-    if (typeof outer !== "string") return null;
-    const inner = JSON.parse(outer) as unknown;
-    return typeof inner === "object" && inner !== null && !Array.isArray(inner)
-      ? (inner as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Some models occasionally double-encode MCP tool inputs, producing a JSON
- * string whose value is the real object. Repair only that narrow case; malformed
- * JSON and schema-invalid objects still fail normally so the model can correct
- * them.
- */
-export const repairStringifiedToolCall: ToolCallRepairFunction<AiToolSet> = async ({
-  toolCall,
-}) => {
-  const input = parseNestedJsonObject(toolCall.input);
-  if (!input) return null;
-  return { ...toolCall, input: JSON.stringify(input) };
-};
 
 export function wrapRunAndWaitTool(
   tools: ToolSet,
