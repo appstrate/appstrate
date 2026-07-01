@@ -87,7 +87,7 @@ export function ChatRunProgressCard({
   modalTitle: React.ReactNode;
   details: React.ReactNode;
 }) {
-  const { logs, status, packageId, startedAt, completedAt } = useRunLogStream(
+  const { logs, status, packageId, startedAt, completedAt, duration } = useRunLogStream(
     runId,
     initialStatus,
     initialPackageId,
@@ -96,8 +96,12 @@ export function ChatRunProgressCard({
     status ?? (isTerminalStatus(initialStatus) ? (initialStatus as RunStatus) : undefined);
   const [open, setOpen] = React.useState(false);
 
-  // Live execution time — ticks each second while running, freezes on completion.
-  const elapsedMs = useLiveElapsedMs(startedAt, completedAt);
+  // Live execution time — ticks while running, then settles on the
+  // server-authoritative `runs.duration` (same value the run page shows).
+  // The local `completedAt - startedAt` fallback covers frames that predate
+  // the duration column being populated.
+  const liveElapsedMs = useLiveElapsedMs(startedAt, completedAt);
+  const elapsedMs = duration ?? liveElapsedMs;
 
   // Pace the log line: a burst of lines plays back one at a time (≥500ms each)
   // rather than flashing straight to the last one. `current` carries a stable

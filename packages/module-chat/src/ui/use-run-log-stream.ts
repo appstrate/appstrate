@@ -38,6 +38,13 @@ export interface RunLogStream {
   startedAt: string | undefined;
   /** ISO timestamp the run reached a terminal status, once reported. */
   completedAt: string | undefined;
+  /**
+   * Server-authoritative duration in ms (`runs.duration`), once reported.
+   * This is the same value the run page shows — prefer it over a local
+   * `completedAt - startedAt` computation, which diverges whenever the
+   * runner supplied its own execution-window `durationMs` at finalize.
+   */
+  duration: number | undefined;
   /** True while the live SSE tail is connected (run not yet terminal). */
   live: boolean;
 }
@@ -61,6 +68,7 @@ export function useRunLogStream(
   const [packageId, setPackageId] = useState<string | undefined>(undefined);
   const [startedAt, setStartedAt] = useState<string | undefined>(undefined);
   const [completedAt, setCompletedAt] = useState<string | undefined>(undefined);
+  const [duration, setDuration] = useState<number | undefined>(undefined);
   const [live, setLive] = useState(false);
 
   useEffect(() => {
@@ -123,6 +131,7 @@ export function useRunLogStream(
       if (update.packageId) setPackageId(update.packageId);
       if (update.startedAt) setStartedAt(update.startedAt);
       if (update.completedAt) setCompletedAt(update.completedAt);
+      if (typeof update.duration === "number") setDuration(update.duration);
       if (isTerminalStatus(update.status)) {
         // One final full history sweep to catch log lines the trigger may have
         // emitted in the same tick as the terminal status (mergeLogs dedups the
@@ -157,5 +166,13 @@ export function useRunLogStream(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId]);
 
-  return { logs, status, packageId: packageId ?? initialPackageId, startedAt, completedAt, live };
+  return {
+    logs,
+    status,
+    packageId: packageId ?? initialPackageId,
+    startedAt,
+    completedAt,
+    duration,
+    live,
+  };
 }

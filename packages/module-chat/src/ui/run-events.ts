@@ -119,6 +119,7 @@ export const runUpdateLiteSchema = z.object({
   error: z.string().nullable().optional(),
   startedAt: z.string().nullable().optional(),
   completedAt: z.string().nullable().optional(),
+  duration: z.number().nullable().optional(),
 });
 export type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
 
