@@ -4,7 +4,8 @@
  * OpenAPI paths for the MCP module's own endpoints. These document the
  * transport + discovery surface for human/API consumers; the platform's
  * ~250 operations are NOT re-listed here — they are discovered at runtime
- * through the `search_operations` / `describe_operation` MCP tools.
+ * through the `search_operations` / `describe_operation` MCP tools, with
+ * `run_and_wait` as the run-launch shortcut.
  */
 
 const jsonRpcRequestBody = {
@@ -42,10 +43,11 @@ export const mcpPaths = {
       summary: "Per-organization MCP Streamable HTTP endpoint",
       description:
         "Model Context Protocol server (Streamable HTTP, stateless) for a single organization. " +
-        "Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). Exposes three " +
-        "tools — `search_operations`, `describe_operation`, `invoke_operation` — that let an MCP " +
-        "client discover and call any platform API operation with the caller's own credentials, " +
-        "confined to the organization in the path. Each organization has its own endpoint: a " +
+        "Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). Exposes four " +
+        "tools — `search_operations`, `describe_operation`, `invoke_operation`, and " +
+        "`run_and_wait` — that let an MCP client discover and call platform API operations, " +
+        "plus launch and wait for agent runs, with the caller's own credentials and confined to " +
+        "the organization in the path. Each organization has its own endpoint: a " +
         "token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource " +
         "URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several " +
         "organizations, configure one MCP server entry per organization. Requires the `mcp:read` " +

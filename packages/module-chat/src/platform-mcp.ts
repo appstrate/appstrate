@@ -4,18 +4,20 @@
  * Client to the platform's own MCP server (`/api/mcp`, Streamable HTTP) —
  * ported from the appstrate-chat satellite (lib/appstrate-mcp.ts).
  *
- * The platform exposes its whole REST surface through three progressive tools
- * (`search_operations` / `describe_operation` / `invoke_operation`); we hand
- * them to `streamText` so the model can drive Appstrate — list/run agents,
- * search documents, schedule — with the caller's own permissions. `run_and_wait`
- * is wrapped locally after discovery so it can emit an AI SDK preliminary result
- * as soon as the run id exists; that is what lets the chat render live logs while
- * the final tool result is still blocked on completion. The wrapper still uses
- * the public REST routes with the caller's forwarded auth/RBAC context.
+ * The platform exposes its REST surface through progressive MCP tools
+ * (`search_operations` / `describe_operation` / `invoke_operation`) plus the
+ * run-specific `run_and_wait` shortcut. We hand them to `streamText` so the
+ * model can drive Appstrate — list agents, inspect runs, search documents,
+ * schedule — with the caller's own permissions. `run_and_wait` is wrapped
+ * locally after discovery so it can emit an AI SDK preliminary result as soon as
+ * the run id exists; that is what lets the chat render live logs while the final
+ * tool result is still blocked on completion. The wrapper still uses the public
+ * REST routes with the caller's forwarded auth/RBAC context.
  */
 
 import { createMCPClient, type MCPClient } from "@ai-sdk/mcp";
 import { runAndWaitSteps } from "@appstrate/core/run-and-wait-client";
+import type { ToolCallRepairFunction, ToolSet as AiToolSet } from "ai";
 import { logger } from "./logger.ts";
 
 type ToolSet = Awaited<ReturnType<MCPClient["tools"]>>;
@@ -99,6 +101,33 @@ function callToolResult(payload: unknown, isError = false): unknown {
     ...(isError ? { isError: true } : {}),
   };
 }
+
+function parseNestedJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const outer = JSON.parse(text) as unknown;
+    if (typeof outer !== "string") return null;
+    const inner = JSON.parse(outer) as unknown;
+    return typeof inner === "object" && inner !== null && !Array.isArray(inner)
+      ? (inner as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Some models occasionally double-encode MCP tool inputs, producing a JSON
+ * string whose value is the real object. Repair only that narrow case; malformed
+ * JSON and schema-invalid objects still fail normally so the model can correct
+ * them.
+ */
+export const repairStringifiedToolCall: ToolCallRepairFunction<AiToolSet> = async ({
+  toolCall,
+}) => {
+  const input = parseNestedJsonObject(toolCall.input);
+  if (!input) return null;
+  return { ...toolCall, input: JSON.stringify(input) };
+};
 
 export function wrapRunAndWaitTool(
   tools: ToolSet,
