@@ -39,8 +39,18 @@ describe("executionContextSchema", () => {
       },
       dryRun: false,
       traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+      timeoutSeconds: 1.5,
     });
     expect(result.success).toBe(true);
+  });
+
+  it("rejects non-finite timeoutSeconds", () => {
+    const result = executionContextSchema.safeParse({
+      runId: "run_abc123",
+      input: {},
+      timeoutSeconds: Infinity,
+    });
+    expect(result.success).toBe(false);
   });
 
   it("rejects missing runId", () => {

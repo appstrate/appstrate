@@ -192,6 +192,68 @@ describe("finalizeThrownFailure", () => {
     expect(h.finalized?.usage).toEqual(USAGE);
   });
 
+  it("stamps `terminalStatus` instead of the default failed (runner-enforced timeout)", async () => {
+    const h = harness();
+    await finalizeThrownFailure({
+      events: [],
+      err: new Error("run timeout watchdog"),
+      signal: undefined,
+      runId: "run_timeout",
+      now: () => 1,
+      emit: h.emit,
+      drainAndEmit: h.drainAndEmit,
+      eventSink: h.eventSink,
+      usage: USAGE,
+      terminalStatus: "timeout",
+      buildError: () => ({ code: "timeout", message: "Run timed out after 5s" }),
+      stamp: (result) => {
+        result.durationMs = 5000;
+      },
+    });
+
+    expect(h.finalized?.status).toBe("timeout");
+    expect(h.finalized?.error).toEqual({ code: "timeout", message: "Run timed out after 5s" });
+    expect(h.finalized?.durationMs).toBe(5000);
+    expect(h.emitted[0]).toMatchObject({
+      type: "appstrate.error",
+      message: "Run timed out after 5s",
+    });
+  });
+
+  it("ignores `terminalStatus` when setFailedStatus:false (status stays unset)", async () => {
+    const h = harness();
+    await finalizeThrownFailure({
+      events: [],
+      err: new Error("e"),
+      signal: undefined,
+      runId: "run_ts_off",
+      now: () => 1,
+      emit: h.emit,
+      drainAndEmit: h.drainAndEmit,
+      eventSink: h.eventSink,
+      usage: USAGE,
+      setFailedStatus: false,
+      terminalStatus: "timeout",
+    });
+    expect(h.finalized?.status).toBeUndefined();
+  });
+
+  it("defaults the terminal status to failed when terminalStatus is omitted", async () => {
+    const h = harness();
+    await finalizeThrownFailure({
+      events: [],
+      err: new Error("boom"),
+      signal: undefined,
+      runId: "run_default",
+      now: () => 1,
+      emit: h.emit,
+      drainAndEmit: h.drainAndEmit,
+      eventSink: h.eventSink,
+      usage: USAGE,
+    });
+    expect(h.finalized?.status).toBe("failed");
+  });
+
   it("leaves usage unset when undefined is passed (Pi bridge-null path)", async () => {
     const h = harness();
     await finalizeThrownFailure({

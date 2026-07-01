@@ -53,6 +53,19 @@ import { getEnv } from "@appstrate/env";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { LlmProxyConfig, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 
+/**
+ * Grace added to the platform's container watchdog on top of the agent's
+ * execution budget. The runner enforces `plan.timeout` ITSELF from the moment
+ * its run loop starts (boot excluded) and finalises a first-class `timeout`.
+ * This platform-side timer is the SAFETY NET for the cases the runner can't
+ * cover — a container wedged in cold-start/boot before its watchdog arms, or a
+ * runner that died without finalising. The grace folds in cold-start (image
+ * pull, workspace init, MCP handshake) so a slow boot does not trip the net
+ * before the runner has had its full budget. When it does fire,
+ * `execute-background` synthesises the `timeout` terminal.
+ */
+const PLATFORM_TIMEOUT_BOOT_GRACE_MS = 90_000;
+
 /** Terminal state reported back to the caller once the container has exited. */
 export interface PlatformContainerResult {
   /** Exit code reported by the orchestrator (0 = clean, non-zero = crash). */
@@ -81,6 +94,13 @@ export interface RunPlatformContainerInput {
    */
   uploadBundle?: typeof uploadRunBundle;
   deleteWorkspace?: typeof deleteRunWorkspace;
+  /**
+   * Grace (ms) added to `plan.timeout` for the platform's safety-net
+   * container watchdog. Defaults to {@link PLATFORM_TIMEOUT_BOOT_GRACE_MS}.
+   * Tests that exercise the net directly (no real runner to self-terminate)
+   * set it to `0` so the net fires at the budget itself.
+   */
+  timeoutBootGraceMs?: number;
 }
 
 /**
@@ -325,6 +345,10 @@ async function runPlatformContainerImpl(
       },
       agentPrompt: prompt,
       runId,
+      // Forward the execution budget so the runner enforces it itself, from the
+      // run-loop start (boot excluded), and finalises a first-class `timeout`.
+      // The platform setTimeout in `waitForWorkload` is the longer safety net.
+      timeoutSeconds: plan.timeout,
       noSidecar: skipSidecar,
       // Sidecar-backed runs route LLM traffic through the sidecar proxy
       // (sidecarProxyLlmUrl below). No-sidecar runs talk to the upstream
@@ -399,7 +423,14 @@ async function runPlatformContainerImpl(
     recordContainerSpawn(Date.now() - spawnStart, { sidecar: !skipSidecar });
     spawnRecorded = true;
 
-    return await waitForWorkload(orch, agent, sidecar, plan.timeout, signal);
+    return await waitForWorkload(
+      orch,
+      agent,
+      sidecar,
+      plan.timeout,
+      signal,
+      input.timeoutBootGraceMs ?? PLATFORM_TIMEOUT_BOOT_GRACE_MS,
+    );
   } catch (err) {
     // SOTA per OTel "Recording errors": the spawn histogram covers failures too,
     // tagged with a bounded `error.type` naming the phase that failed (no
@@ -448,9 +479,11 @@ async function runPlatformContainerImpl(
 }
 
 /**
- * Drive the agent container lifecycle: start, enforce timeout, propagate
- * cancellation, wait for exit. Sidecar is stopped alongside the agent on
- * any terminal condition so neither lingers after the run has ended.
+ * Drive the agent container lifecycle: start, enforce the SAFETY-NET timeout
+ * (`timeoutSeconds` + {@link PLATFORM_TIMEOUT_BOOT_GRACE_MS} — the runner owns
+ * the primary, boot-excluded budget), propagate cancellation, wait for exit.
+ * Sidecar is stopped alongside the agent on any terminal condition so neither
+ * lingers after the run has ended.
  */
 async function waitForWorkload(
   orch: ContainerOrchestrator,
@@ -458,6 +491,7 @@ async function waitForWorkload(
   sidecar: WorkloadHandle | undefined,
   timeoutSeconds: number,
   signal: AbortSignal | undefined,
+  bootGraceMs: number,
 ): Promise<PlatformContainerResult> {
   await orch.startWorkload(agent);
 
@@ -480,11 +514,14 @@ async function waitForWorkload(
   })();
 
   let timedOut = false;
-  const timeoutHandle = setTimeout(() => {
-    timedOut = true;
-    orch.stopWorkload(agent).catch(() => {});
-    if (sidecar) orch.stopWorkload(sidecar).catch(() => {});
-  }, timeoutSeconds * 1000);
+  const timeoutHandle = setTimeout(
+    () => {
+      timedOut = true;
+      orch.stopWorkload(agent).catch(() => {});
+      if (sidecar) orch.stopWorkload(sidecar).catch(() => {});
+    },
+    timeoutSeconds * 1000 + bootGraceMs,
+  );
 
   const onAbort = () => {
     orch.stopWorkload(agent).catch(() => {});

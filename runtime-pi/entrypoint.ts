@@ -668,6 +668,11 @@ const context: ExecutionContext = {
   input: env.agentInput,
   memories: [],
   config: {},
+  // When the platform forwarded a budget, the runner enforces it itself
+  // (watchdog from the run-loop start, boot excluded) and finalizes a
+  // first-class `timeout` terminal — instead of waiting for the platform's
+  // safety-net container kill, which can only surface a generic abort.
+  ...(env.timeoutSeconds !== undefined ? { timeoutSeconds: env.timeoutSeconds } : {}),
 };
 
 // --- 5. Resolve bundle for PiRunner (fallback to synthetic when no .afps) ---
@@ -842,6 +847,19 @@ try {
 } catch (err) {
   heartbeat.stop();
   await mcpClient?.close().catch(() => {});
+
+  // External abort (SIGTERM/SIGINT = platform timeout safety-net or a user
+  // cancel). The runner already honours this by rethrowing WITHOUT finalizing
+  // (`finalizeThrownFailure`'s abort-rethrow arm) — and only the platform knows
+  // WHICH terminal cause it was. Finalizing `failed` + the SDK's generic
+  // "operation was aborted" message here would win the finalize CAS and mask
+  // the platform's authoritative `timeout`/`cancelled` synthesis. So we must
+  // NOT finalize (nor emit a spurious adapter_error): just exit non-zero and
+  // let `execute-background` synthesise the real terminal state.
+  if (runAbort.signal.aborted) {
+    process.exit(1);
+  }
+
   const message = getErrorMessage(err);
   await emitError(message);
   try {

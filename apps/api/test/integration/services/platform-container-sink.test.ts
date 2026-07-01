@@ -271,8 +271,11 @@ describe("runPlatformContainer — sink env-var injection", () => {
     expect(env.APPSTRATE_SINK_SECRET).toBe(credentials.secret);
   });
 
-  it("reports timedOut=true when the run exceeds its timeout window", async () => {
-    // 100ms timeout, 500ms agent lifetime → must flip to timedOut.
+  it("reports timedOut=true when the run exceeds its timeout window (safety net)", async () => {
+    // 100ms budget, 500ms agent lifetime → the platform safety-net watchdog
+    // must flip timedOut. `timeoutBootGraceMs: 0` exercises the net at the
+    // budget itself (the fake orchestrator has no real runner to self-time-out,
+    // so the net is the only timeout in play here).
     const fake = createFakeOrchestrator({ exitCode: 0, exitDelayMs: 500 });
     const plan = buildRunPlan();
     plan.timeout = 0.1; // 100 ms
@@ -287,9 +290,33 @@ describe("runPlatformContainer — sink env-var injection", () => {
         ttlSeconds: 60,
       }),
       orchestrator: fake.orchestrator,
+      timeoutBootGraceMs: 0,
     });
 
     expect(result.timedOut).toBe(true);
+  });
+
+  it("the boot grace defers the safety net past the raw budget", async () => {
+    // 50ms budget but a large grace → the net must NOT fire within the agent's
+    // 200ms lifetime, so a clean exit-0 wins (timedOut stays false).
+    const fake = createFakeOrchestrator({ exitCode: 0, exitDelayMs: 200 });
+    const plan = buildRunPlan();
+    plan.timeout = 0.05; // 50 ms budget
+
+    const result = await runPlatformContainer({
+      runId: "run_grace",
+      context: buildContext("run_grace"),
+      plan,
+      sinkCredentials: mintSinkCredentials({
+        runId: "run_grace",
+        appUrl: "http://platform:3000",
+        ttlSeconds: 60,
+      }),
+      orchestrator: fake.orchestrator,
+      timeoutBootGraceMs: 5_000,
+    });
+
+    expect(result.timedOut).toBe(false);
   });
 
   it("reports cancelled=true when the AbortSignal fires before exit", async () => {
@@ -330,6 +357,7 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
     exitCode: number;
     exitDelayMs?: number;
     timeoutSeconds?: number;
+    timeoutBootGraceMs?: number;
   }): Promise<{ runId: string; packageId: string }> {
     const pkg = await seedPackage({
       id: `@${ctx.orgId.slice(0, 6)}/agent-${crypto.randomUUID().slice(0, 6)}`,
@@ -370,6 +398,9 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
       plan,
       sinkCredentials: realCredentials,
       orchestrator: fake.orchestrator,
+      ...(input.timeoutBootGraceMs !== undefined
+        ? { timeoutBootGraceMs: input.timeoutBootGraceMs }
+        : {}),
     };
 
     await executeAgentInBackground(execInput);
@@ -393,11 +424,13 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
   });
 
   it("synthesises a timeout finalize when the run exceeds its timeout", async () => {
-    // 100ms timeout, 500ms agent lifetime → timeout path.
+    // 100ms budget, 500ms agent lifetime, zero boot grace → safety-net timeout
+    // path (no real runner here to self-time-out).
     const { runId } = await runWithFakeOrchestrator({
       exitCode: 0,
       exitDelayMs: 500,
       timeoutSeconds: 0.1,
+      timeoutBootGraceMs: 0,
     });
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row!.status).toBe("timeout");

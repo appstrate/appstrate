@@ -99,6 +99,15 @@ export interface RuntimePiEnvOptions {
    * Forwarded as `TRACEPARENT` env var, consumed by HttpSink at boot.
    */
   traceparent?: string;
+  /**
+   * Wall-clock execution budget for the run, in seconds. Forwarded as
+   * `AGENT_TIMEOUT_SECONDS`; the entrypoint surfaces it on
+   * `ExecutionContext.timeoutSeconds`, where the runner arms its own
+   * timeout watchdog (measured from the run loop start, so boot is
+   * excluded). Omitted when absent or non-positive — the platform's own
+   * container watchdog stays the only backstop.
+   */
+  timeoutSeconds?: number;
 }
 
 /**
@@ -128,6 +137,13 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
 
   if (opts.runId) env.AGENT_RUN_ID = opts.runId;
   if (opts.agentInput !== undefined) env.AGENT_INPUT = JSON.stringify(opts.agentInput);
+  if (
+    opts.timeoutSeconds !== undefined &&
+    Number.isFinite(opts.timeoutSeconds) &&
+    opts.timeoutSeconds > 0
+  ) {
+    env.AGENT_TIMEOUT_SECONDS = String(opts.timeoutSeconds);
+  }
 
   // MODEL_BASE_URL tells the Pi SDK where to send inference. Two cases set it:
   //   1. Sidecar-backed run — point at the sidecar LLM proxy, which injects the
