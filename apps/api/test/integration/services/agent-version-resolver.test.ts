@@ -198,6 +198,48 @@ describe("resolveAgentRunVersion", () => {
     }
   });
 
+  it("default does not infer a published version from prerelease-only snapshots", async () => {
+    const id = "@verorg/beta-only";
+    await seedAgent({
+      id,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: {
+        name: id,
+        version: "1.0.0-beta.1",
+        type: "agent",
+        description: "Prerelease-only agent",
+      },
+      draftContent: PUBLISHED_PROMPT,
+    });
+    const published = await createVersionFromDraft({
+      packageId: id,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+    });
+    expect("version" in published && published.version).toBe("1.0.0-beta.1");
+
+    await db
+      .update(packages)
+      .set({ draftContent: DIRTY_PROMPT, updatedAt: new Date(Date.now() + 5_000) })
+      .where(eq(packages.id, id));
+    const agent = await getPackage(id, ctx.orgId);
+    expect(agent).not.toBeNull();
+
+    try {
+      await resolveAgentRunVersion(agent!, undefined);
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).status).toBe(404);
+      expect((err as ApiError).code).toBe("no_published_version");
+    }
+
+    const exact = await resolveAgentRunVersion(agent!, "1.0.0-beta.1");
+    expect(exact.overrideVersionLabel).toBe("1.0.0-beta.1");
+    expect(exact.agent.prompt).toBe(PUBLISHED_PROMPT);
+  });
+
   it("'draft' STILL runs the working copy on a never-published agent (the opt-in escape hatch)", async () => {
     await seedAgent({
       id: "@verorg/never-published",

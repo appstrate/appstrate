@@ -9,8 +9,7 @@
  *
  *   - `"draft"`     → execute the live draft (`packages.draft_manifest` /
  *                     `draft_content`) — the editor working copy.
- *   - `"published"` → execute the latest published version (the `latest`
- *                     dist-tag, falling back to the highest version id).
+ *   - `"published"` → execute the version selected by the `latest` dist-tag.
  *                     404 `no_published_version` when nothing is published.
  *   - anything else → 3-step resolution (exact version → dist-tag → semver
  *                     range) via {@link getVersionDetail}. 404 when nothing
