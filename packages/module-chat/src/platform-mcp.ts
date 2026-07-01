@@ -71,6 +71,7 @@ export async function openPlatformMcp(args: {
   let tools: ToolSet;
   try {
     tools = await client.tools();
+    tools = wrapInvokeOperationTool(tools);
     tools = wrapRunAndWaitTool(tools, {
       origin: args.origin,
       headers,
@@ -102,32 +103,177 @@ function callToolResult(payload: unknown, isError = false): unknown {
   };
 }
 
-function parseNestedJsonObject(text: string): Record<string, unknown> | null {
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function parseLooseJsonObject(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{")) return null;
+
+  try {
+    return asRecord(JSON.parse(trimmed));
+  } catch {
+    // Some tool-call providers hand us an object encoded as a string but leave
+    // literal newlines/tabs inside string values. JSON.parse rejects that, while
+    // the intended object is still unambiguous enough to recover.
+  }
+
+  let repaired = "";
+  let inString = false;
+  let escaped = false;
+  for (const ch of trimmed) {
+    if (escaped) {
+      repaired += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      repaired += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      repaired += ch;
+      continue;
+    }
+    if (inString && ch === "\n") {
+      repaired += "\\n";
+      continue;
+    }
+    if (inString && ch === "\r") {
+      repaired += "\\r";
+      continue;
+    }
+    if (inString && ch === "\t") {
+      repaired += "\\t";
+      continue;
+    }
+    repaired += ch;
+  }
+
+  try {
+    return asRecord(JSON.parse(repaired));
+  } catch {
+    return null;
+  }
+}
+
+function parseStringifiedJsonObject(text: string): Record<string, unknown> | null {
   try {
     const outer = JSON.parse(text) as unknown;
     if (typeof outer !== "string") return null;
-    const inner = JSON.parse(outer) as unknown;
-    return typeof inner === "object" && inner !== null && !Array.isArray(inner)
-      ? (inner as Record<string, unknown>)
-      : null;
+    return parseLooseJsonObject(outer);
   } catch {
     return null;
   }
 }
 
 /**
- * Some models occasionally double-encode MCP tool inputs, producing a JSON
- * string whose value is the real object. Repair only that narrow case; malformed
- * JSON and schema-invalid objects still fail normally so the model can correct
- * them.
+ * Some models occasionally string-encode MCP tool inputs, producing a JSON
+ * string whose value is the real object. Repair only that narrow case; schema-
+ * invalid objects still fail normally so the model can correct them.
  */
 export const repairStringifiedToolCall: ToolCallRepairFunction<AiToolSet> = async ({
   toolCall,
 }) => {
-  const input = parseNestedJsonObject(toolCall.input);
+  const input =
+    parseStringifiedJsonObject(toolCall.input) ??
+    (toolCall.toolName === "run_and_wait" ? parseLooseJsonObject(toolCall.input) : null);
   if (!input) return null;
   return { ...toolCall, input: JSON.stringify(input) };
 };
+
+function normalizeRunAndWaitArgs(rawArgs: unknown): unknown {
+  if (asRecord(rawArgs)) return rawArgs;
+  if (typeof rawArgs !== "string") return rawArgs;
+  return parseLooseJsonObject(rawArgs) ?? rawArgs;
+}
+
+function parseMcpTextResult(output: unknown): Record<string, unknown> | null {
+  const content = asRecord(output)?.content;
+  if (!Array.isArray(content)) return null;
+  const first = asRecord(content[0]);
+  const text = first?.type === "text" && typeof first.text === "string" ? first.text : null;
+  if (!text) return null;
+  try {
+    return asRecord(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+
+function compactIntegrationSummary(value: unknown): Record<string, unknown> | null {
+  const row = asRecord(value);
+  if (!row) return null;
+  const manifest = asRecord(row.manifest);
+  return {
+    id: row.id,
+    active: row.active,
+    block_user_connections: row.block_user_connections,
+    display_name: manifest?.display_name,
+    description: manifest?.description,
+    default_tools: manifest?.default_tools,
+  };
+}
+
+function compactListIntegrationsResult(output: unknown): unknown {
+  const envelope = parseMcpTextResult(output);
+  if (!envelope) return output;
+
+  const body = envelope.body;
+  const bodyRecord = asRecord(body);
+  const data = Array.isArray(bodyRecord?.data) ? bodyRecord.data : null;
+  if (data) {
+    const compacted = data.map(compactIntegrationSummary).filter(Boolean);
+    return callToolResult({
+      status: envelope.status,
+      compacted: true,
+      object: bodyRecord?.object,
+      total: compacted.length,
+      data: compacted,
+      hasMore: bodyRecord?.hasMore,
+      note: "Compacted for chat context. For a specific integration, call getIntegration with path_params.packageId to inspect auths, default_tools, and tool_catalog.",
+    });
+  }
+
+  if (envelope.truncated || typeof body === "string") {
+    return callToolResult({
+      status: envelope.status,
+      compacted: true,
+      truncated: envelope.truncated === true,
+      note: "listIntegrations returned a large response omitted from chat context. For a task-specific integration, call getIntegration with the expected @scope/name id, then listIntegrationConnections or initiateIntegrationConnect as needed.",
+    });
+  }
+
+  return output;
+}
+
+export function wrapInvokeOperationTool(tools: ToolSet): ToolSet {
+  const invoke = tools.invoke_operation as
+    | (Record<string, unknown> & {
+        execute?: (args: unknown, options: { abortSignal?: AbortSignal }) => unknown;
+      })
+    | undefined;
+  if (!invoke?.execute) return tools;
+
+  const wrapped = {
+    ...invoke,
+    async execute(rawArgs: unknown, options: { abortSignal?: AbortSignal }) {
+      const output = await invoke.execute!(rawArgs, options);
+      const args = asRecord(rawArgs);
+      if (args?.operation_id !== "listIntegrations") return output;
+      return compactListIntegrationsResult(output);
+    },
+  };
+
+  const next = { ...tools } as Record<string, unknown>;
+  next.invoke_operation = wrapped;
+  return next as unknown as ToolSet;
+}
 
 export function wrapRunAndWaitTool(
   tools: ToolSet,
@@ -143,7 +289,7 @@ export function wrapRunAndWaitTool(
   const wrapped = {
     ...runAndWait,
     async *execute(rawArgs: unknown, options: { abortSignal?: AbortSignal }) {
-      for await (const step of runAndWaitSteps(rawArgs, {
+      for await (const step of runAndWaitSteps(normalizeRunAndWaitArgs(rawArgs), {
         origin: opts.origin,
         headers: opts.headers,
         fetch: opts.fetch,

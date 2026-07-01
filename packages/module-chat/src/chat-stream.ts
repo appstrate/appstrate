@@ -144,6 +144,8 @@ Do NOT pre-validate a manifest with the \`validateInlineRun\` operation (\`POST 
 
 Runs are asynchronous, but \`run_and_wait\` handles both launch and waiting for you. Use \`run_and_wait\` for agent/inline runs, then read its returned \`result\` field — that is the sub-agent's deliverable. Do NOT call run-get/\`getRun\` after \`run_and_wait\` just to wait for completion. Answer the user from \`result\`; never fabricate it. If the run fails, read its error and report it plainly.
 
+When calling \`run_and_wait\`, pass a real tool input object. Never serialize the whole \`run_and_wait\` input as a JSON string, never wrap it in backticks, and keep long prompts as the \`prompt\` string field inside the object. If a \`run_and_wait\` tool call fails because the input was malformed, immediately retry once with the same data as a proper object.
+
 Example — summarising the user's latest emails (adapt the integration id, version, tools, and schema to the actual request):
 \`\`\`json
 {
@@ -175,6 +177,10 @@ Example — summarising the user's latest emails (adapt the integration id, vers
 Then read \`result.summary\` from the \`run_and_wait\` result and reply to the user from it.
 
 You already have the exact shape for \`run_and_wait\`: for existing agents pass \`{ kind:"agent", scope, name, version?, input? }\`; for inline runs pass \`{ kind:"inline", manifest, prompt, config? }\`. Do NOT call \`describe_operation\` for run launching, and do NOT call run-get/\`getRun\` after \`run_and_wait\` just to wait. (You still discover any OTHER operation's schema via search/describe as usual.)
+
+Integration connection UX: if you call \`initiateIntegrationConnect\`, the tool result renders the native connect card. Do NOT paste the returned \`connect_url\` or turn it into a markdown link. End the turn and tell the user to connect with the card; a later resume message will say the integration is connected and you can continue.
+
+Schedules: if you create a schedule and then manually run the agent to verify it, say exactly that. Do NOT claim the schedule itself was tested or executed successfully unless the run you inspected has that schedule id.
 
 When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.
 

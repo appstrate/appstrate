@@ -31,7 +31,18 @@ export interface OrgModel {
   enabled?: boolean;
   /** snake_case to match the `/api/models` wire field — camelCase silently never matches. */
   is_default?: boolean;
+  /** "built-in" for system models, "custom" for org rows. */
+  source?: string;
 }
+
+const CHAT_DEPRIORITIZED_SYSTEM_DEFAULT_PROVIDERS = new Set(["deepseek"]);
+const CHAT_PROVIDER_PREFERENCE = new Map<string, number>([
+  ["anthropic", 50],
+  ["claude-code", 45],
+  ["openai", 40],
+  ["mistral", 25],
+  ["deepseek", -50],
+]);
 
 export async function listModels(
   origin: string,
@@ -68,9 +79,15 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
       "Aucun modèle utilisable par le chat n'est configuré. Connectez un modèle par clé API (Anthropic, OpenAI, Mistral) ou un abonnement Claude Code dans Settings → Models.",
     );
   }
-  const chosen = modelId
-    ? pool.find((m) => m.id === modelId || m.modelId === modelId)
-    : (pool.find((m) => m.is_default) ?? pool[0]);
+  const explicit = modelId ? pool.find((m) => m.id === modelId || m.modelId === modelId) : null;
+  const defaultModel = pool.find((m) => m.is_default);
+  const chosen =
+    explicit ??
+    (defaultModel &&
+    (defaultModel.source !== "built-in" ||
+      !CHAT_DEPRIORITIZED_SYSTEM_DEFAULT_PROVIDERS.has(defaultModel.providerId ?? ""))
+      ? defaultModel
+      : [...pool].sort((a, b) => chatModelPreference(b) - chatModelPreference(a))[0]);
   if (!chosen) {
     throw invalidRequest(
       modelId
@@ -79,6 +96,15 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
     );
   }
   return chosen;
+}
+
+function chatModelPreference(model: OrgModel): number {
+  let score = CHAT_PROVIDER_PREFERENCE.get(model.providerId ?? "") ?? 0;
+  if (model.source !== "built-in") score += 10;
+  if (model.is_default) score += 5;
+  if (model.apiShape === "anthropic-messages") score += 4;
+  if (model.apiShape === "openai-completions") score += 2;
+  return score;
 }
 
 type ProxyKind = "anthropic" | "openai-compatible";
