@@ -62,6 +62,7 @@ import { forkPackage } from "../services/package-fork.ts";
 import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
 import { validateAgentIntegrationSelections } from "../services/integration-scope-validation.ts";
+import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
@@ -1296,38 +1297,41 @@ export function createPackagesRouter() {
     router.get(`/${path}`, makeListHandler(rcfg));
     router.post(`/${path}`, writeGuard, makeCreateHandler(rcfg));
     // Version routes — must be registered before generic get to avoid conflict
-    router.get(`/${path}/:scope{@[^/]+}/:name/versions`, makeListVersionsHandler(rcfg));
+    router.get(`/${path}/${SCOPED_PACKAGE_ROUTE}/versions`, makeListVersionsHandler(rcfg));
     // Version info + create version + restore — BEFORE :version param to avoid matching
-    router.get(`/${path}/:scope{@[^/]+}/:name/versions/info`, makeVersionInfoHandler(rcfg));
+    router.get(`/${path}/${SCOPED_PACKAGE_ROUTE}/versions/info`, makeVersionInfoHandler(rcfg));
     router.post(
-      `/${path}/:scope{@[^/]+}/:name/versions`,
+      `/${path}/${SCOPED_PACKAGE_ROUTE}/versions`,
       requirePackageInOrg(),
       writeGuard,
       makeCreateVersionHandler(rcfg),
     );
     router.post(
-      `/${path}/:scope{@[^/]+}/:name/versions/:version/restore`,
+      `/${path}/${SCOPED_PACKAGE_ROUTE}/versions/:version/restore`,
       requirePackageInOrg(),
       writeGuard,
       makeRestoreVersionHandler(rcfg),
     );
     router.delete(
-      `/${path}/:scope{@[^/]+}/:name/versions/:version`,
+      `/${path}/${SCOPED_PACKAGE_ROUTE}/versions/:version`,
       requirePackageInOrg(),
       deleteGuard,
       makeDeleteVersionHandler(rcfg),
     );
-    router.get(`/${path}/:scope{@[^/]+}/:name/versions/:version`, makeVersionDetailHandler(rcfg));
+    router.get(
+      `/${path}/${SCOPED_PACKAGE_ROUTE}/versions/:version`,
+      makeVersionDetailHandler(rcfg),
+    );
     // Scoped IDs (@scope/name) — must be registered before unscoped to match first
-    router.get(`/${path}/:scope{@[^/]+}/:name`, rcfg.getHandler ?? makeGetHandler(rcfg));
+    router.get(`/${path}/${SCOPED_PACKAGE_ROUTE}`, rcfg.getHandler ?? makeGetHandler(rcfg));
     router.put(
-      `/${path}/:scope{@[^/]+}/:name`,
+      `/${path}/${SCOPED_PACKAGE_ROUTE}`,
       requirePackageInOrg(),
       writeGuard,
       makeUpdateHandler(rcfg),
     );
     router.delete(
-      `/${path}/:scope{@[^/]+}/:name`,
+      `/${path}/${SCOPED_PACKAGE_ROUTE}`,
       requirePackageInOrg(),
       deleteGuard,
       makeDeleteHandler(rcfg),
@@ -1339,7 +1343,7 @@ export function createPackagesRouter() {
   }
 
   // --- Fork route ---
-  router.post("/:scope{@[^/]+}/:name/fork", requirePermission("agents", "write"), async (c) => {
+  router.post(`/${SCOPED_PACKAGE_ROUTE}/fork`, requirePermission("agents", "write"), async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
     const orgSlug = c.get("orgSlug");
@@ -1755,7 +1759,7 @@ export function createPackagesRouter() {
   });
 
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP
-  router.get("/:scope{@[^/]+}/:name/:version/download", rateLimit(50), async (c) => {
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/:version/download`, rateLimit(50), async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
     const versionQuery = c.req.param("version")!;

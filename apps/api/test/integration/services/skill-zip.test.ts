@@ -19,11 +19,12 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { zipSync } from "fflate";
 import { db } from "@appstrate/db/client";
-import { packages, packageVersions } from "@appstrate/db/schema";
+import { packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import { tryParseSkillOnlyZip } from "../../../src/services/skill-zip.ts";
+import { createPackageVersion } from "../../../src/services/package-versions.ts";
 
 const DOS_EPOCH_MS = Date.UTC(1980, 0, 2, 12, 0, 0);
 
@@ -129,12 +130,13 @@ describe("tryParseSkillOnlyZip", () => {
       draftContent: "old body",
       createdBy: ctx.user.id,
     });
-    await db.insert(packageVersions).values({
+    await createPackageVersion({
       packageId,
       version: "1.2.3",
       integrity: "sha256-old",
       artifactSize: 1,
       manifest: { name: packageId, type: "skill", version: "1.2.3" },
+      createdBy: ctx.user.id,
     });
 
     const buf = zipFiles({ "SKILL.md": enc(VALID_SKILL_MD) });

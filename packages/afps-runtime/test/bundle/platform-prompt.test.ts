@@ -433,23 +433,12 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("$SIDECAR_URL");
   });
 
-  it("appends raw template verbatim for pre-1.1 schemaVersion", () => {
+  it("appends raw template verbatim", () => {
     const out = renderPlatformPrompt({
       template: "Template with {{runId}} reference",
       context: ctx(),
-      schemaVersion: "1.0.0",
     });
     expect(out).toContain("Template with {{runId}} reference");
-  });
-
-  it("renders the template via Mustache for 1.1+ schemaVersion", () => {
-    const out = renderPlatformPrompt({
-      template: "Hi {{runId}}",
-      context: ctx({ runId: "run_abc" }),
-      schemaVersion: "1.1.0",
-    });
-    expect(out).toContain("Hi run_abc");
-    expect(out).not.toContain("{{runId}}");
   });
 
   it("preserves ---\\n\\n separator between preamble and template", () => {

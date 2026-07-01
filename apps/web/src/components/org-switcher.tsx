@@ -23,8 +23,8 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSkeleton,
-  useSidebar,
 } from "@appstrate/ui/components/sidebar";
+import { useSidebar } from "@appstrate/ui/components/sidebar-context";
 import { cn } from "@appstrate/ui/cn";
 
 function OrgAvatar({ name, className }: { name: string; className?: string }) {

@@ -15,6 +15,7 @@ import {
   createVersionFromDraft,
   listPackageVersions,
   getLatestVersionId,
+  getLatestVersionInfo,
   getVersionCount,
   getVersionInfo,
   getLatestVersionCreatedAt,
@@ -284,6 +285,23 @@ describe("package-versions service", () => {
 
       const latestId = await getLatestVersionId(pkg.id);
       expect(latestId).toBe(v1!.id);
+    });
+
+    it("does not infer latest from a prerelease-only package without a dist-tag", async () => {
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/beta-only-agent` });
+
+      const prerelease = await createPackageVersion({
+        packageId: pkg.id,
+        version: "1.0.0-beta.1",
+        integrity: "sha256-beta",
+        artifactSize: 1024,
+        manifest: { name: pkg.id, version: "1.0.0-beta.1", type: "agent" },
+        createdBy: userId,
+      });
+
+      expect(prerelease).not.toBeNull();
+      expect(await getLatestVersionId(pkg.id)).toBeNull();
+      expect(await getLatestVersionInfo(pkg.id)).toBeNull();
     });
   });
 

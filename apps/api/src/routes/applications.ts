@@ -28,6 +28,7 @@ import { validateDomainList } from "../services/redirect-validation.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import { recordAuditFromContext } from "../services/audit.ts";
+import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 
 /**
  * Project a Drizzle application row onto the wire shape. The DB column is
@@ -226,7 +227,7 @@ export function createApplicationsRouter() {
   });
 
   // GET /api/applications/:applicationId/packages/:packageId — get installed package detail
-  router.get("/:applicationId/packages/:scope{@[^/]+}/:name", async (c) => {
+  router.get(`/:applicationId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
     const applicationId = c.req.param("applicationId")!;
     const orgId = c.get("orgId");
     const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
@@ -244,7 +245,7 @@ export function createApplicationsRouter() {
 
   // PUT /api/applications/:applicationId/packages/:packageId — update config
   router.put(
-    "/:applicationId/packages/:scope{@[^/]+}/:name",
+    `/:applicationId/packages/${SCOPED_PACKAGE_ROUTE}`,
     requirePermission("applications", "write"),
     async (c) => {
       const applicationId = c.req.param("applicationId")!;
@@ -263,7 +264,7 @@ export function createApplicationsRouter() {
 
   // DELETE /api/applications/:applicationId/packages/:packageId — uninstall
   router.delete(
-    "/:applicationId/packages/:scope{@[^/]+}/:name",
+    `/:applicationId/packages/${SCOPED_PACKAGE_ROUTE}`,
     requirePermission("applications", "write"),
     async (c) => {
       const applicationId = c.req.param("applicationId")!;
@@ -279,7 +280,7 @@ export function createApplicationsRouter() {
   // and version pin. Consumed by the CLI to reproduce a UI run without
   // hand-stitching three separate calls.
   router.get(
-    "/:applicationId/packages/:scope{@[^/]+}/:name/run-config",
+    `/:applicationId/packages/${SCOPED_PACKAGE_ROUTE}/run-config`,
     requirePermission("agents", "read"),
     async (c) => {
       const applicationId = c.req.param("applicationId")!;

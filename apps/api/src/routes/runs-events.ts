@@ -119,12 +119,10 @@ const RunResultSchema = z
       .optional(),
     status: z.enum(["success", "failed", "timeout", "cancelled"]).optional(),
     durationMs: z.number().int().nonnegative().optional().catch(undefined),
-    // Authoritative token usage. When present, finalize uses this as the
-    // source of truth for both the zero-tokens heuristic and the
-    // `runs.tokenUsage` column write — independent of whether the
-    // `appstrate.metric` event POST has landed yet. A malformed object
-    // degrades to "no authoritative usage" (the metric-event path still
-    // feeds the ledger) rather than failing the run.
+    // Authoritative token usage for finalize liveness and the terminal
+    // `runs.tokenUsage` write. Missing/malformed usage is tolerated by the
+    // service boundary as explicit zero usage; metric events are not a finalize
+    // fallback.
     usage: tokenUsageSchema.optional().catch(undefined),
     // Authoritative LLM cost in USD for the runner-source contribution.
     // When present, finalize synthesises a runner-source `llm_usage`

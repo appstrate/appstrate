@@ -28,6 +28,7 @@ import { recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { runConfigOverrideSchema, scheduleInputSchema } from "../lib/jsonb-schemas.ts";
+import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 
 // Per-integration connection picks frozen on the schedule row (cascade
 // mechanism #3). Same wire shape as the run-route's connection_overrides;
@@ -139,7 +140,7 @@ export function createSchedulesRouter() {
   });
 
   // GET /api/agents/:scope/:name/schedules — list schedules for an agent
-  router.get("/agents/:scope{@[^/]+}/:name/schedules", requireAgent(), async (c) => {
+  router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/schedules`, requireAgent(), async (c) => {
     const scope = getAppScope(c);
     const agent = c.get("package");
     const schedules = await listPackageSchedules(scope, agent.id);
@@ -148,7 +149,7 @@ export function createSchedulesRouter() {
 
   // POST /api/agents/:scope/:name/schedules — create a schedule
   router.post(
-    "/agents/:scope{@[^/]+}/:name/schedules",
+    `/agents/${SCOPED_PACKAGE_ROUTE}/schedules`,
     rateLimit(10),
     requireAgent(),
     requirePermission("schedules", "write"),

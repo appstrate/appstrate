@@ -58,8 +58,7 @@ export interface BundleFetchResult {
   integrity: string;
   /**
    * Resolved version label. Read from `X-Bundle-Version` (concrete semver
-   * for published, literal `"draft"` for draft). Falls back to a
-   * Content-Disposition parse on older servers, then to `"unspecified"`.
+   * for published, literal `"draft"` for draft).
    */
   version: string;
   /**
@@ -137,17 +136,18 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
     );
   }
 
-  // Prefer the explicit `X-Bundle-Version` header (added when registry-
-  // attribution landed); fall back to the Content-Disposition parse for
-  // older servers, and finally to `"unspecified"`. The header value is
-  // either a concrete semver (`1.2.3`, `1.2.3-rc.1`) or the literal
-  // `"draft"` — propagate verbatim so the run-creation call can decide
-  // between `source: "published" + spec` and `source: "draft"`.
+  // The header value is either a concrete semver (`1.2.3`, `1.2.3-rc.1`)
+  // or the literal `"draft"` — propagate verbatim so the run-creation call
+  // can decide between `source: "published" + spec` and `source: "draft"`.
   const versionHeader = res.headers.get("X-Bundle-Version") ?? res.headers.get("x-bundle-version");
-  const version =
-    versionHeader ??
-    parseVersionFromContentDisposition(res.headers.get("Content-Disposition")) ??
-    "unspecified";
+  if (!versionHeader) {
+    throw new BundleFetchError(
+      "bundle_fetch_failed",
+      "Server did not return X-Bundle-Version for the bundle response",
+      "Upgrade the Appstrate instance — this header is required for run attribution.",
+    );
+  }
+  const version = versionHeader;
   // `?source=draft` was sent ⇔ the server returned the draft. We don't
   // trust `versionHeader === "draft"` alone for this — the request shape
   // is the authoritative signal, and the response is a sanity check.
@@ -202,15 +202,6 @@ function buildBundleUrl(
   const base = `${instance}/api/agents/${scope}/${name}/bundle`;
   if (!spec) return `${base}?source=draft`;
   return `${base}?version=${encodeURIComponent(spec)}`;
-}
-
-function parseVersionFromContentDisposition(raw: string | null): string | null {
-  if (!raw) return null;
-  // Server emits filename="<scope>-<name>.afps-bundle.zip" — no version
-  // string today. Future-proof: recognise filename*=… or a -X.Y.Z suffix
-  // if the server starts encoding versions there.
-  const versionInName = /-(\d+\.\d+\.\d+(?:[-+][\w.-]+)?)\.afps-bundle/i.exec(raw);
-  return versionInName?.[1] ?? null;
 }
 
 async function safeText(res: Response): Promise<string> {

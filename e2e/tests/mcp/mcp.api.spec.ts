@@ -133,6 +133,7 @@ test.describe("MCP over an API key (full stack)", () => {
       "describe_operation",
       "get_me",
       "invoke_operation",
+      "run_and_wait",
       "search_operations",
     ]);
 

@@ -124,7 +124,7 @@
   "run.emptyLogs": "No public logs",
   "run.breadcrumb": "Run #{{number}}",
   "run.draft": "draft",
-  "run.versionDirty": "+ modifications",
+  "run.versionModified": "+ modifications",
   "run.tabInfo": "Information",
   "run.tabManifest": "Manifest",
   "run.tabPrompt": "Prompt",

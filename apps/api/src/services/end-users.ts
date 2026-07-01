@@ -8,7 +8,7 @@
 
 import { eq, and, or, ilike, desc, lt, gt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { endUsers, applications, notifications } from "@appstrate/db/schema";
+import { endUsers, notifications } from "@appstrate/db/schema";
 import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
@@ -17,6 +17,7 @@ import { prefixedId } from "../lib/ids.ts";
 import { buildUpdateSet } from "../lib/db-helpers.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import type { AppScope } from "../lib/scope.ts";
+import { assertApplicationInScope } from "./applications.ts";
 
 function toEndUserResponse(row: {
   id: string;
@@ -57,15 +58,7 @@ export async function createEndUser(
   const endUserId = prefixedId("eu");
   const now = new Date();
 
-  // Verify application exists and belongs to org
-  const [app] = await db
-    .select({ id: applications.id })
-    .from(applications)
-    .where(and(eq(applications.id, scope.applicationId), eq(applications.orgId, scope.orgId)))
-    .limit(1);
-  if (!app) {
-    throw notFound(`Application '${scope.applicationId}' not found in this organization`);
-  }
+  await assertApplicationInScope(scope);
 
   // Validate externalId uniqueness within application
   if (params.externalId) {

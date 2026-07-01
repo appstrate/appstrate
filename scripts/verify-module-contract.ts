@@ -122,6 +122,8 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   modelProviders: {
     kind: "extension",
     owners: ["core-providers", "module-codex", "module-claude-code"],
+    justification:
+      "Provider registry stays module-owned: subscription providers live outside core while core-providers holds the built-in API-key catalog.",
   },
   openApiPaths: { kind: "extension", owners: ["oidc", "webhooks", "cloud", "module-chat"] },
   openApiComponentSchemas: {
@@ -129,7 +131,12 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
     owners: ["oidc", "webhooks", "cloud", "module-chat"],
   },
   openApiTags: { kind: "extension", owners: ["oidc", "webhooks", "cloud", "module-chat"] },
-  openApiSchemas: { kind: "extension", owners: ["oidc", "webhooks", "module-chat"] },
+  openApiSchemas: {
+    kind: "extension",
+    owners: ["oidc", "webhooks", "module-chat"],
+    justification:
+      "Zod/OpenAPI parity is tied to each module's routes; centralizing these schemas would make the platform import module-private request shapes.",
+  },
 
   // Generic extension: two independent owners (oidc's end-user JWT + module-chat's
   // process-local loopback bearer) prove the auth pipeline stays module-agnostic.
@@ -231,7 +238,7 @@ for (const [member, entry] of Object.entries(LEDGER) as [ContractMember, LedgerE
       );
     } else {
       const tenants = new Set(entry.owners.map((o) => MODULE_TENANT[o] ?? "oss"));
-      if (tenants.size < 2) {
+      if (tenants.size < 2 && !entry.justification) {
         warnings.push(
           `\`${member}\` has ${ownerCount} owners but all in one license tenant (${[...tenants][0]}). ` +
             `Fine today; becomes single-owner if those owners consolidate.`,

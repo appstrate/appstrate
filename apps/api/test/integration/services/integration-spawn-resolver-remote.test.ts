@@ -12,7 +12,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { integrationConnections } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -81,7 +81,7 @@ describe("resolveIntegrationSpawns — remote source", () => {
       applicationId: ctx.defaultAppId,
       userId: ctx.user.id,
       endUserId: null,
-      credentialsEncrypted: encryptCredentials({ api_key: "k-123" }),
+      credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k-123" } }),
       identityClaims: {},
       scopesGranted: [],
       needsReconnection: false,
@@ -171,7 +171,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
       applicationId: ctx.defaultAppId,
       userId: ctx.user.id,
       endUserId: null,
-      credentialsEncrypted: encryptCredentials({ api_key: "k-123" }),
+      credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k-123" } }),
       identityClaims: {},
       scopesGranted: [],
       needsReconnection: false,

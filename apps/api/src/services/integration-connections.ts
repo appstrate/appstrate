@@ -11,7 +11,7 @@
  *     public clients).
  *   - Connection writers (`persistCredentialBundle`, `saveIntegrationConnection`)
  *     that store per-(integration, auth, account) rows in
- *     `integration_connections` with v1-envelope encrypted credentials.
+ *     `integration_connections` with v2-envelope encrypted credentials.
  *     The acquisition flows themselves live in `services/connect/*-strategy.ts`.
  *   - Lookup helpers consumed by the UI (per-auth status, scopes granted,
  *     expiry, multi-account list) and by the runtime resolver cascade.
@@ -26,7 +26,6 @@ import {
   applicationPackages,
   integrationConnections,
   integrationOauthClients,
-  applications,
   packages,
 } from "@appstrate/db/schema";
 import {
@@ -70,6 +69,7 @@ import { fetchMcpServerManifest } from "./integration-service.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 import { getIntegration } from "./integration-service.ts";
+import { assertApplicationInScope } from "./applications.ts";
 
 // ─────────────────────────────────────────────
 // Types
@@ -116,17 +116,6 @@ function lookupAuth(
     throw notFound(`Integration '${manifest.name}' has no auth '${authKey}'`);
   }
   return auth;
-}
-
-async function assertAppBelongsToOrg(scope: AppScope): Promise<void> {
-  const [app] = await db
-    .select({ id: applications.id })
-    .from(applications)
-    .where(and(eq(applications.id, scope.applicationId), eq(applications.orgId, scope.orgId)))
-    .limit(1);
-  if (!app) {
-    throw notFound(`Application '${scope.applicationId}' not found in this organization`);
-  }
 }
 
 async function loadManifestOrThrow(
@@ -594,7 +583,7 @@ export async function createIntegrationOAuthClient(
   input: { clientId: string; clientSecret: string; redirectUri?: string },
   opts: { autoProvisioned?: boolean } = {},
 ): Promise<IntegrationOAuthClientWithSecret> {
-  await assertAppBelongsToOrg(scope);
+  await assertApplicationInScope(scope);
   const manifest = await loadManifestOrThrow(scope, packageId);
   const auth = lookupAuth(manifest, authKey);
   if (auth.type !== "oauth2") {
@@ -645,7 +634,7 @@ export async function updateIntegrationOAuthClient(
   clientId: string,
   input: { clientId: string; clientSecret: string; redirectUri?: string },
 ): Promise<IntegrationOAuthClientWithSecret> {
-  await assertAppBelongsToOrg(scope);
+  await assertApplicationInScope(scope);
   const [existing] = await db
     .select({ autoProvisioned: integrationOauthClients.autoProvisioned })
     .from(integrationOauthClients)
@@ -909,7 +898,7 @@ export async function listIntegrationClients(
   packageId: string,
   authKey: string,
 ): Promise<IntegrationClientDescriptor[]> {
-  await assertAppBelongsToOrg(scope);
+  await assertApplicationInScope(scope);
   const customRows = await listIntegrationOAuthClientsWithSecret(scope, packageId, authKey);
   // Same generic system+DB merge the model-provider / proxy lists use: system
   // entries first, a DB row whose id collides with a system id is skipped
@@ -978,7 +967,7 @@ export async function setDefaultIntegrationClient(
   authKey: string,
   clientRef: string,
 ): Promise<void> {
-  await assertAppBelongsToOrg(scope);
+  await assertApplicationInScope(scope);
   const customRows = await db
     .select({ id: integrationOauthClients.id })
     .from(integrationOauthClients)
@@ -1353,7 +1342,7 @@ export async function deleteIntegrationOAuthClient(
   scope: AppScope,
   clientId: string,
 ): Promise<{ deletedConnections: number }> {
-  await assertAppBelongsToOrg(scope);
+  await assertApplicationInScope(scope);
   return db.transaction(async (tx) => {
     const deleted = await tx
       .delete(integrationOauthClients)
@@ -1596,10 +1585,9 @@ export type PersistTarget =
  *
  * `credentials` is the injectable **outputs** plane. `inputs` (spec §4.6) is
  * the bootstrap-secret plane, persisted ONLY when an OrchestratedStrategy
- * declares `persistLoginSecret` — when present (non-empty) the writer emits a
- * structured v2 envelope `{ v:2, outputs, inputs }`; otherwise it stays a flat
- * v1 blob, byte-identical to every pre-Phase-4 write. The injection path can
- * never read `inputs` (it only ever projects `outputs`).
+ * declares `persistLoginSecret`. The writer always emits the structured v2
+ * envelope `{ v:2, outputs, inputs? }`; the injection path can never read
+ * `inputs` (it only ever projects `outputs`).
  *
  * UPDATE column semantics (preserving today's behaviour exactly):
  *   - `credentials`, `expiresAt`, `needsReconnection` are ALWAYS written.
@@ -1664,17 +1652,15 @@ export async function persistCredentialBundle(
   target: PersistTarget,
   input: PersistCredentialInput,
 ): Promise<IntegrationConnectionSummary | null> {
-  // v2 structured envelope only when a bootstrap secret is being persisted
-  // (`persistLoginSecret`); otherwise a flat v1 blob, byte-identical to every
-  // pre-Phase-4 write so existing connections/round-trips are unchanged.
   const hasInputs = input.inputs && Object.keys(input.inputs).length > 0;
-  const ciphertext = hasInputs
-    ? encryptCredentialEnvelope({ outputs: input.credentials, inputs: input.inputs })
-    : encryptCredentials(input.credentials);
+  const ciphertext = encryptCredentialEnvelope({
+    outputs: input.credentials,
+    ...(hasInputs ? { inputs: input.inputs } : {}),
+  });
   const now = new Date();
 
   if (target.kind === "insert") {
-    await assertAppBelongsToOrg(target.scope);
+    await assertApplicationInScope(target.scope);
     const { userId, endUserId } = actorInsert(target.actor);
     if (!input.packageId || !input.authKey || input.accountId === undefined) {
       throw new Error("persistCredentialBundle(insert): packageId, authKey, accountId required");
@@ -1747,7 +1733,7 @@ export async function persistCredentialBundle(
   if (input.clientRef !== undefined) set.clientRef = input.clientRef;
 
   if (target.kind === "update-owned") {
-    await assertAppBelongsToOrg(target.scope);
+    await assertApplicationInScope(target.scope);
     const ownerPredicate = actorFilter(target.actor, integrationConnections);
     // Owner-scoped reconnect: id + application + actor identity, PLUS the
     // (packageId, authKey) the new credentials belong to. Without the latter
@@ -1930,7 +1916,7 @@ export async function listIntegrationConnections(
   packageId: string,
   actor: Actor,
 ): Promise<IntegrationConnectionSummary[]> {
-  await assertAppBelongsToOrg(scope);
+  await assertApplicationInScope(scope);
   const ownerPredicate = actorFilter(actor, integrationConnections);
   const rows = await db
     .select()
@@ -1982,7 +1968,7 @@ export async function listUsableIntegrationsForActor(
   scope: AppScope,
   actor: Actor,
 ): Promise<UsableIntegration[]> {
-  await assertAppBelongsToOrg(scope);
+  await assertApplicationInScope(scope);
   const ownerPredicate = actorFilter(actor, integrationConnections);
   const rows = await db
     .select({
@@ -2167,7 +2153,7 @@ export async function getIntegrationAuthStatuses(
    */
   block_user_connections: boolean;
 }> {
-  await assertAppBelongsToOrg(scope);
+  await assertApplicationInScope(scope);
   const manifest = await loadManifestOrThrow(scope, packageId);
   const authsMap = manifest.auths ?? {};
 

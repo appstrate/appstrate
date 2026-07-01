@@ -37,7 +37,7 @@ function ctx(overrides: Partial<ExecutionContext> = {}): ExecutionContext {
 }
 
 describe("buildPlatformPromptInputs", () => {
-  it("extracts template + schema_version + timeout from the root package", () => {
+  it("extracts template + timeout from the root package", () => {
     const root = pkg(
       "@acme/agent@1.0.0",
       { type: "agent", schema_version: "0.1", timeout: 120 },
@@ -45,7 +45,6 @@ describe("buildPlatformPromptInputs", () => {
     );
     const inputs = buildPlatformPromptInputs(bundleOf(root), ctx());
     expect(inputs.template).toBe("HELLO");
-    expect(inputs.schemaVersion).toBe("0.1");
     expect(inputs.timeoutSeconds).toBe(120);
   });
 

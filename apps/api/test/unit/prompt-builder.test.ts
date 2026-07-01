@@ -554,33 +554,10 @@ describe("buildEnrichedPrompt — tools and skills", () => {
   });
 });
 
-// ─── schemaVersion template rendering ──────────────────────
+// ─── Raw prompt template ──────────────────────
 
-describe("buildEnrichedPrompt — schemaVersion 1.1 template rendering", () => {
-  it("does NOT interpolate {{…}} in legacy schemaVersion 1.0 (verbatim append)", async () => {
-    const ctx = baseContext({
-      schemaVersion: "1.0",
-      runId: "run_abc",
-      input: { topic: "physics" },
-      rawPrompt: "Topic is {{input.topic}}, run {{runId}}.",
-    });
-    const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("Topic is {{input.topic}}, run {{runId}}.");
-    expect(prompt).not.toContain("Topic is physics");
-  });
-
-  it("does NOT interpolate when schemaVersion is undefined (defaults to legacy)", async () => {
-    const ctx = baseContext({
-      schemaVersion: undefined,
-      runId: "r",
-      input: { x: "y" },
-      rawPrompt: "raw {{input.x}}",
-    });
-    const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("raw {{input.x}}");
-  });
-
-  it("renders {{runId}} and {{input.*}} on schemaVersion 1.1", async () => {
+describe("buildEnrichedPrompt — raw prompt template", () => {
+  it("does not interpolate {{…}} even when schemaVersion declares 1.1", async () => {
     const ctx = baseContext({
       schemaVersion: "1.1",
       runId: "run_abc",
@@ -588,62 +565,18 @@ describe("buildEnrichedPrompt — schemaVersion 1.1 template rendering", () => {
       rawPrompt: "Investigate {{input.topic}} for {{runId}}.",
     });
     const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("Investigate quantum for run_abc.");
-    expect(prompt).not.toContain("{{");
+    expect(prompt).toContain("Investigate {{input.topic}} for {{runId}}.");
+    expect(prompt).not.toContain("Investigate quantum for run_abc.");
   });
 
-  it("renders memory sections on schemaVersion 1.1", async () => {
+  it("preserves the enrichment sections before the raw prompt", async () => {
     const ctx = baseContext({
-      schemaVersion: "1.1",
-      memories: [
-        { id: 1, content: "alpha", createdAt: "2026-01-01T00:00:00Z" },
-        { id: 2, content: "beta", createdAt: null },
-      ],
-      rawPrompt: "Past:\n{{#memories}}- {{content}}\n{{/memories}}End.",
-    });
-    const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("Past:\n- alpha\n- beta\nEnd.");
-  });
-
-  it("inverted section renders when memories are empty on 1.1", async () => {
-    const ctx = baseContext({
-      schemaVersion: "1.1",
-      memories: [],
-      rawPrompt: "{{^memories}}No prior memories.{{/memories}}",
-    });
-    const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("No prior memories.");
-  });
-
-  it("renders higher minor (1.2) and future majors (2.0) through the template path", async () => {
-    const tpl = "Hello {{input.who}}";
-    const forVersion = (v: string): Promise<string> =>
-      buildEnrichedPrompt(
-        baseContext({ schemaVersion: v, input: { who: "World" }, rawPrompt: tpl }),
-      );
-    expect(await forVersion("1.2")).toContain("Hello World");
-    expect(await forVersion("2.0")).toContain("Hello World");
-  });
-
-  it("treats a malformed schemaVersion as legacy (verbatim)", async () => {
-    const ctx = baseContext({
-      schemaVersion: "not-a-version",
-      input: { x: 1 },
-      rawPrompt: "{{input.x}}",
-    });
-    const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("{{input.x}}");
-  });
-
-  it("preserves the enrichment sections when schemaVersion is 1.1", async () => {
-    const ctx = baseContext({
-      schemaVersion: "1.1",
       input: { task: "hello" },
       rawPrompt: "Run: {{input.task}}",
     });
     const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## System");
     expect(prompt).toContain("Appstrate platform");
-    expect(prompt).toMatch(/Run: hello$/);
+    expect(prompt).toMatch(/Run: \{\{input\.task\}\}$/);
   });
 });

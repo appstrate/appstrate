@@ -277,11 +277,11 @@ describe("encryption — structured credential envelope (v2, spec §4.6)", () =>
     expect(decryptCredentialEnvelope(blob).inputs).toEqual({});
   });
 
-  it("reads a legacy v1 flat blob as all-outputs (backward-compat, no DDL)", () => {
-    const v1 = encryptCredentials({ access_token: "at_123", refresh_token: "rt_456" });
-    const env = decryptCredentialEnvelope(v1);
-    expect(env.outputs).toEqual({ access_token: "at_123", refresh_token: "rt_456" });
-    expect(env.inputs).toEqual({});
+  it("rejects a flat encrypted blob", () => {
+    const flat = encryptCredentials({ access_token: "at_123", refresh_token: "rt_456" });
+    expect(() => decryptCredentialEnvelope(flat)).toThrow(
+      "Credential blob is not a structured v2 envelope",
+    );
   });
 
   it("never leaks an input into the outputs plane", () => {

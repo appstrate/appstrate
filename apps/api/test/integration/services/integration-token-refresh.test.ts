@@ -26,7 +26,7 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { forceRefreshIntegrationConnection } from "../../../src/services/integration-token-refresh.ts";
 import { recordIntegrationRefreshFailure } from "../../../src/services/integration-connections.ts";
 
@@ -114,11 +114,13 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
   });
 
   async function seedConnection(initialScopes: string[]): Promise<string> {
-    const ciphertext = encryptCredentials({
-      access_token: "old-access",
-      accessToken: "old-access",
-      refresh_token: "rt-1",
-      refreshToken: "rt-1",
+    const ciphertext = encryptCredentialEnvelope({
+      outputs: {
+        access_token: "old-access",
+        accessToken: "old-access",
+        refresh_token: "rt-1",
+        refreshToken: "rt-1",
+      },
     });
     const [row] = await db
       .insert(integrationConnections)
@@ -306,11 +308,13 @@ describe("integration refresh-failure escalation", () => {
     refreshFailureCount?: number;
     needsReconnection?: boolean;
   }): Promise<string> {
-    const ciphertext = encryptCredentials({
-      access_token: "old-access",
-      accessToken: "old-access",
-      refresh_token: "rt-1",
-      refreshToken: "rt-1",
+    const ciphertext = encryptCredentialEnvelope({
+      outputs: {
+        access_token: "old-access",
+        accessToken: "old-access",
+        refresh_token: "rt-1",
+        refreshToken: "rt-1",
+      },
     });
     const [row] = await db
       .insert(integrationConnections)

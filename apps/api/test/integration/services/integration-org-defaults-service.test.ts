@@ -16,7 +16,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { integrationConnections } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   upsertOrgDefault,
   getOrgDefault,
@@ -73,7 +73,7 @@ describe("integration-org-defaults-service", () => {
         accountId: "acct-shared",
         applicationId,
         userId: ctx.user.id,
-        credentialsEncrypted: encryptCredentials({ api_key: "k" }),
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
         scopesGranted: [],
         sharedWithOrg: true,
       })

@@ -87,6 +87,34 @@ describe("Runs API", () => {
       expect(body.detail).toContain("email");
     });
 
+    it("accepts an encoded @ scope from standards-compliant clients", async () => {
+      await seedAgentWithInput();
+
+      const res = await app.request("/api/agents/%40runorg/input-agent/run?version=draft", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: { count: 5 } }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(body.detail).toContain("email");
+    });
+
+    it("does not treat encoded slashes as scoped package separators", async () => {
+      await seedAgentWithInput();
+
+      const res = await app.request("/api/agents/%40runorg%2Finput-agent/run?version=draft", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: { email: "ops@example.com" } }),
+      });
+
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { detail?: string };
+      expect(body.detail).toContain("API endpoint not found");
+    });
+
     it("returns 400 when input is omitted entirely and schema has required fields", async () => {
       await seedAgentWithInput();
 

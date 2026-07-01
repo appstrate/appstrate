@@ -124,7 +124,7 @@
   "run.emptyLogs": "Aucun log public",
   "run.breadcrumb": "Run #{{number}}",
   "run.draft": "brouillon",
-  "run.versionDirty": "+ modifications",
+  "run.versionModified": "+ modifications",
   "run.tabInfo": "Informations",
   "run.tabManifest": "Manifest",
   "run.tabPrompt": "Prompt",

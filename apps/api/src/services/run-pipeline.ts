@@ -375,7 +375,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   let plan;
   let agentPackage: Buffer | null;
   let versionLabel: string | null;
-  let versionDirty: boolean;
+  let versionRef: string;
   let proxyLabel: string | null;
   let modelLabel: string | null;
   let modelSource: string | null;
@@ -385,7 +385,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       plan,
       agentPackage,
       versionLabel,
-      versionDirty,
+      versionRef,
       proxyLabel,
       modelLabel,
       modelSource,
@@ -475,7 +475,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       input: input ?? null,
       scheduleId,
       versionLabel: versionLabel ?? undefined,
-      versionDirty,
+      versionRef,
       proxyLabel: proxyLabel ?? undefined,
       modelLabel: modelLabel ?? undefined,
       modelSource: modelSource ?? undefined,

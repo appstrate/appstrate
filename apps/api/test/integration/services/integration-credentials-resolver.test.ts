@@ -34,7 +34,7 @@ import { seedPackage } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
 import { resolveLiveIntegrationCredentials } from "../../../src/services/integration-credentials-resolver.ts";
 import {
   localIntegrationManifest,
@@ -199,11 +199,13 @@ describe("resolveLiveIntegrationCredentials", () => {
     accountId?: string;
     expiresAt?: Date;
   }): Promise<string> {
-    const ciphertext = encryptCredentials({
-      access_token: "old-access",
-      accessToken: "old-access",
-      refresh_token: "rt-1",
-      refreshToken: "rt-1",
+    const ciphertext = encryptCredentialEnvelope({
+      outputs: {
+        access_token: "old-access",
+        accessToken: "old-access",
+        refresh_token: "rt-1",
+        refreshToken: "rt-1",
+      },
     });
     const [row] = await db
       .insert(integrationConnections)

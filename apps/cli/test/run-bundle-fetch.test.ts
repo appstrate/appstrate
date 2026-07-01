@@ -109,32 +109,16 @@ describe("fetchBundleForRun — happy path", () => {
     expect(result.version).toBe("1.2.3");
   });
 
-  it("falls back to Content-Disposition then `unspecified` when the version header is absent (older servers)", async () => {
-    const fetchImpl = stubFetch({
-      headers: {
-        "X-Bundle-Integrity": FAKE_BUNDLE_SRI,
-        "Content-Disposition": 'attachment; filename="scope-agent-2.5.0.afps-bundle.zip"',
-      },
-    });
-    const result = await fetchBundleForRun({
-      instance: "https://app.example.com",
-      bearerToken: "ask_test",
-      applicationId: "app_1",
-      packageId: "@scope/agent",
-      spec: "2.5.0",
-      fetchImpl,
-    });
-    // Old-server fallback parses the version from the filename.
-    expect(result.version).toBe("2.5.0");
-  });
-
   it("re-fetches on every call — no on-disk cache", async () => {
     let calls = 0;
     const fetchImpl = (async () => {
       calls++;
       return new Response(FAKE_BUNDLE_BYTES, {
         status: 200,
-        headers: new Headers({ "X-Bundle-Integrity": FAKE_BUNDLE_SRI }),
+        headers: new Headers({
+          "X-Bundle-Integrity": FAKE_BUNDLE_SRI,
+          "X-Bundle-Version": "draft",
+        }),
       });
     }) as unknown as typeof fetch;
 
@@ -163,7 +147,10 @@ describe("fetchBundleForRun — integrity guards", () => {
     // Server lies — the integrity header references a different payload
     // than the body we return. We must surface this as integrity_mismatch.
     const fetchImpl = stubFetch({
-      headers: { "X-Bundle-Integrity": "sha256-this-is-not-the-right-hash=" },
+      headers: {
+        "X-Bundle-Integrity": "sha256-this-is-not-the-right-hash=",
+        "X-Bundle-Version": "draft",
+      },
     });
     await expect(
       fetchBundleForRun({
@@ -189,6 +176,22 @@ describe("fetchBundleForRun — integrity guards", () => {
         fetchImpl,
       }),
     ).rejects.toMatchObject({ code: "integrity_mismatch" });
+  });
+
+  it("rejects responses missing the bundle version header", async () => {
+    const fetchImpl = stubFetch({
+      headers: { "X-Bundle-Integrity": FAKE_BUNDLE_SRI },
+    });
+    await expect(
+      fetchBundleForRun({
+        instance: "https://app.example.com",
+        bearerToken: "ask_test",
+        applicationId: "app_1",
+        packageId: "@system/hello",
+        spec: undefined,
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({ code: "bundle_fetch_failed" });
   });
 });
 

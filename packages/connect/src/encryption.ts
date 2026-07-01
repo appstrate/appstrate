@@ -201,7 +201,7 @@ export interface CredentialEnvelope {
   inputs: Record<string, unknown>;
 }
 
-/** Tag of the structured envelope. v1 (untagged flat map) reads back as all-outputs. */
+/** Tag of the structured credential envelope. */
 const STRUCTURED_ENVELOPE_VERSION = 2;
 
 /**
@@ -227,11 +227,6 @@ export function encryptCredentialEnvelope(envelope: {
 
 /**
  * Decrypt a credential blob into its `{ outputs, inputs }` planes.
- *
- * Backward-compat (spec §4.6): a v1 flat `Record<string,string>` blob (no
- * `v:2` tag) is read as `{ outputs: <whole blob>, inputs: {} }` — zero DDL,
- * zero re-encryption needed. This makes every legacy injection read project
- * the entire blob as injectables, exactly as before.
  */
 export function decryptCredentialEnvelope(ciphertext: string): CredentialEnvelope {
   const decoded = decryptCredentials<unknown>(ciphertext) ?? {};
@@ -246,10 +241,7 @@ export function decryptCredentialEnvelope(ciphertext: string): CredentialEnvelop
       inputs: isPlainObject(inputs) ? inputs : {},
     };
   }
-  // v1 flat blob — the whole map is injectable, nothing is a bootstrap secret.
-  // Guard against a hand-crafted blob that decrypts to a non-object (array /
-  // primitive): such a value carries no injectable fields, so treat it as empty.
-  return { outputs: isPlainObject(decoded) ? decoded : {}, inputs: {} };
+  throw new Error("Credential blob is not a structured v2 envelope");
 }
 
 /**

@@ -165,7 +165,7 @@ export async function listPackageVersions(packageId: string) {
   }));
 }
 
-/** Get the latest version ID for a package via "latest" dist-tag, fallback to highest by id. */
+/** Get the latest version ID for a package via the "latest" dist-tag. */
 export async function getLatestVersionId(packageId: string): Promise<number | null> {
   const [tag] = await db
     .select({ versionId: packageDistTags.versionId })
@@ -173,16 +173,7 @@ export async function getLatestVersionId(packageId: string): Promise<number | nu
     .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, "latest")))
     .limit(1);
 
-  if (tag) return tag.versionId;
-
-  const [row] = await db
-    .select({ id: packageVersions.id })
-    .from(packageVersions)
-    .where(eq(packageVersions.packageId, packageId))
-    .orderBy(desc(packageVersions.id))
-    .limit(1);
-
-  return row?.id ?? null;
+  return tag?.versionId ?? null;
 }
 
 /** Get the latest version ID + version string + createdAt for dirty-check at run time. */

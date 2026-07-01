@@ -7,6 +7,7 @@ import { applications } from "@appstrate/db/schema";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
+import type { AppScope } from "../lib/scope.ts";
 
 export const appSettingsSchema = z.object({
   allowedRedirectDomains: z.array(z.string()).max(20).optional(),
@@ -71,6 +72,24 @@ export async function getApplication(orgId: string, applicationId: string) {
 
   if (!app) throw notFound("Application not found");
   return app;
+}
+
+/** Verify an application id belongs to the current org-scoped request. */
+export async function assertApplicationInScope(scope: AppScope): Promise<void> {
+  const [app] = await db
+    .select({ id: applications.id })
+    .from(applications)
+    .where(
+      scopedWhere(applications, {
+        orgId: scope.orgId,
+        extra: [eq(applications.id, scope.applicationId)],
+      }),
+    )
+    .limit(1);
+
+  if (!app) {
+    throw notFound(`Application '${scope.applicationId}' not found in this organization`);
+  }
 }
 
 /** Update an application. Throws 404 if not found. */

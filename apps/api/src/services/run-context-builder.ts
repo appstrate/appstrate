@@ -109,7 +109,7 @@ export async function buildRunContext(params: {
   plan: AppstrateRunPlan;
   agentPackage: Buffer | null;
   versionLabel: string | null;
-  versionDirty: boolean;
+  versionRef: string;
   proxyLabel: string | null;
   modelLabel: string | null;
   modelSource: string | null;
@@ -171,13 +171,13 @@ export async function buildRunContext(params: {
   const modelLabel = modelResult.label;
   const modelSource = modelResult.isSystemModel ? "system" : "org";
 
-  // Step 3: resolve version label + dirty flag
+  // Step 3: resolve the persisted version display fields.
   let versionLabel: string | null = params.overrideVersionLabel ?? null;
-  let versionDirty = false;
-  if (!versionLabel && latestVersion) {
+  let versionRef = params.overrideVersionLabel ?? "draft";
+  if (!params.overrideVersionLabel && latestVersion) {
     versionLabel = latestVersion.version;
     const updatedAt = agent.updatedAt ?? new Date();
-    versionDirty = updatedAt > latestVersion.createdAt;
+    versionRef = updatedAt > latestVersion.createdAt ? "draft" : latestVersion.version;
   }
 
   // Collapse pinned slot rows to a key→content map. We exclude `checkpoint`
@@ -245,7 +245,7 @@ export async function buildRunContext(params: {
     plan,
     agentPackage,
     versionLabel,
-    versionDirty,
+    versionRef,
     proxyLabel,
     modelLabel,
     modelSource,

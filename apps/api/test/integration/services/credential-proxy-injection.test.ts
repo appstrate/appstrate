@@ -22,7 +22,7 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { applicationPackages, integrationConnections } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { proxyCall, ProxySubstitutionError } from "../../../src/services/credential-proxy/core.ts";
 import {
@@ -58,7 +58,7 @@ async function installAndConnect(
     accountId: "acct-1",
     applicationId: ctx.defaultAppId,
     userId: ctx.user.id,
-    credentialsEncrypted: encryptCredentials(fields),
+    credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
     scopesGranted: [],
     sharedWithOrg: false,
   });

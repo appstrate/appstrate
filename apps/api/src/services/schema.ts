@@ -2,7 +2,11 @@
 
 import { createAjv } from "@appstrate/core/ajv";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
-import { validateConfig as validateConfigCore } from "@appstrate/core/schema-validation";
+import {
+  stripEmptyRequired,
+  validateConfig as validateConfigCore,
+  type ConfigValidationResult,
+} from "@appstrate/core/schema-validation";
 
 // --- AJV runtime validation ---
 //
@@ -34,26 +38,9 @@ function compileCached(schema: object): ReturnType<typeof ajv.compile> {
   return validate;
 }
 
-// AJV with coerceTypes coerces null → "" for strings, which incorrectly passes
-// `required` checks. Strip empty/null values so AJV sees them as missing.
-function stripEmptyRequired(
-  data: Record<string, unknown>,
-  required: string[],
-): Record<string, unknown> {
-  const cleaned = { ...data };
-  for (const key of required) {
-    if (cleaned[key] === "" || cleaned[key] === null) delete cleaned[key];
-  }
-  return cleaned;
-}
-
 // --- Section C: Validation functions ---
 
-export interface ValidationResult {
-  valid: boolean;
-  errors: { field: string; message: string }[];
-  data?: Record<string, unknown>;
-}
+export type ValidationResult = ConfigValidationResult;
 
 /**
  * Shared AJV validation path for input/output.
