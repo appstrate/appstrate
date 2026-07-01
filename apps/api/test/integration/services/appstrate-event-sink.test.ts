@@ -121,6 +121,9 @@ describe("AggregatingEventSink", () => {
     const progressLogs = logs.filter((l) => l.type === "progress");
     expect(progressLogs.map((l) => l.message)).toEqual(["booting", "retry"]);
     expect(progressLogs.map((l) => l.level)).toEqual(["info", "warn"]);
+    // `log.written` is tagged `event='log'` (vs lifecycle/tool `'progress'`) so
+    // the chat run card can show ONLY the agent's explicit log-tool output.
+    expect(progressLogs.map((l) => l.event)).toEqual(["log", "log"]);
   });
 
   it("maps appstrate.progress into progress run_logs with message/data/level", async () => {

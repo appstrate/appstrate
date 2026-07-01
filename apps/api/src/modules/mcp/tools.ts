@@ -29,7 +29,11 @@
 
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
+import type { AppstrateRequestExtra, AppstrateToolDefinition } from "@appstrate/mcp-transport";
+import {
+  waitForRunAndWaitCompletion,
+  type RunAndWaitLaunch,
+} from "@appstrate/core/run-and-wait-client";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 
@@ -41,6 +45,7 @@ export type McpToolName =
   | "search_operations"
   | "describe_operation"
   | "invoke_operation"
+  | "run_and_wait"
   | "get_me";
 
 /** Outcome of an `invoke_operation` call, for audit + telemetry. */
@@ -636,6 +641,260 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
+// --- run_and_wait ----------------------------------------------------------
+
+/**
+ * Build + dispatch a single catalog operation in-process and return the raw
+ * Response (NOT a CallToolResult) so a composing tool can read its body. Same
+ * trusted self-dispatch + auth-forwarding as `invoke_operation`, minus the
+ * model-supplied header plumbing (callers here pass fixed, trusted shapes).
+ */
+async function dispatchCatalogOperation(
+  ctx: McpToolContext,
+  operationId: string,
+  opts: {
+    pathParams?: Record<string, unknown>;
+    query?: Record<string, unknown>;
+    body?: unknown;
+    signal?: AbortSignal;
+  },
+): Promise<Response> {
+  const { operations } = getCatalog();
+  const op = operations.get(operationId);
+  if (!op) {
+    // Our hardcoded operationIds (runAgent/runInline/getRun) are always in the
+    // catalog; a miss is a server-side wiring bug, not a model error.
+    throw new McpError(ErrorCode.InternalError, `Operation not found: ${operationId}`);
+  }
+  const path = interpolatePath(op, opts.pathParams ?? {});
+  if (path === null) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      `Missing path params for ${operationId}: ${op.pathParams.join(", ")}`,
+    );
+  }
+  const url = new URL(path, ctx.origin);
+  applyQuery(url, opts.query ?? {});
+
+  const headers = new Headers(ctx.authHeaders);
+  headers.set(...internalDispatchHeader());
+  const sendBody = opts.body !== undefined && METHODS_WITH_BODY.has(op.method);
+  if (sendBody) headers.set("content-type", "application/json");
+
+  const request = new Request(url.toString(), {
+    method: op.method,
+    headers,
+    body: sendBody ? JSON.stringify(opts.body) : undefined,
+    signal: opts.signal,
+  });
+  return ctx.dispatch(request);
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  throw signal.reason ?? new Error("Aborted");
+}
+
+function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
+  const descriptor: Tool = {
+    name: "run_and_wait",
+    description:
+      'Launch a run and wait for its final status in one call: starts an agent run (`kind:"agent"`, ' +
+      'by `scope`/`name`) or an inline run (`kind:"inline"`, by `manifest`+`prompt`), exposes ' +
+      "the created run to chat for live progress, then returns " +
+      "`{ id, packageId, status, done:true, result?, error? }` when the run reaches a terminal " +
+      "status. Do NOT call `getRun` after this tool just to wait for completion; this tool already " +
+      "waits. The chat shows logs after the run id is known, but ONLY lines the run emits " +
+      "through the `log` runtime tool. For an " +
+      'inline run (`kind:"inline"`) you MUST therefore (1) declare `"runtime_tools": ["log"]` in ' +
+      "the manifest AND (2) instruct the run, in its `prompt`, to call the `log` " +
+      "tool to report each meaningful step — otherwise the in-chat run progress component stays empty. " +
+      "Prefer an existing agent over an inline manifest when one matches the intent.",
+    annotations: {
+      title: "Run and wait",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: {
+          type: "string",
+          enum: ["agent", "inline"],
+          description:
+            "`agent` runs a published/draft agent by scope+name; `inline` runs a manifest.",
+        },
+        scope: { type: "string", description: "Agent scope, keep the leading `@` (kind:agent)." },
+        name: { type: "string", description: "Agent name (kind:agent)." },
+        version: {
+          type: "string",
+          description:
+            "Agent version selector (kind:agent). Omit for the latest published version; pass " +
+            "`draft` to run the working copy of a draft-only agent.",
+        },
+        input: {
+          type: "object",
+          description: "Run input, validated against the agent's input schema (kind:agent).",
+          additionalProperties: true,
+        },
+        manifest: {
+          type: "object",
+          description:
+            'Inline agent manifest to run (kind:inline). Include `"runtime_tools": ["log"]` so the ' +
+            "run can emit progress lines the chat shows live (the panel surfaces only `log`-tool " +
+            "output).",
+          additionalProperties: true,
+        },
+        prompt: {
+          type: "string",
+          description:
+            "Prompt for the inline run (kind:inline). Tell the run to call the `log` tool to report " +
+            "each meaningful step — those lines are what the chat shows live.",
+        },
+        config: {
+          type: "object",
+          description: "Per-run config override (either kind).",
+          additionalProperties: true,
+        },
+      },
+      required: ["kind"],
+    },
+  };
+
+  const handler = async (
+    args: Record<string, unknown>,
+    extra: AppstrateRequestExtra,
+  ): Promise<CallToolResult> => {
+    const start = performance.now();
+    const signal = extra.signal;
+    throwIfAborted(signal);
+    if (!ctx.permissions.has("mcp:invoke")) {
+      emit(ctx, { tool: "run_and_wait", durationMs: performance.now() - start, outcome: "denied" });
+      return textResult({ error: "Permission 'mcp:invoke' is required to launch runs." }, true);
+    }
+
+    const kind = asString(args.kind);
+    if (kind !== "agent" && kind !== "inline") {
+      emit(ctx, {
+        tool: "run_and_wait",
+        durationMs: performance.now() - start,
+        outcome: "rejected",
+      });
+      throw new McpError(ErrorCode.InvalidParams, "`kind` must be 'agent' or 'inline'.");
+    }
+
+    // --- launch (fire-and-forget; the route returns the created run) ---
+    let launchResponse: Response;
+    if (kind === "agent") {
+      const scope = asString(args.scope);
+      const name = asString(args.name);
+      if (!scope || !name) {
+        emit(ctx, {
+          tool: "run_and_wait",
+          durationMs: performance.now() - start,
+          outcome: "rejected",
+        });
+        return textResult({ error: "`scope` and `name` are required for kind:'agent'." }, true);
+      }
+      const body: Record<string, unknown> = {};
+      if (asRecord(args.input)) body.input = args.input;
+      if (asRecord(args.config)) body.config = args.config;
+      const query: Record<string, unknown> = {};
+      const version = asString(args.version);
+      if (version) query.version = version;
+      launchResponse = await dispatchCatalogOperation(ctx, "runAgent", {
+        pathParams: { scope, name },
+        query,
+        body: Object.keys(body).length > 0 ? body : undefined,
+        signal,
+      });
+    } else {
+      const manifest = asRecord(args.manifest);
+      if (!manifest) {
+        emit(ctx, {
+          tool: "run_and_wait",
+          durationMs: performance.now() - start,
+          outcome: "rejected",
+        });
+        return textResult({ error: "`manifest` is required for kind:'inline'." }, true);
+      }
+      const body: Record<string, unknown> = { manifest };
+      const prompt = asString(args.prompt);
+      if (prompt) body.prompt = prompt;
+      if (asRecord(args.config)) body.config = args.config;
+      launchResponse = await dispatchCatalogOperation(ctx, "runInline", { body, signal });
+    }
+
+    // Surface a launch failure (4xx/5xx) verbatim so the model can self-correct
+    // (bad input, unconnected integration, no published version, …).
+    if (launchResponse.status >= 400) {
+      emit(ctx, {
+        tool: "run_and_wait",
+        durationMs: performance.now() - start,
+        method: "POST",
+        status: launchResponse.status,
+        outcome: "invoked",
+      });
+      return readResponse(launchResponse);
+    }
+
+    const launched = (await launchResponse.json().catch(() => undefined)) as unknown;
+    const runId = asString(asRecord(launched)?.id);
+    if (!runId) {
+      emit(ctx, {
+        tool: "run_and_wait",
+        durationMs: performance.now() - start,
+        outcome: "rejected",
+      });
+      return textResult({ error: "Run launch returned no run id.", launch: launched }, true);
+    }
+
+    const runRecord = asRecord(launched) ?? {};
+    const packageId = asString(runRecord.packageId) ?? null;
+    const status = asString(runRecord.status) ?? null;
+    emit(ctx, {
+      tool: "run_and_wait",
+      durationMs: performance.now() - start,
+      operationId: kind === "agent" ? "runAgent" : "runInline",
+      status: launchResponse.status,
+      outcome: "invoked",
+    });
+
+    const waitHeaders = new Headers(ctx.authHeaders);
+    waitHeaders.set(...internalDispatchHeader());
+    const launch: RunAndWaitLaunch = {
+      runId,
+      launchRecord: runRecord,
+      startedAtMs: start,
+      preliminary: { id: runId, packageId, status, done: false },
+    };
+    const final = await waitForRunAndWaitCompletion(launch, {
+      origin: ctx.origin,
+      headers: waitHeaders,
+      fetch: ((input, init) => {
+        const request =
+          input instanceof Request ? new Request(input, init) : new Request(input.toString(), init);
+        return ctx.dispatch(request);
+      }) as typeof fetch,
+      signal,
+    });
+
+    emit(ctx, {
+      tool: "run_and_wait",
+      durationMs: performance.now() - start,
+      operationId: "getRun",
+      method: "GET",
+      status: typeof final.payload.status === "number" ? final.payload.status : 200,
+      outcome: "invoked",
+    });
+    return textResult(final.payload, final.isError);
+  };
+
+  return { descriptor, handler };
+}
+
 function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "get_me",
@@ -682,7 +941,12 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
 /** Build the per-request tool set. Handlers close over the caller's auth context. */
 export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
-  const tools = [buildSearchTool(ctx), buildDescribeTool(ctx), buildInvokeTool(ctx)];
+  const tools = [
+    buildSearchTool(ctx),
+    buildDescribeTool(ctx),
+    buildInvokeTool(ctx),
+    buildRunAndWaitTool(ctx),
+  ];
   // get_me dispatches to GET /api/me/context. A consumer that already injects
   // that payload into its own system prompt (the chat module) drops the tool —
   // it would only re-fetch what the model already has. search_operations is

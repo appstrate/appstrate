@@ -2,10 +2,10 @@
 
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { getAuth } from "@appstrate/db/auth";
-import { organizationMembers } from "@appstrate/db/schema";
+import { organizationMembers, runs } from "@appstrate/db/schema";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { addSubscriber, removeSubscriber } from "../services/realtime.ts";
 import type { RealtimeEvent } from "../services/realtime.ts";
@@ -127,6 +127,7 @@ function openRealtimeStream(
     endUserId?: string;
   },
   verbose: boolean,
+  onSubscribe?: (send: (evt: RealtimeEvent) => void) => void | Promise<void>,
 ) {
   return streamSSE(c, async (stream) => {
     // Queue + signal so events written by PG NOTIFY callbacks are flushed
@@ -144,6 +145,12 @@ function openRealtimeStream(
     stream.onAbort(() => {
       removeSubscriber(subId);
       wake?.();
+    });
+    void Promise.resolve(onSubscribe?.(send)).catch((err: unknown) => {
+      logger.warn("SSE initial snapshot failed", {
+        subId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     });
 
     // SSE event id, structured as `${subId}:${monotonic}` so it is
@@ -209,6 +216,57 @@ function openRealtimeStream(
   });
 }
 
+async function sendInitialRunSnapshot(
+  runId: string,
+  scope: { orgId: string; applicationId: string },
+  send: (evt: RealtimeEvent) => void,
+): Promise<void> {
+  const [row] = await db
+    .select({
+      id: runs.id,
+      packageId: runs.packageId,
+      status: runs.status,
+      userId: runs.userId,
+      endUserId: runs.endUserId,
+      orgId: runs.orgId,
+      applicationId: runs.applicationId,
+      scheduleId: runs.scheduleId,
+      error: runs.error,
+      startedAt: runs.startedAt,
+      completedAt: runs.completedAt,
+      duration: runs.duration,
+    })
+    .from(runs)
+    .where(
+      and(
+        eq(runs.id, runId),
+        eq(runs.orgId, scope.orgId),
+        eq(runs.applicationId, scope.applicationId),
+      ),
+    )
+    .limit(1);
+
+  if (!row) return;
+  send({
+    event: "run_update",
+    data: {
+      operation: "UPDATE",
+      id: row.id,
+      packageId: row.packageId,
+      status: row.status,
+      userId: row.userId,
+      endUserId: row.endUserId,
+      orgId: row.orgId,
+      applicationId: row.applicationId,
+      scheduleId: row.scheduleId,
+      error: row.error,
+      startedAt: row.startedAt?.toISOString() ?? null,
+      completedAt: row.completedAt?.toISOString() ?? null,
+      duration: row.duration,
+    },
+  });
+}
+
 export function createRealtimeRouter() {
   const router = new Hono();
 
@@ -232,6 +290,12 @@ export function createRealtimeRouter() {
         userId: validated.userId,
       },
       verbose,
+      (send) =>
+        sendInitialRunSnapshot(
+          runId,
+          { orgId: validated.orgId, applicationId: validated.applicationId },
+          send,
+        ),
     );
   });
 

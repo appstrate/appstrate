@@ -84,7 +84,8 @@
     "./subscription-engines": "./src/subscription-engines.ts",
     "./chat-engine-contract": "./src/chat-engine-contract.ts",
     "./claude-oauth-gateway": "./src/claude-oauth-gateway.ts",
-    "./subprocess-env": "./src/subprocess-env.ts"
+    "./subprocess-env": "./src/subprocess-env.ts",
+    "./run-and-wait-client": "./src/run-and-wait-client.ts"
   },
   "dependencies": {
     "@afps-spec/schema": "^0.6.1",

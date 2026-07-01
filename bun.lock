@@ -369,6 +369,7 @@
         "@appstrate/core": "workspace:*",
         "@appstrate/runner-claude": "workspace:*",
         "ai": "^6",
+        "zod": "^4.4.3",
       },
     },
     "packages/module-codex": {

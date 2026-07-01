@@ -7,9 +7,10 @@
  * Mounts `/api/mcp/o/:org` (Streamable HTTP) plus per-org RFC 9728 discovery.
  * The ~250 platform operations are surfaced through three progressive-disclosure
  * tools (`search_operations`, `describe_operation`, `invoke_operation`) rather
- * than one tool per endpoint, keeping the client tool budget tiny. Tool calls
- * dispatch in-process through the platform app, reusing the auth pipeline and
- * RBAC — an MCP caller can do exactly what the same credential can do over REST.
+ * than one tool per endpoint, keeping the client tool budget tiny. Run launch
+ * and waiting use the dedicated `run_and_wait` shortcut. Tool calls dispatch
+ * in-process through the platform app, reusing the auth pipeline and RBAC — an
+ * MCP caller can do exactly what the same credential could do over REST.
  *
  * A token is RFC 8707 audience-bound to one org's resource URI
  * (`${APP_URL}/api/mcp/o/<orgId>`), confining it to that organization. The AS

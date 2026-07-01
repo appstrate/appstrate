@@ -23,14 +23,21 @@
  *     transcript bleed.
  */
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { query, type CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { buildClaudeSdkEnv, CLAUDE_SDK_HARDENING } from "@appstrate/runner-claude/binary";
+import { RUN_AND_WAIT_MAX_MS } from "@appstrate/core/run-and-wait-client";
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { createLogger } from "@appstrate/core/logger";
 import type { ChatEngineInput } from "@appstrate/core/chat-engine-contract";
 import { resolveClaudeCodeBinary } from "./binary.ts";
 import { SdkUiStreamMapper, type ClaudeSdkMessage } from "./ui-stream-mapper.ts";
 import { acquireClaudeSlot, chatCapacityResponse } from "./concurrency.ts";
+import {
+  createRunAndWaitBridge,
+  RUN_AND_WAIT_MCP_QUALIFIED_TOOL_NAME,
+  RUN_AND_WAIT_MCP_SERVER_NAME,
+  type RunAndWaitBridge,
+} from "./run-and-wait-bridge.ts";
 
 const logger = createLogger(process.env.LOG_LEVEL ?? "info");
 
@@ -43,21 +50,36 @@ const MAX_TURNS = 16;
  * the `claude` subprocess + a concurrency slot open indefinitely. On the deadline
  * we abort the controller (kills the subprocess, frees the slot via the finally).
  */
-const TURN_DEADLINE_MS = 5 * 60_000;
+const TURN_DEADLINE_MS = RUN_AND_WAIT_MAX_MS + 15_000;
 
 /**
  * Build the `mcpServers` config: the platform HTTP MCP when available, else
  * none. (Typed loosely — the SDK's McpServerConfig union is broad and not
  * re-exported conveniently.)
  */
-function buildMcpServers(input: ChatEngineInput): Record<string, unknown> | undefined {
-  if (!input.platformMcp) return undefined;
-  return {
-    platform: {
+function buildMcpServers(
+  input: ChatEngineInput,
+  runAndWaitServer: unknown | undefined,
+): Record<string, unknown> | undefined {
+  const servers: Record<string, unknown> = {};
+  if (input.platformMcp) {
+    servers.platform = {
       type: "http",
       url: input.platformMcp.url,
       headers: input.platformMcp.headers,
-    },
+    };
+  }
+  if (runAndWaitServer) servers[RUN_AND_WAIT_MCP_SERVER_NAME] = runAndWaitServer;
+  return Object.keys(servers).length > 0 ? servers : undefined;
+}
+
+function buildRunAndWaitCanUseTool(
+  runAndWaitBridge: RunAndWaitBridge | null,
+): CanUseTool | undefined {
+  if (!runAndWaitBridge) return undefined;
+  return async (toolName, toolInput, options) => {
+    runAndWaitBridge.handleToolPermission(toolName, toolInput, options.toolUseID);
+    return { behavior: "allow", toolUseID: options.toolUseID };
   };
 }
 
@@ -95,6 +117,15 @@ export function runClaudeAgentChat(input: ChatEngineInput): Response {
         // client abort (the for-await unwinds when the controller aborts).
         try {
           writer.write(mapper.startChunk(crypto.randomUUID()));
+          const runAndWaitBridge = input.platformMcp
+            ? createRunAndWaitBridge({
+                origin: new URL(input.platformMcp.url).origin,
+                headers: input.platformMcp.headers,
+                fetch,
+                signal: controller.signal,
+                write: (chunk) => writer.write(chunk),
+              })
+            : null;
 
           const response = query({
             prompt: input.prompt,
@@ -107,7 +138,15 @@ export function runClaudeAgentChat(input: ChatEngineInput): Response {
               model: input.modelId,
               systemPrompt: input.system,
               tools: [], // disable ALL built-ins — chat must not get host execution
-              mcpServers: buildMcpServers(input) as never,
+              mcpServers: buildMcpServers(input, runAndWaitBridge?.mcpServer) as never,
+              canUseTool: buildRunAndWaitCanUseTool(runAndWaitBridge),
+              disallowedTools: runAndWaitBridge ? ["mcp__platform__run_and_wait"] : undefined,
+              toolAliases: runAndWaitBridge
+                ? {
+                    run_and_wait: RUN_AND_WAIT_MCP_QUALIFIED_TOOL_NAME,
+                    mcp__platform__run_and_wait: RUN_AND_WAIT_MCP_QUALIFIED_TOOL_NAME,
+                  }
+                : undefined,
               includePartialMessages: true,
               ...CLAUDE_SDK_HARDENING,
               maxTurns: MAX_TURNS,
@@ -116,7 +155,9 @@ export function runClaudeAgentChat(input: ChatEngineInput): Response {
           });
 
           for await (const message of response) {
-            for (const chunk of mapper.map(message as ClaudeSdkMessage)) writer.write(chunk);
+            for (const chunk of mapper.map(message as ClaudeSdkMessage)) {
+              writer.write(chunk);
+            }
           }
 
           const meta = mapper.resultMeta();

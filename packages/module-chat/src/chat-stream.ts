@@ -40,7 +40,7 @@ import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-engine-contract";
 import { logger } from "./logger.ts";
 import { listModels, pickModel, modelFromFamily, resolveDefaultApplicationId } from "./llm.ts";
-import { openPlatformMcp, platformMcpUrl } from "./platform-mcp.ts";
+import { openPlatformMcp, platformMcpUrl, repairStringifiedToolCall } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken } from "./loopback-auth.ts";
 import { buildTranscriptPrompt } from "./transcript.ts";
@@ -88,17 +88,19 @@ const SYSTEM_PROMPT = `You are Appstrate's assistant. You help the user operate 
 
 **You have no ability of your own to act on the outside world.** You cannot browse the web, read email, call third-party APIs, or use any integration or MCP directly. Your only power is invoking Appstrate operations. You are the brain/orchestrator; your hands are Appstrate agents. Any request that needs an integration, an MCP, or any action external to Appstrate MUST be carried out by running an agent and reading its result back — never by you claiming to have done it yourself.
 
-Use the tools to ground every action: search for the right operation, read its schema, then invoke it. Never invent an operationId or argument shape.
+Use the tools to ground every action. For ordinary Appstrate API work, search for the right operation, read its schema, then invoke it. For launching or waiting on agent runs, this rule has one exception: use \`run_and_wait\` directly. Never invent an operationId or argument shape.
 
 Choosing what to do:
 - If the request is a pure Appstrate operation (list or inspect runs, schedule, manage agents, search documents), call that operation directly with \`invoke_operation\`. NEVER spin up a run for something the platform API already does — that wastes credits and time.
 - If the request needs an integration, an MCP, or any external action, run an agent:
-  1. Prefer an existing agent the user can run (listed in your context below) when one matches the intent — trigger it with the \`runAgent\` operation (\`POST /api/agents/{scope}/{name}/run\`): path params \`scope\` (KEEP the leading \`@\`, e.g. \`@acme\`) and \`name\`. Pass an \`input\` object ONLY when the agent's context entry says it takes input (it is validated against the agent's schema); omit it otherwise. Query \`version\`: omit it to run the latest PUBLISHED version — but an agent marked "draft only" in your context has no published version (omitting would 404 \`no_published_version\`), so for those pass \`version=draft\` to run the working copy. The trigger returns the created run — take its \`id\` and long-poll it exactly like an inline run (below).
-  2. Otherwise invoke the \`runInline\` operation (\`POST /api/runs/inline\`): pass a full AFPS agent \`manifest\` plus a \`prompt\`. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version from your context), then select that integration's tools under \`integrations_configuration.<id>.tools\`: omit the entry to inherit the integration's \`default_tools\` (shown per integration in your context), use \`[]\` for none, or list exact tool names (\`api_call\` covers most third-party REST calls). When you need a tool beyond the default, first inspect the integration with describe_operation on \`GET /api/integrations/{packageId}\` to read its full \`tool_catalog\`, then name those tools. When one of the skills listed in your context fits the task, attach it under \`dependencies.skills\` keyed by its \`@scope/name\` id with a satisfiable range (use the version shown in your context, e.g. \`"^1.2.0"\`, or \`"*"\` if none); the agent then has that skill's instructions available. Set \`runtime_tools: ["output"]\`, and define an \`output.schema\` for the data you want back. In the \`prompt\`, tell the agent it is a sub-agent: do the work, then return the result by calling the \`output\` tool with a payload that satisfies the schema. Without that output schema and instruction you will receive nothing back.
+  1. Prefer an existing agent the user can run (listed in your context below) when one matches the intent — call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` (KEEP the leading \`@\`, e.g. \`@acme\`) and \`name\`. Pass an \`input\` object ONLY when the agent's context entry says it takes input (it is validated against the agent's schema); omit it otherwise. \`version\`: omit it to run the latest PUBLISHED version — but an agent marked "draft only" in your context has no published version (omitting would 404 \`no_published_version\`), so for those pass \`version:"draft"\` to run the working copy.
+  2. Otherwise call \`run_and_wait\` with \`kind:"inline"\`: pass a full AFPS agent \`manifest\` plus a \`prompt\`. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version from your context), then select that integration's tools under \`integrations_configuration.<id>.tools\`: omit the entry to inherit the integration's \`default_tools\` (shown per integration in your context), use \`[]\` for none, or list exact tool names (\`api_call\` covers most third-party REST calls). When you need a tool beyond the default, first inspect the integration with describe_operation on \`GET /api/integrations/{packageId}\` to read its full \`tool_catalog\`, then name those tools. When one of the skills listed in your context fits the task, attach it under \`dependencies.skills\` keyed by its \`@scope/name\` id with a satisfiable range (use the version shown in your context, e.g. \`"^1.2.0"\`, or \`"*"\` if none); the agent then has that skill's instructions available. Set \`runtime_tools: ["log", "output"]\`, and define an \`output.schema\` for the data you want back. In the \`prompt\`, tell the agent it is a sub-agent: report meaningful progress with the \`log\` tool, do the work, then return the result by calling the \`output\` tool with a payload that satisfies the schema. Without that output schema and instruction you will receive nothing back.
 
-Do NOT pre-validate a manifest with the \`validateInlineRun\` operation (\`POST /api/runs/inline/validate\`) before firing it. \`runInline\` already runs that exact preflight itself and returns a \`400\` (without consuming credits) if the manifest is invalid — so a validate-then-run pair just runs the preflight twice, adds a round-trip, and counts against the same rate-limit bucket. Go straight to \`runInline\` and handle the \`400\` if it comes. \`validateInlineRun\` is only for iterating on a manifest without firing it, which is not what a chat "do it now" request asks for.
+\`run_and_wait\` is the only tool you should use to launch agent runs from chat. Do NOT call \`invoke_operation\` with \`runAgent\` or \`runInline\`, do NOT call \`describe_operation\` just to learn those schemas, and do NOT call \`getRun\` just to wait for a run that \`run_and_wait\` launched.
 
-Runs are asynchronous. The trigger returns the created run resource — take its \`id\`. Then call the run-get operation (path param \`id\`, not \`runId\`) with \`query: { wait: true }\` to long-poll until the run is terminal (it returns after ~55s; if still running, call it again); never busy-poll in a tight loop yourself. Then read the run's \`result\` field — that is the sub-agent's deliverable. Answer the user from \`result\`; never fabricate it. If the run fails, read its error and report it plainly.
+Do NOT pre-validate a manifest with the \`validateInlineRun\` operation (\`POST /api/runs/inline/validate\`) before firing it. \`run_and_wait\` with \`kind:"inline"\` already goes through the same preflight and returns a \`400\` (without consuming credits) if the manifest is invalid — so a validate-then-run pair just runs the preflight twice, adds a round-trip, and counts against the same rate-limit bucket. Go straight to \`run_and_wait\` and handle the \`400\` if it comes. \`validateInlineRun\` is only for iterating on a manifest without firing it, which is not what a chat "do it now" request asks for.
+
+Runs are asynchronous, but \`run_and_wait\` handles both launch and waiting for you. Use \`run_and_wait\` for agent/inline runs, then read its returned \`result\` field — that is the sub-agent's deliverable. Do NOT call run-get/\`getRun\` after \`run_and_wait\` just to wait for completion. Answer the user from \`result\`; never fabricate it. If the run fails, read its error and report it plainly.
 
 Example — summarising the user's latest emails (adapt the integration id, version, tools, and schema to the actual request):
 \`\`\`json
@@ -115,7 +117,7 @@ Example — summarising the user's latest emails (adapt the integration id, vers
       "skills": { "@appstrate/web-research": "^1.2.0" }
     },
     "integrations_configuration": { "@appstrate/gmail": { "tools": ["api_call"] } },
-    "runtime_tools": ["output"],
+    "runtime_tools": ["log", "output"],
     "output": {
       "schema": {
         "type": "object",
@@ -125,12 +127,12 @@ Example — summarising the user's latest emails (adapt the integration id, vers
       "property_order": ["summary"]
     }
   },
-  "prompt": "You are a sub-agent. Fetch the user's 3 most recent emails, summarise them, and return the summary by calling the output tool."
+  "prompt": "You are a sub-agent. Log meaningful progress with the log tool. Fetch the user's 3 most recent emails, summarise them, and return the summary by calling the output tool."
 }
 \`\`\`
-Then call run-get with \`query: { wait: true }\`, read \`result.summary\`, and reply to the user from it.
+Then read \`result.summary\` from the \`run_and_wait\` result and reply to the user from it.
 
-You already have the exact shapes for these three operations: \`runAgent\` takes path params \`scope\`/\`name\` + optional query \`version\` (omit = published, \`draft\` = working copy) and an optional \`input\` body; the inline-run trigger body is \`{ manifest, prompt }\` exactly as shown above; run-get takes path param \`id\` + \`query: { wait: true }\`. Do NOT call \`describe_operation\` for \`runAgent\`, the inline-run trigger, or run-get — invoke them directly. (You still discover any OTHER operation's schema via search/describe as usual.)
+You already have the exact shape for \`run_and_wait\`: for existing agents pass \`{ kind:"agent", scope, name, version?, input? }\`; for inline runs pass \`{ kind:"inline", manifest, prompt, config? }\`. Do NOT call \`describe_operation\` for run launching, and do NOT call run-get/\`getRun\` after \`run_and_wait\` just to wait. (You still discover any OTHER operation's schema via search/describe as usual.)
 
 When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.
 
@@ -274,8 +276,7 @@ export function formatCallerContext(raw: unknown): string {
     }
     lines.push(
       "Prefer running an existing agent over doing the work inline when one fits the task. " +
-        "Trigger it with the runAgent operation (see the system instructions for its exact shape), " +
-        "then long-poll the run with run-get and `wait: true`.",
+        'Run it with `run_and_wait` using `kind:"agent"`, then answer from the returned result.',
     );
   }
   if (ctx.skills?.length) {
@@ -555,7 +556,7 @@ export async function handleChatStream(
     // let it propagate to a 5xx rather than silently degrading to a no-tools
     // chat.
     const [openedMcp, block] = await Promise.all([
-      openPlatformMcp({ origin, headers, orgId, applicationId }),
+      openPlatformMcp({ origin, headers, orgId, applicationId, fetch: platformFetch }),
       contextPromise,
     ]);
     mcp = openedMcp;
@@ -696,6 +697,7 @@ export async function handleChatStream(
       ],
       tools: mcp ? mcp.tools : undefined,
       stopWhen: stepCountIs(MAX_STEPS),
+      experimental_repairToolCall: repairStringifiedToolCall,
       // Decoupled from the request connection (see `generation` above): a client
       // disconnect must not cancel generation; only an explicit stop does.
       abortSignal: generation.signal,

@@ -36,3 +36,22 @@ export function formatBytes(bytes: number): string {
 function formatTier(value: number, unit: string): string {
   return value >= 10 ? `${Math.round(value)} ${unit}` : `${value.toFixed(1)} ${unit}`;
 }
+
+/**
+ * Format an elapsed duration (milliseconds) as a compact human string:
+ * sub-second as `<n>ms`, under a minute as one-decimal seconds (`2.6s`), and
+ * longer as `<m>m <s>s`. This is the canonical run-duration format — the run
+ * detail page, the run list row, and the in-chat run card all use it.
+ *
+ * Defensive against `NaN`/`Infinity`/negatives: those clamp to `0ms` so a
+ * malformed input never shows a misleading figure.
+ */
+export function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "0ms";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds - minutes * 60);
+  return `${minutes}m ${rest}s`;
+}

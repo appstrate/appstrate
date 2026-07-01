@@ -27,6 +27,7 @@ import {
   SearchOperationsToolUI,
   DescribeOperationToolUI,
   GetMeToolUI,
+  RunAndWaitToolUI,
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
@@ -39,6 +40,7 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
     >
       {/* Register the rich tool cards (these render nothing themselves). */}
       <InvokeOperationToolUI />
+      <RunAndWaitToolUI />
       <SearchOperationsToolUI />
       <DescribeOperationToolUI />
       <GetMeToolUI />
