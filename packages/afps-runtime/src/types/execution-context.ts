@@ -131,3 +131,16 @@ export type SinkConfig = z.infer<typeof sinkConfigSchema>;
 export type CredentialsConfig = z.infer<typeof credentialsConfigSchema>;
 export type ContextSourceConfig = z.infer<typeof contextSourceConfigSchema>;
 export type ModelRef = z.infer<typeof modelRefSchema>;
+
+/**
+ * Seedable snapshot document accepted by `afps render --snapshot` and
+ * `appstrate run --snapshot`: the subset of {@link ExecutionContext} a
+ * caller may pre-seed (prior memories / conversation history / persisted
+ * checkpoint). Extra keys are ignored by loaders so the format can evolve
+ * without breaking fixtures.
+ */
+export interface SnapshotFile {
+  memories?: ExecutionContext["memories"];
+  history?: ExecutionContext["history"];
+  checkpoint?: unknown;
+}

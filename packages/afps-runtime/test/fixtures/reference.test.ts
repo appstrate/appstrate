@@ -35,18 +35,8 @@ import { renderPrompt } from "../../src/bundle/prompt-renderer.ts";
 import { reduceEvents } from "../../src/runner/reducer.ts";
 import type { EventSink } from "../../src/interfaces/event-sink.ts";
 import type { RunEvent } from "@afps-spec/types";
-import type {
-  ExecutionContext,
-  HistoryEntry,
-  MemorySnapshot,
-} from "../../src/types/execution-context.ts";
+import type { ExecutionContext, SnapshotFile } from "../../src/types/execution-context.ts";
 import type { RunResult } from "../../src/types/run-result.ts";
-
-interface SnapshotFile {
-  memories?: MemorySnapshot[];
-  history?: HistoryEntry[];
-  checkpoint?: unknown;
-}
 
 const FIXTURE = new URL("../../fixtures/reference/", import.meta.url).pathname;
 
