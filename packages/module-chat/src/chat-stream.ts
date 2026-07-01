@@ -277,6 +277,8 @@ export async function handleChatStream(
     applicationId,
     user,
     deps,
+    // UI language forwarded by the client; validated/defaulted in the builder.
+    locale: c.req.header("X-Chat-Locale"),
   });
   let contextBlock: string;
   if (isSubscription) {

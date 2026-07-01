@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { ChatPage } from "@appstrate/module-chat/ui";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useSidebarStore } from "../../stores/sidebar-store";
@@ -37,6 +38,15 @@ export function ChatModulePage() {
     (id: string | null) => navigate(id ? `/chat/${id}` : "/chat", { replace: true }),
     [navigate],
   );
+  // Scoping headers + the active UI language, so the assistant replies in the
+  // language the user actually reads (the server defaults to fr without it).
+  // Reads `i18n.language` at call time — the transport invokes this per
+  // request, so a language switch applies to the next send.
+  const { i18n } = useTranslation();
+  const getHeaders = useCallback(
+    () => ({ ...buildScopingHeaders(), "X-Chat-Locale": i18n.language }),
+    [i18n],
+  );
   // The chat's tools (run agents, inspect runs, search…) are served by the
   // `mcp` module, which is a hard peer requirement of `chat` (enforced at
   // boot) — so tools are always available when the chat is reachable.
@@ -47,7 +57,7 @@ export function ChatModulePage() {
   return (
     <div className="h-[calc(100dvh-4rem)] min-h-0">
       <ChatPage
-        getHeaders={buildScopingHeaders}
+        getHeaders={getHeaders}
         conversationId={conversationId ?? null}
         newChatKey={location.key}
         onConversationChange={onConversationChange}
