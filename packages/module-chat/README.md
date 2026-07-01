@@ -32,6 +32,20 @@ inachevé.
 - **Rate limiting** : `rateLimit()`/`idempotency()` sont internes à apps/api ; un module npm ne peut pas encore les appliquer tant qu'ils ne sont pas exportés.
 - **End-users** : `endUserGrantable` reste désactivé jusqu'à l'arrivée du chat embarqué B2B2C.
 
+### Écarts de parité entre moteurs (ai-sdk vs subscription)
+
+Le moteur `ai-sdk` intercepte chaque tool result avant le modèle ; le moteur
+subscription (Claude Agent SDK) exécute sa boucle d'outils en interne, sans
+hook équivalent. Deux protections sont donc **ai-sdk uniquement** :
+
+- **Redaction des liens de connexion** (`redactConnectLinks`, `platform-mcp.ts`) :
+  côté subscription, le modèle voit le `connect_url` brut dans le tool result —
+  seule l'instruction du serveur MCP (« ne jamais coller le lien ») le retient.
+  Une redaction serveur casserait le bouton de connexion : l'UI extrait l'offre
+  du même tool result (`extract-auth-offer`).
+- **Politique d'index d'opérations** (`applyOperationIndexPolicy`) : ne concerne
+  que les providers ai-sdk sans prompt cache (Mistral) ; N/A côté subscription.
+
 ## Configuration (variables d'environnement)
 
 Ces variables sont lues directement par le module (pas via le schéma Zod

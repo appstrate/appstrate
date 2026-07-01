@@ -72,6 +72,44 @@ describe("run_and_wait client", () => {
     ]);
   });
 
+  test("projects the terminal run onto the documented payload (no metrics leak)", async () => {
+    const responses = [
+      jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" }),
+      jsonResponse({
+        id: "run_1",
+        packageId: "@acme/writer",
+        status: "failed",
+        error: "Gmail token expired",
+        // Operational fields the model must never see (it quotes them back):
+        cost: 0.42,
+        tokenUsage: { input: 1200, output: 300 },
+        startedAt: "2026-07-01T09:00:00.000Z",
+        completedAt: "2026-07-01T09:01:30.000Z",
+        config: { secret: "echo" },
+        result: { summary: "partial" },
+      }),
+    ];
+    const fetchImpl = fakeFetch(async () => {
+      const res = responses.shift();
+      if (!res) throw new Error("unexpected fetch");
+      return res;
+    });
+
+    await expect(
+      collectSteps(fetchImpl, { kind: "agent", scope: "@acme", name: "writer" }),
+    ).resolves.toEqual([
+      { id: "run_1", packageId: "@acme/writer", status: "pending", done: false },
+      {
+        id: "run_1",
+        packageId: "@acme/writer",
+        status: "failed",
+        done: true,
+        result: { summary: "partial" },
+        error: "Gmail token expired",
+      },
+    ]);
+  });
+
   test("validates before dispatching", async () => {
     const fetchImpl = fakeFetch(async () => {
       throw new Error("should not fetch");

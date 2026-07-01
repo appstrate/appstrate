@@ -58,6 +58,31 @@ export function isRunAndWaitTerminalStatus(status: unknown): boolean {
   return typeof status === "string" && RUN_AND_WAIT_TERMINAL_STATUSES.has(status);
 }
 
+/**
+ * Project a run record onto the documented run_and_wait payload —
+ * `{ id, packageId, status, done, result?, error? }` (the exact shape the tool
+ * description promises). The full run resource also carries operational fields
+ * (cost, token usage, timestamps, config echo) the model has no use for: the
+ * chat UI already renders live progress and metrics from the run's SSE stream,
+ * and a model that sees a cost or a duration tends to quote it back at the
+ * user. A caller that genuinely needs the full resource reads `getRun`.
+ */
+export function projectRunAndWaitPayload(
+  run: Record<string, unknown> | undefined,
+  done: boolean,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    id: asString(run?.id) ?? null,
+    packageId: asString(run?.packageId) ?? null,
+    status: asString(run?.status) ?? null,
+    done,
+  };
+  if (run?.result !== undefined && run.result !== null) payload.result = run.result;
+  const error = asString(run?.error);
+  if (error) payload.error = error;
+  return payload;
+}
+
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (!signal?.aborted) return;
   throw signal.reason ?? new Error("Aborted");
@@ -275,7 +300,7 @@ export async function waitForRunAndWaitCompletion(
     const runRecord = asRecord(run);
     lastRun = runRecord;
     if (isRunAndWaitTerminalStatus(runRecord?.status)) {
-      return { payload: { ...runRecord, done: true } };
+      return { payload: projectRunAndWaitPayload(runRecord, true) };
     }
 
     const pollMs = performance.now() - pollStart;
@@ -286,11 +311,10 @@ export async function waitForRunAndWaitCompletion(
 
   return {
     payload: {
-      ...(lastRun ?? {}),
+      ...projectRunAndWaitPayload(lastRun, false),
       id: launch.runId,
       packageId: asString(lastRun?.packageId) ?? asString(launch.launchRecord.packageId) ?? null,
       status: asString(lastRun?.status) ?? asString(launch.launchRecord.status) ?? null,
-      done: false,
       error: "run_and_wait timed out before the run reached a terminal status.",
     },
   };
