@@ -440,7 +440,7 @@ export function createAgentsRouter() {
       const packageId = `${scopeParam}/${nameParam}`;
       const orgId = c.get("orgId");
       const applicationId = c.get("applicationId")!;
-      const versionQuery = c.req.query("version") ?? null;
+      const versionSpec = c.req.query("version") ?? null;
       const sourceQuery = c.req.query("source");
       // `source=draft` mirrors the dashboard "Run" button: bundle the
       // agent's current draft state instead of a published version. The
@@ -458,7 +458,7 @@ export function createAgentsRouter() {
         });
       }
       const useDraft = sourceQuery === "draft";
-      if (useDraft && versionQuery) {
+      if (useDraft && versionSpec) {
         throw new ApiError({
           status: 400,
           code: "draft_with_version",
@@ -495,15 +495,15 @@ export function createAgentsRouter() {
       // can attribute the run to a concrete version label without parsing
       // the manifest itself (and without trusting a tag that may have moved
       // between bundle download and run creation).
-      let resolvedVersion: string;
+      let versionLabel: string;
       let bundle;
       if (useDraft) {
         bundle = await buildBundleFromAgentDraft(agent, scope, { builder: "appstrate-platform" });
-        resolvedVersion = "draft";
+        versionLabel = "draft";
       } else {
-        resolvedVersion = await resolveExportVersion(agent.id, scope, versionQuery);
+        versionLabel = await resolveExportVersion(agent.id, scope, versionSpec);
         bundle = await buildBundleForAgentExport(agent.id, scope, {
-          versionQuery: resolvedVersion,
+          versionSpec: versionLabel,
           metadata: { builder: "appstrate-platform" },
         });
       }
@@ -539,7 +539,7 @@ export function createAgentsRouter() {
           // no quoting hazard here.
           "Content-Disposition": `attachment; filename="${safeName}.afps-bundle.zip"`,
           "X-Bundle-Integrity": wireIntegrity,
-          "X-Bundle-Version": resolvedVersion,
+          "X-Bundle-Version": versionLabel,
         },
       });
     },

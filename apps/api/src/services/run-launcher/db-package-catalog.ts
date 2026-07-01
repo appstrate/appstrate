@@ -211,15 +211,10 @@ export function pickVersion(
     if (nonYankedSet.has(t.version)) distTagMap[t.tag] = t.version;
   }
 
-  const resolvedVersion = resolveVersionString(
-    versionSpec,
-    exactVersions,
-    rangeVersions,
-    distTagMap,
-  );
-  if (resolvedVersion === null) return null;
+  const versionLabel = resolveVersionString(versionSpec, exactVersions, rangeVersions, distTagMap);
+  if (versionLabel === null) return null;
 
-  const row = versions.find((v) => v.version === resolvedVersion);
+  const row = versions.find((v) => v.version === versionLabel);
   if (!row) return null;
   return { version: row.version, integrity: row.integrity };
 }

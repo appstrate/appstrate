@@ -2,6 +2,7 @@
 // Copyright 2026 Appstrate
 
 import { randomUUID } from "node:crypto";
+import { computeBackoffDelayMs, isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
 import type { EventSink } from "../interfaces/event-sink.ts";
 import type { RunEvent } from "@afps-spec/types";
 import type { RunResult } from "../types/run-result.ts";
@@ -164,7 +165,7 @@ export class HttpSink implements EventSink {
 
         if (res.ok) return;
 
-        if (res.status < 500 && res.status !== 429) {
+        if (!isRetryableHttpStatus(res.status)) {
           // Capture a peek of the response body. Platform errors are
           // RFC 9457 `application/problem+json` envelopes whose `code` /
           // `detail` fields are the only machine-readable explanation
@@ -190,9 +191,11 @@ export class HttpSink implements EventSink {
   }
 
   private backoff(attempt: number): number {
-    const base = Math.min(this.initialBackoffMs * 2 ** (attempt - 1), this.maxBackoffMs);
-    const jitter = base * 0.25 * Math.random();
-    return Math.floor(base + jitter);
+    return computeBackoffDelayMs(attempt, {
+      baseMs: this.initialBackoffMs,
+      capMs: this.maxBackoffMs,
+      jitterRatio: 0.25,
+    });
   }
 
   private sleep(ms: number): Promise<void> {

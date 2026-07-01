@@ -25,11 +25,11 @@ import { EmptyState } from "../page-states";
 
 export function AgentRunsTab({
   packageId,
-  resolvedVersion,
+  versionLabel,
   configSchemaOverride,
 }: {
   packageId: string;
-  resolvedVersion: string | undefined;
+  versionLabel: string | undefined;
   configSchemaOverride?: JSONSchemaObject;
 }) {
   const { t } = useTranslation(["agents", "common"]);
@@ -51,7 +51,7 @@ export function AgentRunsTab({
           <RunAgentButton
             packageId={packageId}
             detail={detail}
-            version={resolvedVersion}
+            version={versionLabel}
             disabled={runDisabled}
             showLabel
           />

@@ -9,6 +9,7 @@
  */
 
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
+import { parseSseFrames, parseSseJsonData } from "@appstrate/core/sse";
 import { logger } from "./logger.ts";
 
 /** Decode an AI SDK UI-message SSE byte stream into its chunk objects. */
@@ -23,25 +24,24 @@ function sseToChunks(byteStream: ReadableStream<Uint8Array>): ReadableStream<UIM
   return byteStream.pipeThrough(
     new TransformStream<Uint8Array, UIMessageChunk>({
       transform(bytes, controller) {
-        buffer += decoder.decode(bytes, { stream: true });
-        let sep: number;
-        // SSE events are separated by a blank line; each carries one `data:` line.
-        while ((sep = buffer.indexOf("\n\n")) !== -1) {
-          const block = buffer.slice(0, sep);
-          buffer = buffer.slice(sep + 2);
-          for (const line of block.split("\n")) {
-            if (!line.startsWith("data:")) continue;
-            const data = line.slice(5).trim();
-            if (!data || data === "[DONE]") continue;
-            try {
-              controller.enqueue(JSON.parse(data) as UIMessageChunk);
-            } catch {
-              // Drop the malformed fragment rather than failing the whole parse.
-              if (!loggedParseError) {
-                loggedParseError = true;
-                logger.error("chat sse frame parse failed", { preview: data.slice(0, 300) });
-              }
-            }
+        const parsed = parseSseFrames(decoder.decode(bytes, { stream: true }), buffer);
+        buffer = parsed.buffer;
+        for (const frame of parsed.frames) {
+          const chunk = parseSseJsonData(frame.data);
+          if (chunk !== null) {
+            controller.enqueue(chunk as UIMessageChunk);
+            continue;
+          }
+          // parseSseJsonData returns null for the empty / [DONE] / malformed
+          // cases alike. Empty and [DONE] are expected terminators; a
+          // non-empty, non-[DONE] payload that still parses to null is a
+          // malformed frame. Drop it either way (never throw — that would
+          // fail the persist drain and lose the whole turn), but fail loud on
+          // the first real corruption so it isn't silently swallowed.
+          const data = frame.data;
+          if (data && data !== "[DONE]" && !loggedParseError) {
+            loggedParseError = true;
+            logger.error("chat sse frame parse failed", { preview: data.slice(0, 300) });
           }
         }
       },

@@ -1005,9 +1005,9 @@ function makeListVersionsHandler(rcfg: PackageRouteConfig) {
 async function buildVersionDetailDto(
   rcfg: PackageRouteConfig,
   itemId: string,
-  versionQuery: string,
+  versionSpec: string,
 ): Promise<Record<string, unknown> | null> {
-  const detail = await getVersionDetail(itemId, versionQuery);
+  const detail = await getVersionDetail(itemId, versionSpec);
   if (!detail) return null;
 
   const matchingTags = await getMatchingDistTags(itemId, detail.version);
@@ -1048,16 +1048,16 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const versionQuery = c.req.param("version")!;
+    const versionSpec = c.req.param("version")!;
 
     const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
     if (!existing) {
       throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
 
-    const dto = await buildVersionDetailDto(rcfg, itemId, versionQuery);
+    const dto = await buildVersionDetailDto(rcfg, itemId, versionSpec);
     if (!dto) {
-      throw notFound(`Version '${versionQuery}' not found`);
+      throw notFound(`Version '${versionSpec}' not found`);
     }
 
     return c.json(dto);
@@ -1162,10 +1162,10 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 
     await assertNoRunningRuns(c, rcfg, itemId);
 
-    const versionQuery = c.req.param("version")!;
-    const detail = await getVersionDetail(itemId, versionQuery);
+    const versionSpec = c.req.param("version")!;
+    const detail = await getVersionDetail(itemId, versionSpec);
     if (!detail) {
-      throw notFound(`Version '${versionQuery}' not found`);
+      throw notFound(`Version '${versionSpec}' not found`);
     }
 
     const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
@@ -1261,17 +1261,17 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
 
     await assertNoRunningRuns(c, rcfg, itemId);
 
-    const versionQuery = c.req.param("version")!;
-    const deleted = await deletePackageVersion(itemId, versionQuery);
+    const versionSpec = c.req.param("version")!;
+    const deleted = await deletePackageVersion(itemId, versionSpec);
     if (!deleted) {
-      throw notFound(`Version '${versionQuery}' not found`);
+      throw notFound(`Version '${versionSpec}' not found`);
     }
 
     await recordAuditFromContext(c, {
       action: "package.version_deleted",
       resourceType: "package",
       resourceId: itemId,
-      after: { type: rcfg.cfg.type, version: versionQuery },
+      after: { type: rcfg.cfg.type, version: versionSpec },
     });
 
     return c.body(null, 204);
@@ -1762,7 +1762,7 @@ export function createPackagesRouter() {
   router.get(`/${SCOPED_PACKAGE_ROUTE}/:version/download`, rateLimit(50), async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
-    const versionQuery = c.req.param("version")!;
+    const versionSpec = c.req.param("version")!;
 
     // Verify org ownership (or system package). Ephemeral shadows are hidden.
     const [pkg] = await db
@@ -1774,7 +1774,7 @@ export function createPackagesRouter() {
       throw notFound("Package not found");
     }
 
-    const ver = await getVersionForDownload(packageId, versionQuery);
+    const ver = await getVersionForDownload(packageId, versionSpec);
     if (!ver) {
       throw notFound("Version not found");
     }
