@@ -29,19 +29,17 @@ import { AlertTriangleIcon, CheckIcon, Loader2Icon } from "lucide-react";
 import { encodePackageIdPath } from "@appstrate/core/naming";
 import { Button } from "./button.tsx";
 import { useChatHeaders } from "./runtime-context.ts";
-import { encodeResume, type ResumeMeta } from "./auth-offer.ts";
+import {
+  claimResume,
+  completionMatches,
+  encodeResume,
+  type CompletionDetail,
+  type ResumeMeta,
+} from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 
 const BROADCAST_CHANNEL = "appstrate_integration";
 const MESSAGE_TYPE = "appstrate:integration_connection";
-
-interface CompletionDetail {
-  type?: string;
-  ok?: boolean;
-  state?: string;
-  packageId?: string;
-  error?: string;
-}
 
 type Phase = "idle" | "pending" | "done" | "connected" | "error";
 
@@ -153,6 +151,13 @@ export function OAuthConnectCard({
         return;
       }
       resumed.current = true;
+      // Another card already appended the resume for this package (same
+      // completion burst) — show the connected state without a second append,
+      // which would fork the conversation into two concurrent turns.
+      if (!claimResume(packageId)) {
+        setPhase("connected");
+        return;
+      }
       setPhase("done");
       thread.append({
         content: [
@@ -179,8 +184,11 @@ export function OAuthConnectCard({
   useEffect(() => {
     if (phase === "done" || phase === "connected") return;
 
+    // Correlation (state AND packageId) lives in `completionMatches` — see its
+    // doc for why packageId is required: the hosted-connect offer carries no
+    // state, so without the package filter every card accepted every completion.
     const matches = (d: CompletionDetail | undefined) =>
-      !!d && d.type === MESSAGE_TYPE && (!state || !d.state || d.state === state);
+      completionMatches(d, { messageType: MESSAGE_TYPE, state, packageId });
 
     const onMessage = (ev: MessageEvent) => {
       const d = ev.data as CompletionDetail | undefined;
