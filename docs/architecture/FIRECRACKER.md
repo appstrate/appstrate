@@ -5,6 +5,22 @@ hardware virtualization boundary (KVM) around the whole run — stronger host
 protection than a container: a workload escape compromises a throwaway guest
 kernel, not the host.
 
+## Activation — built-in module
+
+The backend ships as the built-in `firecracker` module
+(`apps/api/src/modules/firecracker/`), **not** in the default `MODULES` set.
+Zero footprint when absent: no env vars read, no backend registered.
+
+```sh
+MODULES=oidc,webhooks,mcp,core-providers,firecracker
+RUN_ADAPTER=firecracker
+```
+
+Setting `RUN_ADAPTER=firecracker` without the module is a fatal boot error
+listing the registered backends. The module owns its `FIRECRACKER_*`
+environment variables (validated at module init — see the module `README.md`);
+they are not part of the `@appstrate/env` schema.
+
 ## Production status — EXPERIMENTAL
 
 Treat this backend as **experimental**. Two hardening gaps must close before
@@ -124,12 +140,12 @@ Built once, shared by all runs, validated at `initialize()`:
 bun run firecracker:build          # rootfs + kernel
 ```
 
-- **rootfs** (`FIRECRACKER_ROOTFS_PATH`) — `scripts/firecracker/Dockerfile.rootfs`:
+- **rootfs** (`FIRECRACKER_ROOTFS_PATH`) — `apps/api/src/modules/firecracker/scripts/Dockerfile.rootfs`:
   the `appstrate-pi` image + the compiled sidecar binary + guest init/
   supervisor + nftables/setpriv, exported and converted with `mkfs.ext4 -d`.
   Rebuild whenever the pi/sidecar images change (arch-specific).
 - **kernel** (`FIRECRACKER_KERNEL_PATH`) — built by
-  `scripts/firecracker/build-kernel.sh` (Docker, no host toolchain): pinned
+  `apps/api/src/modules/firecracker/scripts/build-kernel.sh` (Docker, no host toolchain): pinned
   6.1 kernel with the Firecracker project's own CI config as base, plus
   `NF_TABLES`/`NF_TABLES_INET`/`NETFILTER_XT_MATCH_OWNER`. The stock
   Firecracker CI kernels canNOT be used as-is — runtime-verified to lack
@@ -199,12 +215,12 @@ bun run test:firecracker
 ```
 
 macOS: creates/starts the `appstrate-fc-dev` Lima VM
-(`scripts/firecracker-dev/lima.yaml` — docker, firecracker, bun, e2fsprogs
+(`apps/api/src/modules/firecracker/scripts/dev/lima.yaml` — docker, firecracker, bun, e2fsprogs
 provisioned), rsyncs the repo to the VM's own disk (the host mount is
 read-only — installing Linux node_modules into the host tree would break the
 macOS checkout), then runs `vm-smoke.sh`. Linux/CI: runs `vm-smoke.sh`
 directly. The suite = artifact build (cached) + firecracker unit tests +
-`scripts/firecracker-dev/smoke.ts`, which drives the real orchestrator
+`apps/api/src/modules/firecracker/scripts/dev/smoke.ts`, which drives the real orchestrator
 lifecycle (TAP → config drive → boot → uid drop → exit marker → teardown)
 with a trivial agent argv.
 

@@ -9,8 +9,8 @@ import {
   setupHostNetwork,
   teardownHostNetwork,
   type HostExec,
-} from "../../../../src/services/orchestrator/firecracker/host-net.ts";
-import { subnetForIndex } from "../../../../src/services/orchestrator/firecracker/subnet.ts";
+} from "../../host-net.ts";
+import { subnetForIndex } from "../../subnet.ts";
 
 interface RecordedCall {
   cmd: string[];

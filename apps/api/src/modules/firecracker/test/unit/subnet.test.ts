@@ -6,7 +6,7 @@ import {
   platformAliasIp,
   subnetForIndex,
   SubnetAllocator,
-} from "../../../../src/services/orchestrator/firecracker/subnet.ts";
+} from "../../subnet.ts";
 
 const CIDR = "10.231.0.0/16";
 

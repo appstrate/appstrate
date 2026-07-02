@@ -7,8 +7,8 @@ import {
   buildVmConfig,
   parseExitMarker,
   vmSizing,
-} from "../../../../src/services/orchestrator/firecracker/vm-config.ts";
-import { subnetForIndex } from "../../../../src/services/orchestrator/firecracker/subnet.ts";
+} from "../../vm-config.ts";
+import { subnetForIndex } from "../../subnet.ts";
 
 const SUBNET = subnetForIndex("10.231.0.0/16", 7);
 

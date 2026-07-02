@@ -26,7 +26,7 @@
  *
  * Requirements (checked at initialize): Linux, /dev/kvm, the firecracker
  * binary, and the kernel/rootfs artifacts produced by
- * `scripts/firecracker/` (see docs/architecture/FIRECRACKER.md).
+ * `apps/api/src/modules/firecracker/scripts/` (see docs/architecture/FIRECRACKER.md).
  *
  * Config delivery: the per-run launch spec (sidecar env + agent env,
  * including credentials) travels on a read-only ext4 "config drive"
@@ -51,6 +51,7 @@ import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { getEnv } from "@appstrate/env";
+import { getFirecrackerEnv } from "./env.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { pickOperatorSidecarEnv } from "@appstrate/runner-pi";
 import type {
@@ -62,9 +63,13 @@ import type {
   CleanupReport,
   StopResult,
 } from "@appstrate/core/platform-types";
-import { logger } from "../../../lib/logger.ts";
-import { buildBaseSidecarEnv } from "../sidecar-env.ts";
-import { drainStream, spawnCollect, tailFileLines } from "../subprocess-util.ts";
+import { logger } from "../../lib/logger.ts";
+import { buildBaseSidecarEnv } from "../../services/orchestrator/sidecar-env.ts";
+import {
+  drainStream,
+  spawnCollect,
+  tailFileLines,
+} from "../../services/orchestrator/subprocess-util.ts";
 import { SubnetAllocator, platformAliasIp, type RunSubnet } from "./subnet.ts";
 import {
   createHostExec,
@@ -129,7 +134,7 @@ export interface FirecrackerOrchestratorDeps {
   hostExec?: HostExec;
   /**
    * Agent command override forwarded into the guest config — used ONLY by
-   * the dev smoke harness (scripts/firecracker-dev/smoke.ts) to validate
+   * the dev smoke harness (apps/api/src/modules/firecracker/scripts/dev/smoke.ts) to validate
    * the boot machinery without a live platform. Never set in production.
    */
   agentArgvOverride?: string[];
@@ -166,7 +171,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   constructor(deps: FirecrackerOrchestratorDeps = {}) {
     this.hostExec = deps.hostExec ?? createHostExec();
     this.agentArgvOverride = deps.agentArgvOverride;
-    this.allocator = new SubnetAllocator(getEnv().FIRECRACKER_SUBNET_CIDR);
+    this.allocator = new SubnetAllocator(getFirecrackerEnv().FIRECRACKER_SUBNET_CIDR);
   }
 
   // -------------------------------------------------------------------------
@@ -175,10 +180,11 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
 
   async initialize(): Promise<void> {
     const env = getEnv();
+    const fcEnv = getFirecrackerEnv();
     if (process.platform !== "linux") {
       throw new Error(
         "RUN_ADAPTER=firecracker requires a Linux host with KVM. " +
-          "On macOS, develop inside the Lima VM (bun run test:firecracker / scripts/firecracker-dev/).",
+          "On macOS, develop inside the Lima VM (bun run test:firecracker / apps/api/src/modules/firecracker/scripts/dev/).",
       );
     }
     const missing: string[] = [];
@@ -188,11 +194,11 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     await access("/dev/kvm", fsConstants.R_OK | fsConstants.W_OK).catch(() => {
       missing.push("/dev/kvm (KVM not available or not accessible)");
     });
-    if (!(await Bun.file(env.FIRECRACKER_KERNEL_PATH).exists())) {
-      missing.push(`kernel at ${env.FIRECRACKER_KERNEL_PATH}`);
+    if (!(await Bun.file(fcEnv.FIRECRACKER_KERNEL_PATH).exists())) {
+      missing.push(`kernel at ${fcEnv.FIRECRACKER_KERNEL_PATH}`);
     }
-    if (!(await Bun.file(env.FIRECRACKER_ROOTFS_PATH).exists())) {
-      missing.push(`rootfs at ${env.FIRECRACKER_ROOTFS_PATH}`);
+    if (!(await Bun.file(fcEnv.FIRECRACKER_ROOTFS_PATH).exists())) {
+      missing.push(`rootfs at ${fcEnv.FIRECRACKER_ROOTFS_PATH}`);
     }
     if (missing.length > 0) {
       throw new Error(
@@ -201,7 +207,8 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       );
     }
     // Fails loudly here (not at first run) when the binary is absent.
-    const version = (await this.execLocal([env.FIRECRACKER_BIN, "--version"])).split("\n")[0] ?? "";
+    const version =
+      (await this.execLocal([fcEnv.FIRECRACKER_BIN, "--version"])).split("\n")[0] ?? "";
     const versionMatch = /v?(\d+)\.(\d+)/.exec(version);
     const major = versionMatch ? Number(versionMatch[1]) : 0;
     const minor = versionMatch ? Number(versionMatch[2]) : 0;
@@ -211,25 +218,25 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     ) {
       throw new Error(
         `Firecracker >= ${MIN_FIRECRACKER.major}.${MIN_FIRECRACKER.minor} required ` +
-          `(older releases are exposed to CVE-2026-5747) — "${env.FIRECRACKER_BIN} --version" ` +
+          `(older releases are exposed to CVE-2026-5747) — "${fcEnv.FIRECRACKER_BIN} --version" ` +
           `reported: ${version || "(empty)"}`,
       );
     }
 
-    await mkdir(resolve(env.FIRECRACKER_DATA_DIR), { recursive: true, mode: 0o700 });
-    await this.acquireHostLock(resolve(env.FIRECRACKER_DATA_DIR));
+    await mkdir(resolve(fcEnv.FIRECRACKER_DATA_DIR), { recursive: true, mode: 0o700 });
+    await this.acquireHostLock(resolve(fcEnv.FIRECRACKER_DATA_DIR));
     await setupHostNetwork(this.hostExec, {
-      subnetCidr: env.FIRECRACKER_SUBNET_CIDR,
-      aliasIp: platformAliasIp(env.FIRECRACKER_SUBNET_CIDR),
+      subnetCidr: fcEnv.FIRECRACKER_SUBNET_CIDR,
+      aliasIp: platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR),
       platformPort: env.PORT,
-      egressDenyCidrs: env.FIRECRACKER_EGRESS_DENY_CIDRS.split(",").filter(Boolean),
+      egressDenyCidrs: fcEnv.FIRECRACKER_EGRESS_DENY_CIDRS.split(",").filter(Boolean),
     });
     this.initialized = true;
     logger.info("Firecracker orchestrator initialized", {
       version,
-      kernel: env.FIRECRACKER_KERNEL_PATH,
-      rootfs: env.FIRECRACKER_ROOTFS_PATH,
-      subnetCidr: env.FIRECRACKER_SUBNET_CIDR,
+      kernel: fcEnv.FIRECRACKER_KERNEL_PATH,
+      rootfs: fcEnv.FIRECRACKER_ROOTFS_PATH,
+      subnetCidr: fcEnv.FIRECRACKER_SUBNET_CIDR,
     });
   }
 
@@ -259,8 +266,8 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   }
 
   async cleanupOrphans(): Promise<CleanupReport> {
-    const env = getEnv();
-    const dataDir = resolve(env.FIRECRACKER_DATA_DIR);
+    const fcEnv = getFirecrackerEnv();
+    const dataDir = resolve(fcEnv.FIRECRACKER_DATA_DIR);
     let workloads = 0;
     let isolationBoundaries = 0;
 
@@ -326,10 +333,10 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
           "Check the boot logs for the initialize() failure.",
       );
     }
-    const env = getEnv();
+    const fcEnv = getFirecrackerEnv();
     // Admission control BEFORE any allocation: overcommitting host RAM
     // with unbounded concurrent VMs is worse than failing the run fast.
-    const maxVms = env.FIRECRACKER_MAX_CONCURRENT_VMS;
+    const maxVms = fcEnv.FIRECRACKER_MAX_CONCURRENT_VMS;
     if (maxVms > 0 && this.vms.size >= maxVms) {
       throw new Error(
         `Firecracker orchestrator at capacity: ${this.vms.size}/${maxVms} concurrent ` +
@@ -337,7 +344,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       );
     }
     const socketDir = await this.ensureSocketDir();
-    const runDir = join(resolve(env.FIRECRACKER_DATA_DIR), runId);
+    const runDir = join(resolve(fcEnv.FIRECRACKER_DATA_DIR), runId);
     await mkdir(runDir, { recursive: true, mode: 0o700 });
 
     const subnet = this.allocator.allocate();
@@ -350,7 +357,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     }
     await this.writeStateFile(runDir, { runId, tapDevice: subnet.tapDevice });
 
-    const aliasIp = platformAliasIp(env.FIRECRACKER_SUBNET_CIDR);
+    const aliasIp = platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR);
     this.vms.set(runId, {
       runId,
       subnet,
@@ -459,6 +466,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     if (handle.role !== "agent") return;
 
     const env = getEnv();
+    const fcEnv = getFirecrackerEnv();
     const vm = this.vms.get(handle.runId);
     const agentSpec = this.pendingAgentSpecs.get(handle.runId);
     if (!vm || !agentSpec) {
@@ -469,7 +477,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     }
 
     vm.exitNonce = randomBytes(16).toString("hex");
-    const aliasIp = platformAliasIp(env.FIRECRACKER_SUBNET_CIDR);
+    const aliasIp = platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR);
     // skipSidecar runs never called createSidecar — no pending env entry.
     const sidecarEnv = this.pendingSidecarEnv.get(handle.runId);
     const guestConfig = buildGuestConfig({
@@ -492,8 +500,8 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
 
     const sizing = vmSizing(agentSpec.resources, sidecarEnv !== undefined);
     const vmConfig = buildVmConfig({
-      kernelPath: resolve(env.FIRECRACKER_KERNEL_PATH),
-      rootfsPath: resolve(env.FIRECRACKER_ROOTFS_PATH),
+      kernelPath: resolve(fcEnv.FIRECRACKER_KERNEL_PATH),
+      rootfsPath: resolve(fcEnv.FIRECRACKER_ROOTFS_PATH),
       configDrivePath,
       bootArgs: buildKernelBootArgs(vm.subnet),
       subnet: vm.subnet,
@@ -507,7 +515,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // a crashed predecessor that shared the pid+index pair).
     await rm(vm.apiSocketPath, { force: true }).catch(() => {});
     const proc = Bun.spawn(
-      [env.FIRECRACKER_BIN, "--api-sock", vm.apiSocketPath, "--config-file", vmConfigPath],
+      [fcEnv.FIRECRACKER_BIN, "--api-sock", vm.apiSocketPath, "--config-file", vmConfigPath],
       {
         cwd: vm.runDir,
         // Serial console (guest kernel + supervisor + workload stdout)
@@ -543,7 +551,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       );
     }
 
-    this.startConsoleWatch(vm, env.FIRECRACKER_MAX_CONSOLE_BYTES);
+    this.startConsoleWatch(vm, fcEnv.FIRECRACKER_MAX_CONSOLE_BYTES);
     proc.exited.then((code) => {
       if (vm.consoleWatch) clearInterval(vm.consoleWatch);
       if (code !== 0 && !vm.stopping) {
@@ -625,7 +633,8 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
 
   async resolvePlatformApiUrl(): Promise<string> {
     const env = getEnv();
-    return `http://${platformAliasIp(env.FIRECRACKER_SUBNET_CIDR)}:${env.PORT}`;
+    const fcEnv = getFirecrackerEnv();
+    return `http://${platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR)}:${env.PORT}`;
   }
 
   // -------------------------------------------------------------------------

@@ -18,8 +18,12 @@ export function hasS3(): boolean {
 }
 
 /**
- * Execution backend for agent runs — derived from the env schema's
- * `RUN_ADAPTER` enum so the list of backends has a single source of truth.
+ * Execution backend id for agent runs — an open string resolved against the
+ * orchestrator registry at boot (core backends + module contributions). The
+ * registry is the single source of truth for valid ids: an unknown value is
+ * a fatal error at first orchestrator resolution, and the registry's
+ * capability accessors degrade fail-closed ("no capability") for ids that
+ * are not registered.
  */
 export type ExecutionMode = Env["RUN_ADAPTER"];
 

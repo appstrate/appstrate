@@ -15,6 +15,10 @@ import {
   resetModelProviders,
 } from "../../../src/services/model-providers/registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
+import {
+  registerOrchestrator,
+  _resetOrchestratorRegistryForTesting,
+} from "../../../src/services/orchestrator/registry.ts";
 
 function fakeProvider(
   id: string,
@@ -124,14 +128,27 @@ describe("assertSubscriptionEngineIsolation", () => {
     ).not.toThrow();
   });
 
-  it("allows a claude-code subscription run under firecracker (microVM boundary)", () => {
-    expect(() =>
-      assertSubscriptionEngineIsolation({
-        engine: "claude",
-        providerId: "claude-code",
-        orchestratorMode: "firecracker",
-      }),
-    ).not.toThrow();
+  it("allows a claude-code subscription run under a module-contributed isolating backend", () => {
+    registerOrchestrator(
+      "fake-isolated",
+      {
+        isolatesWorkloads: true,
+        supportsSidecarOnly: false,
+        create: () => ({}) as never,
+      },
+      "test",
+    );
+    try {
+      expect(() =>
+        assertSubscriptionEngineIsolation({
+          engine: "claude",
+          providerId: "claude-code",
+          orchestratorMode: "fake-isolated",
+        }),
+      ).not.toThrow();
+    } finally {
+      _resetOrchestratorRegistryForTesting();
+    }
   });
 
   it("fails closed: a backend that never declared isolation is refused", () => {

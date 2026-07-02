@@ -7,7 +7,7 @@
 # real /dev/kvm — Firecracker runs inside it at near-native speed
 # (verified: FC v1.16 boots a microVM in ~1.9 s under this setup).
 #
-# Managed by scripts/firecracker-dev/run-in-vm.sh (bun run test:firecracker).
+# Managed by apps/api/src/modules/firecracker/scripts/dev/run-in-vm.sh (bun run test:firecracker).
 # The host repo is mounted READ-ONLY (Lima default) and rsynced to the VM
 # disk before each run — never `bun install` into the mounted host tree,
 # it would overwrite macOS-native node_modules with Linux binaries.

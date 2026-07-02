@@ -19,9 +19,9 @@ import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test"
 import { mkdtemp, mkdir, rm, writeFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { _resetCacheForTesting } from "@appstrate/env";
-import { FirecrackerOrchestrator } from "../../../../src/services/orchestrator/firecracker/firecracker-orchestrator.ts";
-import type { HostExec } from "../../../../src/services/orchestrator/firecracker/host-net.ts";
+import { _resetFirecrackerEnvCacheForTesting as _resetCacheForTesting } from "../../env.ts";
+import { FirecrackerOrchestrator } from "../../orchestrator.ts";
+import type { HostExec } from "../../host-net.ts";
 
 interface RecordedCall {
   cmd: string[];

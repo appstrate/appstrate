@@ -15,6 +15,13 @@ apps/api/src/data/pricing/
 # Bun config files — toml, no prettier parser
 **/bunfig.toml
 
+# Firecracker module build/guest artifacts — shell, C, Dockerfile:
+# no prettier parser (same class as the former scripts/firecracker/ payloads)
+apps/api/src/modules/firecracker/guest/*.sh
+apps/api/src/modules/firecracker/guest/*.c
+apps/api/src/modules/firecracker/scripts/**/*.sh
+apps/api/src/modules/firecracker/scripts/Dockerfile.rootfs
+
 # AFPS example prompt sources — Mustache whitespace is semantic inside
 # sections; prettier's markdown reformat injects blank lines that leak
 # into rendered output.

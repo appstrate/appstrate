@@ -17,10 +17,8 @@
  * would pass CI.
  *
  * Run inside the Lima dev VM / a Linux KVM host via
- * `bun run test:firecracker` (scripts/firecracker-dev/vm-smoke.sh).
+ * `bun run test:firecracker` (apps/api/src/modules/firecracker/scripts/dev/vm-smoke.sh).
  */
-
-/* eslint-disable no-console -- standalone dev harness, not platform code */
 
 // Minimal env so @appstrate/env validates without a real platform config.
 process.env.BETTER_AUTH_SECRET ??= "smoke-secret-not-a-real-deployment";
@@ -31,10 +29,8 @@ process.env.FIRECRACKER_KERNEL_PATH ??= "./data/firecracker/vmlinux";
 process.env.FIRECRACKER_ROOTFS_PATH ??= "./data/firecracker/rootfs.ext4";
 process.env.FIRECRACKER_DATA_DIR ??= "./data/firecracker/runs";
 
-const { FirecrackerOrchestrator } =
-  await import("../../apps/api/src/services/orchestrator/firecracker/firecracker-orchestrator.ts");
-const { platformAliasIp } =
-  await import("../../apps/api/src/services/orchestrator/firecracker/subnet.ts");
+const { FirecrackerOrchestrator } = await import("../../orchestrator.ts");
+const { platformAliasIp } = await import("../../subnet.ts");
 
 const RUN_ID = `smoke_${process.pid}`;
 

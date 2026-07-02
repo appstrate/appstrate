@@ -3,7 +3,7 @@
 #
 # Build the guest kernel for the Firecracker orchestrator.
 #
-#   scripts/firecracker/build-kernel.sh [output-path]
+#   apps/api/src/modules/firecracker/scripts/build-kernel.sh [output-path]
 #
 # Why build instead of downloading the Firecracker CI kernels: the guest
 # supervisor enforces the per-uid egress firewall with nftables, and the

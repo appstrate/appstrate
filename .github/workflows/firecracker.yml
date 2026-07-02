@@ -2,7 +2,7 @@ name: Firecracker
 
 # End-to-end smoke of the Firecracker orchestrator (RUN_ADAPTER=firecracker):
 # builds the guest kernel/rootfs artifacts, runs the focused unit tests, then
-# boots a REAL microVM through the orchestrator (scripts/firecracker-dev/).
+# boots a REAL microVM through the orchestrator (apps/api/src/modules/firecracker/scripts/dev/).
 # GitHub's Linux runners expose KVM, so this runs on ubuntu-latest.
 #
 # Scoped to the paths that can break the guest boot machinery — the generic
@@ -12,30 +12,28 @@ on:
   push:
     branches: [main]
     paths:
+      - "apps/api/src/modules/firecracker/**"
       - "apps/api/src/services/orchestrator/**"
       - "apps/api/src/services/run-launcher/**"
       - "apps/api/src/services/connect/**"
+      - "apps/api/src/lib/modules/**"
       - "packages/core/**"
       - "packages/env/**"
-      - "runtime-pi/guest/**"
       - "runtime-pi/Dockerfile"
       - "runtime-pi/sidecar/**"
-      - "scripts/firecracker/**"
-      - "scripts/firecracker-dev/**"
       - ".github/workflows/firecracker.yml"
   pull_request:
     branches: [main]
     paths:
+      - "apps/api/src/modules/firecracker/**"
       - "apps/api/src/services/orchestrator/**"
       - "apps/api/src/services/run-launcher/**"
       - "apps/api/src/services/connect/**"
+      - "apps/api/src/lib/modules/**"
       - "packages/core/**"
       - "packages/env/**"
-      - "runtime-pi/guest/**"
       - "runtime-pi/Dockerfile"
       - "runtime-pi/sidecar/**"
-      - "scripts/firecracker/**"
-      - "scripts/firecracker-dev/**"
       - ".github/workflows/firecracker.yml"
   workflow_dispatch:
 
@@ -71,7 +69,7 @@ jobs:
 
       - name: Install Firecracker
         # Pinned release + published checksum — never `latest` (supply chain).
-        # Keep FC_VERSION/FC_SHA256 in sync with scripts/firecracker-dev/lima.yaml.
+        # Keep FC_VERSION/FC_SHA256 in sync with apps/api/src/modules/firecracker/scripts/dev/lima.yaml.
         run: |
           FC_VERSION="v1.16.0"
           ARCH="$(uname -m)"
@@ -97,11 +95,11 @@ jobs:
         uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.4.0
         with:
           path: data/firecracker/vmlinux
-          key: fc-kernel-${{ runner.arch }}-${{ hashFiles('scripts/firecracker/build-kernel.sh') }}
+          key: fc-kernel-${{ runner.arch }}-${{ hashFiles('apps/api/src/modules/firecracker/scripts/build-kernel.sh') }}
 
       - name: Build guest kernel
         if: steps.kernel-cache.outputs.cache-hit != 'true'
-        run: bash scripts/firecracker/build-kernel.sh data/firecracker/vmlinux
+        run: bash apps/api/src/modules/firecracker/scripts/build-kernel.sh data/firecracker/vmlinux
 
       - name: Save guest kernel cache
         if: >-
@@ -110,10 +108,10 @@ jobs:
         uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.4.0
         with:
           path: data/firecracker/vmlinux
-          key: fc-kernel-${{ runner.arch }}-${{ hashFiles('scripts/firecracker/build-kernel.sh') }}
+          key: fc-kernel-${{ runner.arch }}-${{ hashFiles('apps/api/src/modules/firecracker/scripts/build-kernel.sh') }}
 
       - name: Run smoke suite
-        run: bash scripts/firecracker-dev/vm-smoke.sh
+        run: bash apps/api/src/modules/firecracker/scripts/dev/vm-smoke.sh
         env:
           BETTER_AUTH_SECRET: ci-dummy-secret
           CONNECTION_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=

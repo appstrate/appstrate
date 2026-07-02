@@ -3,7 +3,7 @@
 #
 # Build the Firecracker guest rootfs (ext4) from the Docker images.
 #
-#   scripts/firecracker/build-rootfs.sh [output.ext4]
+#   apps/api/src/modules/firecracker/scripts/build-rootfs.sh [output.ext4]
 #
 # Pipeline: docker build (Dockerfile.rootfs, merged pi+sidecar+guest image)
 # → docker create + export → ext4 image via mkfs.ext4 -d. The extraction
@@ -12,7 +12,7 @@
 # both of which unprivileged tar/mkfs would silently strip.
 #
 # Requirements: docker, mkfs.ext4 (e2fsprogs). Linux-oriented — on macOS run
-# inside the Lima dev VM (bun run firecracker:dev / scripts/firecracker-dev/).
+# inside the Lima dev VM (bun run firecracker:dev / apps/api/src/modules/firecracker/scripts/dev/).
 #
 # Env overrides:
 #   PI_IMAGE / SIDECAR_IMAGE   base image refs (default local :latest)
@@ -20,7 +20,7 @@
 #   SKIP_BASE_BUILD=1          reuse existing pi/sidecar images
 set -euo pipefail
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../../../../.."
 OUT="${1:-./data/firecracker/rootfs.ext4}"
 PI_IMAGE="${PI_IMAGE:-appstrate-pi:latest}"
 SIDECAR_IMAGE="${SIDECAR_IMAGE:-appstrate-sidecar:latest}"
@@ -42,7 +42,7 @@ echo "==> Building merged guest image"
 docker build \
   --build-arg "PI_IMAGE=$PI_IMAGE" \
   --build-arg "SIDECAR_IMAGE=$SIDECAR_IMAGE" \
-  -t "$ROOTFS_IMAGE_TAG" -f scripts/firecracker/Dockerfile.rootfs .
+  -t "$ROOTFS_IMAGE_TAG" -f apps/api/src/modules/firecracker/scripts/Dockerfile.rootfs .
 
 echo "==> Exporting filesystem"
 SUDO=""

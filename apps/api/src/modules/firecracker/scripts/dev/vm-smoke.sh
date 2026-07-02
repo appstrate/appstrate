@@ -6,7 +6,7 @@
 # focused unit tests, then boots a real microVM through the orchestrator.
 set -euo pipefail
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../../../../../.."
 export PATH="$HOME/.bun/bin:$PATH"
 
 command -v bun >/dev/null || { echo "bun is required" >&2; exit 1; }
@@ -20,18 +20,18 @@ ROOTFS="./data/firecracker/rootfs.ext4"
 
 if [ ! -f "$KERNEL" ]; then
   echo "==> Building guest kernel (Docker, ~15-25 min — cached afterwards)"
-  bash scripts/firecracker/build-kernel.sh "$KERNEL"
+  bash apps/api/src/modules/firecracker/scripts/build-kernel.sh "$KERNEL"
 fi
 
 if [ ! -f "$ROOTFS" ] || [ "${FORCE_ROOTFS:-0}" = "1" ]; then
   echo "==> Building guest rootfs (first build compiles the pi + sidecar images — slow)"
-  bash scripts/firecracker/build-rootfs.sh "$ROOTFS"
+  bash apps/api/src/modules/firecracker/scripts/build-rootfs.sh "$ROOTFS"
 fi
 
 echo "==> Unit tests (firecracker helpers)"
 TEST_TIER=0 bun test apps/api/test/unit/services/firecracker
 
 echo "==> End-to-end smoke (real microVM)"
-bun run scripts/firecracker-dev/smoke.ts
+bun run apps/api/src/modules/firecracker/scripts/dev/smoke.ts
 
 echo "ALL FIRECRACKER CHECKS PASSED"

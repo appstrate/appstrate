@@ -20,10 +20,10 @@
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
-import { logger } from "../../../lib/logger.ts";
+import { logger } from "../../lib/logger.ts";
 import type { RunSubnet } from "./subnet.ts";
 import { TAP_DEVICE_PREFIX } from "./subnet.ts";
-import { spawnCollect } from "../subprocess-util.ts";
+import { spawnCollect } from "../../services/orchestrator/subprocess-util.ts";
 
 export interface HostExec {
   /** Run a host command; throws with stderr context on non-zero exit. */

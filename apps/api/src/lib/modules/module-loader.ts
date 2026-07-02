@@ -23,6 +23,10 @@ import { dirname, resolve, join } from "node:path";
 import type { AppEnv } from "../../types/index.ts";
 import { logger } from "../logger.ts";
 import { setPlatformApp } from "../platform-app.ts";
+import {
+  registerOrchestrator,
+  _resetOrchestratorRegistryForTesting,
+} from "../../services/orchestrator/registry.ts";
 
 // ---------------------------------------------------------------------------
 // Singleton state
@@ -167,6 +171,16 @@ async function initSortedModules(
     }
     if (_modules.has(mod.manifest.id)) {
       logger.warn("Duplicate module ID, overwriting", { id: mod.manifest.id });
+    }
+    // Execution backends must be registered before anything resolves
+    // RUN_ADAPTER (first `getOrchestrator()` happens later in boot).
+    // `registerOrchestrator` throws on a duplicate id — fatal, same
+    // uniqueness posture as model providers.
+    const orchestrators = mod.orchestrators?.();
+    if (orchestrators) {
+      for (const [id, registration] of Object.entries(orchestrators)) {
+        registerOrchestrator(id, registration, mod.manifest.id);
+      }
     }
     _modules.set(mod.manifest.id, mod);
     logger.info("Module loaded", { id: mod.manifest.id, version: mod.manifest.version });
@@ -604,6 +618,9 @@ function clearAllState(): void {
   _builtinCache = null;
   _initialized = false;
   setModulePermissionsProvider(null);
+  // Drop module-contributed execution backends so a reload (tests) does not
+  // trip the duplicate-id guard. Core backends are re-registered inside.
+  _resetOrchestratorRegistryForTesting();
 }
 
 // ---------------------------------------------------------------------------

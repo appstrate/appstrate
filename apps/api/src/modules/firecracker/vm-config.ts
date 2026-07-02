@@ -10,13 +10,13 @@
  *     schema (their casing, e.g. `kernel_image_path`).
  *   - The guest config (`config.json` on the config drive) is an
  *     Appstrate wire format → snake_case, consumed by
- *     `runtime-pi/guest/supervisor.ts` inside the microVM.
+ *     `apps/api/src/modules/firecracker/guest/supervisor.ts` inside the microVM.
  */
 
 import type { RunSubnet } from "./subnet.ts";
 // The config-drive wire contract is shared with its in-guest consumer —
 // single definition next to the supervisor, imported type-only.
-import type { GuestConfig } from "../../../../../../runtime-pi/guest/guest-config.ts";
+import type { GuestConfig } from "./guest/guest-config.ts";
 
 export interface BuildGuestConfigInput {
   runId: string;

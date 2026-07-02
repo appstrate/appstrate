@@ -6,7 +6,7 @@
  *
  *   - producer: `apps/api/src/services/orchestrator/firecracker/vm-config.ts`
  *     (`buildGuestConfig`, host side)
- *   - consumer: `runtime-pi/guest/supervisor.ts` (inside the microVM)
+ *   - consumer: `apps/api/src/modules/firecracker/guest/supervisor.ts` (inside the microVM)
  *
  * Types only — no imports, no side effects. The supervisor bundle stays
  * self-contained (`bun build` erases type-only imports) and the host side

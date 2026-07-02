@@ -12,7 +12,7 @@
 // unexpected caller reached it, the only possible transition is "become
 // the unprivileged runner user".
 //
-// Built statically in scripts/firecracker/Dockerfile.rootfs and installed
+// Built statically in apps/api/src/modules/firecracker/scripts/Dockerfile.rootfs and installed
 // AFTER the rootfs-wide setuid strip (it is the one intentional setuid).
 
 #define _GNU_SOURCE

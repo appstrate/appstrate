@@ -427,57 +427,24 @@ const envSchema = z
     // `traceparent` for external callers.
     OTEL_TRUST_INCOMING_TRACE: boolEnv("false"),
 
-    // Run — execution backend: "docker" (isolated containers), "process"
-    // (default, Bun subprocesses, no isolation) or "firecracker" (one
-    // microVM per run — Linux host with /dev/kvm + built kernel/rootfs
-    // artifacts required; see docs/architecture/FIRECRACKER.md)
-    RUN_ADAPTER: z.enum(["docker", "process", "firecracker"]).default("process"),
+    // Run — execution backend id resolved against the orchestrator registry
+    // at boot. Core provides "docker" (isolated containers) and "process"
+    // (default, Bun subprocesses, no isolation); modules can contribute more
+    // (e.g. the built-in `firecracker` module — one microVM per run, see
+    // docs/architecture/FIRECRACKER.md). Kept as an open string: the value
+    // is validated after modules load, where an unknown id is a fatal boot
+    // error listing the registered backends.
+    RUN_ADAPTER: z.string().default("process"),
 
     // Integration runtime backend the Docker orchestrator pins onto the
-    // sidecar (operator override; same value set as RUN_ADAPTER). The
-    // process orchestrator deliberately reads the raw environment instead —
-    // it must distinguish "unset" (pin to "process") from an explicit
-    // operator override, which a schema default would erase. The
-    // firecracker orchestrator always pins "process": the sidecar runs
-    // INSIDE the guest, so its integration runners are guest subprocesses.
+    // sidecar (operator override; same value set as core RUN_ADAPTER
+    // backends). The process orchestrator deliberately reads the raw
+    // environment instead — it must distinguish "unset" (pin to "process")
+    // from an explicit operator override, which a schema default would
+    // erase. The firecracker orchestrator always pins "process": the
+    // sidecar runs INSIDE the guest, so its integration runners are guest
+    // subprocesses.
     INTEGRATION_RUNTIME_ADAPTER: z.enum(["docker", "process"]).default("docker"),
-
-    // Firecracker backend (RUN_ADAPTER=firecracker). Linux + /dev/kvm only.
-    // Artifacts are built by `bun run firecracker:build` (see
-    // scripts/firecracker/) — the orchestrator fails fast at boot when the
-    // kernel/rootfs are missing.
-    FIRECRACKER_BIN: z.string().default("firecracker"),
-    FIRECRACKER_KERNEL_PATH: z.string().default("./data/firecracker/vmlinux"),
-    FIRECRACKER_ROOTFS_PATH: z.string().default("./data/firecracker/rootfs.ext4"),
-    FIRECRACKER_DATA_DIR: z.string().default("./data/firecracker/runs"),
-    // IPv4 /16 pool carved into per-run /30 subnets (host TAP peer + guest).
-    // Override when the default collides with an existing route.
-    FIRECRACKER_SUBNET_CIDR: z
-      .string()
-      .regex(/^\d+\.\d+\.0\.0\/16$/, "must be a /16 CIDR ending in .0.0/16")
-      .default("10.231.0.0/16"),
-    // Destinations guests must never reach through the host's forward path,
-    // even when a workload has egress: cloud metadata endpoints (instance
-    // credentials) and RFC1918 ranges (Docker bridges, LAN, VPC neighbours).
-    // Comma-separated CIDRs. Narrow this list only for deployments that
-    // intentionally expose private-range services to guest workloads.
-    FIRECRACKER_EGRESS_DENY_CIDRS: z
-      .string()
-      .regex(
-        /^\d+\.\d+\.\d+\.\d+\/\d+(,\d+\.\d+\.\d+\.\d+\/\d+)*$/,
-        "must be comma-separated IPv4 CIDRs",
-      )
-      .default("169.254.0.0/16,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"),
-    // Per-run serial console log cap (bytes). The console aggregates the
-    // guest kernel + supervisor + full workload stdout and appends
-    // unbounded — with FIRECRACKER_DATA_DIR on a tmpfs a chatty workload
-    // becomes a host OOM vector. A VM whose console exceeds the cap is
-    // killed (the run fails). Default 256 MiB.
-    FIRECRACKER_MAX_CONSOLE_BYTES: z.coerce.number().int().positive().default(268_435_456),
-    // Admission control: maximum concurrent microVMs on this host.
-    // 0 (default) = unlimited. When the cap is reached, new runs fail
-    // fast instead of overcommitting host RAM.
-    FIRECRACKER_MAX_CONCURRENT_VMS: z.coerce.number().int().nonnegative().default(0),
 
     // Docker images (override for GHCR / custom registries)
     PI_IMAGE: z.string().default("appstrate-pi:latest"),

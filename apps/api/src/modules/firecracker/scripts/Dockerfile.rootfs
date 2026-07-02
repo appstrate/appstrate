@@ -10,7 +10,7 @@
 #   guest bits            /sbin/appstrate-init (PID 1) + the bun supervisor
 #   nftables + setpriv    in-guest uid firewall + privilege dropping
 #
-# Build via `bun run firecracker:build` (scripts/firecracker/build-rootfs.sh),
+# Build via `bun run firecracker:build` (apps/api/src/modules/firecracker/scripts/build-rootfs.sh),
 # which docker-builds this image, exports its filesystem, and converts it to
 # the ext4 file the orchestrator attaches read-only to every run.
 
@@ -28,7 +28,7 @@ FROM ghcr.io/astral-sh/uv:0.7 AS uv
 # deps inside the guest.
 FROM alpine:3.21 AS wrapper
 RUN apk add --no-cache gcc musl-dev
-COPY runtime-pi/guest/runner-exec.c /tmp/runner-exec.c
+COPY apps/api/src/modules/firecracker/guest/runner-exec.c /tmp/runner-exec.c
 RUN gcc -static -O2 -Wall -Werror -o /tmp/appstrate-runner-exec /tmp/runner-exec.c
 
 FROM ${PI_IMAGE}
@@ -69,12 +69,12 @@ COPY --from=sidecar /usr/local/bin/sidecar /usr/local/bin/sidecar
 # Guest supervisor, pre-bundled to a single file for cold-start speed.
 # It only imports node builtins plus the type-only wire contract
 # (guest-config.ts, erased at bundle), so the bundle is self-contained.
-COPY runtime-pi/guest/supervisor.ts runtime-pi/guest/guest-config.ts /tmp/guest/
+COPY apps/api/src/modules/firecracker/guest/supervisor.ts apps/api/src/modules/firecracker/guest/guest-config.ts /tmp/guest/
 RUN bun build /tmp/guest/supervisor.ts --target=bun --outfile=/runtime/guest/supervisor.js \
  && rm -r /tmp/guest
 
 # PID 1.
-COPY --chmod=0755 runtime-pi/guest/init.sh /sbin/appstrate-init
+COPY --chmod=0755 apps/api/src/modules/firecracker/guest/init.sh /sbin/appstrate-init
 
 # Strip every setuid/setgid bit inherited from the merged base images —
 # a setuid binary is a uid-firewall bypass (the in-guest isolation is
@@ -84,7 +84,7 @@ RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || true
 
 # The runner-exec privilege-drop wrapper: setuid root, exec restricted to
 # the sidecar's group (1000) — the agent (uid 1001, other groups) cannot
-# even exec it. See runtime-pi/guest/runner-exec.c.
+# even exec it. See apps/api/src/modules/firecracker/guest/runner-exec.c.
 COPY --from=wrapper /tmp/appstrate-runner-exec /usr/local/bin/appstrate-runner-exec
 RUN chown root:1000 /usr/local/bin/appstrate-runner-exec \
  && chmod 4750 /usr/local/bin/appstrate-runner-exec

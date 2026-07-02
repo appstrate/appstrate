@@ -15,6 +15,10 @@
 
 import { describe, it, expect, beforeAll } from "bun:test";
 import { _resetCacheForTesting } from "@appstrate/env";
+import {
+  registerOrchestrator,
+  _resetOrchestratorRegistryForTesting,
+} from "../../../src/services/orchestrator/registry.ts";
 import type {
   RunOrchestrator,
   IsolationBoundary,
@@ -305,23 +309,33 @@ describe("createConnectRunExecutor.run", () => {
     expect(calls.removedBoundaries).toBe(1);
   });
 
-  it("fails fast when the global backend cannot run sidecar-only workloads (firecracker)", async () => {
+  it("fails fast when the global backend cannot run sidecar-only workloads", async () => {
     // No injected orchestrator → the executor gates on the GLOBAL backend
-    // capability. Firecracker boots its VM through the agent workload, so
-    // a connect-run (sidecar-only) would silently never start — the
-    // executor must refuse up front instead of reporting "sidecar exited
-    // without emitting a result".
+    // capability. A backend that boots its workload through the agent
+    // (e.g. a one-shot microVM) cannot run a connect-run (sidecar-only) —
+    // it would silently never start, so the executor must refuse up front
+    // instead of reporting "sidecar exited without emitting a result".
     const prevAdapter = process.env.RUN_ADAPTER;
-    process.env.RUN_ADAPTER = "firecracker";
+    process.env.RUN_ADAPTER = "fake-vm";
+    registerOrchestrator(
+      "fake-vm",
+      {
+        isolatesWorkloads: true,
+        supportsSidecarOnly: false,
+        create: () => ({}) as never,
+      },
+      "test",
+    );
     _resetCacheForTesting();
     try {
       const executor = createConnectRunExecutor({ resolveMcpServer: fakeMcpResolver });
       await expect(executor.run(execution())).rejects.toThrow(
-        /connect-runs are not supported with RUN_ADAPTER="firecracker"/,
+        /connect-runs are not supported with RUN_ADAPTER="fake-vm"/,
       );
     } finally {
       if (prevAdapter === undefined) delete process.env.RUN_ADAPTER;
       else process.env.RUN_ADAPTER = prevAdapter;
+      _resetOrchestratorRegistryForTesting();
       _resetCacheForTesting();
     }
   });

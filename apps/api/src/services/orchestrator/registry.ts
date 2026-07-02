@@ -1,74 +1,89 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Orchestrator registry — the closed table of execution backends, keyed
- * by `RUN_ADAPTER` value. `RUN_ADAPTER` is a closed Zod enum, so the
- * table is a `Record<ExecutionMode, …>`: adding a backend without
- * declaring its security capabilities is a compile error, and there is no
- * runtime "unknown id" path to maintain (the env layer already rejects
- * unknown values).
+ * Orchestrator registry — the table of execution backends, keyed by
+ * `RUN_ADAPTER` value. Core registers its own backends (docker, process)
+ * below; modules contribute additional ones via
+ * `AppstrateModule.orchestrators()`, registered by the module loader at
+ * load time — before any orchestrator is instantiated.
+ *
+ * Security posture (replaces the previous compile-time-closed
+ * `Record<ExecutionMode, …>` table): a duplicate id is a fatal boot error
+ * (never silently shadowed), the capability accessors degrade fail-closed
+ * ("no capability") for unregistered ids, and a module's capability
+ * declaration carries operator trust — code listed in `MODULES` already
+ * runs inside the API process.
  */
 
-import type { RunOrchestrator } from "@appstrate/core/platform-types";
+import type { RunOrchestrator, OrchestratorRegistration } from "@appstrate/core/platform-types";
 import type { ExecutionMode } from "../../infra/mode.ts";
 import { DockerOrchestrator } from "./docker-orchestrator.ts";
 import { ProcessOrchestrator } from "./process-orchestrator.ts";
-import { FirecrackerOrchestrator } from "./firecracker/firecracker-orchestrator.ts";
 
-export interface OrchestratorRegistration {
-  /**
-   * Whether this backend places each run inside a real isolation boundary
-   * (container, microVM) that keeps run credentials out of the host API
-   * process. Security-sensitive: the subscription-run policy refuses
-   * OAuth-subscription agent runs on any backend that does not declare
-   * this — a new backend is untrusted until it opts in explicitly.
-   */
-  readonly isolatesWorkloads: boolean;
-  /**
-   * Whether this backend can run a sidecar-only workload (no agent) —
-   * the shape connect-runs use. The firecracker backend cannot: its VM
-   * boots exactly once, driven by the agent workload, so a sidecar-only
-   * launch would silently never start. Connect fails fast instead.
-   */
-  readonly supportsSidecarOnly: boolean;
-  /** Build a fresh orchestrator instance. Called once per process (singleton held by index.ts). */
-  readonly create: () => RunOrchestrator;
+export type { OrchestratorRegistration } from "@appstrate/core/platform-types";
+
+interface OwnedRegistration extends OrchestratorRegistration {
+  /** Module id that contributed this backend ("core" for built-in ones). */
+  readonly owner: string;
 }
 
-const ORCHESTRATORS: Record<ExecutionMode, OrchestratorRegistration> = {
-  docker: {
-    isolatesWorkloads: true,
-    supportsSidecarOnly: true,
-    create: () => new DockerOrchestrator(),
-  },
-  process: {
-    // Workloads run as host subprocesses of the API user — no boundary.
-    isolatesWorkloads: false,
-    supportsSidecarOnly: true,
-    create: () => new ProcessOrchestrator(),
-  },
-  firecracker: {
-    isolatesWorkloads: true,
-    supportsSidecarOnly: false,
-    create: () => new FirecrackerOrchestrator(),
-  },
-};
+const ORCHESTRATORS = new Map<string, OwnedRegistration>();
 
 /**
- * Runtime lookup that stays fail-closed even for an out-of-enum id (the
- * ExecutionMode type is a compile-time promise, but the value ultimately
- * comes from the environment — the security accessors below must degrade
- * to "no capability", not throw a TypeError).
+ * Register an execution backend under a `RUN_ADAPTER` id. Called by core
+ * (below) and by the module loader for each module's `orchestrators()`
+ * contribution. A duplicate id is fatal — the second registration would
+ * silently shadow the first at `RUN_ADAPTER` resolution time, and
+ * credentials-affecting capabilities must never be ambiguous.
  */
-function registrationFor(id: ExecutionMode): OrchestratorRegistration | undefined {
-  return (ORCHESTRATORS as Partial<Record<string, OrchestratorRegistration>>)[id];
+export function registerOrchestrator(
+  id: string,
+  registration: OrchestratorRegistration,
+  owner: string,
+): void {
+  const existing = ORCHESTRATORS.get(id);
+  if (existing) {
+    throw new Error(
+      `"${existing.owner}" and "${owner}" both declared orchestrator ${JSON.stringify(id)}. ` +
+        `Backend ids must be unique across core and loaded modules — the second ` +
+        `contribution would silently shadow the first at RUN_ADAPTER resolution time.`,
+    );
+  }
+  ORCHESTRATORS.set(id, { ...registration, owner });
 }
 
+function registerCoreOrchestrators(): void {
+  registerOrchestrator(
+    "docker",
+    {
+      isolatesWorkloads: true,
+      supportsSidecarOnly: true,
+      create: () => new DockerOrchestrator(),
+    },
+    "core",
+  );
+  registerOrchestrator(
+    "process",
+    {
+      // Workloads run as host subprocesses of the API user — no boundary.
+      isolatesWorkloads: false,
+      supportsSidecarOnly: true,
+      create: () => new ProcessOrchestrator(),
+    },
+    "core",
+  );
+}
+
+registerCoreOrchestrators();
+
 export function selectOrchestrator(id: ExecutionMode): RunOrchestrator {
-  const registration = registrationFor(id);
+  const registration = ORCHESTRATORS.get(id);
   if (!registration) {
-    const known = Object.keys(ORCHESTRATORS).sort().join(", ");
-    throw new Error(`Unknown RUN_ADAPTER "${id}" — registered orchestrators: ${known}`);
+    const known = [...ORCHESTRATORS.keys()].sort().join(", ");
+    throw new Error(
+      `Unknown RUN_ADAPTER ${JSON.stringify(id)} — registered orchestrators: ${known}. ` +
+        `If a module provides this backend (e.g. "firecracker"), add it to MODULES.`,
+    );
   }
   return registration.create();
 }
@@ -79,7 +94,7 @@ export function selectOrchestrator(id: ExecutionMode): RunOrchestrator {
  * policy then refuses the run rather than trusting an unregistered mode.
  */
 export function orchestratorIsolatesWorkloads(id: ExecutionMode): boolean {
-  return registrationFor(id)?.isolatesWorkloads ?? false;
+  return ORCHESTRATORS.get(id)?.isolatesWorkloads ?? false;
 }
 
 /**
@@ -87,12 +102,24 @@ export function orchestratorIsolatesWorkloads(id: ExecutionMode): boolean {
  * workloads (connect-runs). Fail-closed on unknown ids.
  */
 export function orchestratorSupportsSidecarOnly(id: ExecutionMode): boolean {
-  return registrationFor(id)?.supportsSidecarOnly ?? false;
+  return ORCHESTRATORS.get(id)?.supportsSidecarOnly ?? false;
 }
 
 /** Ids of the backends that provide per-run isolation (sorted). */
 export function isolatingOrchestratorIds(): ExecutionMode[] {
-  return (Object.keys(ORCHESTRATORS) as ExecutionMode[])
-    .filter((id) => ORCHESTRATORS[id].isolatesWorkloads)
+  return [...ORCHESTRATORS.entries()]
+    .filter(([, registration]) => registration.isolatesWorkloads)
+    .map(([id]) => id)
     .sort();
+}
+
+/**
+ * Test seam — restore the registry to core-only backends (docker, process),
+ * dropping any test or module registrations. Never call in production code:
+ * module registrations happen exactly once at load time and must survive
+ * for the process lifetime.
+ */
+export function _resetOrchestratorRegistryForTesting(): void {
+  ORCHESTRATORS.clear();
+  registerCoreOrchestrators();
 }
