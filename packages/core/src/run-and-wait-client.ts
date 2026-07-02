@@ -206,10 +206,29 @@ export async function launchRunAndWait(
         step: { payload: { error: "`manifest` is required for kind:'inline'." }, isError: true },
       };
     }
-    launchPath = "/api/runs/inline";
-    launchBody = { manifest };
+    // Reject a missing top-level prompt before hitting the route: the route's
+    // field error alone doesn't tell the model WHERE the prompt goes, and the
+    // observed failure mode is nesting it inside the manifest (AFPS agents
+    // ship a prompt.md, so models naturally put it there) then retrying blind.
     const prompt = asString(args.prompt);
-    if (prompt) launchBody.prompt = prompt;
+    if (!prompt) {
+      const nested = typeof manifest.prompt === "string";
+      return {
+        ok: false,
+        step: {
+          payload: {
+            error: nested
+              ? "`prompt` was found inside `manifest`. It must be a TOP-LEVEL argument of " +
+                "run_and_wait, alongside `manifest` — move it out of the manifest and retry."
+              : "`prompt` is required for kind:'inline'. Pass it as a top-level argument " +
+                "alongside `manifest` (not inside it).",
+          },
+          isError: true,
+        },
+      };
+    }
+    launchPath = "/api/runs/inline";
+    launchBody = { manifest, prompt };
     if (asRecord(args.config)) launchBody.config = args.config;
   } else {
     return {

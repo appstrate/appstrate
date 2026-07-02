@@ -120,6 +120,29 @@ describe("run_and_wait client", () => {
     ]);
   });
 
+  test("rejects an inline run without a top-level prompt before dispatching", async () => {
+    const fetchImpl = fakeFetch(async () => {
+      throw new Error("should not fetch");
+    });
+
+    const steps = await collectSteps(fetchImpl, { kind: "inline", manifest: { name: "tmp" } });
+    expect(steps).toHaveLength(1);
+    expect(steps[0]?.error).toContain("top-level argument");
+  });
+
+  test("tells the caller to move a prompt nested inside the manifest", async () => {
+    const fetchImpl = fakeFetch(async () => {
+      throw new Error("should not fetch");
+    });
+
+    const steps = await collectSteps(fetchImpl, {
+      kind: "inline",
+      manifest: { name: "tmp", prompt: "do it" },
+    });
+    expect(steps).toHaveLength(1);
+    expect(steps[0]?.error).toContain("found inside `manifest`");
+  });
+
   test("returns a bounded timeout payload", async () => {
     const fetchImpl = fakeFetch(async () =>
       jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" }),

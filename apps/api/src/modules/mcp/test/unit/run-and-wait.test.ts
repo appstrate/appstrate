@@ -130,6 +130,29 @@ describe("run_and_wait", () => {
     expect(calls.some((c) => c.method === "GET")).toBe(false);
   });
 
+  it("rejects an inline run without a top-level prompt before dispatching", async () => {
+    const { tool, calls } = makeRunAndWait({});
+
+    const res = await tool.handler({ kind: "inline", manifest: { name: "tmp" } }, noExtra);
+
+    expect(res.isError).toBe(true);
+    expect(parseResult(res).error).toContain("top-level argument");
+    expect(calls.length).toBe(0);
+  });
+
+  it("tells the model to move a prompt nested inside the manifest", async () => {
+    const { tool, calls } = makeRunAndWait({});
+
+    const res = await tool.handler(
+      { kind: "inline", manifest: { name: "tmp", prompt: "do it" } },
+      noExtra,
+    );
+
+    expect(res.isError).toBe(true);
+    expect(parseResult(res).error).toContain("found inside `manifest`");
+    expect(calls.length).toBe(0);
+  });
+
   it("validates required arguments and permissions", async () => {
     const { tool } = makeRunAndWait({});
     expect((await tool.handler({ kind: "agent", name: "b" }, noExtra)).isError).toBe(true);
